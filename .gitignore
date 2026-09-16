@@ -16,3 +16,4 @@ infra/data/
 test-results/
 playwright-report/
 apps/web/tests/fixtures/
+.npm-registry

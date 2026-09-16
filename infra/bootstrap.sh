@@ -2,9 +2,10 @@
 #
 # راه‌اندازی کامل جزوه‌یار روی سرور، از صفر.
 #
-# بیلد روی خود سرور انجام می‌شود، نه انتقال ایمیج: رجیستری npm از سرور ایرانی
-# جواب می‌دهد، پس دلیلی برای آپلود ۶۰۰ مگابایت از ماشین توسعه نیست. (تنها چیزی
-# که بسته است، رجیستری ایمیج داکر است — آن را setup-docker-mirror.sh حل می‌کند.)
+# بیلد روی خود سرور انجام می‌شود، نه انتقال ایمیج — به شرط دو آینه:
+#   setup-docker-mirror.sh   رجیستری ایمیج داکر (auth.docker.io بسته است)
+#   setup-npm-mirror.sh      رجیستری npm (در دسترس هست ولی کند و بی‌ثبات)
+# اگر هیچ آینه‌ای جواب نداد، infra/deploy.sh ایمیج را بیرون می‌سازد و می‌فرستد.
 #
 # اسکریپت idempotent است: هر بار اجرا شود، آخرین کد را می‌گیرد، بیلد می‌کند و
 # سرویس‌ها را به‌روز می‌کند. رمزها اگر از قبل باشند دست‌نخورده می‌مانند.
@@ -121,8 +122,19 @@ fi
 
 # ── ۳. بیلد ──────────────────────────────────────────────────────────────
 step "بیلد ایمیج"
+# آینهٔ npm که setup-npm-mirror.sh پیدا کرده. اگر نبود، رسمی.
+NPM_REGISTRY="https://registry.npmjs.org"
+if [[ -f "${APP_DIR}/.npm-registry" ]]; then
+  NPM_REGISTRY=$(cat "${APP_DIR}/.npm-registry")
+  info "آینهٔ npm: ${NPM_REGISTRY}"
+else
+  info "آینهٔ npm تنظیم نشده — رجیستری رسمی."
+  info "اگر بیلد روی دانلود بسته گیر کرد: ./infra/setup-npm-mirror.sh"
+fi
 info "روی سرور کوچک چند دقیقه طول می‌کشد. اگر کشته شد، swap کم است."
-docker build -f apps/web/Dockerfile -t "jozveyar/web:${TAG}" .
+docker build \
+  --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
+  -f apps/web/Dockerfile -t "jozveyar/web:${TAG}" .
 ok "ایمیج jozveyar/web:${TAG} ساخته شد"
 
 # ── ۴. بالا آوردن ────────────────────────────────────────────────────────
@@ -165,9 +177,9 @@ if (( ! HAS_CERT )); then
       info "⚠ دامنه به IP دیگری اشاره می‌کند. certbot شکست می‌خورد."
       info "  DNS را درست کنید، بعد: ./infra/setup-tls.sh you@email.com"
     else
-      info "DNS درست است. برای گواهی اجرا کنید:"
-      info "  ./infra/setup-tls.sh you@email.com"
-      info "  (ایمیل برای هشدار انقضای گواهی است)"
+      info "DNS درست است. یک قدم مانده — گواهی و بالا آوردن Nginx:"
+      info "  ./infra/setup-tls.sh ایمیل-شما@example.com"
+      info "  (certbot خودش پورت ۸۰ را می‌گیرد؛ Nginx بعدش بالا می‌آید)"
     fi
   fi
 fi

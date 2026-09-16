@@ -5,18 +5,41 @@
 # سه مرحله تا ایمیج نهایی فقط شامل چیزی باشد که برای اجرا لازم است:
 # بیلد حدود ۱ گیگابایت است، خروجی نهایی چند ده مگابایت.
 #
-# نکتهٔ ایران: این ایمیج روی سرور خارج یا در CI ساخته می‌شود و با
-# `docker save | ssh … docker load` منتقل می‌شود. بیلد از داخل ایران به npm
-# نمی‌رسد و روی همین مرحلهٔ deps گیر می‌کند. جزئیات در infra/deploy.sh
+# نکتهٔ ایران: بیلد روی سرور ایرانی کار می‌کند، ولی دو شرط دارد —
+# آینهٔ رجیستری داکر (setup-docker-mirror.sh) و آینهٔ npm (setup-npm-mirror.sh).
+# اگر هیچ آینه‌ای در دسترس نبود، infra/deploy.sh ایمیج را بیرون می‌سازد و با
+# `docker save | ssh … docker load` می‌فرستد.
 
 FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
+# رجیستری npm قابل تنظیم. از سرور ایرانی، رجیستری رسمی در دسترس هست ولی کند و
+# بی‌ثبات است و دانلود تارball تایم‌اوت می‌شود. setup-npm-mirror.sh سریع‌ترین
+# آینه را پیدا می‌کند و bootstrap.sh همان را اینجا می‌فرستد.
+ARG NPM_REGISTRY=https://registry.npmjs.org
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
+    NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=5000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
+    NPM_CONFIG_FETCH_TIMEOUT=300000
+
+# corepack خودش تلاش مجدد ندارد و اولین تایم‌اوت کل بیلد را می‌کشد.
+RUN corepack enable && \
+    for attempt in 1 2 3 4 5; do \
+      corepack prepare pnpm@10.33.0 --activate && break; \
+      echo "نصب pnpm — تلاش ${attempt} شکست خورد، ۵ ثانیه صبر…"; \
+      sleep 5; \
+    done && \
+    pnpm --version
+
 WORKDIR /repo
 
 # ── وابستگی‌ها ────────────────────────────────────────────────────────────
 # فقط فایل‌های manifest کپی می‌شوند تا تا وقتی وابستگی عوض نشده،
 # این لایه از کش بیاید.
 FROM base AS deps
+# ARG بین مرحله‌ها ارث نمی‌رسد، ولی ENV مرحلهٔ base ارث می‌رسد — پس رجیستری
+# همان می‌ماند و لازم نیست دوباره اعلام شود.
 # پلی‌رایت وابستگی ریشه است و در نصب می‌آید. بدون این متغیر، اسکریپت نصبش
 # تلاش می‌کند حدود ۱۵۰ مگابایت کرومیوم دانلود کند — که روی سرور ایرانی شکست
 # می‌خورد و بیلد را بی‌دلیل می‌کشد. مرورگر فقط برای تست لوکال لازم است.
