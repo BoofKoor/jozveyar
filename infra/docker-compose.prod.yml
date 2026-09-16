@@ -25,6 +25,7 @@ services:
   web:
     image: jozveyar/web:${TAG:-latest}
     restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-640m}
     env_file: [../.env]
     environment:
       NODE_ENV: production
@@ -39,6 +40,9 @@ services:
       POSTGRES_USER: jozveyar
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD لازم است}
       POSTGRES_DB: jozveyar
+    # سقف حافظه: روی سرور کوچک، یک کانتینر پرمصرف نباید بقیه را بکشد.
+    # برای سرور بزرگ‌تر این اعداد را در .env بالا ببرید.
+    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     volumes: ['./data/postgres:/var/lib/postgresql/data']
     # بیرون شبکهٔ داکر پورتی باز نمی‌شود.
     healthcheck:

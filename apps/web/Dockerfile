@@ -17,6 +17,11 @@ WORKDIR /repo
 # فقط فایل‌های manifest کپی می‌شوند تا تا وقتی وابستگی عوض نشده،
 # این لایه از کش بیاید.
 FROM base AS deps
+# پلی‌رایت وابستگی ریشه است و در نصب می‌آید. بدون این متغیر، اسکریپت نصبش
+# تلاش می‌کند حدود ۱۵۰ مگابایت کرومیوم دانلود کند — که روی سرور ایرانی شکست
+# می‌خورد و بیلد را بی‌دلیل می‌کشد. مرورگر فقط برای تست لوکال لازم است.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/analysis/package.json packages/analysis/
@@ -30,7 +35,11 @@ FROM deps AS build
 COPY tsconfig.base.json ./
 COPY packages/ packages/
 COPY apps/web/ apps/web/
-ENV NEXT_TELEMETRY_DISABLED=1
+# سقف هیپ: روی سرور ۲ گیگابایتی، بیلد نکست بدون سقف تا جایی بالا می‌رود که
+# OOM killer کل فرایند را می‌کشد و خطا گمراه‌کننده است. ۱۵۳۶ مگابایت برای این
+# اندازه پروژه کافی است و برای سرور بزرگ‌تر هم ضرری ندارد.
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_OPTIONS=--max-old-space-size=1536
 RUN pnpm --filter @jozveyar/web build
 
 # ── اجرا ─────────────────────────────────────────────────────────────────
