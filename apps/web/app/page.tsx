@@ -39,16 +39,16 @@ export default function HomePage() {
     '@graph': [
       {
         '@type': 'Organization',
-        '@id': 'https://jozveyar.ir/#org',
+        '@id': 'https://jozveyar.com/#org',
         name: 'جزوه‌یار',
-        url: 'https://jozveyar.ir',
+        url: 'https://jozveyar.com',
         areaServed: { '@type': 'Country', name: 'ایران' },
       },
       {
         '@type': 'Service',
         name: 'چاپ و صحافی جزوه',
         serviceType: 'چاپ جزوه',
-        provider: { '@id': 'https://jozveyar.ir/#org' },
+        provider: { '@id': 'https://jozveyar.com/#org' },
         areaServed: { '@type': 'Country', name: 'ایران' },
       },
       {

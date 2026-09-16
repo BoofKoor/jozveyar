@@ -11,7 +11,7 @@
 set -euo pipefail
 
 EMAIL="${1:?ایمیل برای هشدار انقضای گواهی لازم است}"
-DOMAIN="${DOMAIN:-jozveyar.ir}"
+DOMAIN="${DOMAIN:-jozveyar.com}"
 DIR="${REMOTE_DIR:-/opt/jozveyar}"
 
 mkdir -p "${DIR}/certs" "${DIR}/certbot-webroot"
