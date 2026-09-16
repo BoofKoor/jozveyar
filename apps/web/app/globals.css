@@ -1,0 +1,83 @@
+@import 'tailwindcss';
+
+/*
+ * پالت جزوه‌یار. رنگ خارج از این فهرست در کد مجاز نیست.
+ * همین توکن‌ها در پنل ادمین هم استفاده می‌شوند.
+ */
+@theme {
+  --color-sage-deep: #6e7a5e;
+  --color-sage-mid: #a8bc95;
+  --color-sage-pale: #d9e6c9;
+  --color-sage-button: #d0e5b8;
+  --color-chip: #e4eedc;
+  --color-page: #f4f4f1;
+  --color-card: #ffffff;
+  --color-hairline: #e6e6e1;
+  --color-ink: #16181a;
+  --color-ink-2: #6b6f70;
+
+  --font-sans: 'Vazirmatn', system-ui, 'Segoe UI', Tahoma, sans-serif;
+
+  --radius-card: 10px;
+}
+
+/*
+ * وزیرمتن، فقط دو وزن، لوکال.
+ * هیچ منبع خارجی در زمان اجرا — مقصد نهایی هاست ایران است.
+ */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  html {
+    background: var(--color-page);
+    color: var(--color-ink);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-weight: 400;
+    line-height: 1.8;
+    background: var(--color-page);
+    color: var(--color-ink);
+  }
+
+  /*
+   * قیمت و تعداد با ارقام لاتین. `tabular-nums` باعث می‌شود عدد زنده موقع
+   * به‌روز شدن نلرزد — قیمت هر بار که تحلیل جلو می‌رود عوض می‌شود.
+   */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-sage-deep);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

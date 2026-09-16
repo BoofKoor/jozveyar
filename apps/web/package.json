@@ -1,0 +1,32 @@
+{
+  "name": "@jozveyar/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "start:standalone": "node scripts/serve-standalone.mjs"
+  },
+  "dependencies": {
+    "@jozveyar/analysis": "workspace:*",
+    "@jozveyar/contracts": "workspace:*",
+    "@jozveyar/pricing": "workspace:*",
+    "@jozveyar/text": "workspace:*",
+    "next": "15.5.25",
+    "pdfjs-dist": "4.10.38",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.13.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}

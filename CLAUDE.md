@@ -2,7 +2,8 @@
 
 سایت سفارش چاپ و صحافی جزوه. بازار ایران، فارسی، RTL. دامنه: jozveyar.ir
 
-> وضعیت: معماری تأییدنشده. هیچ کدی نوشته نشده. طرح کامل در `docs/ARCHITECTURE.md`.
+> وضعیت: معماری تأیید شد. برش ۰ (اسکلت) و برش ۱ (لحظهٔ جادو) ساخته شده.
+> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md`.
 
 ## تز محصول — تغییر نمی‌کند
 
@@ -95,10 +96,36 @@ docs/               ARCHITECTURE.md، PRICING.md، DECISIONS.md
 ## دستورها
 
 ```
-pnpm dev · pnpm build · pnpm test
-pnpm db:generate · pnpm db:migrate
-docker compose -f infra/docker-compose.yml up
+pnpm dev            سرور توسعه
+pnpm build          بیلد همهٔ پکیج‌ها و اپ
+pnpm test           تست واحد (قیمت، تحلیل، متن)
+pnpm test:e2e       تست سرتاسری مرورگر — نیازمند build
+pnpm typecheck      بررسی تایپ همهٔ پکیج‌ها
+pnpm check          typecheck + تست واحد
+pnpm fixtures       ساخت PDF نمونه برای تست
+
+docker compose -f infra/docker-compose.yml up     پستگرس، Redis، MinIO لوکال
+DEPLOY_HOST=user@ip ./infra/deploy.sh             استقرار روی VPS
 ```
+
+تست سرتاسری روی build تولیدی اجرا می‌شود، نه dev server: چیزی که می‌سنجد
+(اندازهٔ باندل اولیه و تنبل بودن pdf.js) فقط در build تولیدی معنا دارد.
+
+## اعدادی که اندازه گرفته شده‌اند
+
+اینها در تست قفل‌اند؛ اگر پس‌رفت کنند تست می‌شکند:
+
+- اولین قیمت برای اسکن زرد ۱۴۷ صفحه‌ای، با پردازندهٔ ۴ برابر کند: **۴۸۶ms**
+  (سقف پذیرش: ۲ ثانیه)
+- باندل اولیهٔ صفحهٔ اصلی: **۱۳۶ کیلوبایت** — pdf.js داخلش نیست
+- همان اسکن زرد: **۰ صفحهٔ رنگی** تشخیص داده می‌شود، قیمت ۲۸۰,۲۰۰ تومان
+  (اگر تشخیص رنگ بشکند ۳۳۹,۰۰۰ می‌شود)
+
+## پروکسی و TLS
+
+Nginx، نه Caddy. گواهی با certbot دستی صادر و با cron تمدید می‌شود
+(`infra/setup-tls.sh`). اگر صدور از داخل ایران گیر کرد، گواهی را از جای دیگری
+بگیرید و در `infra/certs/live/<دامنه>/` بگذارید — Nginx تفاوتی نمی‌بیند.
 
 ## مهاجرت
 
