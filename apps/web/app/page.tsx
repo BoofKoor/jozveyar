@@ -1,0 +1,108 @@
+import { formatTomans } from '@jozveyar/text';
+import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
+import { OrderFlow } from '../components/OrderFlow';
+
+/**
+ * صفحهٔ اصلی — هم لندینگ سئو است و هم ابزار سفارش.
+ *
+ * هیرو و تمام متن، HTML ایستای سمت سرور است. `OrderFlow` تنها جزیرهٔ کلاینت
+ * است و pdf.js فقط با اولین تعامل فایل بارگذاری می‌شود، پس ۳۵۰ کیلوبایت
+ * کتابخانه به بودجهٔ LCP نمی‌خورد. (ADR-014)
+ */
+
+const FAQ = [
+  {
+    q: 'قیمت چاپ جزوه چطور حساب می‌شود؟',
+    a: `به‌ازای هر صفحهٔ چاپ‌شده: سیاه‌سفید ${formatTomans(SEED_PRICE_LIST.clickRates.bw ?? 0)} و رنگی ${formatTomans(SEED_PRICE_LIST.clickRates.color ?? 0)}. هزینهٔ صحافی جدا و بر اساس تعداد برگ محاسبه می‌شود. قیمت نهایی را قبل از هر ثبت‌نامی روی صفحه می‌بینید.`,
+  },
+  {
+    q: 'باید تعداد صفحات را خودم بشمارم؟',
+    a: 'نه. فایل را که انداختید، سایت خودش تعداد صفحات، اندازهٔ کاغذ و صفحات رنگی را تشخیص می‌دهد و قیمت را نشان می‌دهد.',
+  },
+  {
+    q: 'چه فایل‌هایی را می‌توانم بفرستم؟',
+    a: 'PDF، Word، پاورپوینت و عکس اسکن‌شده. فایل PDF همان لحظه در مرورگر خوانده می‌شود و بقیه سمت سرور تبدیل می‌شوند.',
+  },
+  {
+    q: 'ارسال چقدر طول می‌کشد؟',
+    a: 'تعهد ما این است که سفارش حداکثر دو روز کاری پس از پرداخت به پست تحویل داده شود. بعد از آن کد رهگیری پستی برایتان ارسال می‌شود تا خودتان مسیر مرسوله را ببینید.',
+  },
+  {
+    q: 'برای گرفتن قیمت باید ثبت‌نام کنم؟',
+    a: 'نه. قیمت قبل از هر ثبت‌نامی نشان داده می‌شود. شماره موبایل فقط در لحظهٔ پرداخت گرفته می‌شود، با کد پیامکی و بدون رمز.',
+  },
+];
+
+export default function HomePage() {
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': 'https://jozveyar.ir/#org',
+        name: 'جزوه‌یار',
+        url: 'https://jozveyar.ir',
+        areaServed: { '@type': 'Country', name: 'ایران' },
+      },
+      {
+        '@type': 'Service',
+        name: 'چاپ و صحافی جزوه',
+        serviceType: 'چاپ جزوه',
+        provider: { '@id': 'https://jozveyar.ir/#org' },
+        areaServed: { '@type': 'Country', name: 'ایران' },
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: FAQ.map((item) => ({
+          '@type': 'Question',
+          name: item.q,
+          acceptedAnswer: { '@type': 'Answer', text: item.a },
+        })),
+      },
+    ],
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
+      <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 pb-16 pt-10 sm:gap-10 sm:pt-16">
+        <header className="flex flex-col gap-4">
+          <p className="text-sm font-semibold tracking-wide text-sage-deep">جزوه‌یار</p>
+          <h1 className="text-3xl font-semibold leading-tight text-ink sm:text-4xl">
+            جزوه‌ات را بینداز، قیمت را همین حالا ببین
+          </h1>
+          <p className="text-lg leading-relaxed text-ink-2">
+            تعداد صفحات را خودت نمی‌شماری و فرم پر نمی‌کنی. فایل را می‌خوانیم، قیمت را نشان
+            می‌دهیم، چاپ می‌کنیم و برایت می‌فرستیم.
+          </p>
+        </header>
+
+        <OrderFlow />
+
+        <section className="flex flex-col gap-5 border-t border-hairline pt-8">
+          <h2 className="text-xl font-semibold text-ink">سؤال‌های پرتکرار</h2>
+          <div className="flex flex-col gap-5">
+            {FAQ.map((item) => (
+              <div key={item.q} className="flex flex-col gap-1.5">
+                <h3 className="font-semibold text-ink">{item.q}</h3>
+                <p className="leading-relaxed text-ink-2">{item.a}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <footer className="border-t border-hairline pt-6 text-sm text-ink-2">
+          <p>
+            جزوه‌یار — چاپ و صحافی جزوه با ارسال به سراسر ایران. مسئولیت محتوای فایل ارسالی بر
+            عهدهٔ سفارش‌دهنده است.
+          </p>
+        </footer>
+      </main>
+    </>
+  );
+}
