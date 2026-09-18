@@ -28,6 +28,7 @@ REGISTRIES=(
 # بستهٔ آزمون: همان تارballی که corepack لازم دارد و بیلد روی آن شکست.
 TEST_PATH="/pnpm/-/pnpm-10.33.0.tgz"
 OUT_FILE="${OUT_FILE:-/opt/jozveyar/.npm-registry}"
+BUILD_IMAGE="node:22-alpine"
 TIMEOUT=45
 
 info() { printf '\033[0;36m›\033[0m %s\n' "$1"; }
@@ -35,6 +36,16 @@ ok()   { printf '\033[0;32m✓\033[0m %s\n' "$1"; }
 fail() { printf '\033[0;31m✗\033[0m %s\n' "$1"; }
 
 command -v docker >/dev/null || { fail "داکر نصب نیست."; exit 1; }
+
+# بدون این، اگر ایمیج پایه دانلود نشود همهٔ آینه‌ها «شکست» گزارش می‌شوند و
+# اسکریپت اشتباهاً نتیجه می‌گیرد که هیچ آینه‌ای کار نمی‌کند.
+if ! docker image inspect "$BUILD_IMAGE" >/dev/null 2>&1; then
+  info "دانلود ${BUILD_IMAGE}…"
+  docker pull "$BUILD_IMAGE" >/dev/null 2>&1 || {
+    fail "ایمیج پایه دانلود نشد. اول اجرا کنید: ./infra/setup-docker-mirror.sh"
+    exit 1
+  }
+fi
 
 info "آزمایش دانلود واقعی از داخل کانتینر (همان محیط بیلد)…"
 echo ""
@@ -44,9 +55,13 @@ BEST_MS=999999
 
 for registry in "${REGISTRIES[@]}"; do
   start=$(date +%s%3N)
-  # -f: خطای HTTP را شکست بشمار. -o /dev/null: فقط سرعت مهم است، نه محتوا.
-  if docker run --rm --network host curlimages/curl:latest \
-       -fsS -o /dev/null -m "$TIMEOUT" "${registry}${TEST_PATH}" 2>/dev/null; then
+  # دو نکته که نتیجه را درست می‌کنند:
+  #   • شبکهٔ پیش‌فرض bridge، نه host — بیلد داکر هم در همین شبکه اجرا می‌شود،
+  #     و host networking مسیر و DNS متفاوتی دارد که با بیلد جور نیست.
+  #   • همان ایمیج بیلد (node:22-alpine) با wget بیزی‌باکس، نه یک ایمیج curl
+  #     جداگانه — هم از قبل لوکال است و هم دقیقاً محیط بیلد را می‌سنجد.
+  if docker run --rm "$BUILD_IMAGE" \
+       wget -q -O /dev/null -T "$TIMEOUT" "${registry}${TEST_PATH}" 2>/dev/null; then
     ms=$(( $(date +%s%3N) - start ))
     ok "$(printf '%-42s %5d ms' "$registry" "$ms")"
     if (( ms < BEST_MS )); then
