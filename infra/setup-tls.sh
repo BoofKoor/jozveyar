@@ -113,14 +113,41 @@ fi
 # از این به بعد Nginx بالاست، پس تمدید با webroot و بدون قطع سرویس انجام
 # می‌شود. هفته‌ای یک بار کافی است: certbot فقط گواهی نزدیک انقضا را تمدید می‌کند.
 CRON_LINE="0 3 * * 1 cd ${APP_DIR} && docker run --rm -v ${APP_DIR}/infra/certs:/etc/letsencrypt -v ${APP_DIR}/infra/certbot-webroot:/var/www/certbot certbot/certbot renew --quiet --webroot --webroot-path /var/www/certbot && ${COMPOSE} exec -T nginx nginx -s reload"
-if crontab -l 2>/dev/null | grep -q 'certbot/certbot renew'; then
+
+# روی ایمیج‌های کم‌حجم سرور (از جمله همین پارس‌پک) بستهٔ cron اصلاً نصب نیست.
+#
+# این بدترین نوع شکست را می‌ساخت: اسکریپت **بعد از** گرفتن گواهی و بالا آوردن
+# Nginx به اینجا می‌رسید، `crontab -` با «command not found» می‌افتاد، و
+# `set -e` کل اسکریپت را می‌کشت. یعنی سایت بالا می‌آمد، همه چیز سبز به نظر
+# می‌رسید، و تنها چیزی که جا افتاده بود تمدید خودکار بود — که سه ماه بعد
+# سایت را می‌انداخت بدون اینکه کسی علت را به یاد بیاورد.
+if ! command -v crontab >/dev/null 2>&1; then
+  info "بستهٔ cron نصب نیست — نصبش می‌کنم."
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq cron >/dev/null 2>&1 || true
+  systemctl enable --now cron >/dev/null 2>&1 || true
+fi
+
+# هیچ‌کدام از شاخه‌ها اسکریپت را نمی‌کشد: اگر زمان‌بند نبود، خطِ لازم چاپ
+# می‌شود تا دستی اضافه شود. سکوت بدترین حالت است.
+if ! command -v crontab >/dev/null 2>&1; then
+  info "⚠ crontab در دسترس نیست — تمدید خودکار تنظیم نشد."
+  info "  این خط را دستی به زمان‌بند اضافه کنید:"
+  echo "  ${CRON_LINE}"
+elif crontab -l 2>/dev/null | grep -q 'certbot/certbot renew'; then
   ok "تمدید خودکار از قبل در crontab هست"
-else
-  (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+elif (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -; then
   ok "تمدید خودکار به crontab اضافه شد (دوشنبه‌ها ساعت ۳)"
+else
+  info "⚠ افزودن به crontab نشد. خط بالا را دستی اضافه کنید."
 fi
 
 echo ""
 ok "https://${DOMAIN} آماده است."
 echo ""
-echo "بررسی: curl -sI https://${DOMAIN} | head -1"
+echo "بررسی سایت:   curl -sI https://${DOMAIN} | head -1"
+echo ""
+echo "بررسی تمدید (چالش واقعی، بدون دست زدن به گواهی فعلی):"
+echo "  docker run --rm -v ${APP_DIR}/infra/certs:/etc/letsencrypt \\"
+echo "    -v ${APP_DIR}/infra/certbot-webroot:/var/www/certbot \\"
+echo "    certbot/certbot renew --dry-run --webroot --webroot-path /var/www/certbot"
