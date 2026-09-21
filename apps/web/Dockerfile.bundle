@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+
+# ایمیج زمان اجرا از بستهٔ از پیش ساخته‌شده.
+#
+# اینجا هیچ بیلدی انجام نمی‌شود و هیچ بسته‌ای از npm دانلود نمی‌شود — بسته در
+# گیت‌هاب اکشنز ساخته شده و سرور فقط بازش می‌کند. تنها چیزی که از شبکه لازم
+# است، خود ایمیج پایه است که از آینهٔ رجیستری می‌آید.
+#
+# پایه debian است نه alpine: بستهٔ ساخته‌شده در CI به glibc لینک شده
+# (باینری بومی sharp)، و alpine از musl استفاده می‌کند. ناسازگاری‌اش موقع
+# اجرا و بی‌صدا بروز می‌کرد، نه موقع ساخت.
+
+FROM node:22-slim
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+RUN groupadd -g 1001 nodejs && useradd -u 1001 -g nodejs -m nextjs
+
+# بسته از قبل ساختار درست را دارد: node_modules و packages در ریشه،
+# نقطهٔ ورود در apps/web/server.js
+COPY --chown=nextjs:nodejs bundle/ ./
+
+USER nextjs
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "apps/web/server.js"]

@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "pnpm --filter @jozveyar/web dev",
     "build": "pnpm -r --filter=!@jozveyar/web build && pnpm --filter @jozveyar/web build",
-    "test": "pnpm -r test",
+    "test": "vitest run",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm --filter @jozveyar/web lint",
     "check": "pnpm typecheck && pnpm test",
