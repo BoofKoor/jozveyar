@@ -1,0 +1,77 @@
+# ساخت بستهٔ آمادهٔ اجرا در گیت‌هاب اکشنز.
+#
+# چرا: سرور ایرانی نمی‌تواند ۴۹۰ مگابایت بسته را از npm بکشد — اتصال‌ها
+# با ECONNRESET و ERR_SOCKET_TIMEOUT می‌افتند، مخصوصاً روی فایل‌های بزرگ.
+# ولی همان سرور به گیت‌هاب می‌رسد (git clone و raw.githubusercontent بارها
+# جواب داده‌اند).
+#
+# پس بیلد اینجا انجام می‌شود و سرور فقط یک فایل ۶۷ مگابایتی دانلود می‌کند:
+# خروجی standalone نکست، که فقط ۱۹ بستهٔ زمان اجرا دارد نه ۹۹ بستهٔ بیلد.
+
+name: build-bundle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # نسخه عمداً اینجا نوشته نمی‌شود: اکشن آن را از فیلد `packageManager`
+      # در package.json می‌خواند. اگر هر دو جا نوشته شود و روزی یکی به‌روز
+      # شود و دیگری نه، اکشن با خطای «چند نسخه» می‌افتد.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # دروازه: بستهٔ شکسته منتشر نمی‌شود.
+      - name: تست واحد
+        run: pnpm test
+
+      - name: بیلد
+        run: pnpm --filter @jozveyar/web build
+
+      # خروجی standalone دو چیز را خودش نمی‌آورد و باید کنار server.js بنشینند.
+      # همان مراحل serve-standalone.mjs، اینجا برای بسته‌بندی.
+      - name: مونتاژ بسته
+        run: |
+          set -eux
+          OUT=apps/web/.next/standalone
+          cp -r apps/web/.next/static "$OUT/apps/web/.next/static"
+          cp -r apps/web/public "$OUT/apps/web/public"
+          tar -czf jozveyar-bundle.tar.gz -C "$OUT" .
+          ls -lh jozveyar-bundle.tar.gz
+
+      # اثر انگشت، تا سرور بفهمد نسخهٔ جدید آمده یا نه.
+      - name: اثر انگشت
+        run: |
+          sha256sum jozveyar-bundle.tar.gz | cut -d' ' -f1 > jozveyar-bundle.sha256
+          cat jozveyar-bundle.sha256
+
+      # انتشار زیر تگ ثابت `bundle-latest`: سرور همیشه یک آدرس می‌شناسد و
+      # لازم نیست شمارهٔ نسخه را جایی نگه دارد.
+      - name: انتشار
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: bundle-latest
+          name: آخرین بستهٔ آمادهٔ اجرا
+          body: |
+            خروجی standalone ساخته‌شده از `${{ github.sha }}`.
+
+            روی سرور: `./infra/deploy-bundle.sh`
+          files: |
+            jozveyar-bundle.tar.gz
+            jozveyar-bundle.sha256
+          prerelease: true

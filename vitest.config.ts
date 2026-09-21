@@ -5,10 +5,16 @@ import { defineConfig } from 'vitest/config';
  *
  * تست سرتاسری Playwright است و اجرا کننده‌اش خودش (`pnpm test:e2e`).
  * بدون این جداسازی، vitest فایل spec پلی‌رایت را برمی‌دارد و در collect می‌شکند.
+ *
+ * الگوی include عمداً با «هر پوشه‌ای» شروع می‌شود و نه با «packages». همین یک
+ * فایل کانفیگ هم از ریشه استفاده می‌شود و هم وقتی vitest داخل یک پکیج اجرا
+ * می‌شود؛ و الگو نسبت به پوشهٔ اجرا حل می‌شود، نه نسبت به محل کانفیگ. با الگوی
+ * قبلی، اجرای داخل پکیج **هیچ فایلی پیدا نمی‌کرد** و vitest با کد ۱ بیرون
+ * می‌آمد — یعنی `pnpm -r test` قرمز می‌شد بدون اینکه حتی یک تست اجرا شده باشد.
  */
 export default defineConfig({
   test: {
-    include: ['packages/*/src/**/*.test.ts'],
+    include: ['**/src/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/.next/**', 'apps/**'],
   },
 });
