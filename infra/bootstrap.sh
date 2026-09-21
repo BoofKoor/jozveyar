@@ -23,7 +23,10 @@ BRANCH="${BRANCH:-main}"
 APP_DIR="${APP_DIR:-/opt/jozveyar}"
 DOMAIN="${DOMAIN:-jozveyar.com}"
 TAG="${TAG:-latest}"
-COMPOSE="docker compose -f infra/docker-compose.prod.yml"
+# --env-file اجباری است: کامپوز `.env` را از پوشهٔ **فایل کامپوز**
+# (یعنی infra/) می‌خواند، نه از ریشهٔ پروژه. بدون این، درون‌یابی
+# ${POSTGRES_PASSWORD} خالی می‌ماند و کامپوز با خطا رد می‌شود.
+COMPOSE="docker compose --env-file ${APP_DIR}/.env -f infra/docker-compose.prod.yml"
 
 step()  { printf '\n\033[1;32m══ %s\033[0m\n' "$1"; }
 info()  { printf '\033[0;36m›\033[0m %s\n' "$1"; }
@@ -167,20 +170,16 @@ done
 if (( ! HAS_CERT )); then
   step "گواهی TLS"
   RESOLVED=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -1 || true)
-  PUBLIC_IP=$(curl -s -m 10 https://api.ipify.org || true)
-  info "دامنه → ${RESOLVED:-«حل نشد»} · IP سرور → ${PUBLIC_IP:-«نامعلوم»}"
+  info "دامنه → ${RESOLVED:-«حل نشد»}"
 
   if [[ -z "$RESOLVED" ]]; then
     info "DNS هنوز منتشر نشده. بعد از انتشار اجرا کنید: ./infra/setup-tls.sh you@email.com"
   else
-    if [[ -n "$PUBLIC_IP" && "$RESOLVED" != "$PUBLIC_IP" ]]; then
-      info "⚠ دامنه به IP دیگری اشاره می‌کند. certbot شکست می‌خورد."
-      info "  DNS را درست کنید، بعد: ./infra/setup-tls.sh you@email.com"
-    else
-      info "DNS درست است. یک قدم مانده — گواهی و بالا آوردن Nginx:"
-      info "  ./infra/setup-tls.sh ایمیل-شما@example.com"
-      info "  (certbot خودش پورت ۸۰ را می‌گیرد؛ Nginx بعدش بالا می‌آید)"
-    fi
+    # مقایسه با آدرس خروجی اینجا انجام نمی‌شود — پشت NAT گمراه‌کننده است.
+    # setup-tls.sh بررسی دقیق‌تر را دارد و certbot حرف آخر را می‌زند.
+    info "یک قدم مانده — گواهی و بالا آوردن Nginx:"
+    info "  ./infra/setup-tls.sh ایمیل-شما@example.com"
+    info "  (certbot خودش پورت ۸۰ را می‌گیرد؛ Nginx بعدش بالا می‌آید)"
   fi
 fi
 

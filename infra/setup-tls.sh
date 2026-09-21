@@ -18,7 +18,8 @@ set -euo pipefail
 EMAIL="${1:?ایمیل برای هشدار انقضای گواهی لازم است. مثال: $0 you@example.com}"
 DOMAIN="${DOMAIN:-jozveyar.com}"
 APP_DIR="${APP_DIR:-/opt/jozveyar}"
-COMPOSE="docker compose -f ${APP_DIR}/infra/docker-compose.prod.yml"
+# --env-file اجباری است — کامپوز `.env` را از پوشهٔ فایل کامپوز می‌خواند.
+COMPOSE="docker compose --env-file ${APP_DIR}/.env -f ${APP_DIR}/infra/docker-compose.prod.yml"
 STAGING="${STAGING:-0}"
 
 info() { printf '\033[0;36m›\033[0m %s\n' "$1"; }
@@ -28,13 +29,36 @@ die()  { printf '\033[0;31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 cd "$APP_DIR"
 mkdir -p infra/certs infra/certbot-webroot
 
-# ── ۱. DNS باید درست باشد، وگرنه سهمیهٔ Let's Encrypt هدر می‌رود ──────────
+# ── ۱. DNS ───────────────────────────────────────────────────────────────
 RESOLVED=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -1 || true)
-PUBLIC_IP=$(curl -s -m 10 https://api.ipify.org || true)
 [[ -n "$RESOLVED" ]] || die "دامنهٔ ${DOMAIN} حل نمی‌شود. DNS را بررسی کنید."
-info "دامنه → ${RESOLVED} · IP سرور → ${PUBLIC_IP:-«نامعلوم»}"
-if [[ -n "$PUBLIC_IP" && "$RESOLVED" != "$PUBLIC_IP" ]]; then
-  die "دامنه به IP دیگری اشاره می‌کند. اول DNS را درست کنید."
+
+# IPهای واقعی این ماشین، نه آدرس خروجی.
+#
+# روی هاست ایرانی، ترافیک خروجی معمولاً از یک استخر NAT می‌گذرد و آدرسی که
+# سرویس‌های «IP من چیست» برمی‌گردانند با IP ورودی سرور فرق دارد — و حتی بین
+# دو درخواست پشت سر هم عوض می‌شود. پس آن آدرس معیار درستی نیست.
+LOCAL_IPS=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+OUTBOUND_IP=$(curl -s -m 10 https://api.ipify.org || true)
+
+MATCH=0
+grep -qx "$RESOLVED" <<<"$LOCAL_IPS" 2>/dev/null && MATCH=1
+[[ -n "$OUTBOUND_IP" && "$RESOLVED" == "$OUTBOUND_IP" ]] && MATCH=1
+
+info "دامنه → ${RESOLVED}"
+info "IPهای این ماشین → $(echo "$LOCAL_IPS" | tr '\n' ' ')· خروجی → ${OUTBOUND_IP:-«نامعلوم»}"
+
+if (( MATCH )); then
+  ok "DNS با این سرور جور است"
+elif [[ "${SKIP_DNS_CHECK:-0}" == "1" ]]; then
+  info "⚠ تطبیق نشد، ولی SKIP_DNS_CHECK=1 است — ادامه."
+else
+  # عمداً متوقف نمی‌شویم: پشت NAT نمی‌شود با اطمینان فهمید IP ورودی چیست.
+  # certbot خودش قاطعانه جواب می‌دهد و یک تلاش ناموفق سهمیه را نمی‌سوزاند
+  # (سقف: ۵ اعتبارسنجی ناموفق در ساعت برای هر دامنه).
+  info "⚠ آدرس DNS با هیچ‌کدام از IPهای این ماشین جور نشد."
+  info "  اگر سرور پشت NAT است این طبیعی است — ادامه می‌دهیم و certbot"
+  info "  خودش قطعی جواب می‌دهد."
 fi
 
 # ── ۲. کدام حالت؟ ────────────────────────────────────────────────────────
