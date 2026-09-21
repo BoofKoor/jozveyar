@@ -134,7 +134,9 @@ else
   info "آینهٔ npm تنظیم نشده — رجیستری رسمی."
   info "اگر بیلد روی دانلود بسته گیر کرد: ./infra/setup-npm-mirror.sh"
 fi
-info "روی سرور کوچک چند دقیقه طول می‌کشد. اگر کشته شد، swap کم است."
+info "چند دقیقه طول می‌کشد. انبار بسته‌ها روی کش BuildKit می‌ماند، پس"
+info "اگر شبکه وسط کار قطع شد فقط دوباره همین اسکریپت را بزنید —"
+info "بسته‌های دانلودشده دوباره دانلود نمی‌شوند."
 docker build \
   --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
   -f apps/web/Dockerfile -t "jozveyar/web:${TAG}" .
