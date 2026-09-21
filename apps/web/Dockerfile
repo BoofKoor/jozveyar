@@ -12,29 +12,42 @@
 
 FROM node:22-alpine AS base
 
-# رجیستری npm قابل تنظیم. رجیستری رسمی از سرور ایرانی در دسترس هست ولی گاهی
-# کند است، پس تلاش مجدد سخاوتمندانه تنظیم شده. اگر اصلاً جواب ندهد،
-# setup-npm-mirror.sh آینه پیدا می‌کند و bootstrap.sh همان را اینجا می‌فرستد.
+# رجیستری npm قابل تنظیم. رجیستری رسمی از سرور ایرانی در دسترس است؛ اگر
+# نبود، setup-npm-mirror.sh آینه پیدا می‌کند و bootstrap.sh همان را می‌فرستد.
 ARG NPM_REGISTRY=https://registry.npmjs.org
+# تایم‌اوت‌ها عمداً کوتاه‌اند. نسخهٔ قبلی ۳۰۰ ثانیه تایم‌اوت با ۵ تلاش داشت،
+# یعنی یک دانلود ناموفق تا ۲۵ دقیقه **ساکت** می‌ماند و بعد خطا می‌داد — و حلقهٔ
+# بیرونی هم تکرارش می‌کرد. شکستِ زود، بهتر از انتظارِ کور است.
 ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
-    NPM_CONFIG_FETCH_RETRIES=5 \
-    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=5000 \
-    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
-    NPM_CONFIG_FETCH_TIMEOUT=300000
+    NPM_CONFIG_FETCH_RETRIES=2 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=3000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_TIMEOUT=60000
 
-# pnpm با npm نصب می‌شود، نه با corepack.
+# pnpm مستقیم از تارball نصب می‌شود.
 #
-# corepack قبل از تارball، نقطهٔ متادیتای `/pnpm/<version>` را می‌زند تا امضا را
-# بگیرد. آینه‌های npm تارball را سرو می‌کنند ولی بعضی‌شان روی آن نقطه HTTP 500
-# می‌دهند — و corepack راهی برای رد شدن از آن ندارد.
+# سه روش امتحان شد و دو تایش شکست خورد:
+#   corepack          نقطهٔ متادیتای امضا را می‌زند — بعضی آینه‌ها ۵۰۰ می‌دهند
+#   npm install -g    حل‌کنندهٔ وابستگی npm را صدا می‌زند و دقایق طول می‌کشد
+#   wget + tar        ← همین. یک درخواست، همان چیزی که تست آینه می‌سنجد
 #
-# `npm install -g` فقط از پروتکل استاندارد رجیستری استفاده می‌کند که هر آینه‌ای
-# پیاده کرده است. --force هر شیم corepack موجود را بازنویسی می‌کند.
-RUN for attempt in 1 2 3 4 5; do \
-      npm install -g --force pnpm@10.33.0 && break; \
-      echo "نصب pnpm — تلاش ${attempt} شکست خورد، ۵ ثانیه صبر…"; \
+# pnpm بسته‌ای خودبسنده است و هیچ وابستگی‌ای ندارد، پس حل‌کنندهٔ npm هیچ ارزشی
+# اضافه نمی‌کند و فقط تأخیر و نقطهٔ شکست می‌آورد. تارball در تست آینه زیر
+# ۲ ثانیه دانلود شد.
+ARG PNPM_VERSION=10.33.0
+RUN set -eux; \
+    for attempt in 1 2 3; do \
+      if wget -q -T 60 -O /tmp/pnpm.tgz \
+           "${NPM_REGISTRY}/pnpm/-/pnpm-${PNPM_VERSION}.tgz"; then \
+        mkdir -p /usr/local/lib/pnpm; \
+        tar -xzf /tmp/pnpm.tgz -C /usr/local/lib/pnpm --strip-components=1; \
+        rm /tmp/pnpm.tgz; \
+        ln -sf /usr/local/lib/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm; \
+        break; \
+      fi; \
+      echo "دانلود pnpm — تلاش ${attempt} شکست خورد، ۵ ثانیه صبر…"; \
       sleep 5; \
-    done && \
+    done; \
     pnpm --version
 
 WORKDIR /repo
