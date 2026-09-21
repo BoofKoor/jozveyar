@@ -113,14 +113,56 @@ fi
 # از این به بعد Nginx بالاست، پس تمدید با webroot و بدون قطع سرویس انجام
 # می‌شود. هفته‌ای یک بار کافی است: certbot فقط گواهی نزدیک انقضا را تمدید می‌کند.
 CRON_LINE="0 3 * * 1 cd ${APP_DIR} && docker run --rm -v ${APP_DIR}/infra/certs:/etc/letsencrypt -v ${APP_DIR}/infra/certbot-webroot:/var/www/certbot certbot/certbot renew --quiet --webroot --webroot-path /var/www/certbot && ${COMPOSE} exec -T nginx nginx -s reload"
-if crontab -l 2>/dev/null | grep -q 'certbot/certbot renew'; then
+
+# نسخهٔ قبلی این بلوک یک خط بود و روی **هر سرور تازه** اسکریپت را می‌کشت:
+#
+#     (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+#
+# روی سرور نو، root هنوز هیچ crontab ندارد و `crontab -l` با کد ۱ بیرون
+# می‌آید. ساب‌شل `set -e` را ارث می‌برد، پس همان‌جا کشته می‌شود و هیچ‌وقت به
+# `echo` نمی‌رسد؛ `pipefail` شکست را به بیرون می‌دهد و اسکریپت می‌میرد.
+#
+# بدترین شکل شکست بود، چون **بعد از** گرفتن گواهی و بالا آوردن Nginx اتفاق
+# می‌افتاد: سایت کار می‌کرد، همه چیز سبز به نظر می‌رسید، و تنها چیزی که جا
+# افتاده بود تمدید خودکار بود — که سه ماه بعد سایت را می‌انداخت، بدون هیچ
+# ارتباط قابل‌دیدنی با روزی که مستقر شد.
+#
+# روی سروری که crontab خالی دارد بازتولید و تست شد.
+if ! command -v crontab >/dev/null 2>&1; then
+  info "بستهٔ cron نصب نیست — نصبش می‌کنم."
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq cron >/dev/null 2>&1 || true
+  systemctl enable --now cron >/dev/null 2>&1 || true
+fi
+
+if ! command -v crontab >/dev/null 2>&1; then
+  info "⚠ crontab در دسترس نیست — تمدید خودکار تنظیم نشد."
+  info "  این خط را دستی به زمان‌بند اضافه کنید:"
+  echo "  ${CRON_LINE}"
+elif crontab -l 2>/dev/null | grep -q 'certbot/certbot renew'; then
   ok "تمدید خودکار از قبل در crontab هست"
 else
-  (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
-  ok "تمدید خودکار به crontab اضافه شد (دوشنبه‌ها ساعت ۳)"
+  # `|| true` همان مسیری است که قبلاً اسکریپت را می‌کشت. sed خط خالیِ
+  # crontabِ خالی را برمی‌دارد.
+  CURRENT=$(crontab -l 2>/dev/null || true)
+  printf '%s\n%s\n' "$CURRENT" "$CRON_LINE" | sed '/^[[:space:]]*$/d' | crontab - || true
+
+  # ادعا نکن که اضافه شد — بخوانش. همین ادعای بررسی‌نشده بود که قرار بود
+  # سه ماه بعد سایت را بیندازد.
+  if crontab -l 2>/dev/null | grep -q 'certbot/certbot renew'; then
+    ok "تمدید خودکار به crontab اضافه شد (دوشنبه‌ها ساعت ۳)"
+  else
+    info "⚠ افزودن به crontab نشد. این خط را دستی اضافه کنید:"
+    echo "  ${CRON_LINE}"
+  fi
 fi
 
 echo ""
 ok "https://${DOMAIN} آماده است."
 echo ""
-echo "بررسی: curl -sI https://${DOMAIN} | head -1"
+echo "بررسی سایت:   curl -sI https://${DOMAIN} | head -1"
+echo ""
+echo "بررسی تمدید (چالش واقعی، بدون دست زدن به گواهی فعلی):"
+echo "  docker run --rm -v ${APP_DIR}/infra/certs:/etc/letsencrypt \\"
+echo "    -v ${APP_DIR}/infra/certbot-webroot:/var/www/certbot \\"
+echo "    certbot/certbot renew --dry-run --webroot --webroot-path /var/www/certbot"
