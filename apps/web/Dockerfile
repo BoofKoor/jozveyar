@@ -56,20 +56,47 @@ WORKDIR /repo
 # فقط فایل‌های manifest کپی می‌شوند تا تا وقتی وابستگی عوض نشده،
 # این لایه از کش بیاید.
 FROM base AS deps
-# ARG بین مرحله‌ها ارث نمی‌رسد، ولی ENV مرحلهٔ base ارث می‌رسد — پس رجیستری
-# همان می‌ماند و لازم نیست دوباره اعلام شود.
+# ARG بین مرحله‌ها ارث نمی‌رسد، ولی ENV مرحلهٔ base ارث می‌رسد.
+#
 # پلی‌رایت وابستگی ریشه است و در نصب می‌آید. بدون این متغیر، اسکریپت نصبش
-# تلاش می‌کند حدود ۱۵۰ مگابایت کرومیوم دانلود کند — که روی سرور ایرانی شکست
-# می‌خورد و بیلد را بی‌دلیل می‌کشد. مرورگر فقط برای تست لوکال لازم است.
+# تلاش می‌کند حدود ۱۵۰ مگابایت کرومیوم دانلود کند. مرورگر فقط برای تست
+# لوکال لازم است.
+#
+# تنظیم شبکه برای لینک بی‌ثبات:
+#
+#   network-concurrency=4  پیش‌فرض pnpm ۱۶ اتصال هم‌زمان است. روی لینکی که
+#                          پهنای باند محدود دارد، ۱۶ جریان هرکدام سهم نازکی
+#                          می‌گیرند و با ERR_SOCKET_TIMEOUT می‌افتند. چهار
+#                          اتصالِ سالم از شانزده اتصالِ در حال تایم‌اوت بهتر است.
+#   fetch-timeout=180000   اینجا برخلاف مرحلهٔ قبل صبر لازم است: آنجا یک فایل
+#                          ۴ مگابایتی بود و سکوت طولانی یعنی خرابی؛ اینجا
+#                          صدها بسته است و کندی طبیعی است.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+    PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true \
+    NPM_CONFIG_NETWORK_CONCURRENCY=4 \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=10000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=60000 \
+    NPM_CONFIG_FETCH_TIMEOUT=180000
+
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/analysis/package.json packages/analysis/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/pricing/package.json packages/pricing/
 COPY packages/text/package.json packages/text/
-RUN pnpm install --frozen-lockfile
+
+# انبار pnpm روی کش BuildKit می‌نشیند و بین بیلدها زنده می‌ماند.
+#
+# مهم‌ترین تغییر این فایل: بدون آن، هر بیلدِ شکست‌خورده همهٔ ~۴۵۰ مگابایت
+# دانلودشده را دور می‌ریزد و اجرای بعدی از صفر شروع می‌کند. با آن، هر بسته‌ای
+# که یک بار رسیده دیگر دانلود نمی‌شود — پس روی لینک بی‌ثبات، چند بار اجرا کردن
+# عملاً همان ادامه دادن است.
+#
+# --ignore-scripts: هیچ وابستگی‌ای اسکریپت نصب لازم ندارد (بررسی شد: بیلد نکست
+# بدون آنها سالم کامپایل می‌شود) و حذفشان یک راه شکست شبکه‌ای کمتر است.
+RUN --mount=type=cache,target=/pnpm-store,sharing=locked \
+    pnpm install --frozen-lockfile --ignore-scripts --store-dir=/pnpm-store
 
 # ── بیلد ─────────────────────────────────────────────────────────────────
 FROM deps AS build
