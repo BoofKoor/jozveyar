@@ -47,13 +47,13 @@ ssh "${DEPLOY_HOST}" "test -f ${REMOTE_DIR}/.env" || {
 }
 
 step "بالا آوردن سرویس‌ها"
-ssh "${DEPLOY_HOST}" "cd ${REMOTE_DIR} && TAG=${TAG} docker compose -f infra/docker-compose.prod.yml up -d --remove-orphans"
+ssh "${DEPLOY_HOST}" "cd ${REMOTE_DIR} && TAG=${TAG} docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --remove-orphans"
 
 step "بررسی سلامت"
-ssh "${DEPLOY_HOST}" "cd ${REMOTE_DIR} && docker compose -f infra/docker-compose.prod.yml ps"
+ssh "${DEPLOY_HOST}" "cd ${REMOTE_DIR} && docker compose --env-file .env -f infra/docker-compose.prod.yml ps"
 
 step "پاک کردن ایمیج‌های قدیمی روی سرور"
 ssh "${DEPLOY_HOST}" "docker image prune -f --filter 'label!=keep'"
 
 echo ""
-echo "✅ استقرار تمام شد. لاگ: ssh ${DEPLOY_HOST} 'cd ${REMOTE_DIR} && docker compose -f infra/docker-compose.prod.yml logs -f web'"
+echo "✅ استقرار تمام شد. لاگ: ssh ${DEPLOY_HOST} 'cd ${REMOTE_DIR} && docker compose --env-file .env -f infra/docker-compose.prod.yml logs -f web'"

@@ -12,21 +12,26 @@
 
 FROM node:22-alpine AS base
 
-# رجیستری npm قابل تنظیم. از سرور ایرانی، رجیستری رسمی در دسترس هست ولی کند و
-# بی‌ثبات است و دانلود تارball تایم‌اوت می‌شود. setup-npm-mirror.sh سریع‌ترین
-# آینه را پیدا می‌کند و bootstrap.sh همان را اینجا می‌فرستد.
+# رجیستری npm قابل تنظیم. رجیستری رسمی از سرور ایرانی در دسترس هست ولی گاهی
+# کند است، پس تلاش مجدد سخاوتمندانه تنظیم شده. اگر اصلاً جواب ندهد،
+# setup-npm-mirror.sh آینه پیدا می‌کند و bootstrap.sh همان را اینجا می‌فرستد.
 ARG NPM_REGISTRY=https://registry.npmjs.org
-ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
-    NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
     NPM_CONFIG_FETCH_RETRIES=5 \
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=5000 \
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
     NPM_CONFIG_FETCH_TIMEOUT=300000
 
-# corepack خودش تلاش مجدد ندارد و اولین تایم‌اوت کل بیلد را می‌کشد.
-RUN corepack enable && \
-    for attempt in 1 2 3 4 5; do \
-      corepack prepare pnpm@10.33.0 --activate && break; \
+# pnpm با npm نصب می‌شود، نه با corepack.
+#
+# corepack قبل از تارball، نقطهٔ متادیتای `/pnpm/<version>` را می‌زند تا امضا را
+# بگیرد. آینه‌های npm تارball را سرو می‌کنند ولی بعضی‌شان روی آن نقطه HTTP 500
+# می‌دهند — و corepack راهی برای رد شدن از آن ندارد.
+#
+# `npm install -g` فقط از پروتکل استاندارد رجیستری استفاده می‌کند که هر آینه‌ای
+# پیاده کرده است. --force هر شیم corepack موجود را بازنویسی می‌کند.
+RUN for attempt in 1 2 3 4 5; do \
+      npm install -g --force pnpm@10.33.0 && break; \
       echo "نصب pnpm — تلاش ${attempt} شکست خورد، ۵ ثانیه صبر…"; \
       sleep 5; \
     done && \

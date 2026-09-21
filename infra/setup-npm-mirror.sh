@@ -25,8 +25,11 @@ REGISTRIES=(
   "https://registry.yarnpkg.com"
 )
 
-# بستهٔ آزمون: همان تارballی که corepack لازم دارد و بیلد روی آن شکست.
-TEST_PATH="/pnpm/-/pnpm-10.33.0.tgz"
+# نصب یک بسته دو درخواست دارد و آینه باید **هر دو** را جواب بدهد.
+# آینه‌ای که تارball می‌دهد ولی متادیتا نه، بیلد را با HTTP 500 می‌کشد —
+# دقیقاً همان چیزی که یک بار اتفاق افتاد چون فقط تارball سنجیده می‌شد.
+META_PATH="/pnpm/10.33.0"
+TARBALL_PATH="/pnpm/-/pnpm-10.33.0.tgz"
 OUT_FILE="${OUT_FILE:-/opt/jozveyar/.npm-registry}"
 BUILD_IMAGE="node:22-alpine"
 TIMEOUT=45
@@ -47,29 +50,40 @@ if ! docker image inspect "$BUILD_IMAGE" >/dev/null 2>&1; then
   }
 fi
 
-info "آزمایش دانلود واقعی از داخل کانتینر (همان محیط بیلد)…"
+info "آزمایش متادیتا و تارball از داخل کانتینر (همان محیط بیلد)…"
 echo ""
+
+# شبکهٔ پیش‌فرض bridge، نه host — بیلد داکر هم در همین شبکه اجرا می‌شود.
+# و همان ایمیج بیلد، چون از قبل لوکال است و محیط را دقیق می‌سنجد.
+probe() {
+  docker run --rm "$BUILD_IMAGE" sh -c \
+    "wget -q -O /dev/null -T ${TIMEOUT} '${1}${META_PATH}' && \
+     wget -q -O /dev/null -T ${TIMEOUT} '${1}${TARBALL_PATH}'" 2>/dev/null
+}
 
 BEST=""
 BEST_MS=999999
 
 for registry in "${REGISTRIES[@]}"; do
   start=$(date +%s%3N)
-  # دو نکته که نتیجه را درست می‌کنند:
-  #   • شبکهٔ پیش‌فرض bridge، نه host — بیلد داکر هم در همین شبکه اجرا می‌شود،
-  #     و host networking مسیر و DNS متفاوتی دارد که با بیلد جور نیست.
-  #   • همان ایمیج بیلد (node:22-alpine) با wget بیزی‌باکس، نه یک ایمیج curl
-  #     جداگانه — هم از قبل لوکال است و هم دقیقاً محیط بیلد را می‌سنجد.
-  if docker run --rm "$BUILD_IMAGE" \
-       wget -q -O /dev/null -T "$TIMEOUT" "${registry}${TEST_PATH}" 2>/dev/null; then
+  if probe "$registry"; then
     ms=$(( $(date +%s%3N) - start ))
     ok "$(printf '%-42s %5d ms' "$registry" "$ms")"
+    # رجیستری رسمی همیشه برنده است اگر کار کند: سرعت بیشتر یک آینه ارزشی
+    # ندارد وقتی ممکن است نقطه‌ای را ناقص پیاده کرده باشد. آینه راه پشتیبان
+    # است، نه بهینه‌سازی.
+    if [[ "$registry" == "${REGISTRIES[0]}" ]]; then
+      BEST="$registry"
+      BEST_MS=$ms
+      info "رجیستری رسمی جواب می‌دهد — آینه لازم نیست."
+      break
+    fi
     if (( ms < BEST_MS )); then
       BEST="$registry"
       BEST_MS=$ms
     fi
   else
-    fail "$(printf '%-42s شکست یا تایم‌اوت' "$registry")"
+    fail "$(printf '%-42s متادیتا یا تارball را نداد' "$registry")"
   fi
 done
 
