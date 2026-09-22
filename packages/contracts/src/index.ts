@@ -205,8 +205,19 @@ export const shippingRateSchema = z.object({
   methodId: z.string(),
   zoneId: z.string(),
   minWeightGrams: z.number().int().nonnegative(),
-  /** بالای بازه، شامل نمی‌شود. برای آخرین بازه `Infinity` بگذارید. */
-  maxWeightGrams: z.number().positive(),
+  /**
+   * بالای بازه، شامل نمی‌شود. **`null` یعنی بدون سقف** — برای آخرین بازه.
+   *
+   * قبلاً اینجا نوشته بود «`Infinity` بگذارید» و همین غلط بود، از دو جهت:
+   * zod نسخهٔ ۴ اصلاً `Infinity` را رد می‌کند، و مهم‌تر اینکه
+   * `JSON.stringify(Infinity)` برابر `null` است. یعنی لحظه‌ای که تعرفه از
+   * سرور به مرورگر می‌رفت، آن مقدار بی‌صدا به `null` تبدیل می‌شد و بازهٔ
+   * آخر دیگر به هیچ وزنی نمی‌خورد — کرایه `null` برمی‌گشت برای دقیقاً
+   * سنگین‌ترین سفارش‌ها.
+   *
+   * پس `null` فقط سازگارتر نیست؛ تنها مقداری است که از سیم رد می‌شود.
+   */
+  maxWeightGrams: z.number().int().positive().nullable(),
   priceRials: z.number().int().nonnegative(),
 });
 export type ShippingRate = z.infer<typeof shippingRateSchema>;
