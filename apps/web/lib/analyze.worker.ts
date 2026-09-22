@@ -35,6 +35,41 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 
 const post = (message: WorkerResponse) => self.postMessage(message);
 
+/**
+ * بوم کمکی pdf.js روی OffscreenCanvas.
+ *
+ * pdf.js برای کشیدن تصویر (یعنی هر صفحهٔ اسکن‌شده) یک بوم موقت می‌سازد، و
+ * کارخانهٔ پیش‌فرضش `document.createElement('canvas')` است. این کد در کارگر
+ * اجرا می‌شود و کارگر `document` ندارد — پس **هر اسکن واقعی** با «تحلیل در
+ * مرورگر کامل نشد» می‌افتاد. نمونه‌های تست فقط مستطیل برداری داشتند و هیچ‌وقت
+ * به این مسیر نمی‌رسیدند؛ `image-scan-6.pdf` حالا می‌رسد.
+ */
+class OffscreenCanvasFactory {
+  constructor(_options?: unknown) {}
+
+  create(width: number, height: number) {
+    if (width <= 0 || height <= 0) throw new Error('Invalid canvas size');
+    const canvas = new OffscreenCanvas(width, height);
+    return { canvas, context: canvas.getContext('2d', { willReadFrequently: true }) };
+  }
+
+  reset(target: { canvas: OffscreenCanvas | null }, width: number, height: number) {
+    if (!target.canvas) throw new Error('Canvas is not specified');
+    if (width <= 0 || height <= 0) throw new Error('Invalid canvas size');
+    target.canvas.width = width;
+    target.canvas.height = height;
+  }
+
+  destroy(target: { canvas: OffscreenCanvas | null; context: unknown }) {
+    if (!target.canvas) throw new Error('Canvas is not specified');
+    // صفر کردن اندازه حافظهٔ بیت‌مپ را همان لحظه آزاد می‌کند — روی گوشی مهم است.
+    target.canvas.width = 0;
+    target.canvas.height = 0;
+    target.canvas = null;
+    target.context = null;
+  }
+}
+
 /** خطای pdf.js را به کدی که پیام فارسی دارد نگاشت می‌کند. */
 function classifyError(error: unknown): AnalysisErrorCode {
   const name = (error as { name?: string })?.name ?? '';
@@ -171,7 +206,8 @@ async function analyze(request: AnalyzeRequest): Promise<void> {
     disableStream: true,
     // قلم‌های استاندارد را لوکال نداریم و برای تحلیل رنگ لازم نیست.
     useSystemFonts: false,
-  }).promise;
+    CanvasFactory: OffscreenCanvasFactory,
+  } as Parameters<typeof pdfjs.getDocument>[0]).promise;
 
   const pageCount = doc.numPages;
   if (pageCount === 0) {
