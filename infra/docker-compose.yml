@@ -1,7 +1,6 @@
 # محیط توسعه.
 #
-# پستگرس و MinIO از برش بعدی لازم می‌شوند، ولی الان بالا می‌آیند تا خط
-# استقرار از روز اول کامل و آزمایش‌شده باشد — نه اینکه آخر پروژه غافلگیر شویم.
+# پستگرس و Garage: همان سرویس‌هایی که تولید دارد.
 
 name: jozveyar-dev
 
@@ -30,18 +29,23 @@ services:
       timeout: 5s
       retries: 5
 
-  # استوریج S3-سازگار لوکال. در تولید فقط سه متغیر محیطی عوض می‌شود
-  # و به پارس‌پک یا آروان وصل می‌شویم — بدون تغییر کد.
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
+  # استوریج S3-سازگار لوکال — همان Garage تولید (ADR-023). یک بار بعد از
+  # بالا آمدن، باکت و کلید را بسازید:
+  #   GARAGE_CMD="docker compose -f infra/docker-compose.yml exec -T garage /garage" \
+  #   S3_BUCKET=jozveyar S3_ACCESS_KEY=GK… S3_SECRET_KEY=… ./infra/garage-init.sh
+  #
+  # MinIO اینجا بود؛ ایمیجش در شهریور ۱۴۰۵ از Docker Hub حذف شد.
+  garage:
+    image: dxflrs/garage:v2.4.1
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-jozveyar}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-devpassword}
-    ports: ['9000:9000', '9001:9001']
-    volumes: ['./data/minio:/data']
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0000000000000000000000000000000000000000000000000000000000000000}
+    ports: ['3900:3900']
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - ./data/garage/meta:/var/lib/garage/meta
+      - ./data/garage/data:/var/lib/garage/data
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test: ['CMD', '/garage', 'status']
       interval: 10s
       timeout: 5s
       retries: 5

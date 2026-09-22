@@ -1,0 +1,29 @@
+# پیکربندی Garage — استوریج S3-سازگار روی همان سرور (ADR-023).
+#
+# تک‌گره: `replication_factor = 1`. کپی دوم روی همان دیسک هیچ امنیتی نمی‌خرد و
+# فقط جای دو برابر می‌گیرد؛ فایل‌ها هم عمداً فقط دو روز می‌مانند.
+#
+# رمز RPC اینجا نیست و از متغیر محیطی `GARAGE_RPC_SECRET` می‌آید، که
+# setup-storage.sh یک بار می‌سازد و در .env می‌گذارد.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+# هر تغییر فراداده با fsync — روی یک گره، از دست رفتن فراداده یعنی از دست رفتن فایل.
+metadata_fsync = true
+
+replication_factor = 1
+
+# IPv4 صریح، نه `[::]`: در کانتینری که IPv6 ندارد، bind روی `[::]` با panic
+# می‌افتد (در آزمایش همین پروژه دیده شد).
+rpc_bind_addr = "0.0.0.0:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# همان منطقه‌ای که درایور با آن امضا می‌کند (S3_REGION).
+s3_region = "us-east-1"
+api_bind_addr = "0.0.0.0:3900"
+# دامنهٔ vhost عمداً چیزی است که هیچ‌وقت با Host واقعی جور نمی‌شود: همهٔ
+# درخواست‌ها path-style‌اند (`/<bucket>/<key>`)، از جمله آنهایی که Nginx با
+# `Host: jozveyar.com` می‌فرستد.
+root_domain = ".s3.garage.internal"

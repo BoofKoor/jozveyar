@@ -9,9 +9,18 @@ const config: NextConfig = {
   transpilePackages: [
     '@jozveyar/analysis',
     '@jozveyar/contracts',
+    '@jozveyar/db',
     '@jozveyar/pricing',
+    '@jozveyar/storage',
     '@jozveyar/text',
   ],
+  // پکیج‌های سمت سرور (db، storage) به سبک ESM نود import می‌کنند —
+  // `./schema.js` برای فایل `schema.ts`. tsc و vitest این را می‌فهمند؛ webpack
+  // بدون این نگاشت نمی‌فهمد.
+  webpack(config) {
+    config.resolve.extensionAlias = { '.js': ['.ts', '.tsx', '.js'] };
+    return config;
+  },
   eslint: { ignoreDuringBuilds: true },
   poweredByHeader: false,
 };

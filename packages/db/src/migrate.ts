@@ -21,10 +21,17 @@ export const MIGRATIONS_FOLDER = resolve(
   'migrations',
 );
 
-export async function runMigrations(connectionString: string): Promise<void> {
+/**
+ * `migrationsFolder` برای اجرای داخل بستهٔ تولیدی لازم است: آنجا این فایل در
+ * باندل نکست حل شده و `import.meta.url` دیگر به پوشهٔ پکیج اشاره نمی‌کند.
+ */
+export async function runMigrations(
+  connectionString: string,
+  migrationsFolder: string = MIGRATIONS_FOLDER,
+): Promise<void> {
   const client = postgres(connectionString, { max: 1, onnotice: () => {} });
   try {
-    await migrate(drizzle(client), { migrationsFolder: MIGRATIONS_FOLDER });
+    await migrate(drizzle(client), { migrationsFolder });
   } finally {
     await client.end();
   }

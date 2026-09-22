@@ -12,10 +12,13 @@ services:
     ports: ['80:80', '443:443']
     volumes:
       - ./nginx/jozveyar.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./certs:/etc/nginx/certs:ro
       - ./certbot-webroot:/var/www/certbot
     depends_on:
       web: { condition: service_healthy }
+      # Nginx نام `garage` را موقع بالا آمدن حل می‌کند؛ بدون کانتینرش بالا نمی‌آید.
+      garage: { condition: service_healthy }
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1/nginx-health']
       interval: 30s
@@ -50,6 +53,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # استوریج S3-سازگار (ADR-023). پورتی بیرون باز نمی‌شود: مرورگر از مسیر
+  # `/jozveyar/` در Nginx می‌رسد و اپ از شبکهٔ داخلی. رمزها را
+  # infra/setup-storage.sh یک بار در .env می‌سازد.
+  garage:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-}
+    mem_limit: ${GARAGE_MEM_LIMIT:-512m}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - ./data/garage/meta:/var/lib/garage/meta
+      - ./data/garage/data:/var/lib/garage/data
+    healthcheck:
+      test: ['CMD', '/garage', 'status']
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   redis:
     image: redis:7-alpine

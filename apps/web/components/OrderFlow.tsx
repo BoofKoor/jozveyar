@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { OrderSpec } from '@jozveyar/contracts';
 import { quote, wholeDocumentRule } from '@jozveyar/pricing';
 import {
@@ -10,6 +10,7 @@ import {
 } from '@jozveyar/pricing/seed';
 import { FIRST_PRICE_AFTER_PAGES } from '../lib/analysis-protocol';
 import { useDocumentAnalysis } from '../lib/useDocumentAnalysis';
+import { useUpload } from '../lib/useUpload';
 import { AnalysisCard } from './AnalysisCard';
 import { ConfigPanel, type OrderConfig } from './ConfigPanel';
 import { DropZone } from './DropZone';
@@ -26,6 +27,7 @@ const INITIAL_CONFIG: OrderConfig = {
 export function OrderFlow() {
   const { state, analyzeFile, reset, summary } = useDocumentAnalysis();
   const [config, setConfig] = useState<OrderConfig>(INITIAL_CONFIG);
+  const [file, setFile] = useState<File | null>(null);
 
   /**
    * قیمت زنده.
@@ -59,8 +61,31 @@ export function OrderFlow() {
     breakdown !== null &&
     (state.phase === 'ready' || state.analyzedCount >= FIRST_PRICE_AFTER_PAGES);
 
+  /**
+   * آپلود در پس‌زمینه، **بعد از نمایش اولین قیمت** — تا با لحظهٔ جادو سر
+   * پردازنده و شبکه رقابت نکند. فایل‌هایی که مرورگر نمی‌خواند (Word، عکس،
+   * PDF خیلی بزرگ) هنوز آپلود نمی‌شوند: بدون تحلیل سرور (قدم بعد) آپلودشان
+   * فقط یک بن‌بست تازه می‌ساخت.
+   */
+  const { upload, discard } = useUpload(file, priceReady && state.phase !== 'error');
+
+  const takeFile = useCallback(
+    (next: File) => {
+      discard();
+      setFile(next);
+      analyzeFile(next);
+    },
+    [analyzeFile, discard],
+  );
+
+  const startOver = useCallback(() => {
+    discard();
+    setFile(null);
+    reset();
+  }, [discard, reset]);
+
   if (!hasFile) {
-    return <DropZone onFile={analyzeFile} busy={false} />;
+    return <DropZone onFile={takeFile} busy={false} />;
   }
 
   if (state.phase === 'needs_server') {
@@ -75,7 +100,7 @@ export function OrderFlow() {
           </p>
           <button
             type="button"
-            onClick={reset}
+            onClick={startOver}
             className="mt-5 rounded-lg bg-sage-button px-6 py-2.5 font-semibold text-ink"
           >
             فایل دیگری بینداز
@@ -92,7 +117,7 @@ export function OrderFlow() {
         <p className="mt-2 text-ink-2">{state.error.hint}</p>
         <button
           type="button"
-          onClick={reset}
+          onClick={startOver}
           className="mt-5 rounded-lg bg-sage-button px-6 py-2.5 font-semibold text-ink"
         >
           فایل دیگری بینداز
@@ -103,7 +128,7 @@ export function OrderFlow() {
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
-      <AnalysisCard state={state} summary={summary} onReset={reset} />
+      <AnalysisCard state={state} summary={summary} upload={upload} onReset={startOver} />
 
       {state.pageCount > 0 ? (
         <ConfigPanel

@@ -26,9 +26,15 @@ importers:
       '@jozveyar/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@jozveyar/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing
+      '@jozveyar/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@jozveyar/text':
         specifier: workspace:*
         version: link:../../packages/text
@@ -106,6 +112,12 @@ importers:
       '@jozveyar/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/storage:
+    devDependencies:
+      '@types/node':
+        specifier: 22.13.1
+        version: 22.13.1
 
   packages/text: {}
 

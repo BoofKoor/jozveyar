@@ -92,13 +92,16 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 DATABASE_URL=postgresql://jozveyar:${POSTGRES_PASSWORD}@postgres:5432/jozveyar
 REDIS_URL=redis://redis:6379
 
-# ذخیره‌سازی فایل — از برش ۲ لازم می‌شود.
-# مقادیر فضای ابری پارس‌پک را اینجا بگذارید؛ کد فقط S3 حرف می‌زند.
+# ذخیره‌سازی فایل. خالی بماند: setup-storage.sh برای Garage روی همین سرور
+# پرش می‌کند. برای آروان یا پارس‌پک، مقادیر آنها را اینجا بگذارید؛ کد فقط
+# S3 حرف می‌زند (ADR-023).
 S3_ENDPOINT=
+S3_PUBLIC_ENDPOINT=
 S3_REGION=us-east-1
 S3_BUCKET=jozveyar
 S3_ACCESS_KEY=
 S3_SECRET_KEY=
+GARAGE_RPC_SECRET=
 
 # درگاه نمونه تا نماد الکترونیک فعال شود.
 PAYMENT_PROVIDER=mock
@@ -142,7 +145,11 @@ docker build \
   -f apps/web/Dockerfile -t "jozveyar/web:${TAG}" .
 ok "ایمیج jozveyar/web:${TAG} ساخته شد"
 
-# ── ۴. بالا آوردن ────────────────────────────────────────────────────────
+# ── ۴. استوریج ───────────────────────────────────────────────────────────
+step "استوریج"
+APP_DIR="$APP_DIR" DOMAIN="$DOMAIN" ./infra/setup-storage.sh
+
+# ── ۵. بالا آوردن ────────────────────────────────────────────────────────
 step "بالا آوردن سرویس‌ها"
 # nginx تا وقتی گواهی نباشد بالا نمی‌آید (فایل گواهی را در کانفیگ می‌خواهد)،
 # پس اول فقط اپ و دیتابیس، بعد گواهی، بعد nginx.
@@ -153,7 +160,7 @@ if (( HAS_CERT )); then
   TAG="$TAG" $COMPOSE up -d --remove-orphans
 else
   info "گواهی TLS هنوز نیست — nginx فعلاً بالا نمی‌آید."
-  TAG="$TAG" $COMPOSE up -d --remove-orphans postgres redis web
+  TAG="$TAG" $COMPOSE up -d --remove-orphans postgres redis garage web
 fi
 
 info "انتظار برای سلامت اپ…"
@@ -168,7 +175,7 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-# ── ۵. گواهی TLS ─────────────────────────────────────────────────────────
+# ── ۶. گواهی TLS ─────────────────────────────────────────────────────────
 if (( ! HAS_CERT )); then
   step "گواهی TLS"
   RESOLVED=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -1 || true)
@@ -185,7 +192,7 @@ if (( ! HAS_CERT )); then
   fi
 fi
 
-# ── ۶. وضعیت ─────────────────────────────────────────────────────────────
+# ── ۷. وضعیت ─────────────────────────────────────────────────────────────
 step "وضعیت"
 $COMPOSE ps
 echo ""

@@ -79,7 +79,14 @@ cp apps/web/Dockerfile.bundle "${WORK}/ctx/Dockerfile"
 docker build -t "jozveyar/web:${IMAGE_TAG}" "${WORK}/ctx"
 ok "ایمیج jozveyar/web:${IMAGE_TAG} ساخته شد"
 
-# ── ۳. بالا آوردن ────────────────────────────────────────────────────────
+# ── ۳. استوریج ───────────────────────────────────────────────────────────
+# idempotent: بار اول رمزها را در .env می‌سازد و Garage را آماده می‌کند؛
+# بارهای بعد فقط تأیید می‌کند. باید قبل از بالا آمدن اپ باشد تا اپ مقادیر
+# S3 را از .env بخواند.
+step "استوریج"
+APP_DIR="$APP_DIR" DOMAIN="$DOMAIN" ./infra/setup-storage.sh
+
+# ── ۴. بالا آوردن ────────────────────────────────────────────────────────
 step "بالا آوردن سرویس‌ها"
 HAS_CERT=0
 [[ -f "infra/certs/live/${DOMAIN}/fullchain.pem" ]] && HAS_CERT=1
@@ -88,7 +95,7 @@ if (( HAS_CERT )); then
   TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans
 else
   info "گواهی TLS هنوز نیست — nginx فعلاً بالا نمی‌آید."
-  TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans postgres redis web
+  TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans postgres redis garage web
 fi
 
 info "انتظار برای سلامت اپ…"
@@ -103,9 +110,25 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+# اپ موقع بالا آمدن مهاجرت‌های پایگاه داده را اجرا می‌کند (instrumentation.ts).
+# شکستش اپ را نمی‌کشد — قیمت مرورگر بدون پایگاه داده هم کار می‌کند — پس
+# اینجا باید صریح دیده شود، نه اینکه آپلود بی‌صدا خاموش بماند.
+if $COMPOSE logs --since 10m web 2>/dev/null | grep -q '✓ مهاجرت'; then
+  ok "مهاجرت‌های پایگاه داده اعمال شدند"
+else
+  printf '\033[0;31m✗ مهاجرت دیده نشد — آپلود کار نمی‌کند تا درست شود.\033[0m\n' >&2
+  $COMPOSE logs --since 10m web 2>/dev/null | grep -E 'مهاجرت|Error' | tail -5 >&2 || true
+fi
+
 echo "$ACTUAL" > .bundle-sha256
 
-# ── ۴. وضعیت ─────────────────────────────────────────────────────────────
+# هر استقرار ایمیج قبلی را بی‌تگ جا می‌گذارد (~۶۷ مگابایت) و کش ساخت هم
+# لایه‌های COPY را نگه می‌دارد که دیگر به کار نمی‌آیند. استوریج روی همین
+# دیسک است، پس جای خالی اینجا واقعاً مصرف دارد.
+docker image prune -f >/dev/null && docker builder prune -f >/dev/null || true
+ok "ایمیج‌های کهنه پاک شدند"
+
+# ── ۵. وضعیت ─────────────────────────────────────────────────────────────
 step "وضعیت"
 $COMPOSE ps
 echo ""

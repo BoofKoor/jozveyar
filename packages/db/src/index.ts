@@ -14,6 +14,8 @@ import * as schema from './schema.js';
 export * from './schema.js';
 export * from './price-list.js';
 export * from './seed.js';
+export * from './documents.js';
+export { runMigrations } from './migrate.js';
 
 export type Database = ReturnType<typeof createDb>;
 

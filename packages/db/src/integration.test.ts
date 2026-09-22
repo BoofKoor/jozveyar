@@ -21,7 +21,9 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { createDb, type Database } from './index.js';
 import { runMigrations } from './migrate.js';
 import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
-import { bindingRateBands, priceLists, shippingRates } from './schema.js';
+import { bindingRateBands, documents, priceLists, settings, shippingRates } from './schema.js';
+import { createDocumentStore, type NewUploadDocument } from './documents.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -210,5 +212,80 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     expect((await loadPriceList(conn, 1)).label).toBe(SEED_PRICE_LIST.label);
 
     await activatePriceList(conn, 1);
+  });
+
+  // در همین فایل، نه فایل جدا: vitest فایل‌ها را موازی اجرا می‌کند و دو اجرای
+  // هم‌زمان مهاجرت روی یک پایگاه داده با هم مسابقه می‌دهند.
+  describe('سند و آپلود', () => {
+    const MiB = 1024 * 1024;
+    const doc = (over: Partial<NewUploadDocument> = {}): NewUploadDocument => ({
+      id: randomUUID(),
+      sessionHash: 'a'.repeat(64),
+      originalName: 'جزوهٔ فیزیک.pdf',
+      sourceKind: 'pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10 * MiB,
+      storageKey: 'uploads/x.pdf',
+      uploadId: 'u1',
+      partSizeBytes: 8 * MiB,
+      ...over,
+    });
+
+    beforeAll(async () => {
+      await conn.db.delete(documents);
+    });
+
+    it('سند آپلودی درج و خوانده می‌شود، نام فارسی سالم', async () => {
+      const store = createDocumentStore(conn);
+      const d = doc();
+      await store.insertUpload(d);
+      const row = await store.find(d.id);
+      expect(row?.status).toBe('uploading');
+      expect(row?.originalName).toBe('جزوهٔ فیزیک.pdf');
+      expect(row?.sizeBytes).toBe(10 * MiB);
+      expect(await store.find(randomUUID())).toBeNull();
+    });
+
+    it('شمارش آپلود باز و حجم در راه', async () => {
+      await conn.db.delete(documents);
+      const store = createDocumentStore(conn);
+      const now = new Date();
+      const dayAgo = new Date(now.getTime() - 86_400_000);
+      const session = 'b'.repeat(64);
+
+      const open = doc({ sessionHash: session, sizeBytes: 100 });
+      const uploaded = doc({ sessionHash: session, sizeBytes: 1_000 });
+      const expired = doc({ sizeBytes: 10_000 });
+      const failed = doc({ sessionHash: session, sizeBytes: 100_000 });
+      for (const d of [open, uploaded, expired, failed]) await store.insertUpload(d);
+
+      await store.markUploaded(uploaded.id, now, new Date(now.getTime() + 2 * 86_400_000));
+      await store.markUploaded(expired.id, now, new Date(now.getTime() - 1));
+      await store.markFailed(failed.id, 'aborted');
+
+      expect(await store.countOpenUploads(session, dayAgo)).toBe(1);
+      // باز (۱۰۰) + رسیده و زنده (۱,۰۰۰). منقضی و شکست‌خورده شمرده نمی‌شوند.
+      expect(await store.committedBytes(now, dayAgo)).toBe(1_100);
+      // آپلود بازِ کهنه‌تر از پنجره هم شمرده نمی‌شود: استوریج خودش لغوش کرده.
+      expect(await store.committedBytes(now, new Date(now.getTime() + 1_000))).toBe(1_000);
+    });
+
+    it('سند بدون مالک ساختنی نیست', async () => {
+      const { sessionHash: _drop, ...rest } = doc();
+      await expect(
+        conn.db.insert(documents).values({ ...rest, status: 'uploading' } as never),
+      ).rejects.toThrow();
+    });
+
+    it('تنظیم خوانده می‌شود و نبودش undefined است', async () => {
+      const store = createDocumentStore(conn);
+      await conn.db
+        .insert(settings)
+        .values({ key: 'file.retention_days', value: 3 })
+        .onConflictDoUpdate({ target: settings.key, set: { value: 3 } });
+      expect(await store.setting('file.retention_days')).toBe(3);
+      expect(await store.setting('no.such.key')).toBeUndefined();
+      await conn.db.delete(settings);
+    });
   });
 });
