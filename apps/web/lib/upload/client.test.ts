@@ -36,6 +36,7 @@ function memoryKv() {
 describe('آپلودگر مرورگر', () => {
   let storage: MemoryDriver;
   let service: ReturnType<typeof createUploadService> | null;
+  let store: ReturnType<typeof memoryStore>;
   let kv: ReturnType<typeof memoryKv>;
   let online: boolean;
   let puts: number[];
@@ -83,11 +84,13 @@ describe('آپلودگر مرورگر', () => {
     isOnline: () => online,
     waitForOnline: () => new Promise((resolve) => onlineWaiters.push(resolve)),
     sleep: async () => undefined,
+    // تست‌های آپلود دنبال تحلیل سرور نمی‌مانند؛ تست خودش جدا پایین است.
+    analysisWatchMs: 0,
   });
 
   beforeEach(() => {
     storage = new MemoryDriver();
-    const store = memoryStore();
+    store = memoryStore();
     service = createUploadService({ store, storage, budgetBytes: 1024 * MiB, log: () => undefined });
     kv = memoryKv();
     online = true;
@@ -206,5 +209,36 @@ describe('آپلودگر مرورگر', () => {
     await handle.cancel({ discard: true });
     expect(storage.uploads.size).toBe(0);
     expect(kv.map.size).toBe(0);
+  });
+
+  it('بعد از رسیدن فایل، تحلیل سرور را تا «آماده» دنبال می‌کند', async () => {
+    const seen: UploadSnapshot[] = [];
+    let polls = 0;
+    const handle = startUpload(makeFile(MiB), (s) => seen.push(s), {
+      ...deps(),
+      analysisWatchMs: 60_000,
+      sleep: async () => {
+        polls += 1;
+        // کارگر سرور در دور سوم کارش را تمام می‌کند.
+        if (polls === 3) {
+          const id = [...store.rows.keys()][0]!;
+          store.rows.get(id)!.status = 'ready';
+          store.serverAnalyses.set(id, {
+            engine: 'server-pymupdf-test',
+            pageCount: 7,
+            elapsedMs: 5,
+            pages: Array.from({ length: 7 }, (_, i) => ({
+              widthPt: 595, heightPt: 842, color: i === 4, blank: false, warnings: [],
+            })),
+          });
+        }
+      },
+    });
+    const done = await handle.done;
+    expect(done.phase).toBe('done');
+    await expect.poll(() => seen.at(-1)?.analysis?.state).toBe('ready');
+    expect(seen.at(-1)?.analysis).toMatchObject({ pageCount: 7, colorPageCount: 1, colorPages: [5] });
+    // قبل از آماده شدن، «در صف» دیده شده بود.
+    expect(seen.some((s) => s.analysis?.state === 'pending')).toBe(true);
   });
 });

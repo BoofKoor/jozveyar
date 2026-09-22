@@ -21,8 +21,10 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { createDb, type Database } from './index.js';
 import { runMigrations } from './migrate.js';
 import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
-import { bindingRateBands, documents, priceLists, settings, shippingRates } from './schema.js';
-import { createDocumentStore, type NewUploadDocument } from './documents.js';
+import { bindingRateBands, documents, jobs, priceLists, settings, shippingRates } from './schema.js';
+import { eq } from 'drizzle-orm';
+import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts';
+import { ANALYZE_DOCUMENT_JOB, createDocumentStore, type NewUploadDocument } from './documents.js';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -259,8 +261,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const failed = doc({ sessionHash: session, sizeBytes: 100_000 });
       for (const d of [open, uploaded, expired, failed]) await store.insertUpload(d);
 
-      await store.markUploaded(uploaded.id, now, new Date(now.getTime() + 2 * 86_400_000));
-      await store.markUploaded(expired.id, now, new Date(now.getTime() - 1));
+      await store.markUploaded(uploaded.id, now, new Date(now.getTime() + 2 * 86_400_000), false);
+      await store.markUploaded(expired.id, now, new Date(now.getTime() - 1), false);
       await store.markFailed(failed.id, 'aborted');
 
       expect(await store.countOpenUploads(session, dayAgo)).toBe(1);
@@ -275,6 +277,53 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       await expect(
         conn.db.insert(documents).values({ ...rest, status: 'uploading' } as never),
       ).rejects.toThrow();
+    });
+
+    it('تکمیل آپلود کار تحلیل را در همان تراکنش در صف می‌گذارد، فقط یک بار', async () => {
+      const store = createDocumentStore(conn);
+      const d = doc();
+      await store.insertUpload(d);
+      const at = new Date();
+      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), true);
+      // تکمیل تکراری (کلاینتی که جواب را گم کرده) کار دوم نمی‌سازد.
+      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), true);
+
+      const queued = await conn.db.select().from(jobs).where(eq(jobs.documentId, d.id));
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({ kind: ANALYZE_DOCUMENT_JOB, status: 'queued', attempts: 0 });
+    });
+
+    it('تحلیل مرورگر فقط بار اول ذخیره می‌شود؛ تحلیل سرور تا نیامده null است', async () => {
+      const store = createDocumentStore(conn);
+      const d = doc();
+      await store.insertUpload(d);
+      const analysis = {
+        engine: 'browser-pdfjs-test',
+        thresholds: DEFAULT_THRESHOLDS,
+        pageCount: 2,
+        sampled: false,
+        sampleStride: 1,
+        elapsedMs: 12.6,
+        pages: [1, 2].map((n) => ({
+          n,
+          widthPt: 595,
+          heightPt: 842,
+          rotation: 0,
+          color: n === 2,
+          colorRatio: n === 2 ? 0.1 : 0,
+          coloredInkRatio: n === 2 ? 0.5 : 0,
+          chromaP95: n === 2 ? 120 : 3,
+          paperCast: [250, 245, 225] as [number, number, number],
+          inkRatio: 0.05,
+          blank: false,
+          estimatedDpi: null,
+          minMarginMm: 12.5,
+          warnings: [],
+        })),
+      };
+      expect(await store.saveBrowserAnalysis(d.id, analysis)).toBe(true);
+      expect(await store.saveBrowserAnalysis(d.id, analysis)).toBe(false);
+      expect(await store.serverAnalysis(d.id)).toBeNull();
     });
 
     it('تنظیم خوانده می‌شود و نبودش undefined است', async () => {

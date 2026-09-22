@@ -73,6 +73,20 @@ services:
       timeout: 10s
       retries: 3
 
+  # کارگر اسناد (ADR-005، ADR-025): صف `jobs` را از پستگرس برمی‌دارد، فایل را
+  # از Garage می‌خواند، همهٔ صفحات را تحلیل می‌کند. ایمیجش را deploy-bundle.sh
+  # از بستهٔ CI می‌سازد. حالت ندارد — کارگر دوم، روی همین سرور یا نود دیگر،
+  # فقط یک نمونهٔ دیگر از همین سرویس با همین .env است.
+  docworker:
+    image: jozveyar/docworker:${TAG:-latest}
+    restart: unless-stopped
+    env_file: [../.env]
+    # تحلیل یک صفحه در لحظه است، ولی PyMuPDF روی PDF سنگین جا می‌خواهد.
+    mem_limit: ${DOCWORKER_MEM_LIMIT:-768m}
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage: { condition: service_healthy }
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped

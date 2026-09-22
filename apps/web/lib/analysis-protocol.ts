@@ -71,3 +71,17 @@ export const ERROR_MESSAGES: Record<AnalysisErrorCode, { title: string; hint: st
     hint: 'دوباره تلاش کنید. اگر تکرار شد، فایل را آپلود کنید تا سمت سرور بررسی شود.',
   },
 };
+
+/**
+ * پیام شکست تحلیل **سرور**. سه کد اول همان خطاهای فایل‌اند و همان پیام را
+ * می‌گیرند؛ بقیه یعنی سرور هم نتوانست — و «آپلود کنید» دیگر راه جلو نیست.
+ */
+export function serverFailureMessage(code: string | undefined): { title: string; hint: string } {
+  if (code === 'password_protected' || code === 'corrupt_file' || code === 'no_pages') {
+    return ERROR_MESSAGES[code];
+  }
+  return {
+    title: 'این فایل خوانده نشد',
+    hint: 'از برنامه‌ای که جزوه را با آن ساختی یک بار دیگر خروجی PDF بگیر و همان را بینداز. اگر فایل اسکن است، با کیفیت کمتری اسکن کن.',
+  };
+}

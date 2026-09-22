@@ -6,12 +6,32 @@
  * سرویس با یک پیاده‌سازی حافظه‌ای هم تست‌پذیر باشد.
  */
 
-import { and, eq, gt, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import type { DocumentAnalysis } from '@jozveyar/contracts';
 
 import type { Database } from './index.js';
-import { documents, settings } from './schema.js';
+import { documentAnalyses, documentPages, documents, jobs, settings } from './schema.js';
 
 export type DocumentRow = typeof documents.$inferSelect;
+
+/** نوع کاری که کارگر اسناد برای تحلیل برمی‌دارد. همین رشته در services/docworker است. */
+export const ANALYZE_DOCUMENT_JOB = 'analyze_document';
+
+/** یک صفحه از تحلیل ذخیره‌شده — فقط آنچه برای نمایش و قیمت لازم است. */
+export interface StoredPage {
+  widthPt: number;
+  heightPt: number;
+  color: boolean;
+  blank: boolean;
+  warnings: string[];
+}
+
+export interface StoredAnalysis {
+  engine: string;
+  pageCount: number;
+  elapsedMs: number;
+  pages: StoredPage[];
+}
 
 export interface NewUploadDocument {
   id: string;
@@ -29,7 +49,12 @@ export interface NewUploadDocument {
 export interface DocumentStore {
   insertUpload(doc: NewUploadDocument): Promise<void>;
   find(id: string): Promise<DocumentRow | null>;
-  markUploaded(id: string, at: Date, fileExpiresAt: Date): Promise<void>;
+  /**
+   * آپلود تمام شد. با `queueAnalysis` کار تحلیل **در همان تراکنش** در صف
+   * می‌رود: یا هر دو ثبت می‌شوند یا هیچ‌کدام — سندی نمی‌ماند که رسیده ولی
+   * هیچ‌وقت تحلیل نشود.
+   */
+  markUploaded(id: string, at: Date, fileExpiresAt: Date, queueAnalysis: boolean): Promise<void>;
   markFailed(id: string, reason: string, fileDeletedAt?: Date): Promise<void>;
   /** آپلودهای باز این نشست که از `since` جوان‌ترند. */
   countOpenUploads(sessionHash: string, since: Date): Promise<number>;
@@ -40,6 +65,13 @@ export interface DocumentStore {
   committedBytes(now: Date, openSince: Date): Promise<number>;
   /** مقدار یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
+  /**
+   * تحلیل مرورگر را کنار تحلیل سرور ذخیره می‌کند — فقط بار اول. سرور منبع
+   * حقیقت است؛ این ردیف برای سنجیدن اختلاف دو طرف است (ADR-002).
+   */
+  saveBrowserAnalysis(documentId: string, analysis: DocumentAnalysis): Promise<boolean>;
+  /** آخرین تحلیل سرور، یا null اگر هنوز نیست. */
+  serverAnalysis(documentId: string): Promise<StoredAnalysis | null>;
 }
 
 export function createDocumentStore({ db }: Database): DocumentStore {
@@ -53,11 +85,19 @@ export function createDocumentStore({ db }: Database): DocumentStore {
       return row ?? null;
     },
 
-    async markUploaded(id, at, fileExpiresAt) {
-      await db
-        .update(documents)
-        .set({ status: 'uploaded', uploadedAt: at, fileExpiresAt })
-        .where(eq(documents.id, id));
+    async markUploaded(id, at, fileExpiresAt, queueAnalysis) {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(documents)
+          .set({ status: 'uploaded', uploadedAt: at, fileExpiresAt })
+          .where(eq(documents.id, id));
+        if (queueAnalysis) {
+          await tx
+            .insert(jobs)
+            .values({ kind: ANALYZE_DOCUMENT_JOB, documentId: id })
+            .onConflictDoNothing();
+        }
+      });
     },
 
     async markFailed(id, reason, fileDeletedAt) {
@@ -99,6 +139,76 @@ export function createDocumentStore({ db }: Database): DocumentStore {
     async setting(key) {
       const [row] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
       return row?.value;
+    },
+
+    async saveBrowserAnalysis(documentId, analysis) {
+      return db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ id: documentAnalyses.id })
+          .from(documentAnalyses)
+          .where(and(eq(documentAnalyses.documentId, documentId), eq(documentAnalyses.source, 'browser')))
+          .limit(1);
+        if (existing) return false;
+
+        const [row] = await tx
+          .insert(documentAnalyses)
+          .values({
+            documentId,
+            source: 'browser',
+            engine: analysis.engine,
+            thresholds: analysis.thresholds,
+            pageCount: analysis.pageCount,
+            sampled: analysis.sampled,
+            sampleStride: analysis.sampleStride,
+            elapsedMs: Math.round(analysis.elapsedMs),
+          })
+          .returning({ id: documentAnalyses.id });
+
+        if (analysis.pages.length > 0) {
+          await tx.insert(documentPages).values(
+            analysis.pages.map((p) => ({
+              analysisId: row!.id,
+              n: p.n,
+              widthPt: p.widthPt,
+              heightPt: p.heightPt,
+              rotation: p.rotation,
+              color: p.color,
+              blank: p.blank,
+              colorRatio: p.colorRatio,
+              coloredInkRatio: p.coloredInkRatio,
+              chromaP95: p.chromaP95,
+              inkRatio: p.inkRatio,
+              paperCast: p.paperCast,
+              estimatedDpi: p.estimatedDpi,
+              minMarginMm: p.minMarginMm,
+              warnings: p.warnings,
+            })),
+          );
+        }
+        return true;
+      });
+    },
+
+    async serverAnalysis(documentId) {
+      const [head] = await db
+        .select()
+        .from(documentAnalyses)
+        .where(and(eq(documentAnalyses.documentId, documentId), eq(documentAnalyses.source, 'server')))
+        .orderBy(desc(documentAnalyses.createdAt))
+        .limit(1);
+      if (!head) return null;
+      const pages = await db
+        .select({
+          widthPt: documentPages.widthPt,
+          heightPt: documentPages.heightPt,
+          color: documentPages.color,
+          blank: documentPages.blank,
+          warnings: documentPages.warnings,
+        })
+        .from(documentPages)
+        .where(eq(documentPages.analysisId, head.id))
+        .orderBy(documentPages.n);
+      return { engine: head.engine, pageCount: head.pageCount, elapsedMs: head.elapsedMs, pages };
     },
   };
 }

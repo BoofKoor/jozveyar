@@ -1,0 +1,308 @@
+{
+ "thresholds": {
+  "chromaMin": 36,
+  "colorPixelRatioMin": 0.004,
+  "coloredInkRatioMin": 0.12,
+  "sampleMaxDimension": 400,
+  "nearWhiteLuma": 244,
+  "nearBlackLuma": 26,
+  "paperSampleRatio": 0.1,
+  "lowDpiThreshold": 150
+ },
+ "vectors": [
+  {
+   "spec": {
+    "name": "yellow_scan",
+    "width": 120,
+    "height": 170,
+    "seed": 11,
+    "paper": [
+     250,
+     240,
+     200
+    ],
+    "ink": [
+     40,
+     40,
+     42
+    ],
+    "lineEvery": 9,
+    "lineHeight": 2,
+    "noise": 3
+   },
+   "stats": {
+    "paperCast": [
+     251.7806241266884,
+     242.54587796925944,
+     200.52165812761993
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.20862745098039215,
+    "chromaP95": 18
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "white_bw",
+    "width": 120,
+    "height": 170,
+    "seed": 12,
+    "paper": [
+     255,
+     255,
+     255
+    ],
+    "ink": [
+     30,
+     30,
+     30
+    ],
+    "lineEvery": 8,
+    "lineHeight": 2,
+    "noise": 2
+   },
+   "stats": {
+    "paperCast": [
+     255,
+     255,
+     255
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.2415686274509804,
+    "chromaP95": 4
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "red_highlight",
+    "width": 120,
+    "height": 170,
+    "seed": 13,
+    "paper": [
+     255,
+     255,
+     255
+    ],
+    "ink": [
+     30,
+     30,
+     30
+    ],
+    "lineEvery": 8,
+    "lineHeight": 2,
+    "noise": 2,
+    "highlight": {
+     "x0": 20,
+     "y0": 40,
+     "x1": 90,
+     "y1": 70,
+     "color": [
+      230,
+      40,
+      40
+     ]
+    }
+   },
+   "stats": {
+    "paperCast": [
+     255,
+     255,
+     255
+    ],
+    "colorRatio": 0.10294117647058823,
+    "coloredInkRatio": 0.3246753246753247,
+    "inkRatio": 0.3170588235294118,
+    "chromaP95": 193
+   },
+   "color": true,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "green_marker_on_yellow",
+    "width": 120,
+    "height": 170,
+    "seed": 14,
+    "paper": [
+     248,
+     236,
+     196
+    ],
+    "ink": [
+     45,
+     42,
+     40
+    ],
+    "lineEvery": 9,
+    "lineHeight": 2,
+    "noise": 3,
+    "highlight": {
+     "x0": 10,
+     "y0": 100,
+     "x1": 60,
+     "y1": 108,
+     "color": [
+      120,
+      220,
+      90
+     ]
+    }
+   },
+   "stats": {
+    "paperCast": [
+     250.1259382819016,
+     238.7864887406172,
+     196.767306088407
+    ],
+    "colorRatio": 0.0196078431372549,
+    "coloredInkRatio": 0.08684324793747286,
+    "inkRatio": 0.2257843137254902,
+    "chromaP95": 118
+   },
+   "color": true,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "blank_white",
+    "width": 120,
+    "height": 170,
+    "seed": 15,
+    "paper": [
+     255,
+     255,
+     255
+    ],
+    "ink": [
+     0,
+     0,
+     0
+    ],
+    "lineEvery": 0,
+    "lineHeight": 0,
+    "noise": 1
+   },
+   "stats": {
+    "paperCast": [
+     255,
+     255,
+     255
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0,
+    "chromaP95": 0
+   },
+   "color": false,
+   "blank": true
+  },
+  {
+   "spec": {
+    "name": "gray_scan",
+    "width": 120,
+    "height": 170,
+    "seed": 16,
+    "paper": [
+     200,
+     200,
+     202
+    ],
+    "ink": [
+     60,
+     60,
+     60
+    ],
+    "lineEvery": 7,
+    "lineHeight": 3,
+    "noise": 4
+   },
+   "stats": {
+    "paperCast": [
+     201.8886783514922,
+     203.18332543818096,
+     202.71530080530553
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.40627450980392155,
+    "chromaP95": 10
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "noisy_photo",
+    "width": 90,
+    "height": 130,
+    "seed": 17,
+    "paper": [
+     128,
+     128,
+     128
+    ],
+    "ink": [
+     0,
+     0,
+     0
+    ],
+    "lineEvery": 0,
+    "lineHeight": 0,
+    "noise": 100
+   },
+   "stats": {
+    "paperCast": [
+     183.013468013468,
+     205.78451178451178,
+     146.2946127946128
+    ],
+    "colorRatio": 0.9181196581196581,
+    "coloredInkRatio": 0.9523893962230694,
+    "inkRatio": 0.964017094017094,
+    "chromaP95": 207
+   },
+   "color": true,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "dark_page",
+    "width": 60,
+    "height": 80,
+    "seed": 18,
+    "paper": [
+     18,
+     18,
+     20
+    ],
+    "ink": [
+     240,
+     240,
+     240
+    ],
+    "lineEvery": 6,
+    "lineHeight": 1,
+    "noise": 2
+   },
+   "stats": {
+    "paperCast": [
+     240.54098360655738,
+     241.02459016393442,
+     240.0327868852459
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0,
+    "chromaP95": 0
+   },
+   "color": false,
+   "blank": true
+  }
+ ]
+}

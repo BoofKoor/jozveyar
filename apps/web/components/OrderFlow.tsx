@@ -8,10 +8,16 @@ import {
   DEFAULT_PAPER_TYPE_ID,
   SEED_PRICE_LIST,
 } from '@jozveyar/pricing/seed';
-import { FIRST_PRICE_AFTER_PAGES } from '../lib/analysis-protocol';
-import { useDocumentAnalysis } from '../lib/useDocumentAnalysis';
+import { formatBytes } from '@jozveyar/text';
+import {
+  FIRST_PRICE_AFTER_PAGES,
+  serverFailureMessage,
+  type AnalysisErrorCode,
+} from '../lib/analysis-protocol';
+import { useDocumentAnalysis, type AnalysisSummaryView } from '../lib/useDocumentAnalysis';
 import { useUpload } from '../lib/useUpload';
-import { AnalysisCard } from './AnalysisCard';
+import type { ServerAnalysisView } from '../lib/server/uploads';
+import { AnalysisCard, uploadLine } from './AnalysisCard';
 import { ConfigPanel, type OrderConfig } from './ConfigPanel';
 import { DropZone } from './DropZone';
 import { PriceBar } from './PriceBar';
@@ -24,25 +30,74 @@ const INITIAL_CONFIG: OrderConfig = {
   copies: 1,
 };
 
+/** خطاهای مرورگر که یعنی «مرورگر کم آورد»، نه «فایل خراب است». */
+const BROWSER_GAVE_UP: AnalysisErrorCode[] = ['render_failed', 'unknown'];
+
+/** تحلیل سرور به همان شکلی که کارت تحلیل نشان می‌دهد. */
+function serverSummary(server: ServerAnalysisView): AnalysisSummaryView {
+  return {
+    pageCount: server.pageCount ?? 0,
+    colorPageCount: server.colorPageCount ?? 0,
+    blankPageCount: server.blankPageCount ?? 0,
+    lowDpiPageCount: server.lowDpiPageCount ?? 0,
+    tightMarginPageCount: server.tightMarginPageCount ?? 0,
+    pageSizes: server.pageSizes ?? [],
+    colorPages: server.colorPages ?? [],
+    estimated: false,
+  };
+}
+
 export function OrderFlow() {
-  const { state, analyzeFile, reset, summary } = useDocumentAnalysis();
+  const { state, analyzeFile, reset, summary: browserSummary } = useDocumentAnalysis();
   const [config, setConfig] = useState<OrderConfig>(INITIAL_CONFIG);
   const [file, setFile] = useState<File | null>(null);
 
+  const isPdf = file !== null && /\.pdf$/i.test(file.name);
   /**
-   * قیمت زنده.
-   *
-   * به محض معلوم شدن تعداد صفحات حساب می‌شود — لازم نیست تحلیل تمام شود. همان
-   * تابعی که سرور صدا می‌زند، پس وقتی سرور عدد قطعی را بدهد، همان عدد است.
+   * مسیر سرور برای PDF: یا برای مرورگر بزرگ بود، یا مرورگر وسط راه کم آورد.
+   * قاعدهٔ محصول: «مرورگر کم آورد ← بی‌صدا مسیر سرور». Word و عکس هنوز نه (۲ب).
    */
+  const serverPath =
+    isPdf &&
+    (state.phase === 'needs_server' ||
+      (state.phase === 'error' && state.error !== null && BROWSER_GAVE_UP.includes(state.error.code)));
+
+  const browserPriceReady =
+    state.pageCount > 0 &&
+    (state.phase === 'ready' || state.analyzedCount >= FIRST_PRICE_AFTER_PAGES);
+
+  /**
+   * آپلود در پس‌زمینه. در مسیر مرورگر **بعد از نمایش اولین قیمت** — تا با لحظهٔ
+   * جادو سر پردازنده و شبکه رقابت نکند؛ در مسیر سرور همان لحظه، چون قیمت
+   * بدون آن نمی‌آید.
+   */
+  const { upload, discard } = useUpload(
+    file,
+    (browserPriceReady && state.phase !== 'error') || serverPath,
+    state.analysis,
+  );
+
+  const server = upload?.analysis;
+  const serverReady = server?.state === 'ready' && (server.pageCount ?? 0) > 0;
+
+  /**
+   * منبع حقیقت: وقتی سرور همهٔ صفحات را دید، عدد او جای عدد مرورگر می‌نشیند —
+   * قیمت با همان `quote()` دوباره حساب می‌شود. تا آن موقع قیمت مرورگر
+   * پیش‌فاکتور است.
+   */
+  const pageCount = serverReady ? server!.pageCount! : state.pageCount;
+  const summary = serverReady ? serverSummary(server!) : browserSummary;
+  /** سرور تعداد دیگری دید — کاربر باید بداند چرا عدد عوض شد. */
+  const corrected = serverReady && state.pageCount > 0 && server!.pageCount !== state.pageCount;
+
   const breakdown = useMemo(() => {
-    if (state.pageCount === 0) return null;
+    if (pageCount === 0) return null;
     const spec: OrderSpec = {
       items: [
         {
-          documentId: 'draft',
-          pageCount: state.pageCount,
-          rules: wholeDocumentRule(state.pageCount, config.colorMode, config.paperTypeId),
+          documentId: upload?.documentId ?? 'draft',
+          pageCount,
+          rules: wholeDocumentRule(pageCount, config.colorMode, config.paperTypeId),
           copies: config.copies,
           sidesMode: config.sidesMode,
           bindingTypeId: config.bindingTypeId,
@@ -52,22 +107,11 @@ export function OrderFlow() {
       shipping: null,
     };
     return quote(spec, SEED_PRICE_LIST);
-  }, [state.pageCount, config]);
+  }, [pageCount, config, upload?.documentId]);
 
   const hasFile = state.phase !== 'idle';
-  const analyzing = state.phase === 'reading' || state.phase === 'analyzing';
-  // قیمت به محض هشت صفحهٔ اول نشان داده می‌شود، ولی «موقت» علامت می‌خورد.
-  const priceReady =
-    breakdown !== null &&
-    (state.phase === 'ready' || state.analyzedCount >= FIRST_PRICE_AFTER_PAGES);
-
-  /**
-   * آپلود در پس‌زمینه، **بعد از نمایش اولین قیمت** — تا با لحظهٔ جادو سر
-   * پردازنده و شبکه رقابت نکند. فایل‌هایی که مرورگر نمی‌خواند (Word، عکس،
-   * PDF خیلی بزرگ) هنوز آپلود نمی‌شوند: بدون تحلیل سرور (قدم بعد) آپلودشان
-   * فقط یک بن‌بست تازه می‌ساخت.
-   */
-  const { upload, discard } = useUpload(file, priceReady && state.phase !== 'error');
+  const analyzing = !serverReady && (state.phase === 'reading' || state.phase === 'analyzing');
+  const priceReady = serverReady || (browserPriceReady && !serverPath);
 
   const takeFile = useCallback(
     (next: File) => {
@@ -88,49 +132,92 @@ export function OrderFlow() {
     return <DropZone onFile={takeFile} busy={false} />;
   }
 
-  if (state.phase === 'needs_server') {
+  const anotherFile = (
+    <button
+      type="button"
+      onClick={startOver}
+      className="mt-5 rounded-lg bg-sage-button px-6 py-2.5 font-semibold text-ink"
+    >
+      فایل دیگری بینداز
+    </button>
+  );
+
+  // Word، پاورپوینت و عکس — تبدیلشان با LibreOffice در برش ۲ب.
+  if (state.phase === 'needs_server' && !serverPath) {
     return (
-      <div className="flex flex-col gap-4">
-        <div className="rounded-card border border-hairline bg-card p-6">
-          <h2 className="font-semibold text-ink">این فایل سمت سرور بررسی می‌شود</h2>
-          <p className="mt-2 text-ink-2">
-            فایل‌های Word، پاورپوینت و عکس در مرورگر قابل تجزیه نیستند و فایل‌های بزرگ هم روی
-            گوشی جا نمی‌شوند. مسیر سرور برایشان در دست ساخت است؛ تا آن موقع می‌توانی یک PDF
-            بیندازی و قیمت را فوری ببینی.
-          </p>
-          <button
-            type="button"
-            onClick={startOver}
-            className="mt-5 rounded-lg bg-sage-button px-6 py-2.5 font-semibold text-ink"
-          >
-            فایل دیگری بینداز
-          </button>
-        </div>
+      <div className="rounded-card border border-hairline bg-card p-6">
+        <h2 className="font-semibold text-ink">این فایل سمت سرور بررسی می‌شود</h2>
+        <p className="mt-2 text-ink-2">
+          فایل‌های Word، پاورپوینت و عکس هنوز در سرور تبدیل نمی‌شوند؛ این در دست ساخت است. تا آن
+          موقع اگر همین جزوه را PDF کنی و بیندازی، قیمت را فوری می‌بینی.
+        </p>
+        {anotherFile}
       </div>
     );
   }
 
-  if (state.phase === 'error' && state.error) {
+  // مسیر سرور، تا وقتی قیمت سرور نیامده.
+  if (serverPath && !serverReady) {
+    const unavailable = upload?.phase === 'unavailable' || upload?.phase === 'failed';
+    const failed = server?.state === 'failed';
+    const message = failed ? serverFailureMessage(server?.failureReason) : null;
+    return (
+      <div className="rounded-card border border-hairline bg-card p-6" data-testid="server-path">
+        <h2 className="truncate font-semibold text-ink" title={file?.name ?? ''}>
+          {file?.name}
+        </h2>
+        <p className="num mt-1 text-sm text-ink-2">{formatBytes(file?.size ?? 0)}</p>
+        {message ? (
+          <>
+            <p className="mt-4 font-semibold text-ink">{message.title}</p>
+            <p className="mt-2 text-ink-2">{message.hint}</p>
+          </>
+        ) : unavailable ? (
+          <p className="mt-4 text-ink-2">
+            الان نمی‌توانیم این فایل را بگیریم. چند دقیقهٔ دیگر دوباره بینداز؛ یا اگر فایل کوچک‌تری
+            از همین جزوه داری، همان را امتحان کن.
+          </p>
+        ) : (
+          <>
+            <p className="mt-4 text-ink-2">
+              این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.
+            </p>
+            <p data-testid="upload-status" className="num mt-3 text-sm text-ink">
+              {uploadLine(upload) ?? 'در حال آماده‌سازی…'}
+            </p>
+          </>
+        )}
+        {message || unavailable ? anotherFile : null}
+      </div>
+    );
+  }
+
+  if (state.phase === 'error' && state.error && !serverReady) {
     return (
       <div className="rounded-card border border-hairline bg-card p-6">
         <h2 className="font-semibold text-ink">{state.error.title}</h2>
         <p className="mt-2 text-ink-2">{state.error.hint}</p>
-        <button
-          type="button"
-          onClick={startOver}
-          className="mt-5 rounded-lg bg-sage-button px-6 py-2.5 font-semibold text-ink"
-        >
-          فایل دیگری بینداز
-        </button>
+        {anotherFile}
       </div>
     );
   }
 
+  // کارت تحلیل با عدد سرور وقتی آمده؛ کارت مرورگر دست‌نخورده وقتی نه.
+  const shownState = serverReady
+    ? { ...state, phase: 'ready' as const, pageCount, analyzedCount: pageCount, sampleStride: 1 }
+    : state;
+
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
-      <AnalysisCard state={state} summary={summary} upload={upload} onReset={startOver} />
+      <AnalysisCard
+        state={shownState}
+        summary={summary}
+        upload={upload}
+        correctedFrom={corrected ? state.pageCount : null}
+        onReset={startOver}
+      />
 
-      {state.pageCount > 0 ? (
+      {pageCount > 0 ? (
         <ConfigPanel
           config={config}
           onChange={setConfig}

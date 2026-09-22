@@ -23,6 +23,8 @@ import {
   type StorageDriver,
 } from '@jozveyar/storage';
 import { tidyFa } from '@jozveyar/text';
+import { paperSizeName } from '@jozveyar/analysis';
+import { documentAnalysisSchema } from '@jozveyar/contracts';
 
 /** پیشوندی که قاعدهٔ نگهداری باکت رویش است. سفارش پرداخت‌شده باید از اینجا بیرون برود (برش ۳). */
 export const UPLOAD_PREFIX = 'uploads/';
@@ -33,6 +35,8 @@ export const MAX_PARTS_PER_REQUEST = 50;
 /** آپلود نیمه‌کاره بعد از یک روز در استوریج لغو می‌شود؛ شمارش‌ها هم همین پنجره را دارند. */
 export const OPEN_UPLOAD_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const MAX_OPEN_UPLOADS_PER_SESSION = 5;
+/** سقف صفحات تحلیل مرورگر که پذیرفته می‌شود — همان سقف صفحهٔ فایل. */
+export const MAX_BROWSER_ANALYSIS_PAGES = 1500;
 
 /** پیش‌فرض‌های `settings` — همان اعدادی که ARCHITECTURE فهرست کرده. */
 export const DEFAULT_MAX_BYTES = 1_610_612_736;
@@ -83,6 +87,25 @@ const fail = (status: number, error: UploadErrorCode, missing?: number[]): Resul
 });
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 
+/**
+ * تحلیل سمت سرور، به شکلی که مرورگر برای هم‌تراز کردن قیمت لازم دارد.
+ *
+ * سرور منبع حقیقت است: وقتی `state` برابر `ready` شد، مرورگر تعداد صفحه و
+ * صفحات رنگی را از اینجا می‌گیرد و قیمت را با همان `quote()` دوباره حساب می‌کند.
+ */
+export interface ServerAnalysisView {
+  state: 'pending' | 'running' | 'ready' | 'failed';
+  /** کد شکست؛ همان کدهایی که مرورگر برایشان پیام فارسی دارد. */
+  failureReason?: string;
+  pageCount?: number;
+  colorPageCount?: number;
+  blankPageCount?: number;
+  lowDpiPageCount?: number;
+  tightMarginPageCount?: number;
+  pageSizes?: { name: string; count: number }[];
+  colorPages?: number[];
+}
+
 export interface UploadStatus {
   documentId: string;
   status: 'uploading' | 'uploaded' | 'failed';
@@ -90,6 +113,8 @@ export interface UploadStatus {
   partCount: number;
   /** تکه‌هایی که با اندازهٔ درست رسیده‌اند؛ بقیه باید فرستاده شوند. */
   receivedParts: number[];
+  /** فقط بعد از رسیدن فایل، و فقط برای PDF (Word و عکس: برش ۲ب). */
+  analysis?: ServerAnalysisView;
 }
 
 export interface UploadServiceDeps {
@@ -145,6 +170,40 @@ export function createUploadService(deps: UploadServiceDeps) {
       }
     })();
     return bucketReady;
+  }
+
+  async function analysisView(doc: DocumentRow): Promise<ServerAnalysisView> {
+    if (doc.status === 'uploaded') return { state: 'pending' };
+    if (doc.status === 'analyzing') return { state: 'running' };
+    if (doc.status === 'failed') return { state: 'failed', failureReason: doc.failureReason ?? 'unknown' };
+
+    const stored = await deps.store.serverAnalysis(doc.id);
+    if (!stored) return { state: 'running' };
+    const sizes = new Map<string, number>();
+    const colorPages: number[] = [];
+    let blank = 0;
+    let lowDpi = 0;
+    let tightMargin = 0;
+    stored.pages.forEach((page, i) => {
+      const name = paperSizeName(page.widthPt, page.heightPt);
+      sizes.set(name, (sizes.get(name) ?? 0) + 1);
+      if (page.color) colorPages.push(i + 1);
+      if (page.blank) blank += 1;
+      if (page.warnings.includes('low_dpi')) lowDpi += 1;
+      if (page.warnings.includes('tight_margin')) tightMargin += 1;
+    });
+    return {
+      state: 'ready',
+      pageCount: stored.pageCount,
+      colorPageCount: colorPages.length,
+      blankPageCount: blank,
+      lowDpiPageCount: lowDpi,
+      tightMarginPageCount: tightMargin,
+      pageSizes: [...sizes.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count),
+      colorPages,
+    };
   }
 
   function planOf(doc: DocumentRow): PartPlan {
@@ -278,11 +337,13 @@ export function createUploadService(deps: UploadServiceDeps) {
       const base = { documentId: doc.id, partSizeBytes: plan.partSizeBytes, partCount: plan.partCount };
 
       if (doc.status !== 'uploading') {
-        const done = doc.status !== 'failed';
+        // فایلی که رسیده و بعد تحلیلش شکست خورده، هنوز «رسیده» است؛ شکست مال تحلیل است.
+        const arrived = doc.uploadedAt !== null && doc.fileDeletedAt === null;
         return ok({
           ...base,
-          status: done ? 'uploaded' : 'failed',
-          receivedParts: done ? Array.from({ length: plan.partCount }, (_, i) => i + 1) : [],
+          status: arrived ? 'uploaded' : 'failed',
+          receivedParts: arrived ? Array.from({ length: plan.partCount }, (_, i) => i + 1) : [],
+          ...(arrived && doc.sourceKind === 'pdf' ? { analysis: await analysisView(doc) } : {}),
         });
       }
 
@@ -321,8 +382,14 @@ export function createUploadService(deps: UploadServiceDeps) {
       const key = doc.storageKey!;
       const at = now();
       const retentionDays = await numberSetting('file.retention_days', DEFAULT_RETENTION_DAYS);
+      // PDF همان لحظه در صف تحلیل سرور می‌رود — در همان تراکنش (ADR-025).
       const markUploaded = () =>
-        deps.store.markUploaded(doc.id, at, new Date(at.getTime() + retentionDays * 86_400_000));
+        deps.store.markUploaded(
+          doc.id,
+          at,
+          new Date(at.getTime() + retentionDays * 86_400_000),
+          doc.sourceKind === 'pdf',
+        );
 
       try {
         // منبع حقیقت: آنچه استوریج می‌گوید رسیده، نه آنچه کلاینت می‌گوید فرستاده.
@@ -361,6 +428,24 @@ export function createUploadService(deps: UploadServiceDeps) {
 
       await markUploaded();
       return done();
+    },
+
+    /**
+     * تحلیل مرورگر، برای سنجیدن اختلاف با سرور (ADR-002). بار اول ذخیره می‌شود؛
+     * قیمت هیچ‌وقت از آن نمی‌آید.
+     */
+    async saveBrowserAnalysis(
+      sessionHash: string,
+      id: string,
+      body: unknown,
+    ): Promise<Result<{ saved: boolean }>> {
+      const doc = await owned(sessionHash, id);
+      if (!doc) return fail(404, 'not_found');
+      const parsed = documentAnalysisSchema.safeParse(body);
+      if (!parsed.success || parsed.data.pages.length > MAX_BROWSER_ANALYSIS_PAGES) {
+        return fail(400, 'invalid_request');
+      }
+      return ok({ saved: await deps.store.saveBrowserAnalysis(doc.id, parsed.data) });
     },
 
     /** کاربر فایل دیگری انداخت: دیسک همین حالا آزاد می‌شود، نه دو روز بعد. */

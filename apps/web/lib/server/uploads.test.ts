@@ -219,4 +219,86 @@ describe('سرویس آپلود', () => {
     expect((await service.create(ME, { name: 'a.pdf', sizeBytes: MiB })).ok).toBe(true);
     expect(logs.some((m) => m.includes('نگهداری'))).toBe(true);
   });
+
+  describe('تحلیل سرور و هم‌ترازی (ADR-025)', () => {
+    async function uploaded(name = 'جزوه.pdf') {
+      const upload = await created(20 * MiB, name);
+      sendParts(upload.documentId);
+      await service.complete(ME, upload.documentId);
+      return upload.documentId;
+    }
+
+    it('PDF رسیده در صف تحلیل می‌رود؛ Word نه (برش ۲ب)', async () => {
+      const pdf = await uploaded();
+      const docx = await uploaded('جزوه.docx');
+      expect(store.queued.has(pdf)).toBe(true);
+      expect(store.queued.has(docx)).toBe(false);
+      const status = await service.status(ME, docx);
+      expect(status.ok && status.value.analysis).toBeUndefined();
+    });
+
+    it('وضعیت تحلیل مرحله‌به‌مرحله: در صف ← در حال تحلیل ← آماده', async () => {
+      const id = await uploaded();
+      const view = async () => {
+        const r = await service.status(ME, id);
+        return r.ok ? r.value.analysis : undefined;
+      };
+      expect(await view()).toEqual({ state: 'pending' });
+
+      store.rows.get(id)!.status = 'analyzing';
+      expect(await view()).toEqual({ state: 'running' });
+
+      store.rows.get(id)!.status = 'ready';
+      store.serverAnalyses.set(id, {
+        engine: 'server-pymupdf-test',
+        pageCount: 3,
+        elapsedMs: 40,
+        pages: [
+          { widthPt: 595, heightPt: 842, color: false, blank: false, warnings: ['low_dpi'] },
+          { widthPt: 595, heightPt: 842, color: true, blank: false, warnings: [] },
+          { widthPt: 420, heightPt: 595, color: false, blank: true, warnings: ['blank_page', 'tight_margin'] },
+        ],
+      });
+      expect(await view()).toEqual({
+        state: 'ready',
+        pageCount: 3,
+        colorPageCount: 1,
+        blankPageCount: 1,
+        lowDpiPageCount: 1,
+        tightMarginPageCount: 1,
+        pageSizes: [
+          { name: 'A4', count: 2 },
+          { name: 'A5', count: 1 },
+        ],
+        colorPages: [2],
+      });
+    });
+
+    it('شکست تحلیل: فایل هنوز «رسیده» است، علت شکست به مرورگر می‌رسد', async () => {
+      const id = await uploaded();
+      Object.assign(store.rows.get(id)!, { status: 'failed', failureReason: 'password_protected' });
+      const r = await service.status(ME, id);
+      expect(r.ok && r.value).toMatchObject({
+        status: 'uploaded',
+        analysis: { state: 'failed', failureReason: 'password_protected' },
+      });
+    });
+
+    it('تحلیل مرورگر فقط با شکل قرارداد و فقط بار اول ذخیره می‌شود', async () => {
+      const id = await uploaded();
+      const analysis = {
+        engine: 'browser-pdfjs-4.10.38',
+        thresholds: { chromaMin: 36, colorPixelRatioMin: 0.004, coloredInkRatioMin: 0.12, sampleMaxDimension: 400, nearWhiteLuma: 244, nearBlackLuma: 26, paperSampleRatio: 0.1, lowDpiThreshold: 150 },
+        pageCount: 1,
+        pages: [],
+        sampled: false,
+        sampleStride: 1,
+        elapsedMs: 10,
+      };
+      expect(await service.saveBrowserAnalysis(ME, id, analysis)).toEqual({ ok: true, value: { saved: true } });
+      expect(await service.saveBrowserAnalysis(ME, id, analysis)).toEqual({ ok: true, value: { saved: false } });
+      expect(await service.saveBrowserAnalysis(ME, id, { engine: 1 })).toMatchObject({ status: 400 });
+      expect(await service.saveBrowserAnalysis(OTHER, id, analysis)).toMatchObject({ status: 404 });
+    });
+  });
 });

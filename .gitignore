@@ -17,3 +17,7 @@ test-results/
 playwright-report/
 apps/web/tests/fixtures/
 .npm-registry
+.bundle-sha256
+.docworker-sha256
+__pycache__/
+.pytest_cache/
