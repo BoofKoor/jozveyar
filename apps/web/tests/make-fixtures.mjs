@@ -9,6 +9,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -45,24 +46,55 @@ function pageContent({ paper, ink, inkLines = 28, accent = null }) {
   return parts.join('\n');
 }
 
-/** ساخت یک PDF کامل با xref درست. */
+/**
+ * صفحهٔ اسکن واقعی: یک تصویر RGB تمام‌صفحه، نه مستطیل برداری.
+ *
+ * اسکن واقعی همین است — PDFی که هر صفحه‌اش فقط یک عکس است. رندرش در pdf.js
+ * مسیر دیگری از مستطیل می‌رود (بوم کمکی)، و همین مسیر بود که در کارگر
+ * می‌شکست و هیچ نمونه‌ای آن را نمی‌سنجید.
+ */
+function scanImage({ paper, ink, w = 150, h = 212 }) {
+  const rgb = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y += 1) {
+    const isLine = y > 15 && y < h - 15 && y % 7 < 2;
+    for (let x = 0; x < w; x += 1) {
+      const color = isLine && x > 12 && x < w - 12 - ((y * 13) % 30) ? ink : paper;
+      rgb.set(color.map((c) => Math.round(c * 255)), (y * w + x) * 3);
+    }
+  }
+  return { w, h, data: deflateSync(rgb) };
+}
+
+/** ساخت یک PDF کامل با xref درست. هر صفحه یا محتوای برداری است یا تصویر. */
 function buildPdf(pageContents) {
   const objects = [];
   const pageCount = pageContents.length;
 
-  // ۱: Catalog، ۲: Pages، سپس به‌ازای هر صفحه یک Page و یک Contents.
-  const pageObjIds = pageContents.map((_, i) => 3 + i * 2);
-  const contentObjIds = pageContents.map((_, i) => 4 + i * 2);
+  // ۱: Catalog، ۲: Pages، سپس به‌ازای هر صفحه Page، Contents و (اختیاری) Image.
+  const pageObjIds = pageContents.map((_, i) => 3 + i * 3);
+  const contentObjIds = pageContents.map((_, i) => 4 + i * 3);
+  const imageObjIds = pageContents.map((_, i) => 5 + i * 3);
 
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
   objects[2] =
     `<< /Type /Pages /Kids [${pageObjIds.map((id) => `${id} 0 R`).join(' ')}] ` +
     `/Count ${pageCount} >>`;
 
-  pageContents.forEach((content, i) => {
+  pageContents.forEach((page, i) => {
+    let content = page;
+    let resources = '<< >>';
+    if (typeof page === 'object') {
+      const { w, h, data } = page.image;
+      objects[imageObjIds[i]] =
+        `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB ` +
+        `/BitsPerComponent 8 /Filter /FlateDecode /Length ${data.length} >>\nstream\n` +
+        `${data.toString('latin1')}\nendstream`;
+      resources = `<< /XObject << /Im0 ${imageObjIds[i]} 0 R >> >>`;
+      content = `q ${A4[0]} 0 0 ${A4[1]} 0 0 cm /Im0 Do Q`;
+    }
     objects[pageObjIds[i]] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${A4[0]} ${A4[1]}] ` +
-      `/Resources << >> /Contents ${contentObjIds[i]} 0 R >>`;
+      `/Resources ${resources} /Contents ${contentObjIds[i]} 0 R >>`;
     objects[contentObjIds[i]] =
       `<< /Length ${Buffer.byteLength(content, 'latin1')} >>\nstream\n${content}\nendstream`;
   });
@@ -102,6 +134,14 @@ const fixtures = {
   'yellow-scan-147.pdf': Array.from({ length: 147 }, () =>
     pageContent({ paper: YELLOW_SCAN, ink: GRAPHITE }),
   ),
+
+  /**
+   * اسکن واقعی: هر صفحه یک تصویر زرد با خط مشکی. هم مسیر رندر تصویر در
+   * کارگر را می‌سنجد و هم تلهٔ (الف) را روی پیکسل واقعی اسکن.
+   */
+  'image-scan-6.pdf': Array.from({ length: 6 }, () => ({
+    image: scanImage({ paper: YELLOW_SCAN, ink: GRAPHITE }),
+  })),
 
   /** صفحهٔ سفید ساده — مبنای مقایسه. */
   'plain-bw-10.pdf': Array.from({ length: 10 }, () =>

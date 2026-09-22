@@ -83,6 +83,24 @@ test.describe('تحلیل در مرورگر', () => {
     console.log(`اسکن زرد ۱۴۷ صفحه‌ای: قیمت در ${Date.now() - startedAt}ms`);
   });
 
+  /**
+   * اسکن واقعی — هر صفحه یک تصویر، نه مستطیل برداری.
+   *
+   * این تست بعد از اولین آزمایش روی گوشی واقعی اضافه شد: هر PDF اسکن‌شده با
+   * «تحلیل در مرورگر کامل نشد» می‌افتاد، چون pdf.js برای کشیدن تصویر بوم کمکی
+   * را با `document` می‌سازد و کارگر `document` ندارد. نمونه‌های قبلی همه
+   * برداری بودند و به این مسیر نمی‌رسیدند.
+   */
+  test('اسکن تصویری واقعی خوانده می‌شود و رنگی اعلام نمی‌شود', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', join(FIXTURES, 'image-scan-6.pdf'));
+    // ۶ صفحه سیاه‌سفید: ۹,۶۰۰ + صحافی ۴۵,۰۰۰ = ۵۴,۶۰۰ تومان
+    await expect(price(page)).toContainText('54,600', { timeout: 15_000 });
+    await expect(page.getByTestId('stat-page-count')).toHaveText('6');
+    await expect(colorPages(page)).toHaveText('0');
+    await expect(page.getByText('تحلیل در مرورگر کامل نشد')).toHaveCount(0);
+  });
+
   test('هایلایت واقعی رنگی تشخیص داده می‌شود', async ({ page }) => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', join(FIXTURES, 'mixed-color-10.pdf'));
