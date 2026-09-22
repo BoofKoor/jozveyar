@@ -36,6 +36,7 @@ class Worker:
         self.id = f"{socket.gethostname()}-{os.getpid()}"
         self.stopping = False
         self.poll = float(os.environ.get("DOCWORKER_POLL_SECONDS", "2"))
+        self.retry_seconds = 10.0
         self.storage = S3Storage.from_env()
 
     def stop(self, *_: object) -> None:
@@ -79,7 +80,15 @@ class Worker:
             except psycopg.OperationalError as error:
                 # پستگرس ری‌استارت شده یا هنوز بالا نیامده: صبر، بعد اتصال تازه.
                 log.warning("پایگاه داده در دسترس نیست: %s", error)
-                time.sleep(5)
+                time.sleep(self.retry_seconds)
+            except psycopg.Error as error:
+                # پایگاه داده هست ولی آماده نیست — مثلاً جدول `jobs` هنوز ساخته
+                # نشده چون اپ وب (که مهاجرت را اجرا می‌کند) هنوز بالا نیامده.
+                # این در اولین استقرار واقعاً پیش آمد: کارگر زودتر از وب بالا آمد
+                # و با کرش پشت کرش، داکر فاصلهٔ ری‌استارت را هی بیشتر کرد. صبر
+                # و تلاش دوباره، نه افتادن.
+                log.warning("پایگاه داده آماده نیست (%s) — %s ثانیه دیگر", error, self.retry_seconds)
+                time.sleep(self.retry_seconds)
         log.info("کارگر اسناد متوقف شد")
 
 

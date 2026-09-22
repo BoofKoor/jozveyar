@@ -120,7 +120,10 @@ jobs:
             --platform manylinux2014_x86_64 -r $D/requirements.txt -d dw/wheels
           cp -r $D/Dockerfile $D/requirements.txt $D/docworker dw/
           find dw -name __pycache__ -prune -exec rm -rf {} +
-          tar -czf jozveyar-docworker.tar.gz -C dw .
+          # بستهٔ تکرارپذیر: بدون زمان و مالک، پس تا محتوا عوض نشده اثر انگشت
+          # هم عوض نمی‌شود و سرور ۴۵ مگابایت را دوباره دانلود نمی‌کند.
+          tar --sort=name --mtime='2000-01-01 00:00Z' --owner=0 --group=0 --numeric-owner \
+            -cf - -C dw . | gzip -n > jozveyar-docworker.tar.gz
           sha256sum jozveyar-docworker.tar.gz | cut -d' ' -f1 > jozveyar-docworker.sha256
           ls -lh jozveyar-docworker.tar.gz
 
@@ -144,6 +147,10 @@ jobs:
           OUT=apps/web/.next/standalone
           cp -r apps/web/.next/static "$OUT/apps/web/.next/static"
           cp -r apps/web/public "$OUT/apps/web/public"
+          # commit سازنده داخل خود بسته: deploy-bundle.sh تا وقتی بسته از همان
+          # commitی که git pull آورد ساخته نشده، مستقرش نمی‌کند — نه CDN کهنه
+          # و نه CI نیمه‌کاره نسخهٔ قدیمی را بی‌صدا مستقر نمی‌کنند.
+          echo "$GITHUB_SHA" > "$OUT/COMMIT"
           # مهاجرت‌ها: اپ موقع بالا آمدن اجرایشان می‌کند (instrumentation.ts).
           mkdir -p "$OUT/packages/db"
           cp -r packages/db/migrations "$OUT/packages/db/migrations"
