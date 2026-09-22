@@ -86,6 +86,9 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       garage: { condition: service_healthy }
+      # وب مهاجرت‌ها را قبل از اولین پاسخ اجرا می‌کند؛ پس «وب سالم» یعنی جدول
+      # `jobs` هست. بدون این، کارگر در اولین استقرار زودتر بالا آمد و کرش کرد.
+      web: { condition: service_healthy }
 
   redis:
     image: redis:7-alpine

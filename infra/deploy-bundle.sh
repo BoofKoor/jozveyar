@@ -69,8 +69,28 @@ fetch_verified() {
   die "اثر انگشت ${name} بعد از شش تلاش هم نخواند. وضعیت workflow را در گیت‌هاب ببینید."
 }
 
-ACTUAL=$(fetch_verified jozveyar-bundle)
-ok "بستهٔ وب دریافت و تأیید شد ($(du -h "${WORK}/jozveyar-bundle.tar.gz" | cut -f1))"
+# بسته باید از **همین** commitی ساخته شده باشد که git pull آورد.
+#
+# اثر انگشت فقط می‌گوید بسته سالم رسیده، نه اینکه تازه است. در استقرار واقعی
+# دو بار نسخهٔ کهنه آمد: یک بار CI هنوز تمام نشده بود، یک بار CDN گیت‌هاب تا
+# یکی دو دقیقه بعد از انتشار، بستهٔ قبلی را — با اثر انگشت خودش، پس سالم —
+# می‌داد. وب کهنه ماند، مهاجرت اجرا نشد و کارگر تازه بی‌جدول کرش کرد.
+# CI حالا commit را داخل خود بسته می‌نویسد؛ تا نخواند، صبر.
+#
+# DEPLOY_ANY_BUNDLE=1 این چک را رد می‌کند (مثلاً وقتی کد سرور عمداً از main جداست).
+HEAD_SHA=$(git rev-parse HEAD)
+for round in $(seq 1 20); do
+  ACTUAL=$(fetch_verified jozveyar-bundle)
+  RELEASE_SHA=$(tar -xzf "${WORK}/jozveyar-bundle.tar.gz" -O ./COMMIT 2>/dev/null | tr -d '[:space:]' || true)
+  if [[ "$RELEASE_SHA" == "$HEAD_SHA" || "${DEPLOY_ANY_BUNDLE:-0}" == "1" ]]; then
+    break
+  fi
+  (( round == 20 )) && die "بعد از ده دقیقه، بستهٔ منتشرشده هنوز از ${RELEASE_SHA:0:7} است نه ${HEAD_SHA:0:7}. workflow «build-bundle» را در گیت‌هاب ببینید؛ اگر کد این سرور از main عقب است، اول git pull."
+  SHORT=${RELEASE_SHA:0:7}
+  info "بستهٔ منتشرشده از ${SHORT:-«نسخهٔ قدیمی»} است، نه ${HEAD_SHA:0:7} — CI یا CDN هنوز نرسیده؛ ۳۰ ثانیه صبر… (${round}/20)"
+  sleep 30
+done
+ok "بستهٔ وب ${HEAD_SHA:0:7} دریافت و تأیید شد ($(du -h "${WORK}/jozveyar-bundle.tar.gz" | cut -f1))"
 
 # کارگر اسناد جدا منتشر می‌شود (چرخ‌های پایتون، ~۴۵ مگابایت) و فقط وقتی
 # عوض شده دوباره دانلود می‌شود.
