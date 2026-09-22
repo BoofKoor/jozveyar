@@ -19,6 +19,7 @@
 
 import {
   bigint,
+  bigserial,
   boolean,
   doublePrecision,
   foreignKey,
@@ -32,6 +33,7 @@ import {
   smallint,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -313,4 +315,45 @@ export const documentPages = pgTable(
     warnings: text('warnings').array().notNull().default([]),
   },
   (t) => [primaryKey({ columns: [t.analysisId, t.n] })],
+);
+
+/* ──────────────────────────── صف کار ──────────────────────────── */
+
+/**
+ * صف کار در پستگرس (ADR-004)، نه یک بروکر جدا.
+ *
+ * کارگر با `FOR UPDATE SKIP LOCKED` کار برمی‌دارد، پس چند کارگر — روی همین
+ * سرور یا روزی روی نودهای دیگر — بدون هماهنگی اضافه کنار هم کار می‌کنند.
+ *
+ * «اجاره» (`locked_until`): کارگری که وسط کار بمیرد کارش را قفل نگه نمی‌دارد؛
+ * بعد از انقضای اجاره، کار دوباره برداشتنی است و یک تلاش حساب می‌شود.
+ */
+export const jobStatus = pgEnum('job_status', ['queued', 'running', 'done', 'failed']);
+
+export const jobs = pgTable(
+  'jobs',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /** نوع کار، مثلاً `analyze_document`. کارگر فقط نوع‌هایی را برمی‌دارد که می‌شناسد. */
+    kind: text('kind').notNull(),
+    /** سندی که کار رویش است؛ پاک شدن سند، کارش را هم پاک می‌کند. */
+    documentId: uuid('document_id').references(() => documents.id, { onDelete: 'cascade' }),
+    payload: jsonb('payload').notNull().default({}),
+    status: jobStatus('status').notNull().default('queued'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(3),
+    /** زودتر از این برداشته نمی‌شود — برای عقب‌نشینی بعد از شکست. */
+    runAfter: timestamp('run_after', { withTimezone: true }).notNull().defaultNow(),
+    lockedBy: text('locked_by'),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('jobs_ready').on(t.status, t.runAfter),
+    /** هر سند یک کار از هر نوع؛ درج دوباره (مثلاً تکمیل تکراری) کار دوم نمی‌سازد. */
+    uniqueIndex('jobs_document_kind').on(t.documentId, t.kind),
+  ],
 );

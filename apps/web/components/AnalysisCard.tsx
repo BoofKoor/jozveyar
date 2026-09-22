@@ -8,6 +8,8 @@ interface Props {
   state: AnalysisState;
   summary: AnalysisSummaryView;
   upload: UploadSnapshot | null;
+  /** سرور تعداد دیگری دید؛ این عددی است که مرورگر دیده بود. */
+  correctedFrom?: number | null;
   onReset: () => void;
 }
 
@@ -15,7 +17,7 @@ interface Props {
  * یک خط آرام دربارهٔ ارسال فایل. در حالت «در دسترس نیست» یا «شکست» هیچ
  * نمی‌گوید: قیمت از تحلیل مرورگر می‌آید و آپلود نباید کاربر را نگران کند.
  */
-function uploadLine(upload: UploadSnapshot | null): string | null {
+export function uploadLine(upload: UploadSnapshot | null): string | null {
   if (!upload) return null;
   switch (upload.phase) {
     case 'starting':
@@ -26,7 +28,15 @@ function uploadLine(upload: UploadSnapshot | null): string | null {
     case 'offline':
       return 'اینترنت قطع شد — با وصل شدن، ارسال از همان‌جا ادامه پیدا می‌کند';
     case 'done':
-      return 'فایل رسید';
+      switch (upload.analysis?.state) {
+        case 'pending':
+        case 'running':
+          return 'فایل رسید · بررسی کامل صفحات روی سرور…';
+        case 'ready':
+          return 'فایل رسید · همهٔ صفحات بررسی شد';
+        default:
+          return 'فایل رسید';
+      }
     default:
       return null;
   }
@@ -54,7 +64,7 @@ function Stat({
   );
 }
 
-export function AnalysisCard({ state, summary, upload, onReset }: Props) {
+export function AnalysisCard({ state, summary, upload, correctedFrom, onReset }: Props) {
   const { phase, fileName, fileSize, pageCount, analyzedCount, sampleStride, elapsedMs } = state;
   const analyzing = phase === 'analyzing' || phase === 'reading';
 
@@ -142,6 +152,15 @@ export function AnalysisCard({ state, summary, upload, onReset }: Props) {
           value={elapsedMs > 0 ? `${(elapsedMs / 1000).toFixed(1)}s` : '—'}
         />
       </dl>
+
+      {correctedFrom ? (
+        <p data-testid="server-corrected" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+          بررسی کامل روی سرور{' '}
+          <span className="num font-semibold text-ink">{formatNumber(state.pageCount)}</span> صفحه
+          دید (مرورگر <span className="num">{formatNumber(correctedFrom)}</span> دیده بود). قیمت
+          با عدد سرور حساب شد.
+        </p>
+      ) : null}
 
       {summary.estimated ? (
         <p className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">

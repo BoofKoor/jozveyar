@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DocumentAnalysis } from '@jozveyar/contracts';
 import type { UploadHandle, UploadSnapshot } from './upload/client';
 
 /**
@@ -11,10 +12,16 @@ import type { UploadHandle, UploadSnapshot } from './upload/client';
  *
  * ماژول آپلودگر با import پویا می‌آید، پس به باندل اولیهٔ صفحه نمی‌خورد.
  */
-export function useUpload(file: File | null, start: boolean) {
+export function useUpload(
+  file: File | null,
+  start: boolean,
+  /** تحلیل مرورگر، وقتی تمام شد — کنار تحلیل سرور ذخیره می‌شود (ADR-002). */
+  browserAnalysis: DocumentAnalysis | null = null,
+) {
   const [snapshot, setSnapshot] = useState<UploadSnapshot | null>(null);
   const handleRef = useRef<UploadHandle | null>(null);
   const startedFor = useRef<File | null>(null);
+  const analysisSentFor = useRef<string | null>(null);
 
   useEffect(() => {
     if (!file || !start || startedFor.current === file) return;
@@ -30,6 +37,17 @@ export function useUpload(file: File | null, start: boolean) {
       cancelled = true;
     };
   }, [file, start]);
+
+  // تحلیل مرورگر یک بار، وقتی هم فایل رسیده و هم تحلیل تمام شده — هر کدام
+  // اول تمام شود. برای سنجیدن اختلاف مرورگر و سرور است، نه برای قیمت.
+  const documentId = snapshot?.phase === 'done' ? snapshot.documentId : null;
+  useEffect(() => {
+    if (!documentId || !browserAnalysis || analysisSentFor.current === documentId) return;
+    analysisSentFor.current = documentId;
+    void import('./upload/client').then(({ sendBrowserAnalysis }) =>
+      sendBrowserAnalysis(window.fetch.bind(window), documentId, browserAnalysis),
+    );
+  }, [documentId, browserAnalysis]);
 
   // رفتن از صفحه آپلود را فقط متوقف می‌کند؛ سند می‌ماند تا انداختن دوبارهٔ
   // همان فایل از همان تکه ادامه دهد.

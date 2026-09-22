@@ -156,8 +156,10 @@ step "بالا آوردن سرویس‌ها"
 HAS_CERT=0
 [[ -f "infra/certs/live/${DOMAIN}/fullchain.pem" ]] && HAS_CERT=1
 
+# کارگر اسناد اینجا ساخته نمی‌شود: ایمیجش چرخ‌های پایتون از CI لازم دارد و
+# فقط deploy-bundle.sh می‌سازدش. بعد از bootstrap، یک بار deploy-bundle.sh.
 if (( HAS_CERT )); then
-  TAG="$TAG" $COMPOSE up -d --remove-orphans
+  TAG="$TAG" $COMPOSE up -d --remove-orphans nginx postgres redis garage web
 else
   info "گواهی TLS هنوز نیست — nginx فعلاً بالا نمی‌آید."
   TAG="$TAG" $COMPOSE up -d --remove-orphans postgres redis garage web

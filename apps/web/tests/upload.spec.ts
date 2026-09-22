@@ -95,3 +95,35 @@ test('رفرش وسط آپلود: همان فایل فقط تکه‌های با�
   await expect(status(page)).toContainText('فایل رسید', { timeout: 60_000 });
   expect(putsAfter.sort()).toEqual(['2', '3']);
 });
+
+/*
+ * تحلیل سرور (ADR-025) — این دو تست کارگر اسناد را هم لازم دارند
+ * (`python -m docworker` با همان متغیرهای محیطی).
+ */
+
+test('بعد از رسیدن فایل، سرور همهٔ صفحات را بررسی می‌کند و قیمت همان می‌ماند', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', join(FIXTURES, 'image-scan-6.pdf'));
+  await expect(page.getByTestId('price-total')).toContainText('54,600', { timeout: 15_000 });
+  await expect(status(page)).toContainText('همهٔ صفحات بررسی شد', { timeout: 60_000 });
+  // سرور همان ۶ صفحه را دید؛ قیمت عوض نشد و یادداشت اصلاح نیامد.
+  await expect(page.getByTestId('price-total')).toContainText('54,600');
+  await expect(page.getByTestId('server-corrected')).toHaveCount(0);
+  await expect(page.getByTestId('stat-color-pages')).toHaveText('0');
+});
+
+test('PDF بزرگ‌تر از توان مرورگر: قیمت از سرور می‌آید، نه بن‌بست', async ({ page }) => {
+  // اسکن ۶ صفحه‌ای + ۱۵۱ مگابایت دنبالهٔ بی‌اثر: از سقف ۱۵۰ مگابایتی مرورگر رد
+  // می‌شود، پس فقط سرور می‌تواند بخواندش.
+  const file = join(tmpdir(), 'jozve-huge.pdf');
+  writeFileSync(
+    file,
+    Buffer.concat([readFileSync(join(FIXTURES, 'image-scan-6.pdf')), Buffer.alloc(151 * 1024 * 1024, '%')]),
+  );
+
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', file);
+  await expect(page.getByTestId('server-path')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('price-total')).toContainText('54,600', { timeout: 180_000 });
+  await expect(page.getByTestId('stat-page-count')).toHaveText('6');
+});

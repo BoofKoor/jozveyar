@@ -92,6 +92,46 @@ jobs:
           S3_ENDPOINT: http://127.0.0.1:3900
           S3_BUCKET: jozveyar
 
+      # کارگر اسناد پایتون (ADR-025). بعد از `pnpm test` چون آن مهاجرت‌ها را
+      # اعمال کرده؛ تست‌های یکپارچگی کارگر روی همان پستگرس و Garage اجرا می‌شوند.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: تست کارگر اسناد
+        working-directory: services/docworker
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q tests
+        env:
+          DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jozveyar
+          S3_ENDPOINT: http://127.0.0.1:3900
+          S3_BUCKET: jozveyar
+
+      # بستهٔ کارگر: کد + چرخ‌های آماده برای پایتون ۳.۱۲ لینوکس. سرور به PyPI
+      # نمی‌رسد، پس هر چه ایمیج لازم دارد همین‌جا جمع می‌شود.
+      - name: بستهٔ کارگر اسناد
+        run: |
+          set -eux
+          D=services/docworker
+          rm -rf dw && mkdir -p dw/wheels
+          pip download --only-binary=:all: --python-version 3.12 --implementation cp \
+            --platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 \
+            --platform manylinux2014_x86_64 -r $D/requirements.txt -d dw/wheels
+          cp -r $D/Dockerfile $D/requirements.txt $D/docworker dw/
+          find dw -name __pycache__ -prune -exec rm -rf {} +
+          tar -czf jozveyar-docworker.tar.gz -C dw .
+          sha256sum jozveyar-docworker.tar.gz | cut -d' ' -f1 > jozveyar-docworker.sha256
+          ls -lh jozveyar-docworker.tar.gz
+
+      # همان ایمیجی که سرور می‌سازد، اینجا ساخته و امتحان می‌شود: اگر چرخی
+      # جا افتاده یا با پایه نمی‌خواند، همین‌جا می‌شکند نه روی سرور.
+      - name: آزمایش ایمیج کارگر
+        run: |
+          set -eux
+          docker build -t docworker-smoke dw
+          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, docworker.jobs; print(fitz.VersionBind)"
+
       - name: بیلد
         run: pnpm --filter @jozveyar/web build
 
@@ -129,7 +169,11 @@ jobs:
             خروجی standalone ساخته‌شده از `${{ github.sha }}`.
 
             روی سرور: `./infra/deploy-bundle.sh`
+          # اثر انگشت‌ها آخر: deploy-bundle.sh اول اثر انگشت را می‌خواند و بعد
+          # بسته را. اگر وسط انتشار برسد، ناهمخوانی را می‌بیند و صبر می‌کند.
           files: |
             jozveyar-bundle.tar.gz
+            jozveyar-docworker.tar.gz
             jozveyar-bundle.sha256
+            jozveyar-docworker.sha256
           prerelease: true

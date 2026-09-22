@@ -10,6 +10,7 @@
  */
 
 import { partRange, partSize, planParts, type PartPlan } from '@jozveyar/storage/multipart';
+import type { ServerAnalysisView } from '../server/uploads';
 
 export type UploadPhase =
   | 'starting'
@@ -26,6 +27,11 @@ export interface UploadSnapshot {
   documentId: string | null;
   sentBytes: number;
   totalBytes: number;
+  /**
+   * تحلیل سرور بعد از رسیدن فایل. آپلودگر تا `ready` یا `failed` دنبالش می‌کند؛
+   * سرور منبع حقیقت قیمت است.
+   */
+  analysis?: ServerAnalysisView;
 }
 
 export interface UploadFile {
@@ -50,6 +56,10 @@ export interface UploaderDeps {
   concurrency?: number;
   /** تلاش هر تکه قبل از دست کشیدن، وقتی شبکه وصل است. */
   maxAttempts?: number;
+  /** فاصلهٔ پرسیدن وضعیت تحلیل سرور. */
+  analysisPollMs?: number;
+  /** چقدر دنبال تحلیل سرور بماند. پیش‌فرض ۲۵ دقیقه؛ صفر یعنی دنبال نکن. */
+  analysisWatchMs?: number;
 }
 
 interface ServerStatus {
@@ -58,7 +68,11 @@ interface ServerStatus {
   partSizeBytes: number;
   partCount: number;
   receivedParts: number[];
+  analysis?: ServerAnalysisView;
 }
+
+/** بیش از این دنبال تحلیل سرور نمی‌گردد — سقف زمانی خود کارگر ۲۰ دقیقه است. */
+const ANALYSIS_WATCH_MS = 25 * 60 * 1000;
 
 const API = '/api/uploads';
 const RESUME_PREFIX = 'jy.upload.';
@@ -221,6 +235,32 @@ export function startUpload(
     );
   }
 
+  /**
+   * بعد از رسیدن فایل، وضعیت تحلیل سرور تا نتیجه. پشت done نیست: قیمت
+   * مرورگر همان لحظه معتبر است و این فقط هم‌ترازش می‌کند.
+   */
+  async function watchAnalysis(id: string, first?: ServerAnalysisView) {
+    if (first) emit({ analysis: first });
+    const pollMs = deps.analysisPollMs ?? 2000;
+    const deadline = Date.now() + (deps.analysisWatchMs ?? ANALYSIS_WATCH_MS);
+    let state = first?.state;
+    while (state !== 'ready' && state !== 'failed' && Date.now() < deadline) {
+      await deps.sleep(pollMs);
+      if (controller.signal.aborted) return;
+      try {
+        const response = await api(`/${id}`);
+        if (!response.ok) continue;
+        const status = (await response.json()) as ServerStatus;
+        if (!status.analysis) return; // غیر PDF — تحلیل سرور برش ۲ب
+        state = status.analysis.state;
+        emit({ analysis: status.analysis });
+      } catch (error) {
+        if (error instanceof Stopped || controller.signal.aborted) return;
+        // شبکه لحظه‌ای افتاد؛ دور بعد دوباره.
+      }
+    }
+  }
+
   async function run(): Promise<UploadSnapshot> {
     const status = await resumeOrCreate();
     if (!status) {
@@ -235,6 +275,7 @@ export function startUpload(
     if (status.status === 'uploaded') {
       forget();
       emit({ phase: 'done', sentBytes: file.size });
+      void watchAnalysis(status.documentId, status.analysis);
       return { ...snapshot };
     }
 
@@ -246,6 +287,8 @@ export function startUpload(
       if (response.ok) {
         forget();
         emit({ phase: 'done', sentBytes: file.size });
+        const completed = (await response.json().catch(() => null)) as ServerStatus | null;
+        void watchAnalysis(status.documentId, completed?.analysis ?? { state: 'pending' });
         return { ...snapshot };
       }
       const body = (await response.json().catch(() => ({}))) as { error?: string; missing?: number[] };
@@ -275,6 +318,23 @@ export function startUpload(
       }
     },
   };
+}
+
+/**
+ * تحلیل مرورگر برای سنجیدن اختلاف با سرور. یک بار، بی‌صدا: شکستش هیچ اثری
+ * روی کاربر ندارد.
+ */
+export async function sendBrowserAnalysis(
+  fetchImpl: typeof fetch,
+  documentId: string,
+  analysis: unknown,
+): Promise<void> {
+  await fetchImpl(`${API}/${documentId}/browser-analysis`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(analysis),
+  }).catch(() => undefined);
 }
 
 /** وابستگی‌های واقعی مرورگر. */
