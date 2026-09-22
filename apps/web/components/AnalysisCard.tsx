@@ -2,11 +2,34 @@
 
 import { formatBytes, formatNumber } from '@jozveyar/text';
 import type { AnalysisState, AnalysisSummaryView } from '../lib/useDocumentAnalysis';
+import type { UploadSnapshot } from '../lib/upload/client';
 
 interface Props {
   state: AnalysisState;
   summary: AnalysisSummaryView;
+  upload: UploadSnapshot | null;
   onReset: () => void;
+}
+
+/**
+ * یک خط آرام دربارهٔ ارسال فایل. در حالت «در دسترس نیست» یا «شکست» هیچ
+ * نمی‌گوید: قیمت از تحلیل مرورگر می‌آید و آپلود نباید کاربر را نگران کند.
+ */
+function uploadLine(upload: UploadSnapshot | null): string | null {
+  if (!upload) return null;
+  switch (upload.phase) {
+    case 'starting':
+    case 'uploading': {
+      const percent = upload.totalBytes > 0 ? Math.floor((upload.sentBytes / upload.totalBytes) * 100) : 0;
+      return `در حال ارسال فایل · ${percent}%`;
+    }
+    case 'offline':
+      return 'اینترنت قطع شد — با وصل شدن، ارسال از همان‌جا ادامه پیدا می‌کند';
+    case 'done':
+      return 'فایل رسید';
+    default:
+      return null;
+  }
 }
 
 function Stat({
@@ -31,7 +54,7 @@ function Stat({
   );
 }
 
-export function AnalysisCard({ state, summary, onReset }: Props) {
+export function AnalysisCard({ state, summary, upload, onReset }: Props) {
   const { phase, fileName, fileSize, pageCount, analyzedCount, sampleStride, elapsedMs } = state;
   const analyzing = phase === 'analyzing' || phase === 'reading';
 
@@ -46,7 +69,15 @@ export function AnalysisCard({ state, summary, onReset }: Props) {
           <h2 className="truncate font-semibold text-ink" title={fileName ?? ''}>
             {fileName}
           </h2>
-          <p className="num mt-1 text-sm text-ink-2">{formatBytes(fileSize)}</p>
+          <p className="num mt-1 text-sm text-ink-2">
+            {formatBytes(fileSize)}
+            {uploadLine(upload) ? (
+              <span data-testid="upload-status">
+                {' · '}
+                {uploadLine(upload)}
+              </span>
+            ) : null}
+          </p>
         </div>
         <button
           type="button"

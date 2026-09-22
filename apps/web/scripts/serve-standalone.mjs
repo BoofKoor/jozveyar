@@ -21,6 +21,11 @@ cpSync(`${ROOT}.next/static`, `${STANDALONE}/.next/static`, { recursive: true })
 if (existsSync(`${ROOT}public`)) {
   cpSync(`${ROOT}public`, `${STANDALONE}/public`, { recursive: true });
 }
+// فایل‌های SQL مهاجرت: سرور موقع بالا آمدن اجرایشان می‌کند (instrumentation.ts)
+// و از ../../packages/db/migrations نسبت به apps/web می‌خواند.
+cpSync(`${ROOT}../../packages/db/migrations`, `${STANDALONE}/../../packages/db/migrations`, {
+  recursive: true,
+});
 
 const port = process.argv[2] ?? process.env.PORT ?? '3000';
 spawn(process.execPath, [`${STANDALONE}/server.js`], {

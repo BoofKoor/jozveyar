@@ -83,6 +83,8 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/analysis/package.json packages/analysis/
 COPY packages/contracts/package.json packages/contracts/
+COPY packages/db/package.json packages/db/
+COPY packages/storage/package.json packages/storage/
 COPY packages/pricing/package.json packages/pricing/
 COPY packages/text/package.json packages/text/
 
@@ -134,6 +136,8 @@ COPY --from=build --chown=nextjs:nodejs /repo/apps/web/.next/standalone/ ./
 # این دو را standalone نمی‌آورد و باید کنار server.js بنشینند.
 COPY --from=build --chown=nextjs:nodejs /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build --chown=nextjs:nodejs /repo/apps/web/public ./apps/web/public
+# مهاجرت‌ها: اپ موقع بالا آمدن اجرایشان می‌کند (instrumentation.ts).
+COPY --from=build --chown=nextjs:nodejs /repo/packages/db/migrations ./packages/db/migrations
 
 USER nextjs
 EXPOSE 3000

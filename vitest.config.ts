@@ -1,12 +1,13 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * تست واحد فقط در پکیج‌ها.
+ * تست واحد در پکیج‌ها و در منطق اپ وب (`apps/web/lib`).
  *
- * تست سرتاسری Playwright است و اجرا کننده‌اش خودش (`pnpm test:e2e`).
- * بدون این جداسازی، vitest فایل spec پلی‌رایت را برمی‌دارد و در collect می‌شکند.
+ * تست سرتاسری Playwright است و اجرا کننده‌اش خودش (`pnpm test:e2e`). spec‌های
+ * آن در `apps/web/tests` و با پسوند `.spec.ts` هستند و هیچ‌کدام از الگوهای زیر
+ * آنها را برنمی‌دارد — بدون این جداسازی، vitest در collect می‌شکند.
  *
- * الگوی include عمداً با «هر پوشه‌ای» شروع می‌شود و نه با «packages». همین یک
+ * الگوی پکیج‌ها عمداً با «هر پوشه‌ای» شروع می‌شود و نه با «packages». همین یک
  * فایل کانفیگ هم از ریشه استفاده می‌شود و هم وقتی vitest داخل یک پکیج اجرا
  * می‌شود؛ و الگو نسبت به پوشهٔ اجرا حل می‌شود، نه نسبت به محل کانفیگ. با الگوی
  * قبلی، اجرای داخل پکیج **هیچ فایلی پیدا نمی‌کرد** و vitest با کد ۱ بیرون
@@ -14,7 +15,7 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: ['**/src/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/.next/**', 'apps/**'],
+    include: ['**/src/**/*.test.ts', '**/lib/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/.next/**', '**/tests/**'],
   },
 });

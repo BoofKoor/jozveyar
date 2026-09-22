@@ -220,11 +220,29 @@ export const documents = pgTable(
     /** از تحلیل سرور می‌آید. تا آن موقع null. */
     pageCount: integer('page_count'),
     failureReason: text('failure_reason'),
+
+    /* ── آپلود (ADR-024) ── */
+
+    /**
+     * مالک ناشناس: SHA-256 کوکی نشست، به hex.
+     *
+     * قبل از پرداخت هیچ هویتی نیست، پس مالک سند مرورگری است که آپلودش کرده.
+     * خود کوکی هیچ‌وقت اینجا نمی‌نشیند: نشت پایگاه داده نباید به کسی اجازهٔ
+     * تکمیل یا لغو آپلود دیگری را بدهد.
+     */
+    sessionHash: text('session_hash').notNull(),
+    /** شناسهٔ آپلود چندتکه در استوریج. */
+    uploadId: text('upload_id'),
+    /** اندازهٔ تکه، تا ادامهٔ آپلود بعد از رفرش دقیقاً همان تکه‌بندی را بسازد. */
+    partSizeBytes: integer('part_size_bytes'),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
   },
   (t) => [
     index('documents_status').on(t.status),
     /** برای کار پاک‌سازی: کدام فایل‌ها منقضی شده‌اند و هنوز پاک نشده‌اند. */
     index('documents_file_expiry').on(t.fileExpiresAt),
+    /** سقف آپلود باز هم‌زمان برای هر نشست. */
+    index('documents_session').on(t.sessionHash, t.status),
   ],
 );
 

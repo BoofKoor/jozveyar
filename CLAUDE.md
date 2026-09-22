@@ -3,16 +3,18 @@
 سایت سفارش چاپ و صحافی جزوه. بازار ایران، فارسی، RTL. دامنه: jozveyar.com
 
 > **وضعیت (۱۴۰۵/۰۶/۳۱):** سایت روی `https://jozveyar.com` زنده است.
-> برش ۰ و ۱ ساخته و مستقر شده‌اند. برش ۲الف در حال ساخت — قدم ۱ (`packages/db`) تمام.
+> برش ۰ و ۱ ساخته و مستقر شده‌اند. برش ۲الف در حال ساخت — قدم ۱ (`packages/db`)
+> و قدم ۲ (`packages/storage` + آپلود chunked مستقیم به Garage) تمام.
 >
-> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md` (۲۲ ADR).
+> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md` (۲۴ ADR).
 >
-> **قدم بعدی:** برش ۲الف قدم ۲ — آداپتور استوریج (MinIO، پشت اینترفیس S3)
-> و آپلود chunked. بعدش کارگر تحلیل سمت سرور و هم‌ترازی قیمت.
+> **قدم بعدی:** برش ۲الف قدم ۳ — کارگر تحلیل سمت سرور و هم‌ترازی قیمت.
+> تکمیل آپلود فعلاً کاری در صف نمی‌گذارد؛ همان‌جا اضافه می‌شود.
 > برش ۲ب (docworker با LibreOffice) عمداً بعد از ۲الف است.
 >
-> **سؤال باز:** فضای دیسک سرور (`df -h /`) — MinIO روی دیسک می‌نویسد و
-> فایل‌ها تا دو روز می‌مانند.
+> **استوریج:** Garage روی همان سرور، نه MinIO (ADR-023 — ایمیج MinIO از
+> Docker Hub حذف شد). دیسک: ۸۷ از ۹۶ گیگابایت آزاد؛ سقف فایل‌ها ۴۰ گیگابایت.
+> `deploy-bundle.sh` خودش `setup-storage.sh` را صدا می‌زند؛ کار دستی ندارد.
 >
 > **بیلد روی سرور انجام نمی‌شود.** گیت‌هاب اکشنز بسته را می‌سازد و سرور با
 > `./infra/deploy-bundle.sh` یک فایل ۱۷ مگابایتی می‌گیرد. دلیل در ADR-019.
@@ -80,6 +82,7 @@ packages/pricing    موتور قیمت — TS خالص، بدون وابستگ�
 packages/analysis   الگوریتم تشخیص رنگ و صفحه — مشترک با کارگر
 packages/contracts  اسکیمای zod و تایپ‌های مشترک
 packages/db         اسکیمای drizzle + مهاجرت‌ها
+packages/storage    آداپتور استوریج S3 — SigV4 دست‌نویس، بدون SDK
 packages/text       نرمال‌سازی فارسی، ارقام، تاریخ شمسی
 packages/ui         کامپوننت و توکن‌های پالت
 infra/              docker-compose، Caddyfile، اسکریپت دیپلوی
@@ -116,7 +119,7 @@ pnpm typecheck      بررسی تایپ همهٔ پکیج‌ها
 pnpm check          typecheck + تست واحد
 pnpm fixtures       ساخت PDF نمونه برای تست
 
-docker compose -f infra/docker-compose.yml up     پستگرس، Redis، MinIO لوکال
+docker compose -f infra/docker-compose.yml up     پستگرس، Redis، Garage لوکال
 pnpm --filter @jozveyar/db migrate               اعمال مهاجرت‌ها (نیازمند DATABASE_URL)
 DEPLOY_HOST=user@ip ./infra/deploy.sh             استقرار روی VPS
 ```
@@ -131,13 +134,19 @@ DEPLOY_HOST=user@ip ./infra/deploy.sh             استقرار روی VPS
 DATABASE_URL=postgresql://jozveyar:jozveyar@127.0.0.1:5432/jozveyar pnpm test
 ```
 
+تست‌های استوریج هم همین‌طور، با `S3_ENDPOINT` (و `S3_ACCESS_KEY`،
+`S3_SECRET_KEY`، `S3_BUCKET`) روی یک Garage واقعی. CI هر دو را همیشه بالا
+می‌آورد، روی PR هم. تست سرتاسری آپلود واقعی (`tests/upload.spec.ts`) با
+`E2E_UPLOAD_BASE_URL` اجرا می‌شود؛ طرز اجرا بالای همان فایل است.
+
 ## اعدادی که اندازه گرفته شده‌اند
 
 اینها در تست قفل‌اند؛ اگر پس‌رفت کنند تست می‌شکند:
 
 - اولین قیمت برای اسکن زرد ۱۴۷ صفحه‌ای، با پردازندهٔ ۴ برابر کند: **۴۸۶ms**
   (سقف پذیرش: ۲ ثانیه)
-- باندل اولیهٔ صفحهٔ اصلی: **۱۳۶ کیلوبایت** — pdf.js داخلش نیست
+- باندل اولیهٔ صفحهٔ اصلی: **۱۳۷ کیلوبایت** — pdf.js و آپلودگر داخلش نیستند
+  (۱۳۶ بود؛ یک کیلوبایت برای هوک آپلود و خط وضعیتش)
 - همان اسکن زرد: **۰ صفحهٔ رنگی** تشخیص داده می‌شود، قیمت ۲۸۰,۲۰۰ تومان
   (اگر تشخیص رنگ بشکند ۳۳۹,۰۰۰ می‌شود)
 
