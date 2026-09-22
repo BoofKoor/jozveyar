@@ -186,7 +186,8 @@ CREATE TABLE orders (
 
 | حوزه | جدول‌ها | نکتهٔ طراحی |
 |---|---|---|
-| تعرفه | `price_lists` `print_rates` `paper_types` `paper_rates` `binding_types` `binding_rate_bands` `discount_tiers` `pricing_settings` | نسخه‌دار با `effective_from`. بازه‌های صحافی با محدودیت `EXCLUDE` — دیتابیس اجازهٔ همپوشانی یا حفره نمی‌دهد |
+| تعرفه | `price_lists` `paper_types` `binding_types` `binding_rate_bands` `shipping_methods` `shipping_rates` | ✅ ساخته شد. نسخه‌دار با `version` و دقیقاً یکی فعال. بازه‌های صحافی و وزن با `EXCLUDE` — دیتابیس اجازهٔ همپوشانی نمی‌دهد. `print_rates` و `pricing_settings` جدول جدا نشدند؛ دلیل در ADR-021. `discount_tiers` هنوز ساخته نشده |
+| سند | `documents` `document_analyses` `document_pages` | ✅ ساخته شد. سند = فایل آپلودشده، قبل از اینکه سفارشی باشد. تحلیل مرورگر و سرور **هر دو** ذخیره می‌شوند تا واگرایی قابل اندازه‌گیری باشد. `document_pages` اعداد خام رنگ را نگه می‌دارد، نه فقط بولین |
 | سفارش | `order_items` `document_sources` `order_status_events` `payments` | `order_items` یک ردیف به‌ازای هر سند. `document_sources` ادغام چند PDF را می‌سازد |
 | ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن) |
 | رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود |

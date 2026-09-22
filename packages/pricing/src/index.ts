@@ -164,6 +164,17 @@ function firstPaperGsm(item: ItemSpec, list: PriceList): number | null {
 
 /* ──────────────────────────── ارسال ──────────────────────────── */
 
+/**
+ * سقف بازهٔ وزن، شامل نمی‌شود. `null` یعنی بدون سقف.
+ *
+ * یک تابع کوچک برای یک مقایسه زیاده‌روی به نظر می‌رسد، ولی این مقایسه در دو
+ * جا تکرار می‌شود و اگر یکی‌شان `null` را فراموش کند، اثرش این است که
+ * سنگین‌ترین سفارش‌ها — یعنی گران‌ترین‌ها — بی‌صدا بدون کرایه قیمت می‌خورند.
+ */
+function belowCeiling(weightGrams: number, maxWeightGrams: number | null): boolean {
+  return maxWeightGrams === null || weightGrams < maxWeightGrams;
+}
+
 function shippingRialsFor(
   list: PriceList,
   methodId: string,
@@ -173,7 +184,7 @@ function shippingRialsFor(
   for (const rate of list.shippingRates) {
     if (rate.methodId !== methodId) continue;
     if (rate.zoneId !== zoneId) continue;
-    if (weightGrams >= rate.minWeightGrams && weightGrams < rate.maxWeightGrams) {
+    if (weightGrams >= rate.minWeightGrams && belowCeiling(weightGrams, rate.maxWeightGrams)) {
       return rate.priceRials;
     }
   }
@@ -192,7 +203,8 @@ export function shippingFloorRials(list: PriceList, weightGrams: number): number
   for (const rate of list.shippingRates) {
     const method = list.shippingMethods[rate.methodId];
     if (!method?.enabled) continue;
-    if (weightGrams < rate.minWeightGrams || weightGrams >= rate.maxWeightGrams) continue;
+    if (weightGrams < rate.minWeightGrams) continue;
+    if (!belowCeiling(weightGrams, rate.maxWeightGrams)) continue;
     if (floor === null || rate.priceRials < floor) floor = rate.priceRials;
   }
   return floor;

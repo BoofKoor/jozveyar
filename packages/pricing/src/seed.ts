@@ -67,6 +67,9 @@ export const SEED_PRICE_LIST: PriceList = {
    * ۲۶,۰۰۰ تومان بالا می‌رود. پس سه بازهٔ وزن کافی است و ریزدانه‌تر کردنش
    * ارزشی ندارد تا دادهٔ بیشتری جمع شود. (ADR-011)
    *
+   * سقف بازهٔ آخر `null` است، نه `Infinity`: آن مقدار از zod رد می‌شد و از
+   * JSON هم زنده بیرون نمی‌آمد. توضیح کامل در قرارداد `shippingRateSchema`.
+   *
    * TODO(باز): «تهران» یعنی استان تهران (قرچک و پردیس داخلش) یا فقط شهر تهران؟
    * نقاط دادهٔ تهران کم است؛ بازهٔ بالای ۳ کیلو هیچ نمونه‌ای ندارد و محافظه‌کارانه
    * تخمین زده شده.
@@ -74,10 +77,10 @@ export const SEED_PRICE_LIST: PriceList = {
   shippingRates: [
     { methodId: 'post', zoneId: 'tehran', minWeightGrams: 0, maxWeightGrams: 1_000, priceRials: 1_295_000 },
     { methodId: 'post', zoneId: 'tehran', minWeightGrams: 1_000, maxWeightGrams: 3_000, priceRials: 1_500_000 },
-    { methodId: 'post', zoneId: 'tehran', minWeightGrams: 3_000, maxWeightGrams: Infinity, priceRials: 2_000_000 },
+    { methodId: 'post', zoneId: 'tehran', minWeightGrams: 3_000, maxWeightGrams: null, priceRials: 2_000_000 },
     { methodId: 'post', zoneId: 'other', minWeightGrams: 0, maxWeightGrams: 1_000, priceRials: 1_377_500 },
     { methodId: 'post', zoneId: 'other', minWeightGrams: 1_000, maxWeightGrams: 3_000, priceRials: 1_618_120 },
-    { methodId: 'post', zoneId: 'other', minWeightGrams: 3_000, maxWeightGrams: Infinity, priceRials: 2_072_000 },
+    { methodId: 'post', zoneId: 'other', minWeightGrams: 3_000, maxWeightGrams: null, priceRials: 2_072_000 },
   ],
 
   settings: {

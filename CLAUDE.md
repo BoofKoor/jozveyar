@@ -2,8 +2,20 @@
 
 سایت سفارش چاپ و صحافی جزوه. بازار ایران، فارسی، RTL. دامنه: jozveyar.com
 
-> وضعیت: معماری تأیید شد. برش ۰ (اسکلت) و برش ۱ (لحظهٔ جادو) ساخته شده.
-> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md`.
+> **وضعیت (۱۴۰۵/۰۶/۳۱):** سایت روی `https://jozveyar.com` زنده است.
+> برش ۰ و ۱ ساخته و مستقر شده‌اند. برش ۲الف در حال ساخت — قدم ۱ (`packages/db`) تمام.
+>
+> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md` (۲۲ ADR).
+>
+> **قدم بعدی:** برش ۲الف قدم ۲ — آداپتور استوریج (MinIO، پشت اینترفیس S3)
+> و آپلود chunked. بعدش کارگر تحلیل سمت سرور و هم‌ترازی قیمت.
+> برش ۲ب (docworker با LibreOffice) عمداً بعد از ۲الف است.
+>
+> **سؤال باز:** فضای دیسک سرور (`df -h /`) — MinIO روی دیسک می‌نویسد و
+> فایل‌ها تا دو روز می‌مانند.
+>
+> **بیلد روی سرور انجام نمی‌شود.** گیت‌هاب اکشنز بسته را می‌سازد و سرور با
+> `./infra/deploy-bundle.sh` یک فایل ۱۷ مگابایتی می‌گیرد. دلیل در ADR-019.
 
 ## تز محصول — تغییر نمی‌کند
 
@@ -98,18 +110,26 @@ docs/               ARCHITECTURE.md، PRICING.md، DECISIONS.md
 ```
 pnpm dev            سرور توسعه
 pnpm build          بیلد همهٔ پکیج‌ها و اپ
-pnpm test           تست واحد (قیمت، تحلیل، متن)
+pnpm test           تست واحد (قیمت، تحلیل، متن، تبدیل تعرفه)
 pnpm test:e2e       تست سرتاسری مرورگر — نیازمند build
 pnpm typecheck      بررسی تایپ همهٔ پکیج‌ها
 pnpm check          typecheck + تست واحد
 pnpm fixtures       ساخت PDF نمونه برای تست
 
 docker compose -f infra/docker-compose.yml up     پستگرس، Redis، MinIO لوکال
+pnpm --filter @jozveyar/db migrate               اعمال مهاجرت‌ها (نیازمند DATABASE_URL)
 DEPLOY_HOST=user@ip ./infra/deploy.sh             استقرار روی VPS
 ```
 
 تست سرتاسری روی build تولیدی اجرا می‌شود، نه dev server: چیزی که می‌سنجد
 (اندازهٔ باندل اولیه و تنبل بودن pdf.js) فقط در build تولیدی معنا دارد.
+
+تست‌های یکپارچگی پایگاه داده بدون `DATABASE_URL` خودشان را رد می‌کنند. با آن،
+مهاجرت‌ها روی پستگرس واقعی اجرا می‌شوند و محدودیت‌های تعرفه سنجیده می‌شوند:
+
+```
+DATABASE_URL=postgresql://jozveyar:jozveyar@127.0.0.1:5432/jozveyar pnpm test
+```
 
 ## اعدادی که اندازه گرفته شده‌اند
 

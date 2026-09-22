@@ -21,6 +21,26 @@ permissions:
 jobs:
   bundle:
     runs-on: ubuntu-latest
+
+    # پستگرس واقعی، همان نسخهٔ تولید.
+    #
+    # تست‌های یکپارچگی بدون `DATABASE_URL` خودشان را رد می‌کنند، پس بدون این
+    # سرویس، CI سبز می‌شد بدون اینکه حتی یک مهاجرت اجرا شده باشد — و کشف اینکه
+    # SQL خراب است می‌افتاد به لحظهٔ استقرار روی سرور.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: jozveyar
+          POSTGRES_PASSWORD: jozveyar
+          POSTGRES_DB: jozveyar
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U jozveyar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -37,8 +57,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # دروازه: بستهٔ شکسته منتشر نمی‌شود.
-      - name: تست واحد
+      #
+      # `DATABASE_URL` اینجا تست‌های یکپارچگی را هم روشن می‌کند: مهاجرت‌ها روی
+      # پستگرس واقعی اعمال می‌شوند و محدودیت‌های تعرفه سنجیده می‌شوند.
+      - name: تست واحد و یکپارچگی
         run: pnpm test
+        env:
+          DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jozveyar
 
       - name: بیلد
         run: pnpm --filter @jozveyar/web build
