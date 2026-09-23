@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -26,6 +27,8 @@ from dataclasses import dataclass, field
 import fitz
 
 from . import formats, sandbox
+
+log = logging.getLogger("docworker.convert")
 
 SOFFICE = shutil.which("soffice") or "/usr/bin/soffice"
 TIMEOUT_SECONDS = float(os.environ.get("DOCWORKER_CONVERT_TIMEOUT", "300"))
@@ -126,6 +129,8 @@ class LibreOffice:
     def __init__(self, root: str | None = None):
         self.profile = root or os.path.join(tempfile.gettempdir(), f"docworker-lo-{os.getpid()}")
         self._version: str | None = None
+        # پردازه‌هایی که بعد از آخرین تبدیل مانده بودند و کشته شدند — باید همیشه خالی باشد.
+        self.stragglers: list[int] = []
 
     def _ensure_profile(self) -> None:
         user = os.path.join(self.profile, "user")
@@ -173,6 +178,11 @@ class LibreOffice:
             source,
         ]
         outcome = sandbox.run_confined(cmd, cwd=workdir, timeout=timeout, max_file_bytes=MAX_OUTPUT_BYTES)
+        # کشتن گروه پردازه به LibreOffice‌ای که خودش را جدا کرده نمی‌رسد؛ پروفایل ما در
+        # خط فرمان هر پردازهٔ آن هست.
+        self.stragglers = sandbox.kill_processes_with(f"-env:UserInstallation=file://{self.profile}\0")
+        if self.stragglers:
+            log.warning("LibreOffice بعد از تبدیل مانده بود و کشته شد: %s", self.stragglers)
         output = os.path.join(workdir, os.path.splitext(os.path.basename(source))[0] + ".pdf")
         if outcome.timed_out:
             self.reset()

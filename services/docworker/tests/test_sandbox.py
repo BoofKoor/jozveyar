@@ -87,6 +87,23 @@ def test_lingering_grandchild_neither_delays_nor_survives(tmp_path):
     assert _dead(child)
 
 
+def test_escaped_process_is_found_by_its_command_line(tmp_path):
+    """پردازه‌ای که با setsid از گروه بیرون رفته، از کشتن گروه جان به در می‌برد —
+    ولی نشانی که در خط فرمانش است (برای LibreOffice: مسیر پروفایل) پیدایش می‌کند."""
+    marker = f"-env:UserInstallation=file://{tmp_path}/profile"
+    script = "import os, time; os.setsid(); open('pid', 'w').write(str(os.getpid())); time.sleep(60)"
+    confined(tmp_path, f'"{sys.executable}" -c "{script}" "{marker}" & sleep 0.5; exit 0')
+    pid = int((tmp_path / "pid").read_text())
+    assert not _dead(pid)  # گروهش کشته شد، خودش نه
+
+    assert sandbox.kill_processes_with(marker + "-other\0") == []  # نشان دقیق، نه پیشوند
+    assert sandbox.kill_processes_with(marker + "\0") == [pid]
+    deadline = time.monotonic() + 5
+    while not _dead(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert _dead(pid)
+
+
 def run_isolated(code: str, env: dict[str, str] | None = None) -> str:
     """کد در پایتون جدا، با کاربر بی‌امتیاز اگر تست با root اجرا شده: root قابلیت
     CAP_SYS_PTRACE دارد و دیوار non-dumpable برایش معنا ندارد — LibreOffice واقعی با

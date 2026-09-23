@@ -152,3 +152,29 @@ def _kill_group(pgid: int) -> None:
         os.killpg(pgid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
+
+
+def kill_processes_with(marker: str) -> list[int]:
+    """هر پردازه‌ای که `marker` در خط فرمانش است — مثلاً LibreOffice‌ای که از گروه
+    پردازهٔ خودش بیرون رفته و کشتن گروه به آن نمی‌رسد.
+
+    نمونهٔ ماندهٔ LibreOffice خطر دارد: LibreOffice بعدی با همان پروفایل، کار را از
+    لولهٔ همان نمونه تحویلش می‌دهد و فوری بیرون می‌آید — سقف زمان و «یک پردازه برای
+    هر فایل» هر دو دور زده می‌شوند. خروجی: پردازه‌هایی که کشته شدند، برای لاگ.
+    """
+    needle = marker.encode()
+    me = os.getpid()
+    killed: list[int] = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or int(entry) == me:
+            continue
+        try:
+            with open(f"/proc/{entry}/cmdline", "rb") as f:
+                if needle not in f.read():
+                    continue
+            os.kill(int(entry), signal.SIGKILL)
+            killed.append(int(entry))
+        except OSError:  # همین حالا تمام شد، یا مال ما نیست
+            pass
+    reap_orphans()
+    return killed

@@ -359,8 +359,20 @@ def _live_processes_using(profile: str) -> list[int]:
 
 
 @needs_libreoffice
+def test_no_libreoffice_survives_a_conversion(tmp_path, office):
+    """نمونهٔ ماندهٔ LibreOffice تبدیل بعدی را از لوله‌اش می‌گیرد و سقف زمان را دور
+    می‌زند؛ بعد از هر تبدیل هیچ پردازه‌ای با پروفایل ما نباید بماند."""
+    make_docx(str(tmp_path / "upload"), [docx_paragraph("جزوه", "Vazirmatn")])
+    convert.to_pdf(str(tmp_path / "upload"), str(tmp_path), office)
+    print("کشته‌شده‌های بعد از تبدیل:", office.stragglers)  # نشانهٔ LibreOffice جداشده
+    assert _live_processes_using(office.profile) == []
+
+
+@needs_libreoffice
 def test_timeout_kills_libreoffice_and_the_next_file_still_converts(tmp_path, office):
-    make_docx(str(tmp_path / "source.docx"), [docx_paragraph(persian_text(i + 1, 60), "B Nazanin") for i in range(300)])
+    # ۳۰۰۰ پاراگراف (~۵۰۰ صفحه): چند ثانیه روی هر ماشینی، پس سقف ۰٫۵ ثانیه حتماً می‌رسد.
+    make_docx(str(tmp_path / "source.docx"), [docx_paragraph(persian_text(i + 1, 60), "B Nazanin") for i in range(3000)])
+    assert _live_processes_using(office.profile) == []  # تبدیل قبلی چیزی جا نگذاشته
     with pytest.raises(convert.ConversionFailure) as caught:
         office.to_pdf(str(tmp_path / "source.docx"), formats.DOCX, str(tmp_path), timeout=0.5)
     assert caught.value.code == "convert_timeout"
