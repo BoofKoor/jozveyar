@@ -11,7 +11,9 @@ import {
 import { formatBytes } from '@jozveyar/text';
 import {
   FIRST_PRICE_AFTER_PAGES,
+  fileKind,
   serverFailureMessage,
+  uploadRefusalMessage,
   type AnalysisErrorCode,
 } from '../lib/analysis-protocol';
 import { useDocumentAnalysis, type AnalysisSummaryView } from '../lib/useDocumentAnalysis';
@@ -52,15 +54,20 @@ export function OrderFlow() {
   const [config, setConfig] = useState<OrderConfig>(INITIAL_CONFIG);
   const [file, setFile] = useState<File | null>(null);
 
-  const isPdf = file !== null && /\.pdf$/i.test(file.name);
+  const kind = file ? fileKind(file.name) : null;
   /**
-   * مسیر سرور برای PDF: یا برای مرورگر بزرگ بود، یا مرورگر وسط راه کم آورد.
-   * قاعدهٔ محصول: «مرورگر کم آورد ← بی‌صدا مسیر سرور». Word و عکس هنوز نه (۲ب).
+   * مسیر سرور: Word، پاورپوینت و عکس همیشه (تبدیل، ADR-028)؛ PDF وقتی برای مرورگر
+   * بزرگ بود یا مرورگر وسط راه کم آورد. قاعدهٔ محصول: «مرورگر کم آورد ← بی‌صدا
+   * مسیر سرور».
    */
   const serverPath =
-    isPdf &&
-    (state.phase === 'needs_server' ||
-      (state.phase === 'error' && state.error !== null && BROWSER_GAVE_UP.includes(state.error.code)));
+    state.phase === 'needs_server' ||
+    (state.phase === 'error' && state.error !== null && BROWSER_GAVE_UP.includes(state.error.code));
+  /**
+   * پیش‌فاکتور مسیر سرور: عددی که خود Word نوشته، یا «یک عکس یک صفحه». قیمت از
+   * همان لحظه روی صفحه است و با رسیدن عدد سرور جایش را به او می‌دهد.
+   */
+  const estimate = serverPath && state.estimatedFrom !== null && state.pageCount > 0;
 
   const browserPriceReady =
     state.pageCount > 0 &&
@@ -79,6 +86,8 @@ export function OrderFlow() {
 
   const server = upload?.analysis;
   const serverReady = server?.state === 'ready' && (server.pageCount ?? 0) > 0;
+  const serverFailed = server?.state === 'failed';
+  const uploadRefused = upload?.phase === 'unavailable' || upload?.phase === 'failed';
 
   /**
    * منبع حقیقت: وقتی سرور همهٔ صفحات را دید، عدد او جای عدد مرورگر می‌نشیند —
@@ -142,25 +151,11 @@ export function OrderFlow() {
     </button>
   );
 
-  // Word، پاورپوینت و عکس — تبدیلشان با LibreOffice در برش ۲ب.
-  if (state.phase === 'needs_server' && !serverPath) {
-    return (
-      <div className="rounded-card border border-hairline bg-card p-6">
-        <h2 className="font-semibold text-ink">این فایل سمت سرور بررسی می‌شود</h2>
-        <p className="mt-2 text-ink-2">
-          فایل‌های Word، پاورپوینت و عکس هنوز در سرور تبدیل نمی‌شوند؛ این در دست ساخت است. تا آن
-          موقع اگر همین جزوه را PDF کنی و بیندازی، قیمت را فوری می‌بینی.
-        </p>
-        {anotherFile}
-      </div>
-    );
-  }
-
-  // مسیر سرور، تا وقتی قیمت سرور نیامده.
-  if (serverPath && !serverReady) {
-    const unavailable = upload?.phase === 'unavailable' || upload?.phase === 'failed';
-    const failed = server?.state === 'failed';
-    const message = failed ? serverFailureMessage(server?.failureReason) : null;
+  // مسیر سرور بی‌پیش‌فاکتور (PDF بزرگ، Word قدیمی)، تا وقتی قیمت سرور نیامده؛ و
+  // هر شکست سرور — آنجا پیش‌فاکتور دیگر معنا ندارد.
+  if (serverPath && !serverReady && (!estimate || serverFailed)) {
+    const unavailable = uploadRefused;
+    const message = serverFailed ? serverFailureMessage(server?.failureReason, kind) : null;
     return (
       <div className="rounded-card border border-hairline bg-card p-6" data-testid="server-path">
         <h2 className="truncate font-semibold text-ink" title={file?.name ?? ''}>
@@ -173,14 +168,13 @@ export function OrderFlow() {
             <p className="mt-2 text-ink-2">{message.hint}</p>
           </>
         ) : unavailable ? (
-          <p className="mt-4 text-ink-2">
-            الان نمی‌توانیم این فایل را بگیریم. چند دقیقهٔ دیگر دوباره بینداز؛ یا اگر فایل کوچک‌تری
-            از همین جزوه داری، همان را امتحان کن.
-          </p>
+          <p className="mt-4 text-ink-2">{uploadRefusalMessage(upload?.reason)}</p>
         ) : (
           <>
             <p className="mt-4 text-ink-2">
-              این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.
+              {kind === 'pdf'
+                ? 'این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.'
+                : 'این فایل روی سرور به PDF تبدیل و کامل خوانده می‌شود؛ قیمت همین‌جا می‌آید.'}
             </p>
             <p data-testid="upload-status" className="num mt-3 text-sm text-ink">
               {uploadLine(upload) ?? 'در حال آماده‌سازی…'}
@@ -202,9 +196,16 @@ export function OrderFlow() {
     );
   }
 
-  // کارت تحلیل با عدد سرور وقتی آمده؛ کارت مرورگر دست‌نخورده وقتی نه.
+  // کارت تحلیل با عدد سرور وقتی آمده؛ کارت مرورگر (یا پیش‌فاکتور) دست‌نخورده وقتی نه.
   const shownState = serverReady
-    ? { ...state, phase: 'ready' as const, pageCount, analyzedCount: pageCount, sampleStride: 1 }
+    ? {
+        ...state,
+        phase: 'ready' as const,
+        pageCount,
+        analyzedCount: pageCount,
+        sampleStride: 1,
+        estimatedFrom: null,
+      }
     : state;
 
   return (
@@ -214,6 +215,8 @@ export function OrderFlow() {
         summary={summary}
         upload={upload}
         correctedFrom={corrected ? state.pageCount : null}
+        kind={kind}
+        serverUnavailable={estimate && uploadRefused}
         onReset={startOver}
       />
 

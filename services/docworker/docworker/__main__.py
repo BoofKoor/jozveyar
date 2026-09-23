@@ -8,7 +8,9 @@
 همین سرور یا نود دیگر — فقط اجرای همین فرمان با همان متغیرهای محیطی است.
 
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
-S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری).
+S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
+مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها)،
+DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰).
 """
 
 from __future__ import annotations
@@ -21,14 +23,36 @@ import time
 
 import psycopg
 
-from . import fonts, queue
-from .jobs import ANALYZE_DOCUMENT, PermanentFailure, analyze_document, mark_document_failed
+from . import convert, fonts, queue, sandbox
+from .jobs import (
+    ANALYZE_DOCUMENT,
+    CONVERT_DOCUMENT,
+    PermanentFailure,
+    analyze_document,
+    convert_document,
+    mark_document_failed,
+)
 from .storage import S3Storage
 
 log = logging.getLogger("docworker")
 
-# اجاره بلندتر از سقف زمانی تحلیل (۲۰ دقیقه) — کار سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
+# اجاره بلندتر از سقف زمانی تحلیل (۲۰ دقیقه) و دو بار تبدیل (۲ × ۵ دقیقه) — کار
+# سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
+
+KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT)
+# شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
+EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
+
+
+def kinds_from_env() -> list[str]:
+    raw = os.environ.get("DOCWORKER_KINDS", "")
+    kinds = [k.strip() for k in raw.split(",") if k.strip()]
+    unknown = sorted(set(kinds) - set(KINDS))
+    if unknown:
+        # غلط تایپی یعنی نودی که هیچ کاری برنمی‌دارد؛ بلند بیفتد، نه بی‌صدا بیکار بماند.
+        raise SystemExit(f"DOCWORKER_KINDS ناشناس: {', '.join(unknown)} — مجاز: {', '.join(KINDS)}")
+    return kinds or list(KINDS)
 
 
 class Worker:
@@ -37,7 +61,9 @@ class Worker:
         self.stopping = False
         self.poll = float(os.environ.get("DOCWORKER_POLL_SECONDS", "2"))
         self.retry_seconds = 10.0
+        self.kinds = kinds_from_env()
         self.storage = S3Storage.from_env()
+        self.office = convert.LibreOffice()
         # اولین هم‌گام‌سازی فونت همان اول کار؛ بعد هر ده دقیقه، بین کارها.
         self.fonts_due = 0.0
 
@@ -65,12 +91,15 @@ class Worker:
 
     def run_once(self, conn: psycopg.Connection) -> bool:
         """یک کار برمی‌دارد و انجام می‌دهد. false یعنی صف خالی بود."""
-        job = queue.claim(conn, self.id, [ANALYZE_DOCUMENT], LEASE_SECONDS)
+        job = queue.claim(conn, self.id, self.kinds, LEASE_SECONDS)
         if job is None:
             return False
         log.info("کار %s (%s) سند %s — تلاش %s", job.id, job.kind, job.document_id, job.attempts)
         try:
-            result = analyze_document(conn, self.storage, job.document_id)
+            if job.kind == CONVERT_DOCUMENT:
+                result = convert_document(conn, self.storage, self.office, job.document_id)
+            else:
+                result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)
             conn.commit()
             log.info("✓ کار %s: %s", job.id, result)
@@ -84,7 +113,7 @@ class Worker:
             conn.rollback()
             final = queue.fail(conn, job, repr(error), permanent=False)
             if final:
-                mark_document_failed(conn, job.document_id, "analysis_failed")
+                mark_document_failed(conn, job.document_id, EXHAUSTED.get(job.kind, "analysis_failed"))
             conn.commit()
             log.exception("✗ کار %s شکست%s", job.id, " — تلاش‌ها تمام شد" if final else "، دوباره تلاش می‌شود")
         return True
@@ -97,6 +126,7 @@ class Worker:
                     while not self.stopping:
                         self.sync_fonts_if_due()
                         if not self.run_once(conn):
+                            sandbox.reap_orphans()
                             time.sleep(self.poll)
             except psycopg.OperationalError as error:
                 # پستگرس ری‌استارت شده یا هنوز بالا نیامده: صبر، بعد اتصال تازه.
@@ -115,7 +145,12 @@ class Worker:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # پیش از هر کار دیگر: LibreOffice آلوده نباید محیط و حافظهٔ کارگر را بخواند (sandbox.py).
+    walls = sandbox.protect_worker()
+    if not all(walls.values()):
+        log.warning("دیوار کارگر کامل نیست: %s", walls)
     worker = Worker()
+    log.info("کارها: %s", ", ".join(worker.kinds))
     signal.signal(signal.SIGTERM, worker.stop)
     signal.signal(signal.SIGINT, worker.stop)
     worker.run()

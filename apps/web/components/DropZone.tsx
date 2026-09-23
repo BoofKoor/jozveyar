@@ -1,11 +1,10 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { formatBytes } from '@jozveyar/text';
-import { MAX_BROWSER_ANALYSIS_BYTES } from '../lib/analysis-protocol';
+import { ACCEPTED_EXTENSIONS } from '../lib/analysis-protocol';
 
-/** فرمت‌هایی که می‌پذیریم. PDF مسیر مرورگر، بقیه مسیر سرور. */
-const ACCEPT = '.pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.heic';
+/** فرمت‌هایی که می‌پذیریم. PDF مسیر مرورگر، بقیه مسیر سرور (تبدیل، ADR-028). */
+const ACCEPT = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
 interface Props {
   onFile: (file: File) => void;
@@ -64,9 +63,8 @@ export function DropZone({ onFile, busy }: Props) {
       </button>
 
       <p className="mt-6 text-sm text-ink-2">
-        PDF، Word، پاورپوینت و عکس اسکن‌شده — تا{' '}
-        <span className="num">{formatBytes(MAX_BROWSER_ANALYSIS_BYTES)}</span> در مرورگر خوانده
-        می‌شود
+        PDF، Word، پاورپوینت و عکس — PDF همین‌جا در مرورگر خوانده می‌شود، بقیه روی سرور به PDF
+        تبدیل می‌شوند
       </p>
     </div>
   );

@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { DocumentRow, DocumentStore } from '@jozveyar/db';
+import { ANALYZE_DOCUMENT_JOB, CONVERT_DOCUMENT_JOB, type DocumentRow, type DocumentStore } from '@jozveyar/db';
 import {
   DEFAULT_PART_SIZE_BYTES,
   partSize,
@@ -94,7 +94,8 @@ const ok = <T>(value: T): Result<T> => ({ ok: true, value });
  * صفحات رنگی را از اینجا می‌گیرد و قیمت را با همان `quote()` دوباره حساب می‌کند.
  */
 export interface ServerAnalysisView {
-  state: 'pending' | 'running' | 'ready' | 'failed';
+  /** `converting`: Word، پاورپوینت یا عکس در حال تبدیل به PDF (ADR-028). */
+  state: 'pending' | 'converting' | 'running' | 'ready' | 'failed';
   /** کد شکست؛ همان کدهایی که مرورگر برایشان پیام فارسی دارد. */
   failureReason?: string;
   pageCount?: number;
@@ -113,7 +114,7 @@ export interface UploadStatus {
   partCount: number;
   /** تکه‌هایی که با اندازهٔ درست رسیده‌اند؛ بقیه باید فرستاده شوند. */
   receivedParts: number[];
-  /** فقط بعد از رسیدن فایل، و فقط برای PDF (Word و عکس: برش ۲ب). */
+  /** فقط بعد از رسیدن فایل. Word و پاورپوینت و عکس اول تبدیل می‌شوند (`converting`). */
   analysis?: ServerAnalysisView;
 }
 
@@ -174,6 +175,7 @@ export function createUploadService(deps: UploadServiceDeps) {
 
   async function analysisView(doc: DocumentRow): Promise<ServerAnalysisView> {
     if (doc.status === 'uploaded') return { state: 'pending' };
+    if (doc.status === 'converting') return { state: 'converting' };
     if (doc.status === 'analyzing') return { state: 'running' };
     if (doc.status === 'failed') return { state: 'failed', failureReason: doc.failureReason ?? 'unknown' };
 
@@ -343,7 +345,7 @@ export function createUploadService(deps: UploadServiceDeps) {
           ...base,
           status: arrived ? 'uploaded' : 'failed',
           receivedParts: arrived ? Array.from({ length: plan.partCount }, (_, i) => i + 1) : [],
-          ...(arrived && doc.sourceKind === 'pdf' ? { analysis: await analysisView(doc) } : {}),
+          ...(arrived ? { analysis: await analysisView(doc) } : {}),
         });
       }
 
@@ -382,13 +384,15 @@ export function createUploadService(deps: UploadServiceDeps) {
       const key = doc.storageKey!;
       const at = now();
       const retentionDays = await numberSetting('file.retention_days', DEFAULT_RETENTION_DAYS);
-      // PDF همان لحظه در صف تحلیل سرور می‌رود — در همان تراکنش (ADR-025).
+      // همان لحظه در صف کارگر، در همان تراکنش: PDF مستقیم تحلیل (ADR-025)، بقیه
+      // اول تبدیل و بعد همان تحلیل (ADR-028). نوع از پسوند است؛ کارگر محتوا را
+      // می‌سنجد و اگر مثلاً «docx» در واقع PDF باشد، همان را تحلیل می‌کند.
       const markUploaded = () =>
         deps.store.markUploaded(
           doc.id,
           at,
           new Date(at.getTime() + retentionDays * 86_400_000),
-          doc.sourceKind === 'pdf',
+          doc.sourceKind === 'pdf' ? ANALYZE_DOCUMENT_JOB : CONVERT_DOCUMENT_JOB,
         );
 
       try {
@@ -459,6 +463,10 @@ export function createUploadService(deps: UploadServiceDeps) {
           await deps.store.markFailed(doc.id, 'aborted');
         } else {
           await deps.storage.deleteObject(doc.storageKey!);
+          // PDF تبدیل‌شدهٔ Word و عکس هم؛ وگرنه تا روزهای نگهداری دیسک را نگه می‌دارد.
+          if (doc.pdfStorageKey && doc.pdfStorageKey !== doc.storageKey) {
+            await deps.storage.deleteObject(doc.pdfStorageKey);
+          }
           await deps.store.markFailed(doc.id, 'discarded', now());
         }
       } catch (error) {

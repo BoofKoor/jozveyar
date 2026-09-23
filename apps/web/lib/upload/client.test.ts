@@ -122,7 +122,14 @@ describe('آپلودگر مرورگر', () => {
     service = null;
     const { result } = await finalPhase(makeFile(MiB));
     expect(result.phase).toBe('unavailable');
+    expect(result.reason).toBe('storage_unavailable');
     expect(puts).toEqual([]);
+  });
+
+  it('فایلی که سرور نمی‌پذیرد دلیلش را می‌گوید — پیام کاربر به همان بستگی دارد', async () => {
+    const { result } = await finalPhase(makeFile(MiB, 'جزوه.xlsx'));
+    expect(result.phase).toBe('unavailable');
+    expect(result.reason).toBe('unsupported_type');
   });
 
   it('قطع شبکه وسط کار: منتظر می‌ماند و از همان تکه ادامه می‌دهد', async () => {

@@ -5,20 +5,20 @@
  * تست یکپارچگی `packages/db` سنجیده می‌شود.
  */
 
-import type { DocumentRow, DocumentStore, NewUploadDocument, StoredAnalysis } from '@jozveyar/db';
+import type { DocumentJob, DocumentRow, DocumentStore, NewUploadDocument, StoredAnalysis } from '@jozveyar/db';
 import type { DocumentAnalysis } from '@jozveyar/contracts';
 
 export function memoryStore(): DocumentStore & {
   rows: Map<string, DocumentRow>;
   settings: Map<string, unknown>;
-  queued: Set<string>;
+  queued: Map<string, DocumentJob>;
   browserAnalyses: Map<string, DocumentAnalysis>;
   serverAnalyses: Map<string, StoredAnalysis>;
 } {
   const rows = new Map<string, DocumentRow>();
   const settings = new Map<string, unknown>();
-  /** کار تحلیلی که در صف رفته — شبیه جدول `jobs`. */
-  const queued = new Set<string>();
+  /** کاری که در صف رفته (تحلیل یا تبدیل) — شبیه جدول `jobs`. */
+  const queued = new Map<string, DocumentJob>();
   const browserAnalyses = new Map<string, DocumentAnalysis>();
   /** تحلیل‌هایی که «کارگر» نوشته — تست مستقیم پرش می‌کند. */
   const serverAnalyses = new Map<string, StoredAnalysis>();
@@ -38,14 +38,17 @@ export function memoryStore(): DocumentStore & {
         pageCount: null,
         failureReason: null,
         uploadedAt: null,
+        pdfStorageKey: null,
+        pdfSizeBytes: null,
+        conversion: null,
       });
     },
     async find(id) {
       return rows.get(id) ?? null;
     },
-    async markUploaded(id, at, fileExpiresAt, queueAnalysis) {
+    async markUploaded(id, at, fileExpiresAt, job) {
       Object.assign(rows.get(id)!, { status: 'uploaded', uploadedAt: at, fileExpiresAt });
-      if (queueAnalysis) queued.add(id);
+      if (job && !queued.has(id)) queued.set(id, job);
     },
     async markFailed(id, reason, fileDeletedAt) {
       Object.assign(rows.get(id)!, { status: 'failed', failureReason: reason, fileDeletedAt: fileDeletedAt ?? null });
@@ -55,8 +58,8 @@ export function memoryStore(): DocumentStore & {
     },
     async committedBytes() {
       return [...rows.values()]
-        .filter((r) => r.status === 'uploading' || r.status === 'uploaded')
-        .reduce((sum, r) => sum + r.sizeBytes, 0);
+        .filter((r) => r.status !== 'failed' && r.status !== 'pending' && r.fileDeletedAt === null)
+        .reduce((sum, r) => sum + r.sizeBytes + (r.pdfSizeBytes ?? 0), 0);
     },
     async setting(key) {
       return settings.get(key);

@@ -141,16 +141,61 @@ test.describe('تحلیل در مرورگر', () => {
   });
 });
 
-test.describe('بن‌بست نداریم', () => {
-  test('فایل Word به مسیر سرور می‌رود، نه خطا', async ({ page }) => {
+/**
+ * Word، پاورپوینت و عکس (ADR-028). اینجا استوریج نیست، پس تبدیل سرور هرگز
+ * نمی‌رسد؛ چیزی که سنجیده می‌شود پیش‌فاکتور فوری مرورگر است و اینکه نبودن سرور
+ * بن‌بست نمی‌سازد. تبدیل واقعی در `upload.spec.ts`.
+ */
+test.describe('Word، پاورپوینت و عکس', () => {
+  test('Word: قیمت فوری از عددی که خود Word نوشته', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', join(FIXTURES, 'jozve-12.docx'));
+    await expect(page.getByTestId('stat-page-count')).toHaveText('12');
+    // ۱۲ صفحه سیاه‌سفید: ۱۹,۲۰۰ + صحافی ۴۵,۰۰۰ = ۶۴,۲۰۰ تومان — پیش‌فاکتور.
+    await expect(price(page)).toContainText('64,200');
+    await expect(page.getByTestId('office-estimate')).toBeVisible();
+    await expect(colorPages(page)).toHaveText('—');
+    // سرور نیست: قیمت تقریبی می‌ماند و راه جلو گفته می‌شود — نه خطا، نه انتظار بی‌پایان.
+    await expect(page.getByTestId('estimate-unconfirmed')).toContainText('خروجی PDF');
+  });
+
+  test('پاورپوینت: اسلاید مخفی شمرده نمی‌شود', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', join(FIXTURES, 'slides-21.pptx'));
+    await expect(page.getByTestId('stat-page-count')).toHaveText('21');
+    await expect(page.getByTestId('office-estimate')).toContainText('پاورپوینت');
+  });
+
+  test('عکس: یک صفحه، قیمت فوری', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', join(FIXTURES, 'scan-photo.png'));
+    await expect(page.getByTestId('stat-page-count')).toHaveText('1');
+    // ۱ صفحه سیاه‌سفید: ۱,۶۰۰ + صحافی ۴۵,۰۰۰ = ۴۶,۶۰۰ تومان
+    await expect(price(page)).toContainText('46,600');
+  });
+
+  test('Word بدون شمارهٔ صفحه: مسیر سرور، و بدون سرور راه جلو', async ({ page }) => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', {
       name: 'jozve.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      buffer: Buffer.from('PK not a real docx'),
+      buffer: Buffer.from('PK not a real docx'),
     });
-    await expect(page.getByText('این فایل سمت سرور بررسی می‌شود')).toBeVisible();
-    // و راه جلو دارد
+    await expect(page.getByTestId('server-path')).toBeVisible();
+    await expect(page.getByText('چند دقیقهٔ دیگر دوباره بینداز')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'فایل دیگری بینداز' })).toBeVisible();
+  });
+});
+
+test.describe('بن‌بست نداریم', () => {
+  test('نوع فایل ناشناخته پیام روشن و راه جلو می‌دهد', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', {
+      name: 'jozve.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from('PK'),
+    });
+    await expect(page.getByText('این نوع فایل را نمی‌گیریم')).toBeVisible();
     await expect(page.getByRole('button', { name: 'فایل دیگری بینداز' })).toBeVisible();
   });
 

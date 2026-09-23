@@ -1,6 +1,7 @@
 'use client';
 
 import { formatBytes, formatNumber } from '@jozveyar/text';
+import type { FileKind } from '../lib/analysis-protocol';
 import type { AnalysisState, AnalysisSummaryView } from '../lib/useDocumentAnalysis';
 import type { UploadSnapshot } from '../lib/upload/client';
 
@@ -8,8 +9,11 @@ interface Props {
   state: AnalysisState;
   summary: AnalysisSummaryView;
   upload: UploadSnapshot | null;
-  /** سرور تعداد دیگری دید؛ این عددی است که مرورگر دیده بود. */
+  /** سرور تعداد دیگری دید؛ این عددی است که مرورگر (یا خود فایل Word) گفته بود. */
   correctedFrom?: number | null;
+  kind?: FileKind | null;
+  /** پیش‌فاکتور Word یا عکس که سرور نمی‌تواند تأییدش کند (آپلود پذیرفته نشد). */
+  serverUnavailable?: boolean;
   onReset: () => void;
 }
 
@@ -29,6 +33,8 @@ export function uploadLine(upload: UploadSnapshot | null): string | null {
       return 'اینترنت قطع شد — با وصل شدن، ارسال از همان‌جا ادامه پیدا می‌کند';
     case 'done':
       switch (upload.analysis?.state) {
+        case 'converting':
+          return 'فایل رسید · تبدیل به PDF روی سرور…';
         case 'pending':
         case 'running':
           return 'فایل رسید · بررسی کامل صفحات روی سرور…';
@@ -64,9 +70,21 @@ function Stat({
   );
 }
 
-export function AnalysisCard({ state, summary, upload, correctedFrom, onReset }: Props) {
-  const { phase, fileName, fileSize, pageCount, analyzedCount, sampleStride, elapsedMs } = state;
+export function AnalysisCard({
+  state,
+  summary,
+  upload,
+  correctedFrom,
+  kind,
+  serverUnavailable,
+  onReset,
+}: Props) {
+  const { phase, fileName, fileSize, pageCount, analyzedCount, sampleStride, elapsedMs, estimatedFrom } =
+    state;
   const analyzing = phase === 'analyzing' || phase === 'reading';
+  const program = kind === 'slides' ? 'پاورپوینت' : 'Word';
+  /** عدد قبلی را خود فایل Word یا پاورپوینت گفته بود، نه مرورگر. */
+  const fromOffice = kind === 'word' || kind === 'slides';
 
   // درصد پیشرفت بر اساس صفحاتی که قرار است تحلیل شوند، نه کل صفحات سند.
   const target = sampleStride > 1 ? Math.ceil(pageCount / sampleStride) : pageCount;
@@ -144,8 +162,8 @@ export function AnalysisCard({ state, summary, upload, correctedFrom, onReset }:
         <Stat
           testId="stat-color-pages"
           label="صفحات رنگی"
-          value={formatNumber(summary.colorPageCount)}
-          hint={summary.estimated ? 'برآوردی' : undefined}
+          value={estimatedFrom ? '—' : formatNumber(summary.colorPageCount)}
+          hint={estimatedFrom ? 'پس از بررسی' : summary.estimated ? 'برآوردی' : undefined}
         />
         <Stat
           label="زمان بررسی"
@@ -153,12 +171,36 @@ export function AnalysisCard({ state, summary, upload, correctedFrom, onReset }:
         />
       </dl>
 
+      {estimatedFrom === 'office' ? (
+        <p data-testid="office-estimate" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+          این تعداد را خود فایل {program} نوشته. فایل روی سرور به PDF تبدیل می‌شود و قیمت با
+          شمارش دقیق همان به‌روز می‌شود.
+        </p>
+      ) : null}
+
+      {estimatedFrom === 'image' ? (
+        <p className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+          هر عکس یک صفحهٔ A4 می‌شود. رنگی بودن و کیفیتش بعد از بررسی روی سرور معلوم می‌شود.
+        </p>
+      ) : null}
+
+      {serverUnavailable ? (
+        <p data-testid="estimate-unconfirmed" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+          الان نمی‌توانیم این فایل را بگیریم، پس این قیمت تقریبی می‌ماند. چند دقیقهٔ دیگر
+          دوباره بینداز
+          {estimatedFrom === 'office'
+            ? ` — یا از خود ${program} خروجی PDF بگیر؛ PDF همین‌جا فوری و دقیق خوانده می‌شود.`
+            : '.'}
+        </p>
+      ) : null}
+
       {correctedFrom ? (
         <p data-testid="server-corrected" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
           بررسی کامل روی سرور{' '}
           <span className="num font-semibold text-ink">{formatNumber(state.pageCount)}</span> صفحه
-          دید (مرورگر <span className="num">{formatNumber(correctedFrom)}</span> دیده بود). قیمت
-          با عدد سرور حساب شد.
+          دید ({fromOffice ? `خود فایل ${program}` : 'مرورگر'}{' '}
+          <span className="num">{formatNumber(correctedFrom)}</span> {fromOffice ? 'نوشته' : 'دیده'}{' '}
+          بود). قیمت با عدد سرور حساب شد.
         </p>
       ) : null}
 

@@ -7,6 +7,8 @@ import {
   ERROR_MESSAGES,
   MAX_BROWSER_ANALYSIS_BYTES,
   MAX_PAGES_TO_ANALYZE,
+  extensionOf,
+  fileKind,
   type AnalysisErrorCode,
   type AnalyzeRequest,
   type WorkerResponse,
@@ -17,7 +19,10 @@ export type AnalysisPhase =
   | 'reading'
   | 'analyzing'
   | 'ready'
-  /** فایل برای مرورگر بزرگ است — مسیر سرور. بن‌بست نیست، فقط کندتر. */
+  /**
+   * مسیر سرور: Word، پاورپوینت و عکس (تبدیل، ADR-028)، یا PDF‌ای که برای مرورگر
+   * بزرگ است. بن‌بست نیست، فقط چند ثانیه کندتر.
+   */
   | 'needs_server'
   | 'error';
 
@@ -34,6 +39,12 @@ export interface AnalysisState {
   analysis: DocumentAnalysis | null;
   error: { code: AnalysisErrorCode; title: string; hint: string } | null;
   elapsedMs: number;
+  /**
+   * `pageCount` در مسیر سرور، پیش از رسیدن عدد سرور: `office` یعنی عددی که خود
+   * Word یا پاورپوینت در فایل نوشته، `image` یعنی «هر عکس یک صفحه». پیش‌فاکتور
+   * فوری است؛ قیمت قطعی از شمارش PDF تبدیل‌شده می‌آید.
+   */
+  estimatedFrom: 'office' | 'image' | null;
 }
 
 const INITIAL: AnalysisState = {
@@ -47,10 +58,8 @@ const INITIAL: AnalysisState = {
   analysis: null,
   error: null,
   elapsedMs: 0,
+  estimatedFrom: null,
 };
-
-/** پسوندهایی که مسیر مرورگر می‌روند. بقیه از روز اول مسیر سرور دارند. */
-const BROWSER_PATH = /\.pdf$/i;
 
 export interface AnalysisSummaryView {
   pageCount: number;
@@ -114,6 +123,8 @@ export function useDocumentAnalysis() {
   const [state, setState] = useState<AnalysisState>(INITIAL);
   const workerRef = useRef<Worker | null>(null);
   const startedAtRef = useRef(0);
+  /** هر فایل تازه یک شماره؛ برآورد دیررسِ فایل قبلی روی فایل جدید نمی‌نشیند. */
+  const fileTokenRef = useRef(0);
 
   const disposeWorker = useCallback(() => {
     workerRef.current?.terminate();
@@ -124,6 +135,7 @@ export function useDocumentAnalysis() {
 
   const reset = useCallback(() => {
     disposeWorker();
+    fileTokenRef.current += 1;
     setState(INITIAL);
   }, [disposeWorker]);
 
@@ -132,6 +144,7 @@ export function useDocumentAnalysis() {
       // فایل جدید، تحلیل قبلی را لغو می‌کند — وگرنه نتیجهٔ کهنه قیمت را خراب می‌کند.
       disposeWorker();
       startedAtRef.current = Date.now();
+      const token = ++fileTokenRef.current;
 
       const base = {
         ...INITIAL,
@@ -139,10 +152,32 @@ export function useDocumentAnalysis() {
         fileSize: file.size,
       };
 
-      if (!BROWSER_PATH.test(file.name)) {
-        // Word، پاورپوینت و عکس در مرورگر قابل تجزیه نیستند. مسیر سرور
-        // از روز اول در طرح هست؛ تا ساخته شود، کاربر پیام روشن می‌بیند.
+      const kind = fileKind(file.name);
+      if (kind === null) {
+        const error = { code: 'unsupported_type' as const, ...ERROR_MESSAGES.unsupported_type };
+        setState({ ...base, phase: 'error', error });
+        return;
+      }
+      if (kind === 'image') {
+        // هر عکس یک صفحهٔ A4 می‌شود؛ رنگ و کیفیتش را سرور بعد از تبدیل می‌گوید.
+        setState({ ...base, phase: 'needs_server', pageCount: 1, estimatedFrom: 'image' });
+        return;
+      }
+      if (kind !== 'pdf') {
+        // Word و پاورپوینت در مرورگر صفحه‌بندی نمی‌شوند؛ سرور تبدیلشان می‌کند. تا
+        // آن موقع، اگر خود فایل تعداد صفحه‌اش را نوشته، همان پیش‌فاکتور است.
         setState({ ...base, phase: 'needs_server' });
+        const ext = extensionOf(file.name);
+        if (ext !== 'docx' && ext !== 'pptx') return; // doc و ppt قدیمی چنین فهرستی ندارند
+        try {
+          const { officePageCount } = await import('./office-meta');
+          const pages = await officePageCount(file, ext);
+          if (pages !== null && token === fileTokenRef.current) {
+            setState((current) => ({ ...current, pageCount: pages, estimatedFrom: 'office' }));
+          }
+        } catch {
+          // بدون برآورد هم کار می‌کند: قیمت با عدد سرور می‌آید.
+        }
         return;
       }
 

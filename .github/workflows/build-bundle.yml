@@ -193,8 +193,26 @@ jobs:
         run: |
           set -eux
           docker build --build-arg "BASE_IMAGE=${{ steps.base.outputs.image }}" -t docworker-smoke dw
-          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts; print(fitz.VersionBind)"
+          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert; print(fitz.VersionBind)"
           docker run --rm docworker-smoke soffice --version
+          # تبدیل واقعی همان‌طور که روی سرور اجرا می‌شود (ADR-028): کاربر بی‌امتیاز
+          # docworker، پایتون PID 1 بی init، پروفایل مهارشده، بی‌شبکه.
+          docker run --rm -i --network none -v "$PWD/services/docworker/tests:/app/tests:ro" docworker-smoke python - <<'PY'
+          import os, tempfile
+          import fitz
+          from docworker import convert, sandbox
+          from tests.samples import docx_paragraph, make_docx, persian_text
+          walls = sandbox.protect_worker()
+          assert os.getpid() == 1 and all(walls.values()), walls
+          work = tempfile.mkdtemp()
+          make_docx(os.path.join(work, "upload"), [docx_paragraph(persian_text(i + 1, 40), "B Nazanin") for i in range(120)])
+          office = convert.LibreOffice()
+          result = convert.to_pdf(os.path.join(work, "upload"), work, office)
+          with fitz.open(result.pdf_path) as doc:
+              print(result.record(), "pages:", doc.page_count)
+          # LibreOffice‌ای که بعد از تبدیل مانده بود و کشته شد — باید خالی باشد.
+          print("stragglers:", office.stragglers)
+          PY
           docker image ls docworker-smoke
 
       - name: بیلد

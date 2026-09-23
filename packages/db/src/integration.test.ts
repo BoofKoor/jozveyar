@@ -24,7 +24,12 @@ import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } 
 import { bindingRateBands, documents, jobs, priceLists, settings, shippingRates } from './schema.js';
 import { eq } from 'drizzle-orm';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts';
-import { ANALYZE_DOCUMENT_JOB, createDocumentStore, type NewUploadDocument } from './documents.js';
+import {
+  ANALYZE_DOCUMENT_JOB,
+  CONVERT_DOCUMENT_JOB,
+  createDocumentStore,
+  type NewUploadDocument,
+} from './documents.js';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -261,8 +266,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const failed = doc({ sessionHash: session, sizeBytes: 100_000 });
       for (const d of [open, uploaded, expired, failed]) await store.insertUpload(d);
 
-      await store.markUploaded(uploaded.id, now, new Date(now.getTime() + 2 * 86_400_000), false);
-      await store.markUploaded(expired.id, now, new Date(now.getTime() - 1), false);
+      await store.markUploaded(uploaded.id, now, new Date(now.getTime() + 2 * 86_400_000), null);
+      await store.markUploaded(expired.id, now, new Date(now.getTime() - 1), null);
       await store.markFailed(failed.id, 'aborted');
 
       expect(await store.countOpenUploads(session, dayAgo)).toBe(1);
@@ -284,13 +289,44 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const d = doc();
       await store.insertUpload(d);
       const at = new Date();
-      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), true);
+      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), ANALYZE_DOCUMENT_JOB);
       // تکمیل تکراری (کلاینتی که جواب را گم کرده) کار دوم نمی‌سازد.
-      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), true);
+      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), ANALYZE_DOCUMENT_JOB);
 
       const queued = await conn.db.select().from(jobs).where(eq(jobs.documentId, d.id));
       expect(queued).toHaveLength(1);
       expect(queued[0]).toMatchObject({ kind: ANALYZE_DOCUMENT_JOB, status: 'queued', attempts: 0 });
+    });
+
+    it('Word رسیده کار تبدیل می‌گیرد، نه تحلیل (ADR-028)', async () => {
+      const store = createDocumentStore(conn);
+      const d = doc({ sourceKind: 'docx', originalName: 'جزوه.docx', storageKey: 'uploads/w.docx' });
+      await store.insertUpload(d);
+      const at = new Date();
+      await store.markUploaded(d.id, at, new Date(at.getTime() + 86_400_000), CONVERT_DOCUMENT_JOB);
+      const queued = await conn.db.select().from(jobs).where(eq(jobs.documentId, d.id));
+      expect(queued.map((j) => j.kind)).toEqual([CONVERT_DOCUMENT_JOB]);
+    });
+
+    it('بودجهٔ دیسک PDF تبدیل‌شده را هم می‌شمارد، و «در حال تبدیل» زنده است', async () => {
+      await conn.db.delete(documents);
+      const store = createDocumentStore(conn);
+      const now = new Date();
+      const later = new Date(now.getTime() + 86_400_000);
+      const word = doc({ sourceKind: 'docx', sizeBytes: 1_000 });
+      const converting = doc({ sourceKind: 'pptx', sizeBytes: 50 });
+      for (const d of [word, converting]) {
+        await store.insertUpload(d);
+        await store.markUploaded(d.id, now, later, null);
+      }
+      await conn.db
+        .update(documents)
+        .set({ status: 'ready', pdfStorageKey: 'uploads/w.converted.pdf', pdfSizeBytes: 3_000 })
+        .where(eq(documents.id, word.id));
+      await conn.db.update(documents).set({ status: 'converting' }).where(eq(documents.id, converting.id));
+      expect(await store.committedBytes(now, now)).toBe(1_000 + 3_000 + 50);
+      const row = await store.find(word.id);
+      expect(row).toMatchObject({ pdfStorageKey: 'uploads/w.converted.pdf', pdfSizeBytes: 3_000, conversion: null });
     });
 
     it('تحلیل مرورگر فقط بار اول ذخیره می‌شود؛ تحلیل سرور تا نیامده null است', async () => {

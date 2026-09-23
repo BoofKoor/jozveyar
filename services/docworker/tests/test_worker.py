@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from docworker import fonts
-from docworker.__main__ import Worker
+from docworker.__main__ import KINDS, Worker, kinds_from_env
 
 
 @pytest.fixture
@@ -76,3 +76,20 @@ def test_unreachable_database_waits(worker, monkeypatch):
     monkeypatch.setattr(psycopg, "connect", fake_connect)
     worker.run()
     assert len(calls) == 2
+
+
+def test_worker_takes_every_kind_by_default(monkeypatch):
+    monkeypatch.delenv("DOCWORKER_KINDS", raising=False)
+    assert kinds_from_env() == ["convert_document", "analyze_document"] == list(KINDS)
+
+
+def test_a_node_can_take_only_analysis(monkeypatch):
+    """نود دوم با رم کم: همان ایمیج، فقط تحلیل؛ تبدیل‌ها برای نود اصلی می‌ماند."""
+    monkeypatch.setenv("DOCWORKER_KINDS", " analyze_document ")
+    assert kinds_from_env() == ["analyze_document"]
+
+
+def test_a_typo_in_kinds_stops_the_worker_loudly(monkeypatch):
+    monkeypatch.setenv("DOCWORKER_KINDS", "analyse_document")
+    with pytest.raises(SystemExit, match="analyse_document"):
+        kinds_from_env()
