@@ -127,3 +127,43 @@ test('PDF بزرگ‌تر از توان مرورگر: قیمت از سرور م�
   await expect(page.getByTestId('price-total')).toContainText('54,600', { timeout: 180_000 });
   await expect(page.getByTestId('stat-page-count')).toHaveText('6');
 });
+
+/*
+ * تبدیل روی سرور (ADR-028) — کارگر اسناد با LibreOffice لازم است (ایمیج پایه،
+ * یا هر جا `soffice` و فونت‌های ایمیج نصب باشد).
+ */
+
+test('Word: پیش‌فاکتور فوری، بعد عدد سرور از PDF تبدیل‌شده', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', join(FIXTURES, 'jozve-12.docx'));
+  // خود فایل می‌گوید ۱۲ صفحه (Word با فونت‌های کاربر): ۱۹,۲۰۰ + ۴۵,۰۰۰.
+  await expect(page.getByTestId('price-total')).toContainText('64,200', { timeout: 15_000 });
+  await expect(status(page)).toContainText('همهٔ صفحات بررسی شد', { timeout: 120_000 });
+  // LibreOffice با Nazli (جای B Nazanin) ۶ صفحه دید؛ قیمت همان می‌شود و کاربر می‌داند چرا.
+  await expect(page.getByTestId('stat-page-count')).toHaveText('6');
+  await expect(page.getByTestId('price-total')).toContainText('54,600');
+  await expect(page.getByTestId('server-corrected')).toContainText('خود فایل Word');
+  await expect(page.getByTestId('office-estimate')).toHaveCount(0);
+});
+
+test('عکس: روی سرور یک صفحه می‌شود و رنگش سنجیده می‌شود', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', join(FIXTURES, 'scan-photo.png'));
+  await expect(page.getByTestId('price-total')).toContainText('46,600', { timeout: 15_000 });
+  await expect(status(page)).toContainText('همهٔ صفحات بررسی شد', { timeout: 60_000 });
+  await expect(page.getByTestId('stat-color-pages')).toHaveText('0');
+  await expect(page.getByTestId('price-total')).toContainText('46,600');
+});
+
+test('Word خراب: پیام روشن سرور و راه جلو، نه انتظار بی‌پایان', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', {
+    name: 'jozve-broken.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    buffer: Buffer.from('PK\x03\x04 not really a docx'),
+  });
+  await expect(page.getByTestId('server-path')).toBeVisible();
+  // zip خراب: کارگر محتوا را می‌سنجد و Word نمی‌شناسدش (unsupported_format).
+  await expect(page.getByText('محتوای این فایل با پسوندش جور نیست')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('button', { name: 'فایل دیگری بینداز' })).toBeVisible();
+});

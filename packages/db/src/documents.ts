@@ -16,6 +16,12 @@ export type DocumentRow = typeof documents.$inferSelect;
 
 /** نوع کاری که کارگر اسناد برای تحلیل برمی‌دارد. همین رشته در services/docworker است. */
 export const ANALYZE_DOCUMENT_JOB = 'analyze_document';
+/**
+ * تبدیل Word، پاورپوینت یا عکس به PDF (ADR-028). کارگر بعد از تبدیل، کار
+ * تحلیل همان سند را خودش در صف می‌گذارد — در همان تراکنشی که PDF را ثبت می‌کند.
+ */
+export const CONVERT_DOCUMENT_JOB = 'convert_document';
+export type DocumentJob = typeof ANALYZE_DOCUMENT_JOB | typeof CONVERT_DOCUMENT_JOB;
 
 /** یک صفحه از تحلیل ذخیره‌شده — فقط آنچه برای نمایش و قیمت لازم است. */
 export interface StoredPage {
@@ -50,17 +56,18 @@ export interface DocumentStore {
   insertUpload(doc: NewUploadDocument): Promise<void>;
   find(id: string): Promise<DocumentRow | null>;
   /**
-   * آپلود تمام شد. با `queueAnalysis` کار تحلیل **در همان تراکنش** در صف
-   * می‌رود: یا هر دو ثبت می‌شوند یا هیچ‌کدام — سندی نمی‌ماند که رسیده ولی
-   * هیچ‌وقت تحلیل نشود.
+   * آپلود تمام شد. کار بعدی (`job`: تحلیل برای PDF، تبدیل برای بقیه) **در همان
+   * تراکنش** در صف می‌رود: یا هر دو ثبت می‌شوند یا هیچ‌کدام — سندی نمی‌ماند که
+   * رسیده ولی هیچ‌وقت بررسی نشود.
    */
-  markUploaded(id: string, at: Date, fileExpiresAt: Date, queueAnalysis: boolean): Promise<void>;
+  markUploaded(id: string, at: Date, fileExpiresAt: Date, job: DocumentJob | null): Promise<void>;
   markFailed(id: string, reason: string, fileDeletedAt?: Date): Promise<void>;
   /** آپلودهای باز این نشست که از `since` جوان‌ترند. */
   countOpenUploads(sessionHash: string, since: Date): Promise<number>;
   /**
    * حجمی که الان روی دیسک است یا در راه است: آپلودهای باز جوان‌تر از
-   * `openSince` + فایل‌های رسیده‌ای که هنوز منقضی یا پاک نشده‌اند.
+   * `openSince` + فایل‌های رسیده‌ای که هنوز منقضی یا پاک نشده‌اند — با PDF
+   * تبدیل‌شده‌شان، که گاهی از خود Word بزرگ‌تر است.
    */
   committedBytes(now: Date, openSince: Date): Promise<number>;
   /** مقدار یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
@@ -85,17 +92,14 @@ export function createDocumentStore({ db }: Database): DocumentStore {
       return row ?? null;
     },
 
-    async markUploaded(id, at, fileExpiresAt, queueAnalysis) {
+    async markUploaded(id, at, fileExpiresAt, job) {
       await db.transaction(async (tx) => {
         await tx
           .update(documents)
           .set({ status: 'uploaded', uploadedAt: at, fileExpiresAt })
           .where(eq(documents.id, id));
-        if (queueAnalysis) {
-          await tx
-            .insert(jobs)
-            .values({ kind: ANALYZE_DOCUMENT_JOB, documentId: id })
-            .onConflictDoNothing();
+        if (job) {
+          await tx.insert(jobs).values({ kind: job, documentId: id }).onConflictDoNothing();
         }
       });
     },
@@ -124,12 +128,14 @@ export function createDocumentStore({ db }: Database): DocumentStore {
     async committedBytes(now, openSince) {
       const open: SQL = and(eq(documents.status, 'uploading'), gt(documents.createdAt, openSince))!;
       const stored: SQL = and(
-        inArray(documents.status, ['uploaded', 'analyzing', 'ready']),
+        inArray(documents.status, ['uploaded', 'converting', 'analyzing', 'ready']),
         isNull(documents.fileDeletedAt),
         or(isNull(documents.fileExpiresAt), gt(documents.fileExpiresAt, now)),
       )!;
       const [row] = await db
-        .select({ total: sql<string>`coalesce(sum(${documents.sizeBytes}), 0)` })
+        .select({
+          total: sql<string>`coalesce(sum(${documents.sizeBytes} + coalesce(${documents.pdfSizeBytes}, 0)), 0)`,
+        })
         .from(documents)
         .where(or(open, stored));
       // sum روی bigint در پستگرس numeric برمی‌گرداند و درایور رشته می‌دهد.

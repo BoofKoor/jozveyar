@@ -190,6 +190,8 @@ export const documentStatus = pgEnum('document_status', [
   'pending',
   'uploading',
   'uploaded',
+  /** Word، پاورپوینت یا عکس در حال تبدیل به PDF (برش ۲ب، ADR-028). */
+  'converting',
   'analyzing',
   'ready',
   'failed',
@@ -238,6 +240,25 @@ export const documents = pgTable(
     /** اندازهٔ تکه، تا ادامهٔ آپلود بعد از رفرش دقیقاً همان تکه‌بندی را بسازد. */
     partSizeBytes: integer('part_size_bytes'),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
+
+    /* ── تبدیل (ADR-028) ── */
+
+    /**
+     * PDF یکدستی که تحلیل و چاپ رویش انجام می‌شود. برای PDF همان null است و
+     * خود `storageKey` خوانده می‌شود؛ برای Word و پاورپوینت و عکس، خروجی
+     * تبدیل کارگر زیر همان پیشوند `uploads/`، پس با همان قاعدهٔ نگهداری پاک
+     * می‌شود.
+     */
+    pdfStorageKey: text('pdf_storage_key'),
+    /** حجم PDF تبدیل‌شده — بودجهٔ دیسک آن را هم می‌شمارد. */
+    pdfSizeBytes: bigint('pdf_size_bytes', { mode: 'number' }),
+    /**
+     * سابقهٔ تبدیل: موتور و نسخه، فرمت واقعی (از محتوا، نه پسوند)، زمان، تعداد
+     * صفحه‌ای که خود Word یا پاورپوینت داخل فایل نوشته بود، و فونت‌هایی که
+     * خواسته شد و جایگزین شد. خام نگه داشته می‌شود، مثل اعداد تحلیل: فایل دو
+     * روز بعد پاک می‌شود و این تنها ردِ اختلاف صفحه‌بندی ماست.
+     */
+    conversion: jsonb('conversion'),
   },
   (t) => [
     index('documents_status').on(t.status),

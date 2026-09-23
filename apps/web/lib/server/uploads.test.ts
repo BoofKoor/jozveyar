@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { MemoryDriver, partSize, planParts } from '@jozveyar/storage';
 
 import { memoryStore } from './testing';
+import { ANALYZE_DOCUMENT_JOB, CONVERT_DOCUMENT_JOB } from '@jozveyar/db';
+
 import { createUploadService, MAX_OPEN_UPLOADS_PER_SESSION } from './uploads';
 
 const MiB = 1024 * 1024;
@@ -228,13 +230,40 @@ describe('سرویس آپلود', () => {
       return upload.documentId;
     }
 
-    it('PDF رسیده در صف تحلیل می‌رود؛ Word نه (برش ۲ب)', async () => {
+    it('PDF رسیده در صف تحلیل می‌رود؛ Word و پاورپوینت و عکس در صف تبدیل (ADR-028)', async () => {
       const pdf = await uploaded();
-      const docx = await uploaded('جزوه.docx');
-      expect(store.queued.has(pdf)).toBe(true);
-      expect(store.queued.has(docx)).toBe(false);
-      const status = await service.status(ME, docx);
-      expect(status.ok && status.value.analysis).toBeUndefined();
+      const others = await Promise.all(['جزوه.docx', 'اسلاید.pptx', 'صفحه.jpg'].map((n) => uploaded(n)));
+      expect(store.queued.get(pdf)).toBe(ANALYZE_DOCUMENT_JOB);
+      for (const id of others) expect(store.queued.get(id)).toBe(CONVERT_DOCUMENT_JOB);
+      // Word هم وضعیت تحلیل دارد: مرورگر دنبالش می‌کند تا قیمت سرور بیاید.
+      const status = await service.status(ME, others[0]!);
+      expect(status.ok && status.value.analysis).toEqual({ state: 'pending' });
+    });
+
+    it('تبدیل روی سرور «converting» دیده می‌شود، نه «در صف»', async () => {
+      const id = await uploaded('جزوه.docx');
+      store.rows.get(id)!.status = 'converting';
+      const status = await service.status(ME, id);
+      expect(status.ok && status.value).toMatchObject({ status: 'uploaded', analysis: { state: 'converting' } });
+    });
+
+    it('لغو Word تبدیل‌شده: هم فایل اصل پاک می‌شود هم PDF تبدیل‌شده', async () => {
+      const id = await uploaded('جزوه.docx');
+      const row = store.rows.get(id)!;
+      row.pdfStorageKey = `uploads/${id}.converted.pdf`;
+      storage.objects.set(row.pdfStorageKey, { sizeBytes: 10, etag: '"x"', contentType: 'application/pdf' });
+      expect((await service.abort(ME, id)).ok).toBe(true);
+      expect(storage.objects.has(row.storageKey!)).toBe(false);
+      expect(storage.objects.has(row.pdfStorageKey)).toBe(false);
+    });
+
+    it('بودجهٔ دیسک PDF تبدیل‌شده را هم می‌شمارد', async () => {
+      const id = await uploaded('جزوه.docx'); // ۲۰ مگابایت
+      store.rows.get(id)!.pdfSizeBytes = 70 * MiB;
+      expect(await service.create(ME, { name: 'b.pdf', sizeBytes: 20 * MiB })).toMatchObject({
+        status: 503,
+        error: 'storage_full',
+      });
     });
 
     it('وضعیت تحلیل مرحله‌به‌مرحله: در صف ← در حال تحلیل ← آماده', async () => {

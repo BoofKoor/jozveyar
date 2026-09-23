@@ -81,8 +81,11 @@ services:
     image: jozveyar/docworker:${TAG:-latest}
     restart: unless-stopped
     env_file: [../.env]
-    # کارگر پردازهٔ LibreOffice می‌سازد؛ init (tini) پردازهٔ یتیمش را جمع می‌کند.
-    init: true
+    # بدون init (tini): خود کارگر PID 1 است و پردازهٔ یتیم LibreOffice را جمع می‌کند.
+    # tini محیط کامل کانتینر (رمز پایگاه داده، کلید S3) را دارد و dumpable است؛
+    # LibreOffice آلوده می‌توانست `/proc/1/environ` آن را بخواند (ADR-028).
+    # کار جاری پیش از توقف تمام می‌شود — سقف تبدیل ۵ دقیقه است.
+    stop_grace_period: 6m
     # سنجیده (ADR-027): LibreOffice برای Word متنی ~۲۴۰ مگابایت، پاورپوینت ۶۰
     # اسلایدی با عکس ~۵۷۰، و Word با ۳۰ عکس ۱۲ مگاپیکسلی ~۸۹۰؛ پایتون ~۱۵۰. سرور
     # ۷٫۸ گیگابایت دارد. بی swap: فایل سنگین‌تر از این سقف، LibreOffice را می‌کشد

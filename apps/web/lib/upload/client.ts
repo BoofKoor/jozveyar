@@ -28,10 +28,12 @@ export interface UploadSnapshot {
   sentBytes: number;
   totalBytes: number;
   /**
-   * تحلیل سرور بعد از رسیدن فایل. آپلودگر تا `ready` یا `failed` دنبالش می‌کند؛
-   * سرور منبع حقیقت قیمت است.
+   * تحلیل سرور بعد از رسیدن فایل (برای Word و عکس: اول تبدیل). آپلودگر تا
+   * `ready` یا `failed` دنبالش می‌کند؛ سرور منبع حقیقت قیمت است.
    */
   analysis?: ServerAnalysisView;
+  /** چرا `unavailable`: کد خطای API، مثلاً `too_large` یا `unsupported_type`. */
+  reason?: string;
 }
 
 export interface UploadFile {
@@ -71,8 +73,8 @@ interface ServerStatus {
   analysis?: ServerAnalysisView;
 }
 
-/** بیش از این دنبال تحلیل سرور نمی‌گردد — سقف زمانی خود کارگر ۲۰ دقیقه است. */
-const ANALYSIS_WATCH_MS = 25 * 60 * 1000;
+/** بیش از این دنبال تحلیل سرور نمی‌گردد — سقف زمانی کارگر: تبدیل دو بار ۵ دقیقه، تحلیل ۲۰. */
+const ANALYSIS_WATCH_MS = 35 * 60 * 1000;
 
 const API = '/api/uploads';
 const RESUME_PREFIX = 'jy.upload.';
@@ -143,6 +145,9 @@ export function startUpload(
     }
   };
 
+  /** کد خطای آخرین درخواستی که سرور نپذیرفت. */
+  let refusal: string | undefined;
+
   async function resumeOrCreate(): Promise<ServerStatus | null> {
     let previous: string | null = null;
     try {
@@ -163,7 +168,11 @@ export function startUpload(
       method: 'POST',
       body: JSON.stringify({ name: file.name, sizeBytes: file.size, mimeType: file.type }),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      refusal = body.error;
+      return null;
+    }
     const created = (await response.json()) as ServerStatus;
     remember(created.documentId);
     return created;
@@ -251,7 +260,7 @@ export function startUpload(
         const response = await api(`/${id}`);
         if (!response.ok) continue;
         const status = (await response.json()) as ServerStatus;
-        if (!status.analysis) return; // غیر PDF — تحلیل سرور برش ۲ب
+        if (!status.analysis) return; // فایل دیگر روی سرور نیست (انصراف یا انقضا)
         state = status.analysis.state;
         emit({ analysis: status.analysis });
       } catch (error) {
@@ -264,7 +273,7 @@ export function startUpload(
   async function run(): Promise<UploadSnapshot> {
     const status = await resumeOrCreate();
     if (!status) {
-      emit({ phase: 'unavailable' });
+      emit({ phase: 'unavailable', reason: refusal });
       return { ...snapshot };
     }
     const plan = planParts(file.size, status.partSizeBytes);
