@@ -167,6 +167,37 @@ export function pluralFa(count: number, noun: string): string {
   return `${formatNumber(count)} ${noun}`;
 }
 
+/**
+ * فهرست شمارهٔ صفحه‌ها برای هشدار: `صفحهٔ 2`، `صفحه‌های 3، 7 و 12`، و بازهٔ پشت‌سرهم
+ * به‌صورت `صفحه‌های 1 تا 40 و 52`. بیش از `maxItems` بخش کوتاه می‌شود:
+ * `… و 38 صفحهٔ دیگر` — کاربر باید جا را پیدا کند، نه فهرست را بخواند.
+ */
+export function formatPages(pages: readonly number[], maxItems = 6): string {
+  const sorted = [...new Set(pages)].sort((a, b) => a - b);
+  if (sorted.length === 0) return '';
+
+  const items: { text: string; count: number }[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j += 1;
+    const run = j - i + 1;
+    if (run >= 3) {
+      items.push({ text: `${formatNumber(sorted[i]!)} تا ${formatNumber(sorted[j]!)}`, count: run });
+    } else {
+      for (let k = i; k <= j; k += 1) items.push({ text: formatNumber(sorted[k]!), count: 1 });
+    }
+    i = j + 1;
+  }
+
+  const shown = items.slice(0, maxItems);
+  const rest = items.slice(maxItems).reduce((sum, item) => sum + item.count, 0);
+  const parts = shown.map((item) => item.text);
+  if (rest > 0) parts.push(`${formatNumber(rest)} صفحهٔ دیگر`);
+
+  const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join('، ')} و ${parts.at(-1)!}`;
+  return `${sorted.length === 1 ? 'صفحهٔ' : 'صفحه‌های'} ${list}`;
+}
+
 /* ───────────────────────── تاریخ شمسی ───────────────────────── */
 
 const JALALI_MONTHS = [

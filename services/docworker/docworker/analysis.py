@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -40,6 +41,43 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
 }
 
 MIN_SAFE_MARGIN_MM = 10
+
+# همان `ANALYSIS_REVISION` و `DPI_MIN_PAGE_COVERAGE` در packages/analysis؛ تست هم‌ارزی
+# هر دو را می‌سنجد. ۲: DPI از جای واقعی تصویر روی صفحه، نه از اندازهٔ کل صفحه؛ و رندر
+# سرور روی همان شبکهٔ پیکسل مرورگر (`pdf.py`، ADR-029).
+ANALYSIS_REVISION = 2
+DPI_MIN_PAGE_COVERAGE = 0.2
+
+
+def placement_dpi(placement: dict) -> float | None:
+    """DPI مؤثر یک تصویر از اندازه‌ای که واقعاً روی صفحه گرفته — همان `placementDpi`.
+
+    `placement`: `widthPx`، `heightPx` و `matrix` (`[a, b, c, d, e, f]` که مربع واحد
+    تصویر را روی صفحه به پوینت می‌نشاند)."""
+    a, b, c, d = placement["matrix"][:4]
+    width_in = math.hypot(a, b) / 72
+    height_in = math.hypot(c, d) / 72
+    if not (width_in > 0 and height_in > 0 and placement["widthPx"] > 0 and placement["heightPx"] > 0):
+        return None
+    return min(placement["widthPx"] / width_in, placement["heightPx"] / height_in)
+
+
+def page_dpi(placements: list[dict], page_width_pt: float, page_height_pt: float) -> float | None:
+    """DPI تصویری که بیشترین سطح صفحه را پوشانده — همان `pageDpi`. صفحهٔ بی‌تصویر بزرگ
+    (متن، حتی با لوگوی کوچک) None می‌گیرد: کیفیت چاپش را متن تعیین می‌کند."""
+    page_area = page_width_pt * page_height_pt
+    if not page_area > 0:
+        return None
+    best, best_area = None, 0.0
+    for placement in placements:
+        a, b, c, d = placement["matrix"][:4]
+        area = abs(a * d - b * c)
+        if area > best_area:
+            best, best_area = placement, area
+    if best is None or best_area / page_area < DPI_MIN_PAGE_COVERAGE:
+        return None
+    dpi = placement_dpi(best)
+    return None if dpi is None else float(math.floor(dpi + 0.5))
 
 
 @dataclass

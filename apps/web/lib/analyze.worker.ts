@@ -14,13 +14,16 @@
 
 import * as pdfjs from 'pdfjs-dist';
 import {
+  ANALYSIS_REVISION,
   analyzePixels,
   buildPageAnalysis,
   estimatePaperCast,
+  pageDpi,
   paperSizeName,
   ptToMm,
   sampleScaleFor,
   sampleStrideFor,
+  type ImagePlacement,
   type PageMeasurement,
 } from '@jozveyar/analysis';
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
@@ -130,12 +133,115 @@ function measureMinMargin(
   return ptToMm(Math.min(marginLeftPt, marginRightPt, marginTopPt, marginBottomPt));
 }
 
+type Matrix = [number, number, number, number, number, number];
+
+const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
+
+/** `m × n` به قرارداد canvas — همان کاری که `ctx.transform` با ماتریس جاری می‌کند. */
+function multiply(m: Matrix, n: readonly number[]): Matrix {
+  return [
+    m[0] * n[0]! + m[2] * n[1]!,
+    m[1] * n[0]! + m[3] * n[1]!,
+    m[0] * n[2]! + m[2] * n[3]!,
+    m[1] * n[2]! + m[3] * n[3]!,
+    m[0] * n[4]! + m[2] * n[5]! + m[4],
+    m[1] * n[4]! + m[3] * n[5]! + m[5],
+  ];
+}
+
+const isMatrix = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.length === 6 && value.every((x) => typeof x === 'number');
+
 /**
- * برآورد DPI بزرگ‌ترین تصویر صفحه.
+ * هر بار کشیده شدن یک تصویر روی صفحه، با ماتریسی که آن لحظه جاری بوده.
  *
- * فقط برای هشدار کیفیت است، نه برای قیمت — پس اگر درنیامد `null` برمی‌گردد و
- * هیچ‌چیز نمی‌شکند. pdf.js شکل داخلی اشیای تصویر را بین نسخه‌ها عوض می‌کند،
- * به همین دلیل کل کار داخل try نشسته.
+ * pdf.js تصویر را در مربع واحد می‌کشد و ماتریس جاری آن را روی صفحه می‌نشاند؛ همان
+ * ماتریسی که PyMuPDF در سرور می‌دهد. پس فهرست عملگرها با پشتهٔ ماتریس دنبال می‌شود،
+ * درست مثل رندر خود pdf.js: `save`/`restore`، `transform`، ماتریس Form XObject، و جای
+ * ظاهر حاشیه‌نویسی (مهر، امضا).
+ * ماتریس گروه شفافیت فقط برای مرز گروه است و آن را همان `paintFormXObjectBegin`
+ * بعدی اعمال می‌کند؛ اینجا دو بار حساب نمی‌شود.
+ */
+type OperatorList = Awaited<ReturnType<pdfjs.PDFPageProxy['getOperatorList']>>;
+
+function collectPlacements(page: pdfjs.PDFPageProxy, opList: OperatorList): ImagePlacement[] {
+  const OPS = pdfjs.OPS;
+  const stack: Matrix[] = [];
+  let ctm: Matrix = IDENTITY;
+  const placements: ImagePlacement[] = [];
+  const push = (widthPx: unknown, heightPx: unknown, matrix: Matrix) => {
+    const w = Number(widthPx);
+    const h = Number(heightPx);
+    if (w > 0 && h > 0) placements.push({ widthPx: w, heightPx: h, matrix });
+  };
+  const dimensions = (name: unknown) => {
+    if (typeof name !== 'string') return null;
+    const image = tryGet(page.objs, name) ?? tryGet(page.commonObjs, name);
+    return image as { width?: number; height?: number } | null;
+  };
+
+  for (let i = 0; i < opList.fnArray.length; i += 1) {
+    const args = (opList.argsArray[i] ?? []) as unknown[];
+    switch (opList.fnArray[i]) {
+      case OPS.save:
+      case OPS.beginGroup:
+        stack.push(ctm);
+        break;
+      case OPS.restore:
+      case OPS.endGroup:
+      case OPS.paintFormXObjectEnd:
+        ctm = stack.pop() ?? IDENTITY;
+        break;
+      case OPS.transform:
+        if (isMatrix(args)) ctm = multiply(ctm, args);
+        break;
+      case OPS.paintFormXObjectBegin:
+        stack.push(ctm);
+        if (isMatrix(args[0])) ctm = multiply(ctm, args[0]);
+        break;
+      case OPS.beginAnnotation:
+        // [id، مستطیل، جای جعبه روی مستطیل، ماتریس خود ظاهر، …]: pdf.js حالت را به
+        // آغاز صفحه برمی‌گرداند و ظاهر را با این دو روی صفحه می‌نشاند. سرور هم
+        // تصویر مهر و امضا را با همین جا می‌بیند.
+        stack.length = 0;
+        ctm = IDENTITY;
+        if (isMatrix(args[2])) ctm = multiply(ctm, args[2]);
+        if (isMatrix(args[3])) ctm = multiply(ctm, args[3]);
+        break;
+      case OPS.paintImageXObject: {
+        // [objId, پهنا، بلندی] — پیکسل‌ها در خود آرگومان‌اند؛ شیء فقط اگر نبودند.
+        const image = args[1] === undefined ? dimensions(args[0]) : null;
+        push(args[1] ?? image?.width, args[2] ?? image?.height, ctm);
+        break;
+      }
+      case OPS.paintInlineImageXObject: {
+        const image = args[0] as { width?: number; height?: number } | undefined;
+        push(image?.width, image?.height, ctm);
+        break;
+      }
+      case OPS.paintImageXObjectRepeat: {
+        // یک تصویر، چند بار: [objId، مقیاس x، مقیاس y، جای هر بار]
+        const image = dimensions(args[0]);
+        const positions = args[3] as ArrayLike<number> | undefined;
+        for (let k = 0; positions && k + 1 < positions.length; k += 2) {
+          const tile = [Number(args[1]), 0, 0, Number(args[2]), positions[k]!, positions[k + 1]!];
+          push(image?.width, image?.height, multiply(ctm, tile));
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return placements;
+}
+
+/**
+ * DPI صفحه برای هشدار کیفیت، از جای واقعی تصویرها (`pageDpi`، مشترک با سرور).
+ *
+ * فقط برای هشدار است، نه برای قیمت — پس اگر درنیامد `null` برمی‌گردد و هیچ‌چیز
+ * نمی‌شکند. pdf.js شکل داخلی عملگرها را بین نسخه‌ها عوض می‌کند، به همین دلیل کل کار
+ * داخل try نشسته.
  */
 async function estimateDpi(
   page: pdfjs.PDFPageProxy,
@@ -144,44 +250,7 @@ async function estimateDpi(
 ): Promise<number | null> {
   try {
     const opList = await page.getOperatorList();
-    let bestPixels = 0;
-    let bestWidth = 0;
-    let bestHeight = 0;
-
-    for (let i = 0; i < opList.fnArray.length; i += 1) {
-      const fn = opList.fnArray[i];
-      if (fn !== pdfjs.OPS.paintImageXObject && fn !== pdfjs.OPS.paintInlineImageXObject) {
-        continue;
-      }
-      const args = opList.argsArray[i] as unknown[];
-      let image: { width?: number; height?: number } | null = null;
-
-      if (typeof args[0] === 'string') {
-        // تصویر نام‌دار: در objs یا commonObjs صفحه نشسته.
-        const name = args[0];
-        image =
-          (tryGet(page.objs, name) as { width?: number; height?: number } | null) ??
-          (tryGet(page.commonObjs, name) as { width?: number; height?: number } | null);
-      } else if (args[0] && typeof args[0] === 'object') {
-        image = args[0] as { width?: number; height?: number };
-      }
-
-      const w = image?.width ?? 0;
-      const h = image?.height ?? 0;
-      if (w * h > bestPixels) {
-        bestPixels = w * h;
-        bestWidth = w;
-        bestHeight = h;
-      }
-    }
-
-    if (bestPixels === 0) return null; // صفحهٔ متنی — DPI معنا ندارد
-
-    // پوینت ۱/۷۲ اینچ است، پس پیکسل بر اینچ = پیکسل / (پوینت / ۷۲).
-    const dpiX = bestWidth / (pageWidthPt / 72);
-    const dpiY = bestHeight / (pageHeightPt / 72);
-    const dpi = Math.min(dpiX, dpiY);
-    return Number.isFinite(dpi) && dpi > 0 ? Math.round(dpi) : null;
+    return pageDpi(collectPlacements(page, opList), pageWidthPt, pageHeightPt);
   } catch {
     return null;
   }
@@ -289,7 +358,7 @@ async function analyze(request: AnalyzeRequest): Promise<void> {
   }
 
   const analysis: DocumentAnalysis = {
-    engine: `browser-pdfjs-${pdfjs.version}`,
+    engine: `browser-pdfjs-${pdfjs.version}-r${ANALYSIS_REVISION}`,
     thresholds,
     pageCount,
     pages,

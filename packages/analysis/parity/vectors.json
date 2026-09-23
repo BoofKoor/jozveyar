@@ -1,4 +1,5 @@
 {
+ "revision": 2,
  "thresholds": {
   "chromaMin": 36,
   "colorPixelRatioMin": 0.004,
@@ -303,6 +304,227 @@
    },
    "color": false,
    "blank": true
+  }
+ ],
+ "dpi": [
+  {
+   "name": "full_page_scan_300",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 2480,
+     "heightPx": 3508,
+     "matrix": [
+      595,
+      0,
+      0,
+      842,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": 300
+  },
+  {
+   "name": "full_page_scan_150",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 1240,
+     "heightPx": 1754,
+     "matrix": [
+      595,
+      0,
+      0,
+      842,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": 150
+  },
+  {
+   "name": "logo_on_text_page",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 200,
+     "heightPx": 50,
+     "matrix": [
+      144,
+      0,
+      0,
+      36,
+      50,
+      50
+     ]
+    }
+   ],
+   "dpi": null
+  },
+  {
+   "name": "half_page_low_res_photo",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 400,
+     "heightPx": 300,
+     "matrix": [
+      595,
+      0,
+      0,
+      446,
+      0,
+      200
+     ]
+    }
+   ],
+   "dpi": 48
+  },
+  {
+   "name": "rotated_phone_photo",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 4000,
+     "heightPx": 3000,
+     "matrix": [
+      0,
+      -793,
+      595,
+      0,
+      0,
+      817
+     ]
+    }
+   ],
+   "dpi": 363
+  },
+  {
+   "name": "largest_area_wins",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 2000,
+     "heightPx": 2000,
+     "matrix": [
+      100,
+      0,
+      0,
+      100,
+      20,
+      20
+     ]
+    },
+    {
+     "widthPx": 600,
+     "heightPx": 850,
+     "matrix": [
+      595,
+      0,
+      0,
+      842,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": 73
+  },
+  {
+   "name": "just_below_coverage",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 1000,
+     "heightPx": 1000,
+     "matrix": [
+      316,
+      0,
+      0,
+      316,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": null
+  },
+  {
+   "name": "just_above_coverage",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 1000,
+     "heightPx": 1000,
+     "matrix": [
+      318,
+      0,
+      0,
+      318,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": 226
+  },
+  {
+   "name": "landscape_slide_background",
+   "pageWidthPt": 720,
+   "pageHeightPt": 405,
+   "placements": [
+    {
+     "widthPx": 1920,
+     "heightPx": 1080,
+     "matrix": [
+      720,
+      0,
+      0,
+      405,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": 192
+  },
+  {
+   "name": "text_page_no_images",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [],
+   "dpi": null
+  },
+  {
+   "name": "degenerate_matrix",
+   "pageWidthPt": 595,
+   "pageHeightPt": 842,
+   "placements": [
+    {
+     "widthPx": 100,
+     "heightPx": 100,
+     "matrix": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   "dpi": null
   }
  ]
 }

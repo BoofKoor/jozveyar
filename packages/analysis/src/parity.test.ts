@@ -24,7 +24,15 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_THRESHOLDS, type DetectionThresholds } from '@jozveyar/contracts';
 
-import { analyzePixels, isBlankPage, isColorPage, type PixelStats } from './index.js';
+import {
+  ANALYSIS_REVISION,
+  analyzePixels,
+  isBlankPage,
+  isColorPage,
+  pageDpi,
+  type ImagePlacement,
+  type PixelStats,
+} from './index.js';
 
 type RGB = [number, number, number];
 
@@ -99,15 +107,57 @@ interface Vector {
   blank: boolean;
 }
 
+/** صفحه‌ای با تصویرهایش — ورودی `pageDpi`، با همان ماتریس‌هایی که pdf.js و PyMuPDF می‌دهند. */
+export interface DpiCase {
+  name: string;
+  pageWidthPt: number;
+  pageHeightPt: number;
+  placements: ImagePlacement[];
+}
+
+const A4: [number, number] = [595, 842];
+
+export const DPI_CASES: DpiCase[] = [
+  { name: 'full_page_scan_300', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 2480, heightPx: 3508, matrix: [595, 0, 0, 842, 0, 0] }] },
+  { name: 'full_page_scan_150', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 1240, heightPx: 1754, matrix: [595, 0, 0, 842, 0, 0] }] },
+  // باگ نسخهٔ ۱: همین لوگو «۴ DPI» و هشدار کیفیت می‌گرفت.
+  { name: 'logo_on_text_page', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 200, heightPx: 50, matrix: [144, 0, 0, 36, 50, 50] }] },
+  { name: 'half_page_low_res_photo', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 400, heightPx: 300, matrix: [595, 0, 0, 446, 0, 200] }] },
+  // عکس گوشی، چرخیده: محور x تصویر روی محور y صفحه می‌افتد (همان ماتریس PyMuPDF).
+  { name: 'rotated_phone_photo', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 4000, heightPx: 3000, matrix: [0, -793, 595, 0, 0, 817] }] },
+  // تصویر بزرگ کم‌کیفیت و تصویر کوچک پرکیفیت: بزرگ‌تر بر صفحه حاکم است.
+  {
+    name: 'largest_area_wins',
+    pageWidthPt: A4[0],
+    pageHeightPt: A4[1],
+    placements: [
+      { widthPx: 2000, heightPx: 2000, matrix: [100, 0, 0, 100, 20, 20] },
+      { widthPx: 600, heightPx: 850, matrix: [595, 0, 0, 842, 0, 0] },
+    ],
+  },
+  { name: 'just_below_coverage', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 1000, heightPx: 1000, matrix: [316, 0, 0, 316, 0, 0] }] },
+  { name: 'just_above_coverage', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 1000, heightPx: 1000, matrix: [318, 0, 0, 318, 0, 0] }] },
+  { name: 'landscape_slide_background', pageWidthPt: 720, pageHeightPt: 405, placements: [{ widthPx: 1920, heightPx: 1080, matrix: [720, 0, 0, 405, 0, 0] }] },
+  { name: 'text_page_no_images', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [] },
+  { name: 'degenerate_matrix', pageWidthPt: A4[0], pageHeightPt: A4[1], placements: [{ widthPx: 100, heightPx: 100, matrix: [0, 0, 0, 0, 0, 0] }] },
+];
+
+interface DpiVector extends DpiCase {
+  dpi: number | null;
+}
+
 interface VectorsFile {
+  revision: number;
   thresholds: DetectionThresholds;
   vectors: Vector[];
+  dpi: DpiVector[];
 }
 
 const FILE = join(dirname(fileURLToPath(import.meta.url)), '..', 'parity', 'vectors.json');
 
 function compute(): VectorsFile {
   return {
+    revision: ANALYSIS_REVISION,
     thresholds: DEFAULT_THRESHOLDS,
     vectors: SPECS.map((spec) => {
       const stats = analyzePixels(renderSpec(spec), DEFAULT_THRESHOLDS);
@@ -118,6 +168,7 @@ function compute(): VectorsFile {
         blank: isBlankPage(stats),
       };
     }),
+    dpi: DPI_CASES.map((c) => ({ ...c, dpi: pageDpi(c.placements, c.pageWidthPt, c.pageHeightPt) })),
   };
 }
 
@@ -140,5 +191,19 @@ describe('بردارهای هم‌ارزی مرورگر و کارگر', () => {
     expect(byName.red_highlight!.color).toBe(true);
     expect(byName.green_marker_on_yellow!.color).toBe(true);
     expect(byName.blank_white!.blank).toBe(true);
+  });
+
+  it('DPI از جای واقعی تصویر؛ لوگوی کوچک هشدار کیفیت نمی‌سازد', () => {
+    const dpi = Object.fromEntries(compute().dpi.map((v) => [v.name, v.dpi]));
+    expect(dpi.full_page_scan_300).toBe(300);
+    expect(dpi.full_page_scan_150).toBe(150);
+    expect(dpi.logo_on_text_page).toBeNull();
+    expect(dpi.half_page_low_res_photo).toBe(48);
+    expect(dpi.rotated_phone_photo).toBe(363);
+    expect(dpi.largest_area_wins).toBe(73);
+    expect(dpi.just_below_coverage).toBeNull();
+    expect(dpi.just_above_coverage).toBe(226);
+    expect(dpi.text_page_no_images).toBeNull();
+    expect(dpi.degenerate_matrix).toBeNull();
   });
 });

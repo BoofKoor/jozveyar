@@ -108,6 +108,31 @@ test.describe('تحلیل در مرورگر', () => {
     await expect(colorPages(page)).toHaveText('3', { timeout: 20_000 });
   });
 
+  /**
+   * هشدار جای مشکل را نام می‌برد و DPI از جای واقعی تصویر است (ADR-029): لوگوی
+   * کوچک صفحهٔ ۱ و تصویری که داخل فرم نیم‌مقیاس صفحهٔ ۴ نشسته هشدار کیفیت
+   * نمی‌گیرند. فرمول قدیمی به صفحهٔ ۱ «۴ DPI» می‌داد و هر چهار صفحه را نام می‌برد.
+   */
+  test('هشدار کیفیت فقط صفحهٔ واقعاً بی‌کیفیت را نام می‌برد', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', join(FIXTURES, 'dpi-mix-4.pdf'));
+    await expect(page.getByTestId('stat-page-count')).toHaveText('4', { timeout: 15_000 });
+    await expect(page.getByTestId('warning-low-dpi')).toHaveText(
+      'صفحهٔ 2 کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود.',
+      { timeout: 15_000 },
+    );
+    await expect(page.getByTestId('warning-tight-margin')).toContainText('صفحه‌های 3 و 4');
+    await expect(page.getByTestId('warning-blank')).toHaveCount(0);
+  });
+
+  test('اسکنی که در ظاهر یک مهر نشسته هم جای واقعی‌اش سنجیده می‌شود', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', join(FIXTURES, 'stamp-scan-1.pdf'));
+    await expect(page.getByTestId('stat-page-count')).toHaveText('1', { timeout: 15_000 });
+    // همان ۱۸ DPI سرور؛ بی دنبال کردن جای حاشیه‌نویسی، تصویر «۱ پوینتی» بود و هشداری نمی‌آمد.
+    await expect(page.getByTestId('warning-low-dpi')).toContainText('صفحهٔ 1', { timeout: 15_000 });
+  });
+
   test('تغییر تنظیمات قیمت را زنده عوض می‌کند', async ({ page }) => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', join(FIXTURES, 'plain-bw-10.pdf'));

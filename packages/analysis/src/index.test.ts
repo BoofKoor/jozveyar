@@ -6,6 +6,7 @@ import {
   estimatePaperCast,
   isBlankPage,
   isColorPage,
+  isSlidePage,
   paperSizeName,
   reclassify,
   sampleScaleFor,
@@ -285,6 +286,18 @@ describe('اندازه و مقیاس', () => {
 
   it('اندازهٔ کمی خارج از استاندارد را هم A4 می‌شمارد', () => {
     expect(paperSizeName(596, 843)).toBe('A4');
+  });
+
+  it('اسلاید را از شکل صفحه می‌شناسد، نه کاغذ افقی را', () => {
+    // پاورپوینت ۱۶:۹ و ۴:۳، Google Slides، LibreOffice (۲۸×۱۵٫۷۵ سانتی‌متر)، Beamer ۱۶:۱۰.
+    for (const [w, h] of [[960, 540], [720, 540], [720, 405], [793.7, 446.5], [453.5, 283.5]] as const) {
+      expect(isSlidePage(w, h)).toBe(true);
+    }
+    expect(isSlidePage(842, 595)).toBe(false); // A4 افقی: سند است
+    expect(isSlidePage(792, 612)).toBe(false); // Letter افقی، نزدیک ۴:۳
+    expect(isSlidePage(540, 960)).toBe(false); // عمودی
+    expect(isSlidePage(595, 842)).toBe(false);
+    expect(isSlidePage(0, 0)).toBe(false);
   });
 
   it('مقیاس نمونه بزرگ‌ترین بُعد را به سقف می‌رساند', () => {

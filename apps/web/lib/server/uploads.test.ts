@@ -300,7 +300,78 @@ describe('سرویس آپلود', () => {
           { name: 'A5', count: 1 },
         ],
         colorPages: [2],
+        blankPages: [3],
+        lowDpiPages: [1],
+        tightMarginPages: [3],
+        mismatchedFonts: [],
       });
+    });
+
+    /** سند آماده با تحلیل سرور؛ هر صفحه حاشیهٔ تنگ دارد. پیش‌فرض: دو صفحهٔ A4. */
+    async function readyWithTightMargins(
+      name: string,
+      conversion: unknown,
+      sizes: [number, number][] = [
+        [595, 842],
+        [595, 842],
+      ],
+    ) {
+      const id = await uploaded(name);
+      Object.assign(store.rows.get(id)!, { status: 'ready', conversion });
+      store.serverAnalyses.set(id, {
+        engine: 'server-pymupdf-test',
+        pageCount: sizes.length,
+        elapsedMs: 40,
+        pages: sizes.map(([widthPt, heightPt]) => ({
+          widthPt,
+          heightPt,
+          color: false,
+          blank: false,
+          warnings: ['tight_margin'],
+        })),
+      });
+      const r = await service.status(ME, id);
+      return r.ok ? r.value.analysis : undefined;
+    }
+
+    it('پاورپوینت هشدار حاشیه نمی‌گیرد — چه کارگر تشخیص داده باشد، چه پسوند (ADR-029)', async () => {
+      const byFormat = await readyWithTightMargins('اسلاید.pptx', { format: 'pptx', fonts: { mismatched: [] } });
+      expect(byFormat).toMatchObject({ tightMarginPageCount: 0, tightMarginPages: [] });
+      // «docx» که در واقع ارائهٔ ODF بود: محتوا تصمیم می‌گیرد، نه پسوند.
+      const sniffed = await readyWithTightMargins('جزوه.docx', { format: 'odp' });
+      expect(sniffed).toMatchObject({ tightMarginPages: [] });
+      // هنوز تبدیل ثبت نشده (یا کهنه است): پسوند.
+      expect(await readyWithTightMargins('اسلاید.ppt', null)).toMatchObject({ tightMarginPages: [] });
+      // Word همان هشدار را می‌گیرد، با شمارهٔ صفحه‌ها.
+      expect(await readyWithTightMargins('جزوه.docx', { format: 'docx' })).toMatchObject({
+        tightMarginPageCount: 2,
+        tightMarginPages: [1, 2],
+      });
+    });
+
+    it('PDF اسلاید هم: فقط صفحه‌هایی که شکل کاغذ دارند هشدار حاشیه می‌گیرند', async () => {
+      const view = await readyWithTightMargins('اسلایدهای استاد.pdf', null, [
+        [960, 540], // ۱۶:۹
+        [595, 842], // جزوهٔ A4 وسط اسلایدها
+        [720, 540], // ۴:۳
+        [842, 595], // A4 افقی: سند است
+      ]);
+      expect(view).toMatchObject({ tightMarginPageCount: 2, tightMarginPages: [2, 4] });
+    });
+
+    it('فونت جایگزین با اندازهٔ دیگر به مرورگر می‌رسد، با نام کوتاه‌شده (ADR-029)', async () => {
+      const view = await readyWithTightMargins('جزوه.docx', {
+        format: 'docx',
+        fonts: {
+          requested: ['B Nazanin', 'Times New Roman'],
+          mismatched: ['B Nazanin', ' ', 42, 'X'.repeat(500)],
+        },
+      });
+      expect(view?.mismatchedFonts).toEqual(['B Nazanin', 'X'.repeat(60)]);
+      // PDF تبدیلی ندارد؛ ستون خراب هم چیزی نمی‌شکند.
+      expect((await readyWithTightMargins('جزوه.pdf', null))?.mismatchedFonts).toEqual([]);
+      const broken = await readyWithTightMargins('جزوه.docx', { format: 'docx', fonts: { mismatched: 'B Nazanin' } });
+      expect(broken?.mismatchedFonts).toEqual([]);
     });
 
     it('شکست تحلیل: فایل هنوز «رسیده» است، علت شکست به مرورگر می‌رسد', async () => {

@@ -11,7 +11,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from docworker.analysis import DEFAULT_THRESHOLDS, analyze_pixels, is_blank_page, is_color_page
+from docworker.analysis import (
+    ANALYSIS_REVISION,
+    DEFAULT_THRESHOLDS,
+    analyze_pixels,
+    is_blank_page,
+    is_color_page,
+    page_dpi,
+)
 
 VECTORS = Path(__file__).resolve().parents[3] / "packages" / "analysis" / "parity" / "vectors.json"
 DATA = json.loads(VECTORS.read_text(encoding="utf-8"))
@@ -58,3 +65,14 @@ def test_exact_parity(vector):
     blank = is_blank_page(stats)
     assert blank == vector["blank"]
     assert ((not blank) and is_color_page(stats, DATA["thresholds"])) == vector["color"]
+
+
+def test_same_analysis_revision():
+    """نسخهٔ الگوریتم در شناسهٔ موتور هر دو طرف یکی است."""
+    assert ANALYSIS_REVISION == DATA["revision"]
+
+
+@pytest.mark.parametrize("case", DATA["dpi"], ids=lambda c: c["name"])
+def test_dpi_parity(case):
+    """DPI صفحه از جای واقعی تصویر — همان عدد مرورگر، دقیقاً."""
+    assert page_dpi(case["placements"], case["pageWidthPt"], case["pageHeightPt"]) == case["dpi"]

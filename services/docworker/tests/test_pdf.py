@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import fitz
 
-from docworker.analysis import DEFAULT_THRESHOLDS
+from docworker.analysis import ANALYSIS_REVISION, DEFAULT_THRESHOLDS
 from docworker.pdf import AnalysisFailure, analyze_pdf
 
 A4 = fitz.paper_rect("a4")
@@ -81,6 +81,114 @@ def test_low_resolution_scan_warns(tmp_path):
     page = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"][0]
     assert page["estimatedDpi"] == pytest.approx(36, abs=1)
     assert "low_dpi" in page["warnings"]
+
+
+def _pixmap(w, h, value=255):
+    img = np.full((h, w, 3), value, dtype=np.uint8)
+    img[h // 3 : h // 3 + 4, : w // 2] = 30  # یک خط، تا صفحه سفید نباشد
+    return fitz.Pixmap(fitz.csRGB, w, h, img.tobytes(), False)
+
+
+def test_dpi_is_measured_where_the_image_sits_not_over_the_whole_page(tmp_path):
+    """ADR-029: DPI از جای واقعی تصویر روی صفحه. نسخهٔ ۱ لوگوی کوچک را «۴ DPI» می‌دید."""
+    path = str(tmp_path / "dpi.pdf")
+    doc = fitz.open()
+    # ۱) صفحهٔ متنی با لوگوی ۲۰۰×۵۰ پیکسلی در ۲×۰٫۵ اینچ: ۱٪ صفحه، پس DPI صفحه ندارد.
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((60, 200), "Chapter 1", fontsize=14)
+    page.insert_image(fitz.Rect(60, 40, 204, 76), pixmap=_pixmap(200, 50))
+    # ۲) اسکن کامل ۱۲۴۰×۱۷۵۴ روی A4: ۱۵۰ DPI.
+    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, pixmap=_pixmap(1240, 1754))
+    # ۳) عکس ۶۴۰×۴۸۰ گوشی، چرخیده و در نیمهٔ بالای صفحه: ۴۲۱ پوینت ارتفاع برای ۶۴۰
+    #    پیکسل ≈ ۱۰۹ DPI در هر دو محور — هشدار دارد.
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_image(fitz.Rect(0, 0, 595, 421), pixmap=_pixmap(640, 480), rotate=90)
+    doc.save(path)
+
+    result = analyze_pdf(path, DEFAULT_THRESHOLDS)
+    pages = result["pages"]
+    assert [p["estimatedDpi"] for p in pages] == [None, 150, 109]
+    assert ["low_dpi" in p["warnings"] for p in pages] == [False, False, True]
+    # ردیف‌های نسخهٔ ۱ (DPI روی کل صفحه) از شناسهٔ موتور جدا می‌شوند.
+    assert result["engine"].endswith(f"-r{ANALYSIS_REVISION}")
+
+
+def test_dpi_follows_the_form_xobject_matrix(tmp_path):
+    """صفحه‌ای که داخل صفحهٔ دیگر کوچک نشسته (Form XObject، مثل «چند صفحه در یک برگ»):
+    اسکن ۳۰۰ DPI وقتی نصف شود ۶۰۰ DPI است؛ اسکن ۱۵۰ DPI که ربع صفحه بگیرد، ۳۰۰."""
+    source = fitz.open()
+    source.new_page(width=A4.width, height=A4.height).insert_image(A4, pixmap=_pixmap(1240, 1754))
+    path = str(tmp_path / "nup.pdf")
+    doc = fitz.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.show_pdf_page(fitz.Rect(0, 0, A4.width / 2, A4.height / 2), source, 0)
+    doc.save(path)
+
+    [only] = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert only["estimatedDpi"] == 300
+    assert "low_dpi" not in only["warnings"]
+
+
+def test_dpi_sees_an_image_inside_a_stamp_annotation(tmp_path):
+    """اسکنی که در ظاهر یک مهر (حاشیه‌نویسی) نشسته، نه در محتوای صفحه: PyMuPDF آن را با
+    جایش روی صفحه می‌بیند، و مرورگر هم با همان جا حساب می‌کند (`stamp-scan-1.pdf`)."""
+    doc = fitz.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((60, 100), "Stamped scan", fontsize=14)
+    page_xref = page.xref  # صفحهٔ تازه شیء Page قبلی را بی‌اعتبار می‌کند
+    scratch = doc.new_page(width=10, height=10)
+    image = scratch.insert_image(scratch.rect, pixmap=_pixmap(150, 212))
+    form = doc.get_new_xref()
+    doc.update_object(
+        form,
+        f"<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << /XObject << /Im0 {image} 0 R >> >> >>",
+    )
+    doc.update_stream(form, b"/Im0 Do")
+    annot = doc.get_new_xref()
+    doc.update_object(
+        annot, f"<< /Type /Annot /Subtype /Stamp /F 4 /Rect [0 0 595 842] /AP << /N {form} 0 R >> >>"
+    )
+    doc.xref_set_key(page_xref, "Annots", f"[{annot} 0 R]")
+    doc.delete_page(1)
+    path = str(tmp_path / "stamp.pdf")
+    doc.save(path)
+
+    [only] = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert only["estimatedDpi"] == 18  # ۱۵۰ پیکسل روی ۸٫۲۶ اینچ
+    assert "low_dpi" in only["warnings"]
+
+
+def test_solid_dark_page_counts_as_blank(tmp_path):
+    """ADR-026: صفحه‌ای که جز زمینهٔ تیرهٔ یکدست چیزی ندارد «سفید» است، و رنگی نیست.
+    اگر این عوض شود، تصمیم ADR-026 عوض شده — اول آنجا."""
+    path = str(tmp_path / "dark.pdf")
+    doc = fitz.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.draw_rect(page.rect, color=None, fill=(0, 0, 0))
+    doc.save(path)
+
+    [dark] = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert (dark["blank"], dark["color"]) == (True, False)
+    assert "blank_page" in dark["warnings"]
+    # ته‌رنگ تیره ذخیره می‌شود؛ درمان روزی لازم شد، از همین جدا می‌شود (ADR-026).
+    assert max(dark["paperCast"]) < 40
+
+
+def test_dark_slide_with_white_text_is_not_blank(tmp_path):
+    """ADR-026: اسلاید تیره با متن سفید «سفید» نیست — لبهٔ نرم حروف مرکب شمرده می‌شود.
+    یک خط روی زمینهٔ تقریباً سیاه (که خودش مرکب نیست)، و ده خط روی خاکستری تیره."""
+    path = str(tmp_path / "slides.pdf")
+    doc = fitz.open()
+    for lines, background in ((1, (0.08, 0.1, 0.14)), (10, (0.2, 0.2, 0.22))):
+        page = doc.new_page(width=960, height=540)
+        page.draw_rect(page.rect, color=None, fill=background)
+        for i in range(lines):
+            page.insert_text((60, 80 + i * 44), "Lecture 3 - Thermodynamics", fontsize=28, color=(1, 1, 1))
+    doc.save(path)
+
+    pages = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert [p["blank"] for p in pages] == [False, False]
+    assert [p["color"] for p in pages] == [False, False]
 
 
 def test_page_shape_matches_contract(tmp_path):

@@ -45,6 +45,10 @@ function serverSummary(server: ServerAnalysisView): AnalysisSummaryView {
     tightMarginPageCount: server.tightMarginPageCount ?? 0,
     pageSizes: server.pageSizes ?? [],
     colorPages: server.colorPages ?? [],
+    blankPages: server.blankPages ?? [],
+    lowDpiPages: server.lowDpiPages ?? [],
+    tightMarginPages: server.tightMarginPages ?? [],
+    mismatchedFonts: server.mismatchedFonts ?? [],
     estimated: false,
   };
 }
