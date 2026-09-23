@@ -13,7 +13,7 @@
 | چارچوب وب | Next.js 15 (App Router) | Django + HTMX — پنل ادمین آماده، ولی موتور قیمت دو بار پیاده می‌شد |
 | زبان مشترک | TypeScript | — (تحمیل‌شده توسط ADR-001) |
 | تحلیل مرورگر | `pdfjs-dist` در Web Worker | ندارد؛ تنها پارسر PDF بالغ در مرورگر |
-| کارگر اسناد | Python + PyMuPDF + numpy؛ LibreOffice در ۲ب. الگوریتم رنگ با بردارهای هم‌ارزی به مرورگر قفل است (ADR-025) | همه‌چیز در Node با `node-canvas` |
+| کارگر اسناد | Python + PyMuPDF + numpy + LibreOffice (بدون رابط گرافیکی)، روی ایمیج پایه‌ای که فقط CI می‌سازد (ADR-027). الگوریتم رنگ با بردارهای هم‌ارزی به مرورگر قفل است (ADR-025) | همه‌چیز در Node با `node-canvas` |
 | پایگاه داده | PostgreSQL 17 | MySQL — محدودیت بازه‌ای ندارد |
 | صف کار | جدول `jobs` با `FOR UPDATE SKIP LOCKED` | Celery / BullMQ / Redis Streams |
 | کش و نرخ | Redis (فقط کش و محدودیت OTP) | — |
@@ -92,7 +92,7 @@ jozveyar/
 │  ├─ text/             نرمال‌سازی فارسی، ارقام، تاریخ شمسی
 │  └─ ui/               کامپوننت و توکن‌های پالت
 ├─ services/
-│  └─ docworker/        Python — LibreOffice، PyMuPDF، Ghostscript
+│  └─ docworker/        Python — LibreOffice، PyMuPDF (Dockerfile.base: ایمیج پایه، ADR-027)
 ├─ infra/
 │  ├─ docker-compose.yml · docker-compose.prod.yml · garage.toml
 │  ├─ nginx/ · deploy-bundle.sh · setup-storage.sh · garage-init.sh
@@ -281,7 +281,7 @@ detection.sample_dpi                    = 40
 |---|---|---|
 | 0 | ✅ اسکلت قابل دیپلوی | Docker Compose، Nginx، Dockerfile چندمرحله‌ای، `deploy.sh`، `setup-tls.sh`، سلامت سرویس |
 | 1 | ✅ **لحظهٔ جادو** | فایل بینداز ← مرورگر می‌خواند ← قیمت زنده با تعرفهٔ واقعی ← تنظیمات. بدون دیتابیس و حساب. + پایه‌های سئو (رندر ایستا، متا، نقشهٔ سایت، JSON-LD). ۱۲۳ تست واحد + ۱۵ تست سرتاسری |
-| 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ مانده (۲ب): مسیر Word/PPT/عکس، ادغام PDF، هشدارها |
+| 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ ۲ب: ایمیج پایه با LibreOffice و فونت‌ها (ADR-027)، بعد مسیر Word/PPT/عکس، چند فایل در یک جزوه، هشدارها |
 | 3 | سفارش کامل با پرداخت جعلی | شهر و آدرس، نرخ ارسال، OTP، ساخت سفارش، درگاه نمونه، صفحهٔ تأیید |
 | 4 | پنل ادمین نسخهٔ ۱ | TOTP روی ساب‌دامین جدا، فهرست و جزئیات سفارش، دانلود فایل، تغییر وضعیت، ویرایش تعرفه، ساعت SLA |
 | 5 | چاپخانه و خروجی چاپ | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ |

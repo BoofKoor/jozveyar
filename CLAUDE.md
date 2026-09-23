@@ -6,7 +6,7 @@
 > برش ۰ و ۱ ساخته و مستقر شده‌اند. برش ۲الف تمام: پایگاه داده، آپلود chunked
 > مستقیم به Garage، و کارگر تحلیل پایتون (`services/docworker`) با هم‌ترازی قیمت.
 >
-> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md` (۲۶ ADR).
+> طرح کامل در `docs/ARCHITECTURE.md`، تصمیم‌ها در `docs/DECISIONS.md` (۲۷ ADR).
 >
 > **قدم بعدی:** برش ۲ب — Word، پاورپوینت و عکس با LibreOffice در همان کارگر،
 > ادغام چند PDF، هشدارها. یا اگر صاحب پروژه بخواهد، برش ۳ (سفارش) زودتر.
@@ -24,6 +24,9 @@
 >
 > **بیلد روی سرور انجام نمی‌شود.** گیت‌هاب اکشنز بسته را می‌سازد و سرور با
 > `./infra/deploy-bundle.sh` یک فایل ۱۷ مگابایتی می‌گیرد. دلیل در ADR-019.
+> ایمیج پایهٔ کارگر (LibreOffice، فونت‌ها، چرخ‌ها؛ ~۲۵۰ مگابایت) جدا و فقط وقتی
+> عوض شده می‌آید، با `docker load` (ADR-027). فونت خصوصی (سری B) در مخزن عمومی
+> نمی‌رود: `./infra/upload-fonts.sh <پوشه>` آن را به پیشوند `fonts/` باکت می‌برد.
 
 ## تز محصول — تغییر نمی‌کند
 
@@ -129,8 +132,11 @@ docker compose -f infra/docker-compose.yml up     پستگرس، Redis، Garage 
 pnpm --filter @jozveyar/db migrate               اعمال مهاجرت‌ها (نیازمند DATABASE_URL)
 DEPLOY_HOST=user@ip ./infra/deploy.sh             استقرار روی VPS
 
-cd services/docworker && python -m pytest -q tests   تست کارگر اسناد (پایتون ۳.۱۲)
+cd services/docworker && python -m pytest -q tests   تست کارگر اسناد (پایتون ۳.۱۲؛ تست‌های LibreOffice
+                                                    بیرون ایمیج پایه رد می‌شوند — CI داخلش اجرا می‌کند)
 python -m docworker                                 اجرای کارگر (همان env اپ)
+./services/docworker/base-id.sh                     شناسهٔ ایمیج پایهٔ کارگر (هش ورودی‌هایش، ADR-027)
+./infra/upload-fonts.sh <پوشه>                      فونت خصوصی به باکت، روی سرور (ADR-027)
 UPDATE_PARITY=1 pnpm test                           بازنویسی بردارهای هم‌ارزی بعد از تغییر عمدی الگوریتم رنگ
 ```
 

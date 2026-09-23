@@ -1,29 +1,17 @@
 # syntax=docker/dockerfile:1
 
-# کارگر اسناد (ADR-005، ADR-025).
+# کارگر اسناد (ADR-005، ADR-025، ADR-027): فقط کد، روی ایمیج پایه.
 #
-# مثل ایمیج وب، روی سرور هیچ دانلودی از PyPI نمی‌شود: CI چرخ‌های آماده را
-# کنار این فایل می‌گذارد (wheels/) و اینجا فقط `pip install --no-index` است.
-# تنها چیزی که از شبکه می‌آید ایمیج پایه است، از همان آینهٔ Docker Hub.
-#
-# debian نه alpine: چرخ‌های PyMuPDF و numpy برای glibc ساخته شده‌اند.
+# هر چیز سنگین (LibreOffice، فونت‌ها، چرخ‌های پایتون) در `Dockerfile.base` است و
+# سرور آن را یک بار، آماده، با `docker load` می‌گیرد. این ایمیج فقط COPY است:
+# هیچ دانلودی، نه از PyPI نه از آینهٔ Docker Hub. پس هر تغییر کد کارگر چند
+# کیلوبایت است. `deploy-bundle.sh` شناسهٔ پایه را از فایل `BASE` بسته می‌خواند.
 
-FROM python:3.12-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ARG BASE_IMAGE=jozveyar/docworker-base:local
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
-
-COPY wheels/ /tmp/wheels/
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --no-index --find-links /tmp/wheels -r requirements.txt \
-    && rm -rf /tmp/wheels
-
 COPY docworker/ ./docworker/
 
-# کاربر غیر-root: کارگر فایل کاربر را باز می‌کند و نباید root باشد.
-RUN useradd -u 1002 -m docworker
 USER docworker
-
 CMD ["python", "-m", "docworker"]

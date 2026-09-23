@@ -5,11 +5,9 @@
 مهاجرت‌شده باشد: در CI، `pnpm test` قبل از این اجرا می‌شود و مهاجرت می‌کند.
 """
 
-import hashlib
 import os
-import urllib.request
+import tempfile
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 
@@ -18,7 +16,7 @@ psycopg = pytest.importorskip("psycopg")
 from docworker import queue  # noqa: E402
 from docworker.__main__ import Worker  # noqa: E402
 from docworker.jobs import ANALYZE_DOCUMENT  # noqa: E402
-from docworker.storage import S3Storage, sign_headers  # noqa: E402
+from docworker.storage import S3Storage  # noqa: E402
 from tests.test_pdf import GRAPHITE, YELLOW, make_pdf, scan_image  # noqa: E402
 
 ENABLED = all(os.environ.get(k) for k in ("DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"))
@@ -26,12 +24,10 @@ pytestmark = pytest.mark.skipif(not ENABLED, reason="DATABASE_URL و S3_* لاز
 
 
 def put_object(storage: S3Storage, key: str, body: bytes) -> None:
-    url = storage._url(key)
-    headers = sign_headers(
-        "PUT", url, {}, hashlib.sha256(body).hexdigest(), storage.credentials, datetime.now(timezone.utc)
-    )
-    with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method="PUT")) as r:
-        assert r.status == 200
+    with tempfile.NamedTemporaryFile() as f:
+        f.write(body)
+        f.flush()
+        storage.upload(key, f.name, "application/pdf")
 
 
 @pytest.fixture
