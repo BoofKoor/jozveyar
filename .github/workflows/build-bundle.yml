@@ -156,11 +156,13 @@ jobs:
       # تست کارگر داخل همان ایمیجی که روی سرور اجرا می‌شود: همان LibreOffice،
       # همان فونت‌ها. بعد از `pnpm test` چون آن مهاجرت‌ها را اعمال کرده؛ تست‌های
       # یکپارچگی روی همان پستگرس و Garage اجرا می‌شوند (شبکهٔ میزبان).
+      # کل مخزن mount می‌شود، نه فقط پوشهٔ کارگر: تست هم‌ارزی بردارها را از
+      # packages/analysis/parity می‌خواند (ADR-025).
       - name: تست کارگر اسناد
         run: |
           docker run --rm --network host --user root \
             -e DATABASE_URL -e S3_ENDPOINT -e S3_BUCKET -e S3_ACCESS_KEY -e S3_SECRET_KEY \
-            -v "$PWD/services/docworker:/src" -w /src "${{ steps.base.outputs.image }}" \
+            -v "$PWD:/src" -w /src/services/docworker "${{ steps.base.outputs.image }}" \
             sh -c 'pip install -q --no-cache-dir --root-user-action=ignore -r requirements-dev.txt \
                    && python -m pytest -q -p no:cacheprovider tests'
         env:
