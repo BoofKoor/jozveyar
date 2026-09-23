@@ -182,6 +182,9 @@ DATABASE_URL=postgresql://jozveyar:jozveyar@127.0.0.1:5432/jozveyar pnpm test
   (سقف تست ۱۵ ثانیه)
 - همان اسکن زرد: **۰ صفحهٔ رنگی** تشخیص داده می‌شود، قیمت ۲۸۰,۲۰۰ تومان
   (اگر تشخیص رنگ بشکند ۳۳۹,۰۰۰ می‌شود)
+- Word فارسی ۱۲۰ پاراگرافی با «B Nazanin» (Nazli جایش می‌نشیند): **۱۱ صفحه** با
+  LibreOffice ۲۵.۲.۳ ایمیج، تبدیل در **۰٫۹ ثانیه** (`PERSIAN_WORD_PAGES` در
+  `tests/test_convert.py`)
 
 ## پروکسی و TLS
 
