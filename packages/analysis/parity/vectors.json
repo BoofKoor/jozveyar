@@ -1,5 +1,5 @@
 {
- "revision": 2,
+ "revision": 3,
  "thresholds": {
   "chromaMin": 36,
   "colorPixelRatioMin": 0.004,
@@ -33,9 +33,9 @@
    },
    "stats": {
     "paperCast": [
-     251.7806241266884,
-     242.54587796925944,
-     200.52165812761993
+     251.20061334014824,
+     242.25044722719142,
+     200.43904932277024
     ],
     "colorRatio": 0,
     "coloredInkRatio": 0,
@@ -67,9 +67,9 @@
    },
    "stats": {
     "paperCast": [
+     254.79421452097952,
      255,
-     255,
-     255
+     254.46584562508951
     ],
     "colorRatio": 0,
     "coloredInkRatio": 0,
@@ -112,9 +112,9 @@
    },
    "stats": {
     "paperCast": [
+     254.79179163378058,
      255,
-     255,
-     255
+     254.46566692975532
     ],
     "colorRatio": 0.10294117647058823,
     "coloredInkRatio": 0.3246753246753247,
@@ -157,9 +157,9 @@
    },
    "stats": {
     "paperCast": [
-     250.1259382819016,
-     238.7864887406172,
-     196.767306088407
+     249.67141162514827,
+     238.4590747330961,
+     196.59470146302885
     ],
     "colorRatio": 0.0196078431372549,
     "coloredInkRatio": 0.08684324793747286,
@@ -191,9 +191,9 @@
    },
    "stats": {
     "paperCast": [
+     254.664605418139,
      255,
-     255,
-     255
+     254.66806537102474
     ],
     "colorRatio": 0,
     "coloredInkRatio": 0,
@@ -225,9 +225,9 @@
    },
    "stats": {
     "paperCast": [
-     201.8886783514922,
-     203.18332543818096,
-     202.71530080530553
+     201.3832807570978,
+     202.90820189274447,
+     202.52145110410095
     ],
     "colorRatio": 0,
     "coloredInkRatio": 0,
@@ -259,13 +259,13 @@
    },
    "stats": {
     "paperCast": [
-     183.013468013468,
-     205.78451178451178,
-     146.2946127946128
+     182.33278822567456,
+     205.53147996729354,
+     146.00654129190517
     ],
-    "colorRatio": 0.9181196581196581,
-    "coloredInkRatio": 0.9523893962230694,
-    "inkRatio": 0.964017094017094,
+    "colorRatio": 0.9179487179487179,
+    "coloredInkRatio": 0.952549889135255,
+    "inkRatio": 0.9636752136752137,
     "chromaP95": 207
    },
    "color": true,
@@ -293,9 +293,9 @@
    },
    "stats": {
     "paperCast": [
-     240.54098360655738,
-     241.02459016393442,
-     240.0327868852459
+     240.30588235294118,
+     240.6392156862745,
+     240.11960784313726
     ],
     "colorRatio": 0,
     "coloredInkRatio": 0,
@@ -304,6 +304,232 @@
    },
    "color": false,
    "blank": true
+  },
+  {
+   "spec": {
+    "name": "flat_yellow_200",
+    "width": 120,
+    "height": 170,
+    "seed": 19,
+    "paper": [
+     250,
+     240,
+     200
+    ],
+    "ink": [
+     40,
+     40,
+     42
+    ],
+    "lineEvery": 9,
+    "lineHeight": 2,
+    "noise": 0
+   },
+   "stats": {
+    "paperCast": [
+     250,
+     240,
+     200
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.20862745098039215,
+    "chromaP95": 13
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "flat_yellow_201",
+    "width": 120,
+    "height": 170,
+    "seed": 20,
+    "paper": [
+     250,
+     240,
+     201
+    ],
+    "ink": [
+     40,
+     40,
+     42
+    ],
+    "lineEvery": 9,
+    "lineHeight": 2,
+    "noise": 0
+   },
+   "stats": {
+    "paperCast": [
+     250,
+     240,
+     201
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.20862745098039215,
+    "chromaP95": 12
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "dark_slide_title",
+    "width": 120,
+    "height": 170,
+    "seed": 21,
+    "paper": [
+     40,
+     40,
+     46
+    ],
+    "ink": [
+     0,
+     0,
+     0
+    ],
+    "lineEvery": 0,
+    "lineHeight": 0,
+    "noise": 0,
+    "highlight": {
+     "x0": 10,
+     "y0": 10,
+     "x1": 30,
+     "y1": 14,
+     "color": [
+      255,
+      255,
+      255
+     ]
+    }
+   },
+   "stats": {
+    "paperCast": [
+     40.84313725490196,
+     40.84313725490196,
+     46.819607843137256
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.996078431372549,
+    "chromaP95": 6
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "navy_slide_title",
+    "width": 120,
+    "height": 170,
+    "seed": 22,
+    "paper": [
+     26,
+     38,
+     89
+    ],
+    "ink": [
+     0,
+     0,
+     0
+    ],
+    "lineEvery": 0,
+    "lineHeight": 0,
+    "noise": 0,
+    "highlight": {
+     "x0": 10,
+     "y0": 10,
+     "x1": 30,
+     "y1": 14,
+     "color": [
+      255,
+      255,
+      255
+     ]
+    }
+   },
+   "stats": {
+    "paperCast": [
+     26.898039215686275,
+     38.85098039215686,
+     89.65098039215687
+    ],
+    "colorRatio": 0.996078431372549,
+    "coloredInkRatio": 1,
+    "inkRatio": 0.996078431372549,
+    "chromaP95": 63
+   },
+   "color": true,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "gray_128_text",
+    "width": 120,
+    "height": 170,
+    "seed": 23,
+    "paper": [
+     128,
+     128,
+     128
+    ],
+    "ink": [
+     20,
+     20,
+     20
+    ],
+    "lineEvery": 9,
+    "lineHeight": 2,
+    "noise": 0
+   },
+   "stats": {
+    "paperCast": [
+     128,
+     128,
+     128
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.7913725490196079,
+    "chromaP95": 0
+   },
+   "color": false,
+   "blank": false
+  },
+  {
+   "spec": {
+    "name": "gray_129_text",
+    "width": 120,
+    "height": 170,
+    "seed": 24,
+    "paper": [
+     129,
+     129,
+     129
+    ],
+    "ink": [
+     20,
+     20,
+     20
+    ],
+    "lineEvery": 9,
+    "lineHeight": 2,
+    "noise": 0
+   },
+   "stats": {
+    "paperCast": [
+     129,
+     129,
+     129
+    ],
+    "colorRatio": 0,
+    "coloredInkRatio": 0,
+    "inkRatio": 0.20862745098039215,
+    "chromaP95": 0
+   },
+   "color": false,
+   "blank": false
   }
  ],
  "dpi": [

@@ -36,6 +36,11 @@ function luma(r: number, g: number, b: number): number {
  *
  * میانگین روشن‌ترین دهک گرفته می‌شود، نه سفیدترین پیکسل: یک نقطهٔ سفید تکی
  * (مثلاً حاشیهٔ برش اسکنر) نباید ته‌رنگ کل صفحه را تعیین کند.
+ *
+ * هیستوگرام و انتخاب پیکسل‌ها **هر دو** با روشنایی گردشده کار می‌کنند. نسخهٔ ۲ پیکسل را
+ * با روشنایی خام با مرز می‌سنجید: زمینهٔ یکدستی که کسر روشنایی‌اش ۰٫۵ یا بیشتر است
+ * (مثلاً 250,240,201 با روشنایی 238.54 و مرز 239) کلاً بیرون می‌افتاد، رنگ کاغذ سفید
+ * برآورد می‌شد و کل صفحه «رنگی» و بی‌حاشیه اعلام می‌شد (ANALYSIS_REVISION ۳).
  */
 export function estimatePaperCast(
   rgba: Uint8ClampedArray | Uint8Array,
@@ -69,7 +74,9 @@ export function estimatePaperCast(
     const r = rgba[i]!;
     const g = rgba[i + 1]!;
     const b = rgba[i + 2]!;
-    if (luma(r, g, b) >= cutoff) {
+    // همان گرد کردن هیستوگرام: پیکسل‌هایی که اینجا برداشته می‌شوند دقیقاً همان‌هایی‌اند
+    // که بالا تا مرز شمرده شدند.
+    if (Math.round(luma(r, g, b)) >= cutoff) {
       sumR += r;
       sumG += g;
       sumB += b;
@@ -80,6 +87,17 @@ export function estimatePaperCast(
   if (count === 0) return [255, 255, 255];
   return [sumR / count, sumG / count, sumB / count];
 }
+
+/**
+ * ته‌رنگی تیره‌تر از این (روشنایی، خاکستری میانی) کاغذ نیست: زمینهٔ اسلاید تیره، صفحهٔ
+ * سیاه یا عکس شب است، و تعادل سفیدی رویش اعمال نمی‌شود.
+ *
+ * در اسلاید تیره با یک تیتر سفید، روشن‌ترین دهک تقریباً همه زمینهٔ تیره است. خنثی
+ * کردنش بهره‌ای تا ۱۲ برابر می‌داد: زمینه سفید می‌شد، صفحه «خالی» و اسلاید سرمه‌ای
+ * «سیاه‌سفید». نسخهٔ ۲ همین را بر حسب تصادفِ کسر روشنایی زمینه گاهی داشت و گاهی نه
+ * (ADR-026، اصلاح).
+ */
+export const PAPER_CAST_MIN_LUMA = 128;
 
 /**
  * آمار رنگ یک صفحه.
@@ -107,9 +125,11 @@ export function analyzePixels(
 
   // بهرهٔ هر کانال برای تعادل سفیدی. کاغذ زرد یعنی کانال آبی ضعیف است و
   // تقویت می‌شود، پس ته‌رنگ یکدست خنثی می‌شود ولی هایلایت واقعی رنگی می‌ماند.
-  const gainR = paperCast[0] > 1 ? 255 / paperCast[0] : 1;
-  const gainG = paperCast[1] > 1 ? 255 / paperCast[1] : 1;
-  const gainB = paperCast[2] > 1 ? 255 / paperCast[2] : 1;
+  // فقط روی کاغذ: زمینهٔ تیره همان‌طور که هست سنجیده می‌شود.
+  const paper = luma(paperCast[0], paperCast[1], paperCast[2]) >= PAPER_CAST_MIN_LUMA;
+  const gainR = paper && paperCast[0] > 1 ? 255 / paperCast[0] : 1;
+  const gainG = paper && paperCast[1] > 1 ? 255 / paperCast[1] : 1;
+  const gainB = paper && paperCast[2] > 1 ? 255 / paperCast[2] : 1;
 
   const chromaHistogram = new Uint32Array(256);
   let inkCount = 0;
@@ -245,8 +265,11 @@ export function ptToMm(pt: number): number {
  * ذخیره‌شده را عوض کند بالا می‌رود، تا ردیف‌های قدیم و جدید از هم جدا بمانند.
  * ۲: DPI از جای واقعی تصویر روی صفحه، نه از اندازهٔ کل صفحه؛ و رندر سرور روی همان
  * شبکهٔ پیکسل مرورگر (ADR-029).
+ * ۳: رنگ کاغذ با همان روشنایی گردشدهٔ هیستوگرام (`estimatePaperCast`)، پس زمینهٔ یکدست
+ * دیگر از برآورد بیرون نمی‌افتد؛ و تعادل سفیدی فقط روی ته‌رنگ روشن (`PAPER_CAST_MIN_LUMA`)
+ * (ADR-009، اصلاح).
  */
-export const ANALYSIS_REVISION = 2;
+export const ANALYSIS_REVISION = 3;
 
 /**
  * یک بار کشیده شدن یک تصویر روی صفحه: پیکسل‌های خود تصویر، و ماتریسی که مربع واحد

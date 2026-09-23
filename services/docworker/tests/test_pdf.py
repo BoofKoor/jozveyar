@@ -191,6 +191,60 @@ def test_dark_slide_with_white_text_is_not_blank(tmp_path):
     assert [p["color"] for p in pages] == [False, False]
 
 
+# نسخهٔ ۲ اسلاید تیره با یک تیتر سفید را روی ۲۰، ۲۴، ۲۵، ۳۰، ۴۵، ۶۰ و ۹۰ «سفید» می‌کرد و روی ۱۰ و ۲۲
+# (و رنگ‌های تست بالا) نه، بسته به کسر روشنایی زمینه. روی ۸۳ خاکستری ۸ تا ۹۰ سنجیده شد: نسخهٔ ۲
+# برای ۵۵ «سفید»، با اصلاح گرد کردن ولی بی قاعدهٔ کاغذ ۷۱، و حالا صفر.
+@pytest.mark.parametrize("gray", [10, 20, 22, 24, 25, 30, 45, 60, 90])
+def test_dark_slide_with_a_title_is_never_blank(tmp_path, gray):
+    """ADR-026 فقط صفحهٔ یکدست تیره را «سفید» می‌داند. اسلاید تیره با یک خط تیتر سفید سفید نیست،
+    چون زمینهٔ تیره کاغذ نیست و خنثی نمی‌شود (`PAPER_CAST_MIN_LUMA`)."""
+    path = str(tmp_path / "title.pdf")
+    doc = fitz.open()
+    page = doc.new_page(width=960, height=540)
+    page.draw_rect(page.rect, color=None, fill=(gray / 255, gray / 255, gray / 255))
+    page.insert_text((60, 80), "Lecture 3 - Thermodynamics", fontsize=28, color=(1, 1, 1))
+    doc.save(path)
+
+    [slide] = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert (slide["blank"], slide["color"]) == (False, False)
+    assert "blank_page" not in slide["warnings"]
+
+
+def test_dark_colored_slide_is_color(tmp_path):
+    """اسلاید سرمه‌ای با متن سفید رنگی چاپ می‌شود؛ خنثی کردن زمینه‌اش آن را «سیاه‌سفید» می‌کرد."""
+    path = str(tmp_path / "navy.pdf")
+    doc = fitz.open()
+    page = doc.new_page(width=960, height=540)
+    page.draw_rect(page.rect, color=None, fill=(0.1, 0.15, 0.35))
+    for i in range(3):
+        page.insert_text((60, 80 + i * 44), "Lecture 3 - Thermodynamics", fontsize=28, color=(1, 1, 1))
+    doc.save(path)
+
+    [slide] = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert (slide["blank"], slide["color"]) == (False, True)
+
+
+@pytest.mark.parametrize("blue", [200, 201])
+def test_flat_tinted_paper_is_paper_whatever_its_luma_fraction(tmp_path, blue):
+    """زمینهٔ زرد یکدست، مثل PDF برداری. روشنایی (250,240,201) برابر 238.54 است و نسخهٔ ۲ آن را
+    از برآورد کاغذ بیرون می‌انداخت: کل صفحه رنگی می‌شد (colorRatio ۰٫۹۱) و حاشیه‌اش صفر، یعنی
+    هشدار «حاشیهٔ تنگ» هم. (250,240,200) با روشنایی 238.43 درست بود."""
+    path = str(tmp_path / "flat.pdf")
+    doc = fitz.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.draw_rect(page.rect, color=None, fill=(250 / 255, 240 / 255, blue / 255))
+    for i in range(20):
+        page.draw_rect(fitz.Rect(60, 60 + i * 35, 500, 64 + i * 35), color=None, fill=(0.18, 0.18, 0.19))
+    doc.save(path)
+
+    [flat] = analyze_pdf(path, DEFAULT_THRESHOLDS)["pages"]
+    assert flat["color"] is False
+    assert flat["colorRatio"] == 0
+    assert list(flat["paperCast"]) == [250, 240, blue]
+    assert "tight_margin" not in flat["warnings"]
+    assert flat["minMarginMm"] > 15
+
+
 def test_page_shape_matches_contract(tmp_path):
     path = str(tmp_path / "one.pdf")
     make_pdf(path, ["vector"])
