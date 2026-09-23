@@ -1,8 +1,11 @@
 """حلقهٔ کارگر در برابر پایگاه دادهٔ ناآماده — بدون سرویس واقعی."""
 
+import math
+
 import psycopg
 import pytest
 
+from docworker import fonts
 from docworker.__main__ import Worker
 
 
@@ -15,7 +18,24 @@ def worker(monkeypatch):
         monkeypatch.setenv(key, value)
     w = Worker()
     w.retry_seconds = 0
+    w.fonts_due = math.inf  # استوریج ساختگی است؛ هم‌گام‌سازی فونت جدا تست می‌شود
     return w
+
+
+def test_font_sync_failure_never_stops_the_worker(worker, monkeypatch):
+    """استوریج در دسترس نیست ← هشدار، نه کرش؛ و ده دقیقه بعد دوباره."""
+    calls = []
+
+    def broken_sync(storage):
+        calls.append(storage)
+        raise OSError("storage down")
+
+    monkeypatch.setattr(fonts, "sync", broken_sync)
+    worker.fonts_due = 0.0
+    worker.sync_fonts_if_due()
+    worker.sync_fonts_if_due()  # هنوز وقتش نشده
+    assert len(calls) == 1
+    assert worker.fonts_due > 0
 
 
 def test_missing_jobs_table_waits_instead_of_crashing(worker, monkeypatch):

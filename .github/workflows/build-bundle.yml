@@ -16,10 +16,18 @@ on:
   # روی PR فقط تست و بیلد — هیچ بسته‌ای منتشر نمی‌شود (شرط‌های `if` پایین).
   # بدون این، تست‌ها اولین بار بعد از merge اجرا می‌شدند.
   pull_request:
+  # اجرای دستی روی هر شاخه‌ای جز main هم فقط تست و بیلد است: انتشار فقط از
+  # main، وگرنه بستهٔ یک شاخهٔ نیمه‌کاره جای بستهٔ تولید را می‌گرفت.
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# اجراهای main پشت‌سرهم، نه هم‌زمان: دو انتشار هم‌زمان روی یک تگ، بسته‌ای
+# نیمه‌تازه نیمه‌کهنه می‌سازد. روی PR اجرای کهنه لغو می‌شود.
+concurrency:
+  group: build-bundle-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   bundle:
@@ -92,48 +100,102 @@ jobs:
           S3_ENDPOINT: http://127.0.0.1:3900
           S3_BUCKET: jozveyar
 
-      # کارگر اسناد پایتون (ADR-025). بعد از `pnpm test` چون آن مهاجرت‌ها را
-      # اعمال کرده؛ تست‌های یکپارچگی کارگر روی همان پستگرس و Garage اجرا می‌شوند.
+      # ── کارگر اسناد: ایمیج پایه (ADR-027) ─────────────────────────────────
+      #
+      # LibreOffice، فونت‌ها و چرخ‌های پایتون در یک ایمیج پایه که شناسه‌اش هش
+      # ورودی‌هایش است. اگر همین شناسه قبلاً منتشر شده، همان برداشته می‌شود
+      # (چند ثانیه)؛ اگر نه، اینجا ساخته می‌شود. سرور هیچ‌وقت نمی‌سازدش.
+      - name: شناسهٔ ایمیج پایهٔ کارگر
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          id=$(services/docworker/base-id.sh)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "image=jozveyar/docworker-base:$id" >> "$GITHUB_OUTPUT"
+          if gh release view "docworker-base-$id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "ایمیج پایه $id از قبل منتشر شده"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "ایمیج پایه $id تازه است — ساخته می‌شود"
+          fi
+
+      - name: ایمیج پایه — نسخهٔ منتشرشده
+        if: steps.base.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          rm -rf base-dl
+          gh release download "docworker-base-${{ steps.base.outputs.id }}" --repo "$GITHUB_REPOSITORY" --dir base-dl
+          (cd base-dl && sha256sum -c jozveyar-docworker-base.sha256)
+          cat base-dl/jozveyar-docworker-base.tar.gz.part-* | docker load
+          rm -rf base-dl
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: تست کارگر اسناد
-        working-directory: services/docworker
+      # چرخ‌ها برای پایتون ۳.۱۲ لینوکس، همین‌جا: داخل ساخت ایمیج شبکه لازم نیست.
+      - name: ایمیج پایه — ساخت
+        if: steps.base.outputs.published != 'true'
         run: |
-          pip install -r requirements-dev.txt
-          python -m pytest -q tests
+          set -eux
+          D=services/docworker
+          rm -rf base-ctx && mkdir -p base-ctx/wheels
+          pip download --only-binary=:all: --python-version 3.12 --implementation cp \
+            --platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 \
+            --platform manylinux2014_x86_64 -r $D/requirements.txt -d base-ctx/wheels
+          cp -r $D/Dockerfile.base $D/requirements.txt $D/fonts $D/fontconfig base-ctx/
+          docker build -f base-ctx/Dockerfile.base -t "${{ steps.base.outputs.image }}" base-ctx
+          rm -rf base-ctx
+          docker image ls "${{ steps.base.outputs.image }}"
+
+      # تست کارگر داخل همان ایمیجی که روی سرور اجرا می‌شود: همان LibreOffice،
+      # همان فونت‌ها. بعد از `pnpm test` چون آن مهاجرت‌ها را اعمال کرده؛ تست‌های
+      # یکپارچگی روی همان پستگرس و Garage اجرا می‌شوند (شبکهٔ میزبان).
+      # کل مخزن mount می‌شود، نه فقط پوشهٔ کارگر: تست هم‌ارزی بردارها را از
+      # packages/analysis/parity می‌خواند (ADR-025).
+      - name: تست کارگر اسناد
+        run: |
+          docker run --rm --network host --user root \
+            -e DATABASE_URL -e S3_ENDPOINT -e S3_BUCKET -e S3_ACCESS_KEY -e S3_SECRET_KEY \
+            -v "$PWD:/src" -w /src/services/docworker "${{ steps.base.outputs.image }}" \
+            sh -c 'pip install -q --no-cache-dir --root-user-action=ignore -r requirements-dev.txt \
+                   && python -m pytest -q -p no:cacheprovider tests'
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jozveyar
           S3_ENDPOINT: http://127.0.0.1:3900
           S3_BUCKET: jozveyar
 
-      # بستهٔ کارگر: کد + چرخ‌های آماده برای پایتون ۳.۱۲ لینوکس. سرور به PyPI
-      # نمی‌رسد، پس هر چه ایمیج لازم دارد همین‌جا جمع می‌شود.
+      # بستهٔ کارگر: فقط کد و شناسهٔ پایه — چند کیلوبایت. سرور پایه را از
+      # انتشار جدای خودش می‌گیرد، فقط وقتی شناسه‌اش را ندارد.
       - name: بستهٔ کارگر اسناد
         run: |
           set -eux
           D=services/docworker
-          rm -rf dw && mkdir -p dw/wheels
-          pip download --only-binary=:all: --python-version 3.12 --implementation cp \
-            --platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 \
-            --platform manylinux2014_x86_64 -r $D/requirements.txt -d dw/wheels
-          cp -r $D/Dockerfile $D/requirements.txt $D/docworker dw/
+          rm -rf dw && mkdir -p dw
+          cp -r $D/Dockerfile $D/docworker dw/
+          echo "${{ steps.base.outputs.id }}" > dw/BASE
           find dw -name __pycache__ -prune -exec rm -rf {} +
           # بستهٔ تکرارپذیر: بدون زمان و مالک، پس تا محتوا عوض نشده اثر انگشت
-          # هم عوض نمی‌شود و سرور ۴۵ مگابایت را دوباره دانلود نمی‌کند.
+          # هم عوض نمی‌شود و سرور کارگر را بی‌دلیل دوباره نمی‌سازد.
           tar --sort=name --mtime='2000-01-01 00:00Z' --owner=0 --group=0 --numeric-owner \
             -cf - -C dw . | gzip -n > jozveyar-docworker.tar.gz
           sha256sum jozveyar-docworker.tar.gz | cut -d' ' -f1 > jozveyar-docworker.sha256
           ls -lh jozveyar-docworker.tar.gz
 
-      # همان ایمیجی که سرور می‌سازد، اینجا ساخته و امتحان می‌شود: اگر چرخی
+      # همان ایمیجی که سرور می‌سازد، اینجا ساخته و امتحان می‌شود: اگر چیزی
       # جا افتاده یا با پایه نمی‌خواند، همین‌جا می‌شکند نه روی سرور.
       - name: آزمایش ایمیج کارگر
         run: |
           set -eux
-          docker build -t docworker-smoke dw
-          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, docworker.jobs; print(fitz.VersionBind)"
+          docker build --build-arg "BASE_IMAGE=${{ steps.base.outputs.image }}" -t docworker-smoke dw
+          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts; print(fitz.VersionBind)"
+          docker run --rm docworker-smoke soffice --version
+          docker image ls docworker-smoke
 
       - name: بیلد
         run: pnpm --filter @jozveyar/web build
@@ -141,7 +203,7 @@ jobs:
       # خروجی standalone دو چیز را خودش نمی‌آورد و باید کنار server.js بنشینند.
       # همان مراحل serve-standalone.mjs، اینجا برای بسته‌بندی.
       - name: مونتاژ بسته
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
           set -eux
           OUT=apps/web/.next/standalone
@@ -159,15 +221,62 @@ jobs:
 
       # اثر انگشت، تا سرور بفهمد نسخهٔ جدید آمده یا نه.
       - name: اثر انگشت
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
           sha256sum jozveyar-bundle.tar.gz | cut -d' ' -f1 > jozveyar-bundle.sha256
           cat jozveyar-bundle.sha256
 
+      # ایمیج پایهٔ کارگر — فقط اگر این شناسه تازه است، و **قبل از** بستهٔ کد:
+      # بسته‌ای که به پایهٔ منتشرنشده اشاره کند هیچ‌وقت منتشر نمی‌شود. تگ
+      # `docworker-base-<شناسه>` هرگز بازنویسی نمی‌شود، پس CDN کهنه (ADR-019) اینجا
+      # بی‌معناست. تکه‌های ۴۰ مگابایتی، هر کدام با اثر انگشت خودش: لینک سرور روی
+      # فایل بزرگ می‌افتد و تکهٔ افتاده جدا دوباره گرفته می‌شود.
+      - name: بسته‌بندی ایمیج پایه
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.base.outputs.published != 'true'
+        run: |
+          set -eux
+          rm -rf base-out && mkdir base-out
+          docker save "${{ steps.base.outputs.image }}" | gzip -n > base-out/image.tar.gz
+          ls -lh base-out/image.tar.gz
+          cd base-out
+          split -b 40m -d -a 2 image.tar.gz jozveyar-docworker-base.tar.gz.part-
+          rm image.tar.gz
+          sha256sum jozveyar-docworker-base.tar.gz.part-* > jozveyar-docworker-base.sha256
+          cat jozveyar-docworker-base.sha256
+
+      - name: انتشار ایمیج پایه
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.base.outputs.published != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: docworker-base-${{ steps.base.outputs.id }}
+          name: ایمیج پایهٔ کارگر ${{ steps.base.outputs.id }}
+          body: |
+            LibreOffice، فونت‌ها و چرخ‌های پایتون کارگر اسناد (ADR-027)، ساخته‌شده از `${{ github.sha }}`.
+
+            سرور خودش با `./infra/deploy-bundle.sh` برش می‌دارد؛ کار دستی ندارد.
+          files: |
+            base-out/jozveyar-docworker-base.tar.gz.part-*
+            base-out/jozveyar-docworker-base.sha256
+          prerelease: true
+          make_latest: false
+
+      # پنج پایهٔ آخر برای برگشت به نسخهٔ قبل کافی است؛ هر کدام ~۲۵۰ مگابایت.
+      - name: پاک‌سازی ایمیج‌های پایهٔ قدیمی
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.base.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("docworker-base-"))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+          | while read -r tag; do
+              echo "حذف $tag"
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            done
+
       # انتشار زیر تگ ثابت `bundle-latest`: سرور همیشه یک آدرس می‌شناسد و
       # لازم نیست شمارهٔ نسخه را جایی نگه دارد.
       - name: انتشار
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: bundle-latest

@@ -19,5 +19,6 @@ apps/web/tests/fixtures/
 .npm-registry
 .bundle-sha256
 .docworker-sha256
+.docworker-base/
 __pycache__/
 .pytest_cache/

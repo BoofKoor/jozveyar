@@ -9,7 +9,8 @@
 #
 # ولی همین سرور به گیت‌هاب می‌رسد. پس بیلد در گیت‌هاب اکشنز انجام می‌شود و
 # اینجا فقط یک فایل ۶۷ مگابایتی دانلود می‌شود — خروجی standalone نکست با
-# ۱۹ بستهٔ زمان اجرا، نه ۹۹ بستهٔ بیلد.
+# ۱۹ بستهٔ زمان اجرا، نه ۹۹ بستهٔ بیلد. ایمیج پایهٔ کارگر اسناد (LibreOffice،
+# ~۲۵۰ مگابایت) فقط وقتی می‌آید که عوض شده باشد (ADR-027).
 #
 # اجرا (روی سرور):
 #   ./infra/deploy-bundle.sh
@@ -25,7 +26,10 @@ APP_DIR="${APP_DIR:-/opt/jozveyar}"
 DOMAIN="${DOMAIN:-jozveyar.com}"
 COMPOSE="docker compose --env-file ${APP_DIR}/.env -f infra/docker-compose.prod.yml"
 
-BASE="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
+# نشانی انتشارها؛ اگر روزی گیت‌هاب از سرور بسته شد، همین تکه‌ها را روی آینهٔ
+# دیگری (مثلاً استوریج آروان) گذاشته و اینجا عوضش کنید.
+RELEASES_URL="${RELEASES_URL:-https://github.com/${REPO}/releases/download}"
+BASE="${RELEASES_URL}/${RELEASE_TAG}"
 
 step() { printf '\n\033[1;32m══ %s\033[0m\n' "$1"; }
 info() { printf '\033[0;36m›\033[0m %s\n' "$1"; }
@@ -69,6 +73,65 @@ fetch_verified() {
   die "اثر انگشت ${name} بعد از شش تلاش هم نخواند. وضعیت workflow را در گیت‌هاب ببینید."
 }
 
+# ایمیج پایهٔ کارگر اسناد (ADR-027): LibreOffice، فونت‌ها و چرخ‌های پایتون.
+#
+# ~۲۵۰ مگابایت، پس فقط وقتی دانلود می‌شود که این سرور آن شناسه را ندارد — یعنی
+# وقتی LibreOffice یا فونت یا چرخ‌ها عوض شده‌اند، نه با هر تغییر کد. تگ انتشارش
+# تغییرناپذیر است (`docworker-base-<شناسه>`)، پس CDN کهنه اینجا معنا ندارد.
+#
+# تکه‌های ۴۰ مگابایتی، هر کدام با اثر انگشت خودش: این لینک روی فایل بزرگ
+# می‌افتد (ADR-019). تکهٔ افتاده از همان بایت ادامه می‌گیرد (`curl -C -`) و
+# تکه‌های رسیده در پوشهٔ ماندگار می‌مانند، پس اجرای دوبارهٔ همین اسکریپت بعد
+# از قطعی، از همان تکه ادامه می‌دهد.
+#   ensure_base <شناسه>
+ensure_base() {
+  local id="$1" image="jozveyar/docworker-base:$1"
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    ok "ایمیج پایهٔ کارگر ${id} از قبل هست"
+    return 0
+  fi
+  local url="${RELEASES_URL}/docworker-base-${id}"
+  local dir="${APP_DIR}/.docworker-base/${id}"
+  mkdir -p "$dir"
+  info "ایمیج پایهٔ کارگر ${id} تازه است — دانلود تکه‌به‌تکه (یک بار، تا پایه دوباره عوض شود)"
+  curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "${dir}/manifest" \
+      "${url}/jozveyar-docworker-base.sha256" \
+    || die "فهرست تکه‌های ایمیج پایه ${id} نیامد. آیا workflow «build-bundle» روی main تمام شده؟"
+
+  local total n=0 sum name file before after
+  total=$(wc -l < "${dir}/manifest")
+  while read -r sum name; do
+    n=$((n + 1))
+    [[ "$name" =~ ^jozveyar-docworker-base\.tar\.gz\.part-[0-9]+$ ]] || die "نام تکهٔ غیرمنتظره: ${name}"
+    file="${dir}/${name}"
+    for attempt in $(seq 1 10); do
+      if [[ -f "$file" ]] && echo "${sum}  ${file}" | sha256sum -c --status; then
+        break
+      fi
+      before=$(stat -c %s "$file" 2>/dev/null || echo 0)
+      if curl -fsSL -C - --retry 3 --retry-delay 5 --retry-all-errors -o "$file" "${url}/${name}"; then
+        # کامل رسید ولی نخواند: خراب است، از اول.
+        echo "${sum}  ${file}" | sha256sum -c --status || { info "تکهٔ ${n} خراب رسید — از اول"; rm -f "$file"; }
+      else
+        after=$(stat -c %s "$file" 2>/dev/null || echo 0)
+        # بی‌پیشرفت یعنی ادامه‌دادن گیر کرده (مثلاً فایل خراب و کامل): از اول.
+        (( after > before )) || rm -f "$file"
+        info "تکهٔ ${n}/${total} قطع شد (تلاش ${attempt}) — ادامه از همان‌جا"
+        sleep $(( attempt * 3 ))
+      fi
+    done
+    echo "${sum}  ${file}" | sha256sum -c --status || die "تکهٔ ${n}/${total} بعد از ده تلاش هم سالم نرسید. دوباره اجرا کنید؛ تکه‌های رسیده می‌مانند."
+    info "تکهٔ ${n}/${total} ✓"
+  done < "${dir}/manifest"
+
+  info "بارگذاری ایمیج پایه در داکر…"
+  cat "${dir}"/jozveyar-docworker-base.tar.gz.part-* | docker load >/dev/null \
+    || die "docker load ایمیج پایه شکست خورد."
+  docker image inspect "$image" >/dev/null 2>&1 || die "بعد از بارگذاری، ${image} پیدا نشد."
+  rm -rf "$dir"
+  ok "ایمیج پایهٔ کارگر ${id} بارگذاری شد ($(docker image inspect -f '{{.Size}}' "$image" | numfmt --to=iec))"
+}
+
 # بسته باید از **همین** commitی ساخته شده باشد که git pull آورد.
 #
 # اثر انگشت فقط می‌گوید بسته سالم رسیده، نه اینکه تازه است. در استقرار واقعی
@@ -92,8 +155,8 @@ for round in $(seq 1 20); do
 done
 ok "بستهٔ وب ${HEAD_SHA:0:7} دریافت و تأیید شد ($(du -h "${WORK}/jozveyar-bundle.tar.gz" | cut -f1))"
 
-# کارگر اسناد جدا منتشر می‌شود (چرخ‌های پایتون، ~۴۵ مگابایت) و فقط وقتی
-# عوض شده دوباره دانلود می‌شود.
+# کارگر اسناد جدا منتشر می‌شود و فقط وقتی عوض شده دوباره ساخته می‌شود. بسته‌اش
+# فقط کد است (چند کیلوبایت)؛ LibreOffice و فونت‌ها در ایمیج پایه‌اند (ensure_base).
 DW_SHA=$(curl -fsSL --retry 3 "${BASE}/jozveyar-docworker.sha256" | tr -d '[:space:]' || true)
 DW_BUILD=1
 if [[ -n "$DW_SHA" && -f .docworker-sha256 && "$(cat .docworker-sha256)" == "$DW_SHA" ]] \
@@ -128,13 +191,19 @@ cp apps/web/Dockerfile.bundle "${WORK}/ctx/Dockerfile"
 docker build -t "jozveyar/web:${IMAGE_TAG}" "${WORK}/ctx"
 ok "ایمیج jozveyar/web:${IMAGE_TAG} ساخته شد"
 
+BASE_ID=""
 if (( DW_BUILD )); then
   rm -rf "${WORK}/dw" && mkdir -p "${WORK}/dw"
   tar -xzf "${WORK}/jozveyar-docworker.tar.gz" -C "${WORK}/dw"
-  [[ -f "${WORK}/dw/Dockerfile" && -d "${WORK}/dw/wheels" ]] \
+  [[ -f "${WORK}/dw/Dockerfile" && -f "${WORK}/dw/BASE" ]] \
     || die "ساختار بستهٔ کارگر اسناد غیرمنتظره است."
-  docker build -t "jozveyar/docworker:${IMAGE_TAG}" "${WORK}/dw"
-  ok "ایمیج jozveyar/docworker:${IMAGE_TAG} ساخته شد"
+  BASE_ID=$(tr -d '[:space:]' < "${WORK}/dw/BASE")
+  [[ "$BASE_ID" =~ ^[0-9a-f]{16}$ ]] || die "شناسهٔ ایمیج پایه نامعتبر است: «${BASE_ID}»"
+  ensure_base "$BASE_ID"
+  # فقط COPY روی پایهٔ محلی: نه PyPI، نه آینهٔ Docker Hub.
+  docker build --build-arg "BASE_IMAGE=jozveyar/docworker-base:${BASE_ID}" \
+    -t "jozveyar/docworker:${IMAGE_TAG}" "${WORK}/dw"
+  ok "ایمیج jozveyar/docworker:${IMAGE_TAG} ساخته شد (پایه ${BASE_ID})"
 fi
 
 # ── ۳. استوریج ───────────────────────────────────────────────────────────
@@ -185,6 +254,13 @@ echo "$DW_SHA" > .docworker-sha256
 # لایه‌های COPY را نگه می‌دارد که دیگر به کار نمی‌آیند. استوریج روی همین
 # دیسک است، پس جای خالی اینجا واقعاً مصرف دارد.
 docker image prune -f >/dev/null && docker builder prune -f >/dev/null || true
+# ایمیج پایهٔ قبلی کارگر (~۷۰۰ مگابایت) هم؛ بعد از prune، چون تا ایمیج کارگر
+# قدیمی هست، داکر پایه‌اش را پاک نمی‌کند.
+if [[ -n "$BASE_ID" ]]; then
+  for tag in $(docker images jozveyar/docworker-base --format '{{.Tag}}'); do
+    [[ "$tag" == "$BASE_ID" ]] || docker rmi "jozveyar/docworker-base:${tag}" >/dev/null 2>&1 || true
+  done
+fi
 ok "ایمیج‌های کهنه پاک شدند"
 
 # ── ۵. وضعیت ─────────────────────────────────────────────────────────────

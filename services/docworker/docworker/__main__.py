@@ -21,7 +21,7 @@ import time
 
 import psycopg
 
-from . import queue
+from . import fonts, queue
 from .jobs import ANALYZE_DOCUMENT, PermanentFailure, analyze_document, mark_document_failed
 from .storage import S3Storage
 
@@ -38,10 +38,30 @@ class Worker:
         self.poll = float(os.environ.get("DOCWORKER_POLL_SECONDS", "2"))
         self.retry_seconds = 10.0
         self.storage = S3Storage.from_env()
+        # اولین هم‌گام‌سازی فونت همان اول کار؛ بعد هر ده دقیقه، بین کارها.
+        self.fonts_due = 0.0
 
     def stop(self, *_: object) -> None:
         # کار جاری تمام می‌شود؛ اگر داکر زودتر بکشد، اجاره کار را برمی‌گرداند.
         self.stopping = True
+
+    def sync_fonts_if_due(self) -> None:
+        """فونت‌های خصوصی باکت (ADR-027). شکستش کار را نگه نمی‌دارد: بدون آنها
+        تبدیل با نزدیک‌ترین فونت آزاد انجام می‌شود."""
+        now = time.monotonic()
+        if now < self.fonts_due:
+            return
+        self.fonts_due = now + fonts.SYNC_EVERY_SECONDS
+        try:
+            result = fonts.sync(self.storage)
+        except Exception as error:  # noqa: BLE001
+            log.warning("فونت‌های خصوصی هم‌گام نشدند: %s", error)
+            return
+        if result.added or result.removed:
+            log.info(
+                "فونت‌های خصوصی: %s فونت؛ تازه %s، برداشته %s",
+                result.fonts, result.added or "—", result.removed or "—",
+            )
 
     def run_once(self, conn: psycopg.Connection) -> bool:
         """یک کار برمی‌دارد و انجام می‌دهد. false یعنی صف خالی بود."""
@@ -75,6 +95,7 @@ class Worker:
             try:
                 with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
                     while not self.stopping:
+                        self.sync_fonts_if_due()
                         if not self.run_once(conn):
                             time.sleep(self.poll)
             except psycopg.OperationalError as error:

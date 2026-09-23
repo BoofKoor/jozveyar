@@ -81,8 +81,14 @@ services:
     image: jozveyar/docworker:${TAG:-latest}
     restart: unless-stopped
     env_file: [../.env]
-    # تحلیل یک صفحه در لحظه است، ولی PyMuPDF روی PDF سنگین جا می‌خواهد.
-    mem_limit: ${DOCWORKER_MEM_LIMIT:-768m}
+    # کارگر پردازهٔ LibreOffice می‌سازد؛ init (tini) پردازهٔ یتیمش را جمع می‌کند.
+    init: true
+    # سنجیده (ADR-027): LibreOffice برای Word متنی ~۲۴۰ مگابایت، پاورپوینت ۶۰
+    # اسلایدی با عکس ~۵۷۰، و Word با ۳۰ عکس ۱۲ مگاپیکسلی ~۸۹۰؛ پایتون ~۱۵۰. سرور
+    # ۷٫۸ گیگابایت دارد. بی swap: فایل سنگین‌تر از این سقف، LibreOffice را می‌کشد
+    # (پیام روشن)، نه اینکه کل سرور را در swap بخواباند.
+    mem_limit: ${DOCWORKER_MEM_LIMIT:-2g}
+    memswap_limit: ${DOCWORKER_MEM_LIMIT:-2g}
     depends_on:
       postgres: { condition: service_healthy }
       garage: { condition: service_healthy }
