@@ -86,6 +86,32 @@ def test_unknown_content_is_refused_clearly(tmp_path):
     assert caught.value.code == "unsupported_format"
 
 
+def test_only_fonts_that_change_the_layout_are_warned_about():
+    """Times New Roman ← Liberation Serif هم‌اندازه است و صفحه‌بندی را عوض نمی‌کند؛
+    B Nazanin ← Nazli نه. Calibri بی Carlito (ایمیجی که آن را ندارد) هم نه."""
+    substituted = {
+        "Times New Roman": "Liberation Serif",
+        "B Nazanin": "Nazli",
+        "Calibri": "DejaVu Sans",
+        "Cambria": "Caladea",
+        "Calibri Light": "Noto Sans",  # فقط در پوستهٔ سند؛ در PDF نیامد
+    }
+    printed = {"nazli", "liberationserif", "dejavusans", "caladea"}
+    assert convert.mismatched_fonts(substituted, printed) == ["B Nazanin", "Calibri"]
+    assert convert.mismatched_fonts({}, printed) == []
+    # PDF خوانده نشد: هشدار زیادی بهتر از هشدار گم‌شده.
+    assert convert.mismatched_fonts(substituted, None) == ["B Nazanin", "Calibri", "Calibri Light"]
+
+
+def test_font_key_matches_pdf_font_names():
+    """نام فونت داخل PDF برچسب زیرمجموعه و وزن دارد؛ خانوادهٔ fontconfig فاصله."""
+    assert convert.font_key("BAAAAA+NotoSans-Regular") == convert.font_key("Noto Sans") == "notosans"
+    assert convert.font_key("CAAAAA+LiberationSerif") == convert.font_key("Liberation Serif")
+    assert convert.font_key("DejaVuSans-Bold") == convert.font_key("DejaVu Sans")
+    assert convert.font_key("Nazli,Bold") == convert.font_key("Nazli")
+    assert convert.font_key("NotoSansArabic-Regular") != convert.font_key("Noto Sans")
+
+
 # ── عکس ──────────────────────────────────────────────────────────────────────
 
 
@@ -287,11 +313,32 @@ def test_persian_word_becomes_pdf_and_says_what_happened(tmp_path, office):
     assert record["fonts"]["requested"] == ["B Nazanin"]
     used = fc_match("B Nazanin")
     assert record["fonts"]["substituted"] == ({} if used == "B Nazanin" else {"B Nazanin": used})
+    assert record["fonts"]["mismatched"] == ([] if used == "B Nazanin" else ["B Nazanin"])
 
     with fitz.open(result.pdf_path) as doc:
         assert (round(doc[0].rect.width), round(doc[0].rect.height)) == (595, 842)
         if used == "Nazli":  # فونت خصوصی واقعی نصب نیست — همان وضعیت CI
             assert doc.page_count == PERSIAN_WORD_PAGES
+
+
+@needs_libreoffice
+def test_latin_text_in_times_new_roman_is_not_a_font_warning(tmp_path, office):
+    """جزوهٔ فارسی معمولی: متن B Nazanin، اعداد و کلمه‌های لاتین Times New Roman. فقط
+    اولی هشدار می‌گیرد — ایمیج برای دومی جایگزین هم‌اندازه دارد."""
+    source = str(tmp_path / "upload")
+    make_docx(source, [
+        docx_paragraph(persian_text(3, 30), "B Nazanin"),
+        docx_paragraph("Fourier series and the heat equation", "Times New Roman", rtl=False),
+    ], theme=True)
+    fonts = convert.to_pdf(source, str(tmp_path), office).record()["fonts"]
+    assert fonts["substituted"].get("Times New Roman") == "Liberation Serif"
+    # «Calibri Light» سرتیترهای پوسته در هر Word هست و جایگزینش هم‌اندازه نیست — ولی
+    # این سند سرتیتر ندارد و جایگزینش در PDF نیامده: هشدارش فقط سردرگمی بود.
+    assert "Calibri Light" in fonts["requested"]
+    assert "Calibri Light" not in fonts["mismatched"]
+    used = fc_match("B Nazanin")
+    assert fonts["mismatched"] == ([] if used == "B Nazanin" else ["B Nazanin"])
+    assert "Times New Roman" not in fonts["mismatched"]
 
 
 @needs_libreoffice

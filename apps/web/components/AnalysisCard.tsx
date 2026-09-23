@@ -1,6 +1,7 @@
 'use client';
 
-import { formatBytes, formatNumber } from '@jozveyar/text';
+import { Fragment, type ReactNode } from 'react';
+import { formatBytes, formatNumber, formatPages } from '@jozveyar/text';
 import type { FileKind } from '../lib/analysis-protocol';
 import type { AnalysisState, AnalysisSummaryView } from '../lib/useDocumentAnalysis';
 import type { UploadSnapshot } from '../lib/upload/client';
@@ -221,36 +222,95 @@ export function AnalysisCard({
         </p>
       ) : null}
 
-      {(summary.lowDpiPageCount > 0 ||
-        summary.tightMarginPageCount > 0 ||
-        summary.blankPageCount > 0) && (
+      {summary.mismatchedFonts.length > 0 ||
+      summary.lowDpiPageCount > 0 ||
+      summary.tightMarginPageCount > 0 ||
+      summary.blankPageCount > 0 ? (
         <ul className="mt-4 flex flex-col gap-2 border-t border-hairline pt-4 text-sm text-ink-2">
-          {summary.lowDpiPageCount > 0 && (
-            <li>
-              <span className="num font-semibold text-ink">
-                {formatNumber(summary.lowDpiPageCount)}
-              </span>{' '}
-              صفحه کیفیت اسکن پایینی دارد و چاپش کمی مات درمی‌آید.
+          {summary.mismatchedFonts.length > 0 ? (
+            <li data-testid="warning-fonts">
+              {summary.mismatchedFonts.length === 1 ? 'فونت' : 'فونت‌های'}{' '}
+              <FontNames fonts={summary.mismatchedFonts} /> روی سرور ما نیست و با فونت مشابه
+              چاپ می‌شود؛ ظاهر و تعداد صفحه ممکن است فرق کند. برای چاپ دقیقاً مثل فایل خودت، از{' '}
+              {program} خروجی PDF بگیر و همان را بینداز.
             </li>
-          )}
-          {summary.tightMarginPageCount > 0 && (
-            <li>
-              <span className="num font-semibold text-ink">
-                {formatNumber(summary.tightMarginPageCount)}
-              </span>{' '}
-              صفحه حاشیهٔ کمی دارد — صحافی ممکن است لبهٔ متن را بگیرد.
-            </li>
-          )}
-          {summary.blankPageCount > 0 && (
-            <li>
-              <span className="num font-semibold text-ink">
-                {formatNumber(summary.blankPageCount)}
-              </span>{' '}
-              صفحه خالی است و هزینهٔ چاپ می‌گیرد.
-            </li>
-          )}
+          ) : null}
+          <PageWarning
+            testId="warning-low-dpi"
+            pages={summary.lowDpiPages}
+            count={summary.lowDpiPageCount}
+            estimated={summary.estimated}
+            text="کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود"
+          />
+          <PageWarning
+            testId="warning-tight-margin"
+            pages={summary.tightMarginPages}
+            count={summary.tightMarginPageCount}
+            estimated={summary.estimated}
+            text="حاشیهٔ کمی دارد — صحافی ممکن است لبهٔ متن را بگیرد"
+          />
+          <PageWarning
+            testId="warning-blank"
+            pages={summary.blankPages}
+            count={summary.blankPageCount}
+            estimated={summary.estimated}
+            text="خالی است و هزینهٔ چاپ می‌گیرد"
+          />
         </ul>
-      )}
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * یک هشدار با جایش روی سند (ADR-029): «صفحه‌های 3، 7 و 12 …». سند بزرگ فقط نمونه‌ای
+ * بررسی شده، پس عدد برآوردی می‌آید و چند صفحهٔ نمونه با «مثلاً».
+ */
+function PageWarning({
+  pages,
+  count,
+  estimated,
+  text,
+  testId,
+}: {
+  pages: readonly number[];
+  count: number;
+  estimated: boolean;
+  text: string;
+  testId: string;
+}) {
+  if (count === 0 || pages.length === 0) return null;
+  return (
+    <li data-testid={testId}>
+      <span className="font-semibold text-ink">
+        {estimated ? `حدود ${formatNumber(count)} صفحه` : formatPages(pages)}
+      </span>{' '}
+      {text}
+      {estimated ? `، مثلاً ${formatPages(pages.slice(0, 3))}` : ''}.
+    </li>
+  );
+}
+
+const MAX_FONT_NAMES = 3;
+
+/** «B Nazanin، B Titr و 2 فونت دیگر» — نام لاتین جدا، تا جهت متن فارسی را به هم نریزد. */
+function FontNames({ fonts }: { fonts: readonly string[] }) {
+  const parts: ReactNode[] = fonts.slice(0, MAX_FONT_NAMES).map((name) => (
+    <bdi key={name} className="font-semibold text-ink">
+      {name}
+    </bdi>
+  ));
+  if (fonts.length > MAX_FONT_NAMES) {
+    parts.push(`${formatNumber(fonts.length - MAX_FONT_NAMES)} فونت دیگر`);
+  }
+  return (
+    <>
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i === 0 ? null : i === parts.length - 1 ? ' و ' : '، '}
+          {part}
+        </Fragment>
+      ))}
+    </>
   );
 }

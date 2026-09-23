@@ -65,15 +65,24 @@ function scanImage({ paper, ink, w = 150, h = 212 }) {
   return { w, h, data: deflateSync(rgb) };
 }
 
-/** ساخت یک PDF کامل با xref درست. هر صفحه یا محتوای برداری است یا تصویر. */
+/**
+ * ساخت یک PDF کامل با xref درست. هر صفحه یا محتوای برداری است یا تصویر.
+ *
+ * صفحهٔ تصویری: `{ image }` تمام‌صفحه؛ با `matrix` در جای دلخواه (`cm`)، با `vector`
+ * محتوای برداری زیرش، با `formMatrix` داخل یک Form XObject با همان ماتریس، و با
+ * `stampRect` در ظاهر یک حاشیه‌نویسی مهر روی آن مستطیل — همان جاهایی که DPI واقعی
+ * تصویر از اندازهٔ صفحه جدا می‌شود.
+ */
 function buildPdf(pageContents) {
   const objects = [];
   const pageCount = pageContents.length;
 
-  // ۱: Catalog، ۲: Pages، سپس به‌ازای هر صفحه Page، Contents و (اختیاری) Image.
-  const pageObjIds = pageContents.map((_, i) => 3 + i * 3);
-  const contentObjIds = pageContents.map((_, i) => 4 + i * 3);
-  const imageObjIds = pageContents.map((_, i) => 5 + i * 3);
+  // ۱: Catalog، ۲: Pages، سپس به‌ازای هر صفحه Page، Contents، و (اختیاری) Image، Form و Annot.
+  const pageObjIds = pageContents.map((_, i) => 3 + i * 5);
+  const contentObjIds = pageContents.map((_, i) => 4 + i * 5);
+  const imageObjIds = pageContents.map((_, i) => 5 + i * 5);
+  const formObjIds = pageContents.map((_, i) => 6 + i * 5);
+  const annotObjIds = pageContents.map((_, i) => 7 + i * 5);
 
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
   objects[2] =
@@ -83,18 +92,42 @@ function buildPdf(pageContents) {
   pageContents.forEach((page, i) => {
     let content = page;
     let resources = '<< >>';
+    let annots = '';
     if (typeof page === 'object') {
       const { w, h, data } = page.image;
       objects[imageObjIds[i]] =
         `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB ` +
         `/BitsPerComponent 8 /Filter /FlateDecode /Length ${data.length} >>\nstream\n` +
         `${data.toString('latin1')}\nendstream`;
-      resources = `<< /XObject << /Im0 ${imageObjIds[i]} 0 R >> >>`;
-      content = `q ${A4[0]} 0 0 ${A4[1]} 0 0 cm /Im0 Do Q`;
+      const matrix = (page.matrix ?? [A4[0], 0, 0, A4[1], 0, 0]).join(' ');
+      const draw = `q ${matrix} cm /Im0 Do Q`;
+      if (page.stampRect) {
+        // ظاهر مهر: تصویر در مربع واحد جعبه؛ خواننده جعبه را روی مستطیل مهر می‌کشد.
+        const appearance = '/Im0 Do';
+        objects[formObjIds[i]] =
+          `<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] ` +
+          `/Resources << /XObject << /Im0 ${imageObjIds[i]} 0 R >> >> /Length ${appearance.length} >>\n` +
+          `stream\n${appearance}\nendstream`;
+        objects[annotObjIds[i]] =
+          `<< /Type /Annot /Subtype /Stamp /F 4 /Rect [${page.stampRect.join(' ')}] ` +
+          `/AP << /N ${formObjIds[i]} 0 R >> >>`;
+        annots = ` /Annots [${annotObjIds[i]} 0 R]`;
+        content = page.vector ?? '';
+      } else if (page.formMatrix) {
+        const form = draw;
+        objects[formObjIds[i]] =
+          `<< /Type /XObject /Subtype /Form /BBox [0 0 ${A4[0]} ${A4[1]}] /Matrix [${page.formMatrix.join(' ')}] ` +
+          `/Resources << /XObject << /Im0 ${imageObjIds[i]} 0 R >> >> /Length ${form.length} >>\nstream\n${form}\nendstream`;
+        resources = `<< /XObject << /Fm0 ${formObjIds[i]} 0 R >> >>`;
+        content = `${page.vector ?? ''}\n/Fm0 Do`;
+      } else {
+        resources = `<< /XObject << /Im0 ${imageObjIds[i]} 0 R >> >>`;
+        content = `${page.vector ?? ''}\n${draw}`;
+      }
     }
     objects[pageObjIds[i]] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${A4[0]} ${A4[1]}] ` +
-      `/Resources ${resources} /Contents ${contentObjIds[i]} 0 R >>`;
+      `/Resources ${resources} /Contents ${contentObjIds[i]} 0 R${annots} >>`;
     objects[contentObjIds[i]] =
       `<< /Length ${Buffer.byteLength(content, 'latin1')} >>\nstream\n${content}\nendstream`;
   });
@@ -147,6 +180,32 @@ const fixtures = {
   'plain-bw-10.pdf': Array.from({ length: 10 }, () =>
     pageContent({ paper: WHITE, ink: GRAPHITE }),
   ),
+
+  /**
+   * DPI از جای واقعی تصویر (ADR-029). فقط صفحهٔ ۲ کیفیت پایین است:
+   * ۱) صفحهٔ متنی با لوگوی ۲۰۰×۵۰ پیکسلی (فرمول قدیمی: «۴ DPI»)؛
+   * ۲) اسکن تمام‌صفحهٔ ۱۵۰×۲۱۲ — ۱۸ DPI؛
+   * ۳) اسکن ۱۳۰۰×۱۸۳۹ — ۱۵۷ DPI؛
+   * ۴) تصویر ۹۰۰×۱۲۷۲ داخل Form XObject نیم‌مقیاس: یک‌چهارم صفحه، ۲۱۸ DPI
+   *    (بدون دنبال کردن ماتریس فرم «۱۰۹»).
+   */
+  'dpi-mix-4.pdf': [
+    { image: scanImage({ paper: WHITE, ink: GRAPHITE, w: 200, h: 50 }), matrix: [144, 0, 0, 36, 60, 760],
+      vector: pageContent({ paper: WHITE, ink: GRAPHITE }) },
+    { image: scanImage({ paper: YELLOW_SCAN, ink: GRAPHITE }) },
+    { image: scanImage({ paper: WHITE, ink: GRAPHITE, w: 1300, h: 1839 }) },
+    { image: scanImage({ paper: WHITE, ink: GRAPHITE, w: 900, h: 1272 }), formMatrix: [0.5, 0, 0, 0.5, 0, 0],
+      vector: pageContent({ paper: WHITE, ink: GRAPHITE, inkLines: 6 }) },
+  ],
+
+  /**
+   * اسکن کم‌کیفیت که در ظاهر یک حاشیه‌نویسی مهر نشسته، نه در محتوای صفحه — تصویر
+   * ۱۵۰×۲۱۲ روی کل A4، ۱۸ DPI. سرور (PyMuPDF) آن را با همین جا می‌بیند؛ مرورگر هم باید.
+   */
+  'stamp-scan-1.pdf': [
+    { image: scanImage({ paper: WHITE, ink: GRAPHITE }), stampRect: [0, 0, A4[0], A4[1]],
+      vector: pageContent({ paper: WHITE, ink: GRAPHITE, inkLines: 4 }) },
+  ],
 
   /** ۱۰ صفحه که ۳ صفحه‌اش هایلایت رنگی واقعی دارد. */
   'mixed-color-10.pdf': Array.from({ length: 10 }, (_, i) =>

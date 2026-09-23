@@ -4,6 +4,7 @@ import {
   formatBytes,
   formatJalaliNumeric,
   formatNumber,
+  formatPages,
   formatTomans,
   formatWeight,
   normalizeFa,
@@ -184,6 +185,30 @@ describe('formatBytes', () => {
     expect(formatBytes(512)).toBe('512 بایت');
     expect(formatBytes(2 * 1024 * 1024)).toBe('2.0 مگابایت');
     expect(formatBytes(Math.round(1.5 * 1024 ** 3))).toBe('1.5 گیگابایت');
+  });
+});
+
+describe('formatPages — شمارهٔ صفحه در هشدار', () => {
+  it('یک صفحه و چند صفحه', () => {
+    expect(formatPages([2])).toBe('صفحهٔ 2');
+    expect(formatPages([12, 3, 7])).toBe('صفحه‌های 3، 7 و 12');
+    expect(formatPages([1, 2])).toBe('صفحه‌های 1 و 2');
+  });
+
+  it('بازهٔ پشت‌سرهم کوتاه می‌شود', () => {
+    expect(formatPages([1, 2, 3, 4, 5, 6])).toBe('صفحه‌های 1 تا 6');
+    expect(formatPages([1, 2, 3, 10, 11, 52])).toBe('صفحه‌های 1 تا 3، 10، 11 و 52');
+  });
+
+  it('فهرست بلند با «صفحهٔ دیگر» تمام می‌شود، با شمار درست', () => {
+    const pages = [1, 3, 5, 7, 9, 11, 13, 20, 21, 22, 40];
+    expect(formatPages(pages)).toBe('صفحه‌های 1، 3، 5، 7، 9، 11 و 5 صفحهٔ دیگر');
+    expect(formatPages([1000, 2000], 1)).toBe('صفحه‌های 1,000 و 1 صفحهٔ دیگر');
+  });
+
+  it('تکراری و خالی', () => {
+    expect(formatPages([4, 4])).toBe('صفحهٔ 4');
+    expect(formatPages([])).toBe('');
   });
 });
 

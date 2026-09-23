@@ -2,8 +2,9 @@
 تحلیل کامل یک PDF روی سرور — همهٔ صفحات، بدون نمونه‌برداری.
 
 همان مراحل کارگر مرورگر (`apps/web/lib/analyze.worker.ts`): رندر با DPI پایین
-روی زمینهٔ سفید، آمار پیکسل با الگوریتم مشترک (`analysis.py`)، برآورد DPI
-بزرگ‌ترین تصویر، و کوچک‌ترین حاشیه. خروجی شکل `DocumentAnalysis` قرارداد است.
+روی زمینهٔ سفید، آمار پیکسل با الگوریتم مشترک (`analysis.py`)، DPI تصویری که
+بیشترین سطح صفحه را پوشانده (از جای واقعی‌اش)، و کوچک‌ترین حاشیه. خروجی شکل
+`DocumentAnalysis` قرارداد است.
 
 رندر PyMuPDF و pdf.js پیکسل‌به‌پیکسل یکی نیستند (دو موتور رندر)، پس اعداد خام
 کمی فرق می‌کنند. الگوریتم یکی است — تست هم‌ارزی ضامنش — و برای همین هر دو
@@ -12,14 +13,22 @@
 
 from __future__ import annotations
 
+import math
 import time
 
 import fitz  # PyMuPDF
 import numpy as np
 
-from .analysis import analyze_pixels, build_page_analysis, pt_to_mm, sample_scale_for
+from .analysis import (
+    ANALYSIS_REVISION,
+    analyze_pixels,
+    build_page_analysis,
+    page_dpi,
+    pt_to_mm,
+    sample_scale_for,
+)
 
-ENGINE = f"server-pymupdf-{fitz.VersionBind}"
+ENGINE = f"server-pymupdf-{fitz.VersionBind}-r{ANALYSIS_REVISION}"
 
 
 class AnalysisFailure(Exception):
@@ -54,18 +63,15 @@ def _min_margin_mm(
     return pt_to_mm(min(left, right, top, bottom))
 
 
-def _estimated_dpi(doc: fitz.Document, page: fitz.Page, width_pt: float, height_pt: float) -> float | None:
-    """DPI بزرگ‌ترین تصویر صفحه — همان فرمول مرورگر. فقط برای هشدار کیفیت."""
+def _estimated_dpi(page: fitz.Page, width_pt: float, height_pt: float) -> float | None:
+    """DPI تصویری که بیشترین سطح صفحه را پوشانده، از جای واقعی‌اش (`page_dpi`) — همان
+    عدد مرورگر. هر بار کشیده شدن تصویر جدا حساب می‌شود، حتی داخل Form XObject."""
     try:
-        best = (0, 0, 0)
-        for image in page.get_images(full=True):
-            w, h = int(image[2]), int(image[3])
-            if w * h > best[0]:
-                best = (w * h, w, h)
-        if best[0] == 0:
-            return None
-        dpi = min(best[1] / (width_pt / 72), best[2] / (height_pt / 72))
-        return float(round(dpi)) if dpi > 0 else None
+        placements = [
+            {"widthPx": info["width"], "heightPx": info["height"], "matrix": tuple(info["transform"])}
+            for info in page.get_image_info()
+        ]
+        return page_dpi(placements, width_pt, height_pt)
     except Exception:  # noqa: BLE001 — هشدار کیفیت هرگز نباید تحلیل را بشکند
         return None
 
@@ -101,6 +107,12 @@ def analyze_pdf(path: str, thresholds: dict[str, float], deadline_seconds: float
                 rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                     pix.height, pix.stride
                 )[:, : pix.width * 3].reshape(pix.height, pix.width, 3)
+                # همان شبکهٔ پیکسل مرورگر: بوم آنجا `floor` ابعاد است. PyMuPDF رو به بالا گرد
+                # می‌کند و ستون آخر نیمه‌پر می‌شود — آمیزهٔ محتوا و سفیدی که مرکب شمرده
+                # می‌شد و صفحهٔ یکدست تیره را از «سفید» بیرون می‌برد (ADR-026، ADR-029).
+                rgb = rgb[
+                    : max(1, math.floor(height_pt * scale)), : max(1, math.floor(width_pt * scale))
+                ]
 
                 stats = analyze_pixels(rgb, thresholds)
                 pages.append(
@@ -109,7 +121,7 @@ def analyze_pdf(path: str, thresholds: dict[str, float], deadline_seconds: float
                         width_pt=width_pt,
                         height_pt=height_pt,
                         rotation=page.rotation,
-                        estimated_dpi=_estimated_dpi(doc, page, width_pt, height_pt),
+                        estimated_dpi=_estimated_dpi(page, width_pt, height_pt),
                         min_margin_mm=_min_margin_mm(rgb, stats.paper_cast, width_pt, height_pt),
                         stats=stats,
                         thresholds=thresholds,

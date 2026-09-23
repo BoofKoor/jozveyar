@@ -197,6 +197,57 @@ class LibreOffice:
         return output
 
 
+# جایگزین هم‌اندازه (قاعدهٔ متریک خود fontconfig): همان پهنای حروف، پس صفحه‌بندی و
+# تعداد صفحه عوض نمی‌شود و هشداری لازم نیست.
+METRIC_COMPATIBLE = {
+    "times new roman": "liberation serif",
+    "times": "liberation serif",
+    "arial": "liberation sans",
+    "helvetica": "liberation sans",
+    "arial narrow": "liberation sans narrow",
+    "courier new": "liberation mono",
+    "courier": "liberation mono",
+    "calibri": "carlito",
+    "cambria": "caladea",
+}
+
+
+def font_key(name: str) -> str:
+    """کلید مقایسهٔ خانوادهٔ فونت با نام فونت داخل PDF: «Noto Sans» و
+    «BAAAAA+NotoSans-Regular» هر دو `notosans` می‌شوند (برچسب زیرمجموعه و وزن کنار)."""
+    base = name.split("+", 1)[-1].split("-", 1)[0].split(",", 1)[0]
+    return "".join(ch for ch in base.lower() if ch.isalnum())
+
+
+def printed_fonts(pdf_path: str) -> set[str] | None:
+    """کلید فونت‌هایی که واقعاً در PDF تبدیل‌شده به کار رفته‌اند؛ None اگر خوانده نشد."""
+    try:
+        with fitz.open(pdf_path) as doc:
+            return {
+                font_key(font[3])
+                for pno in range(doc.page_count)
+                for font in doc.get_page_fonts(pno)
+            }
+    except Exception:  # noqa: BLE001 — هشدار فونت هرگز نباید تبدیل را بشکند
+        return None
+
+
+def mismatched_fonts(substituted: dict[str, str], printed: set[str] | None) -> list[str]:
+    """فونت‌هایی که جایگزینشان اندازهٔ دیگری دارد **و واقعاً چاپ می‌شود**: ظاهر و تعداد
+    صفحه ممکن است با فایل خود کاربر فرق کند (B Nazanin ← Nazli). همان‌که کاربر باید
+    درباره‌اش هشدار بگیرد (ADR-029).
+
+    فونت پوستهٔ سند (مثل «Calibri Light» سرتیترهای Word) در هر فایلی هست، حتی وقتی به
+    کار نرفته؛ جایگزینی که در PDF نیامده، چیزی را عوض نکرده. `printed` که None باشد
+    (PDF خوانده نشد)، همه هشدار می‌گیرند — هشدار زیادی بهتر از هشدار گم‌شده است."""
+    return [
+        name
+        for name, used in substituted.items()
+        if METRIC_COMPATIBLE.get(name.strip().lower()) != used.strip().lower()
+        and (printed is None or font_key(used) in printed)
+    ]
+
+
 def substituted_fonts(requested: list[str]) -> dict[str, str]:
     """فونت خواسته‌شده ← فونتی که واقعاً به کار رفت، فقط برای آنهایی که فرق دارند."""
     out: dict[str, str] = {}
@@ -221,13 +272,18 @@ def office_to_pdf(office: LibreOffice, source: str, fmt: str, workdir: str) -> C
     requested = formats.requested_fonts(named, fmt)
     pages = formats.office_page_count(named, fmt)
     pdf = office.to_pdf(named, fmt, workdir)
+    substituted = substituted_fonts(requested)
     return Converted(
         pdf_path=pdf,
         format=fmt,
         engine=f"libreoffice-{office.version()}",
         elapsed_ms=round((time.monotonic() - started) * 1000),
         source_pages=pages,
-        fonts={"requested": requested, "substituted": substituted_fonts(requested)},
+        fonts={
+            "requested": requested,
+            "substituted": substituted,
+            "mismatched": mismatched_fonts(substituted, printed_fonts(pdf)),
+        },
     )
 
 

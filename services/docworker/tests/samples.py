@@ -50,11 +50,21 @@ def app_xml(**counts: int) -> str:
     )
 
 
-def make_docx(path: str, paragraphs: list[str], app_pages: int | None = None) -> None:
+# فونت‌های پوستهٔ پیش‌فرض Office که Word در هر سندی می‌گذارد، حتی سندی که سرتیتر ندارد.
+OFFICE_THEME = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme"><a:themeElements>
+<a:fontScheme name="Office"><a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/>
+<a:font script="Arab" typeface="Times New Roman"/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/>
+<a:ea typeface=""/><a:cs typeface=""/><a:font script="Arab" typeface="Arial"/></a:minorFont></a:fontScheme>
+</a:themeElements></a:theme>"""
+
+
+def make_docx(path: str, paragraphs: list[str], app_pages: int | None = None, theme: bool = False) -> None:
     """سند A4 با حاشیهٔ ۲٫۵ سانتی؛ `paragraphs` خروجی `docx_paragraph` است.
 
     `app_pages`: تعداد صفحه‌ای که «Word» موقع ذخیره نوشته (بدون آن، مثل فایل‌هایی که
-    برنامه‌های دیگر می‌سازند، `docProps/app.xml` نیست)."""
+    برنامه‌های دیگر می‌سازند، `docProps/app.xml` نیست). `theme`: پوستهٔ پیش‌فرض Office
+    با فونت‌هایش، که متن سند به کارشان نمی‌برد."""
     document = (
         f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="{W}"><w:body>'
         + "".join(paragraphs)
@@ -68,6 +78,8 @@ def make_docx(path: str, paragraphs: list[str], app_pages: int | None = None) ->
         z.writestr("word/document.xml", document)
         if app_pages is not None:
             z.writestr("docProps/app.xml", app_xml(Pages=app_pages))
+        if theme:
+            z.writestr("word/theme/theme1.xml", OFFICE_THEME)
 
 
 def make_odp(path: str, slide_titles: list[str], hidden: set[int] = frozenset()) -> None:

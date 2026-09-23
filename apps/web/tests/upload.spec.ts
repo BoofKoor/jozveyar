@@ -97,9 +97,20 @@ test('رفرش وسط آپلود: همان فایل فقط تکه‌های با�
 });
 
 /*
- * تحلیل سرور (ADR-025) — این دو تست کارگر اسناد را هم لازم دارند
+ * تحلیل سرور (ADR-025) — این سه تست کارگر اسناد را هم لازم دارند
  * (`python -m docworker` با همان متغیرهای محیطی).
  */
+
+test('هشدار بعد از بررسی سرور همان صفحه‌ها را نام می‌برد که مرورگر (ADR-029)', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', join(FIXTURES, 'dpi-mix-4.pdf'));
+  await expect(status(page)).toContainText('همهٔ صفحات بررسی شد', { timeout: 60_000 });
+  // حالا کارت عدد سرور را نشان می‌دهد: DPI از PyMuPDF، همان فرمول (بردارهای هم‌ارزی).
+  await expect(page.getByTestId('warning-low-dpi')).toHaveText(
+    'صفحهٔ 2 کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود.',
+  );
+  await expect(page.getByTestId('warning-tight-margin')).toContainText('صفحه‌های 3 و 4');
+});
 
 test('بعد از رسیدن فایل، سرور همهٔ صفحات را بررسی می‌کند و قیمت همان می‌ماند', async ({ page }) => {
   await page.goto('/');
@@ -144,6 +155,12 @@ test('Word: پیش‌فاکتور فوری، بعد عدد سرور از PDF ت�
   await expect(page.getByTestId('price-total')).toContainText('54,600');
   await expect(page.getByTestId('server-corrected')).toContainText('خود فایل Word');
   await expect(page.getByTestId('office-estimate')).toHaveCount(0);
+  // و علتش را هم می‌بیند، با راه جلو (ADR-029): Nazli هم‌اندازهٔ B Nazanin نیست.
+  // با فونت خصوصی واقعی روی سرور (ADR-027) نه جایگزینی هست نه این هشدار.
+  await expect(page.getByTestId('warning-fonts')).toHaveText(
+    'فونت B Nazanin روی سرور ما نیست و با فونت مشابه چاپ می‌شود؛ ظاهر و تعداد صفحه ممکن است' +
+      ' فرق کند. برای چاپ دقیقاً مثل فایل خودت، از Word خروجی PDF بگیر و همان را بینداز.',
+  );
 });
 
 test('عکس: روی سرور یک صفحه می‌شود و رنگش سنجیده می‌شود', async ({ page }) => {

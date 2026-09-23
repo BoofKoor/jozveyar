@@ -102,7 +102,10 @@ export const pageAnalysisSchema = z.object({
   /** نسبت پیکسل مرکب به کل صفحه. صفر یعنی صفحهٔ خالی. */
   inkRatio: z.number().min(0).max(1),
   blank: z.boolean(),
-  /** DPI برآوردی بزرگ‌ترین تصویر صفحه؛ برای صفحهٔ متنی null. */
+  /**
+   * DPI مؤثر تصویری که بیشترین سطح صفحه را پوشانده، از جای واقعی‌اش روی صفحه
+   * (`pageDpi` در packages/analysis)؛ صفحهٔ بی‌تصویر بزرگ null.
+   */
   estimatedDpi: z.number().positive().nullable(),
   /** کوچک‌ترین حاشیهٔ محتوا به میلی‌متر؛ null یعنی محاسبه نشد. */
   minMarginMm: z.number().min(0).nullable(),

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_THRESHOLDS, type DocumentAnalysis, type PageAnalysis } from '@jozveyar/contracts';
-import { paperSizeName } from '@jozveyar/analysis';
+import { isSlidePage, paperSizeName } from '@jozveyar/analysis';
 import {
   ERROR_MESSAGES,
   MAX_BROWSER_ANALYSIS_BYTES,
@@ -70,6 +70,16 @@ export interface AnalysisSummaryView {
   pageSizes: { name: string; count: number }[];
   /** صفحاتی که رنگی تشخیص داده شده‌اند — ورودی حالت ترکیبی در آینده. */
   colorPages: number[];
+  /**
+   * شمارهٔ صفحه‌های هر هشدار، از ۱ (ADR-029). در سند نمونه‌برداری‌شده فقط صفحه‌های
+   * بررسی‌شده‌اند، پس نمونه‌اند نه فهرست کامل؛ شمارش بالا برآورد است.
+   */
+  blankPages: number[];
+  lowDpiPages: number[];
+  /** بدون صفحه‌های اسلاید: اسلاید برای چاپ کوچک می‌شود و لبه‌اش لبهٔ کاغذ نیست. */
+  tightMarginPages: number[];
+  /** فونت‌هایی که روی سرور نبودند و جایگزینشان اندازهٔ دیگری دارد — فقط از سرور. */
+  mismatchedFonts: string[];
   /** true یعنی عددها از نمونه برآورد شده‌اند، نه شمارش کامل. */
   estimated: boolean;
 }
@@ -85,21 +95,20 @@ export function summarize(state: AnalysisState): AnalysisSummaryView {
   const { pages, pageCount, sampleStride } = state;
   const sizes = new Map<string, number>();
   const colorPages: number[] = [];
-  let color = 0;
-  let blank = 0;
-  let lowDpi = 0;
-  let tightMargin = 0;
+  const blankPages: number[] = [];
+  const lowDpiPages: number[] = [];
+  const tightMarginPages: number[] = [];
 
   for (const page of pages) {
     const name = paperSizeName(page.widthPt, page.heightPt);
     sizes.set(name, (sizes.get(name) ?? 0) + 1);
-    if (page.color) {
-      color += 1;
-      colorPages.push(page.n);
+    if (page.color) colorPages.push(page.n);
+    if (page.blank) blankPages.push(page.n);
+    if (page.warnings.includes('low_dpi')) lowDpiPages.push(page.n);
+    // همان قاعدهٔ سرور (`analysisView`): حاشیهٔ اسلاید حساب می‌شود ولی هشدار نمی‌شود.
+    if (page.warnings.includes('tight_margin') && !isSlidePage(page.widthPt, page.heightPt)) {
+      tightMarginPages.push(page.n);
     }
-    if (page.blank) blank += 1;
-    if (page.warnings.includes('low_dpi')) lowDpi += 1;
-    if (page.warnings.includes('tight_margin')) tightMargin += 1;
   }
 
   const scale = (value: number) =>
@@ -107,14 +116,18 @@ export function summarize(state: AnalysisState): AnalysisSummaryView {
 
   return {
     pageCount,
-    colorPageCount: scale(color),
-    blankPageCount: scale(blank),
-    lowDpiPageCount: scale(lowDpi),
-    tightMarginPageCount: scale(tightMargin),
+    colorPageCount: scale(colorPages.length),
+    blankPageCount: scale(blankPages.length),
+    lowDpiPageCount: scale(lowDpiPages.length),
+    tightMarginPageCount: scale(tightMarginPages.length),
     pageSizes: [...sizes.entries()]
       .map(([name, count]) => ({ name, count: scale(count) }))
       .sort((a, b) => b.count - a.count),
     colorPages,
+    blankPages,
+    lowDpiPages,
+    tightMarginPages,
+    mismatchedFonts: [],
     estimated: sampleStride > 1,
   };
 }
