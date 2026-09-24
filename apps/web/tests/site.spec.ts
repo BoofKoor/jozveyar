@@ -1,8 +1,10 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک و ۴۰۴.
+ * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک، آیکون گوشی،
+ * manifest، تصویر اشتراک و ۴۰۴.
  *
  * مثل flow.spec.ts روی build تولیدی و بی استوریج. سربرگ و پاورقی کامپوننت سرورند و JS ندارند؛
  * حالت سفارش را CSS با `:has()` از نشانهٔ جزیرهٔ سفارش می‌گیرد، پس اینجا در مرورگر سنجیده می‌شود.
@@ -127,6 +129,87 @@ test.describe('نشانک', () => {
       expect(response.headers()['content-type'], href).toContain(type);
       expect((await response.body()).length, href).toBeGreaterThan(0);
     }
+  });
+});
+
+test.describe('آیکون گوشی، manifest و تصویر اشتراک', () => {
+  /** مقدار content یک meta، با property یا name. */
+  const meta = (html: string, key: string) =>
+    new RegExp(`<meta (?:property|name)="${key}" content="([^"]*)"`).exec(html)?.[1];
+  /** اندازهٔ یک PNG از سرآیندش. */
+  const pngSize = (png: Buffer) => `${png.readUInt32BE(16)}×${png.readUInt32BE(20)}`;
+  /** یک رنگ از فایل برند؛ کد رنگ در تست نوشته نمی‌شود. */
+  const brandColor = (token: string) =>
+    new RegExp(`--jy-${token}\\s*:\\s*(#[0-9A-Fa-f]{6})`).exec(
+      readFileSync(join(process.cwd(), '..', '..', 'docs', 'brand', 'jozveyar-colors.css'), 'utf8'),
+    )?.[1];
+
+  async function getPng(request: APIRequestContext, href: string) {
+    const response = await request.get(href);
+    expect(response.status(), href).toBe(200);
+    expect(response.headers()['content-type'], href).toContain('image/png');
+    return response.body();
+  }
+
+  test('apple-touch-icon: PNG ۱۸۰ پیکسلی', async ({ request }) => {
+    const html = await (await request.get('/')).text();
+    const link = /<link rel="apple-touch-icon" href="([^"]+)" type="([^"]+)" sizes="([^"]+)"/.exec(html);
+    expect(link?.slice(2)).toEqual(['image/png', '180x180']);
+    expect(pngSize(await getPng(request, link![1]!))).toBe('180×180');
+  });
+
+  test('manifest: فارسی و راست‌به‌چپ، green-50، و آیکون‌های ۱۹۲ و ۵۱۲ با نوع درست', async ({ request }) => {
+    const html = await (await request.get('/')).text();
+    const href = /<link rel="manifest" href="([^"]+)"/.exec(html)?.[1];
+    expect(href).toBe('/manifest.webmanifest');
+    const response = await request.get(href!);
+    expect(response.status()).toBe(200);
+    expect(response.headers()['content-type']).toContain('application/manifest+json');
+
+    const manifest = await response.json();
+    expect(manifest).toMatchObject({
+      name: 'جزوه‌یار',
+      short_name: 'جزوه‌یار',
+      lang: 'fa',
+      dir: 'rtl',
+      start_url: '/',
+      display: 'browser',
+    });
+    // همان رنگ نوار مرورگر صفحه (PAGE_COLOR)، که امروز green-50 است.
+    expect(manifest.theme_color).toBe(meta(html, 'theme-color'));
+    expect(manifest.background_color).toBe(brandColor('green-50'));
+
+    const icons: { src: string; sizes: string; type: string; purpose: string }[] = manifest.icons;
+    expect(icons.map(({ src, sizes, purpose }) => `${src} ${sizes} ${purpose}`)).toEqual([
+      '/icons/icon-192.png 192x192 any',
+      '/icons/icon-512.png 512x512 any',
+      '/icons/icon-512.png 512x512 maskable',
+    ]);
+    for (const { src, sizes, type } of icons) {
+      expect(type).toBe('image/png');
+      expect(pngSize(await getPng(request, src))).toBe(sizes.replace('x', '×'));
+    }
+  });
+
+  test('og:image نشانی مطلق دارد و PNG ۱۲۰۰×۶۳۰ است؛ توییتر کارت بزرگ همان تصویر را دارد', async ({ request }) => {
+    const html = await (await request.get('/')).text();
+    const image = meta(html, 'og:image');
+    // شبکه‌های اجتماعی نشانی نسبی را نمی‌خوانند؛ دامنه همان canonical است (metadataBase).
+    expect(image).toMatch(/^https?:\/\//);
+    const url = new URL(image!);
+    const canonical = /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
+    expect(url.origin).toBe(new URL(canonical!).origin);
+    expect(url.pathname).toBe('/opengraph-image.png');
+
+    expect(meta(html, 'og:image:type')).toBe('image/png');
+    expect(meta(html, 'og:image:width')).toBe('1200');
+    expect(meta(html, 'og:image:height')).toBe('630');
+    expect(meta(html, 'og:image:alt')).toContain('جزوه‌ات را بینداز، قیمت را همین حالا ببین');
+    expect(meta(html, 'twitter:card')).toBe('summary_large_image');
+    expect(meta(html, 'twitter:image')).toBe(image);
+
+    // همین تصویر را سرور خودمان می‌دهد؛ دامنهٔ تولید از اینجا در دسترس نیست.
+    expect(pngSize(await getPng(request, url.pathname + url.search))).toBe('1200×630');
   });
 });
 
