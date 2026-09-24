@@ -1,0 +1,687 @@
+/*
+ * اجزای رابط جزوه‌یار: کیت راهنما (docs/brand/jozveyar-ui.css) به همان شکلی که طرح تأییدشدهٔ ز
+ * (docs/ui/mockups/home-z.html) به کار برده است؛ نام‌ها با پیشوند `jy-` مثل خود کیت.
+ *
+ * - رنگ فقط توکن theme.css است؛ اینجا هیچ کد رنگی نیست.
+ * - فقط logical properties.
+ * - وزن ۷۰۰ کیت اینجا ۶۰۰ است؛ سایت فقط وزیرمتن ۴۰۰ و ۶۰۰ دارد.
+ * - هیچ جزئی فاصلهٔ بیرونی (margin) ندارد؛ جایش را صفحه تعیین می‌کند.
+ * - هیچ جزئی JS ندارد؛ کامپوننت کلاینت فقط کلاس می‌گذارد، پس رشتهٔ کوتاه به باندل می‌رود.
+ */
+@layer components {
+  /* ===== آیکون: فایل برند به شکل mask و به رنگ متن؛ نام با کلاس jy-icon-* (icons.css) ===== */
+  .jy-icon {
+    display: inline-block;
+    flex: none;
+    width: 20px;
+    height: 20px;
+    background-color: currentColor;
+    /* بی نام، شفاف؛ نه مربعی به رنگ متن */
+    mask-image: var(--jy-icon, linear-gradient(transparent, transparent));
+    mask-position: center;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+  }
+  /* فلش برند به چپ است، یعنی «جلو» در راست‌به‌چپ؛ بالا و پایین با چرخش همان */
+  .jy-icon--up {
+    rotate: 90deg;
+  }
+  .jy-icon--down {
+    rotate: -90deg;
+  }
+
+  /* ===== دکمه ===== */
+  .jy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 20px;
+    font: inherit;
+    font-size: var(--text-base);
+    font-weight: 600;
+    line-height: 1.5;
+    color: inherit;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background-color var(--jy-dur-fast) var(--jy-ease),
+      border-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .jy-btn .jy-icon {
+    width: 1.25em;
+    height: 1.25em;
+  }
+  .jy-btn--primary {
+    background: var(--color-green-600);
+    border-color: var(--color-green-600);
+    color: var(--color-paper);
+  }
+  .jy-btn--primary:hover {
+    background: var(--color-green-700);
+    border-color: var(--color-green-700);
+  }
+  .jy-btn--primary:active {
+    background: var(--color-green-800);
+    border-color: var(--color-green-800);
+  }
+  .jy-btn--secondary {
+    background: var(--color-paper);
+    border-color: var(--color-green-500);
+    color: var(--color-green-700);
+  }
+  .jy-btn--secondary:hover {
+    background: var(--color-green-50);
+    border-color: var(--color-green-600);
+  }
+  .jy-btn--secondary:active {
+    background: var(--color-green-100);
+    border-color: var(--color-green-700);
+  }
+  .jy-btn--text {
+    padding-inline: 12px;
+    color: var(--color-green-700);
+  }
+  .jy-btn--text:hover {
+    background: var(--color-green-50);
+  }
+  .jy-btn--text:active {
+    background: var(--color-green-100);
+  }
+  /* اندازه‌ها بعد از گونه‌ها، تا padding دکمهٔ فقط‌آیکون بر padding گونهٔ متنی غلبه کند */
+  .jy-btn--sm {
+    min-height: 36px;
+    padding-inline: 14px;
+    font-size: var(--text-small);
+  }
+  .jy-btn--lg {
+    min-height: 52px;
+    padding-inline: 28px;
+  }
+  /* تمام‌عرض می‌شکند، نه اینکه از صفحهٔ باریک بیرون بزند */
+  .jy-btn--block {
+    display: flex;
+    width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+  .jy-btn--icon {
+    width: 44px;
+    padding: 0;
+  }
+  .jy-btn--icon.jy-btn--sm {
+    width: 36px;
+  }
+  .jy-btn--icon.jy-btn--lg {
+    width: 52px;
+  }
+  /* بعد از hover گونه‌ها، تا دکمهٔ بسته زیر اشاره‌گر هم بسته بماند */
+  .jy-btn:is(:disabled, [aria-disabled='true']) {
+    background: var(--color-green-50);
+    border-color: var(--color-green-200);
+    color: var(--color-green-500);
+    cursor: not-allowed;
+  }
+  /* دکمهٔ متنی بسته کادر نمی‌گیرد؛ وگرنه بسته پررنگ‌تر از باز دیده می‌شد */
+  .jy-btn--text:is(:disabled, [aria-disabled='true']) {
+    background: none;
+    border-color: transparent;
+  }
+  .jy-btn.is-loading {
+    cursor: progress;
+  }
+  .jy-btn.is-loading::before {
+    content: '';
+    width: 1em;
+    height: 1em;
+    flex: none;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: jy-spin 0.8s linear infinite;
+  }
+
+  /* پیوند در شکل دکمه: کاری درون یک جمله، مثل «جایگزین کن» */
+  .jy-link {
+    padding: 0;
+    font: inherit;
+    color: var(--color-green-700);
+    background: none;
+    border: 0;
+    text-decoration-line: underline;
+    text-underline-offset: 4px;
+    cursor: pointer;
+  }
+  .jy-link:hover {
+    color: var(--color-ink);
+  }
+
+  /* ===== کارت ===== */
+  .jy-card {
+    padding: 24px;
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+  }
+  .jy-card__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
+  .jy-card__title {
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .jy-card__meta {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+
+  /*
+   * ===== یادداشت: خنثی روی green-50؛ وضعیت با زمینهٔ همان وضعیت و آیکون همرنگ متنش =====
+   * با آیکون، آیکون و یک span متن کنار هم (مثل طرح ز)؛ بی آیکون، متن معمولی با نام و عدد درونش.
+   */
+  .jy-note {
+    padding: 12px 14px;
+    color: var(--color-ink);
+    background: var(--color-green-50);
+    border-radius: var(--radius-md);
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .jy-note:has(> .jy-icon) {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .jy-note > .jy-icon {
+    margin-block-start: 1px;
+  }
+  .jy-note--info {
+    background: var(--color-info-bg);
+  }
+  .jy-note--info > .jy-icon {
+    color: var(--color-info-text);
+  }
+  .jy-note--warning {
+    background: var(--color-warning-bg);
+  }
+  .jy-note--warning > .jy-icon {
+    color: var(--color-warning-text);
+  }
+  .jy-note--error {
+    background: var(--color-error-bg);
+  }
+  .jy-note--error > .jy-icon {
+    color: var(--color-error-text);
+  }
+  .jy-note--success {
+    background: var(--color-success-bg);
+  }
+  .jy-note--success > .jy-icon {
+    color: var(--color-success-text);
+  }
+
+  /* ===== نشان وضعیت ===== */
+  .jy-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 12px;
+    border-radius: 999px;
+    font-size: var(--text-small);
+    font-weight: 600;
+    line-height: 1.8;
+  }
+  .jy-badge > .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .jy-badge--success {
+    background: var(--color-success-bg);
+    color: var(--color-success-text);
+  }
+  .jy-badge--info {
+    background: var(--color-info-bg);
+    color: var(--color-info-text);
+  }
+  .jy-badge--warning {
+    background: var(--color-warning-bg);
+    color: var(--color-warning-text);
+  }
+  .jy-badge--error {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+  }
+
+  /* ===== نوار پیشرفت: هم <progress>، هم ظرف با .jy-progress__bar برای پهنای متحرک ===== */
+  .jy-progress {
+    display: block;
+    width: 100%;
+    height: 6px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 999px;
+    background: var(--color-green-100);
+    color: var(--color-green-600);
+    appearance: none;
+  }
+  .jy-progress::-webkit-progress-bar {
+    background: var(--color-green-100);
+    border-radius: 999px;
+  }
+  .jy-progress::-webkit-progress-value {
+    background: var(--color-green-600);
+    border-radius: 999px;
+  }
+  .jy-progress::-moz-progress-bar {
+    background: var(--color-green-600);
+    border-radius: 999px;
+  }
+  .jy-progress__bar {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--color-green-600);
+    transition: width var(--jy-dur-base) var(--jy-ease);
+  }
+
+  /* ===== کارت بارگذاری: کارت سفید با سایه، و محل انداختن خط‌چین داخلش ===== */
+  .jy-upload {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    background: var(--color-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+  }
+  /* وقتی کل کارت برچسب ورودی فایل است (کیت): ورودی پنهان است، پس فوکوسش روی کارت دیده می‌شود */
+  label.jy-upload {
+    cursor: pointer;
+  }
+  .jy-upload:has(input:focus-visible) {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow:
+      0 0 0 2px var(--jy-focus-inner),
+      var(--shadow-md);
+  }
+  .jy-drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 24px 20px 20px;
+    text-align: center;
+    background: var(--color-green-50);
+    border: 2px dashed var(--color-green-500);
+    border-radius: var(--radius-md);
+    transition:
+      background-color var(--jy-dur-fast) var(--jy-ease),
+      border-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  label.jy-upload:hover .jy-drop,
+  .jy-drop.is-dragover {
+    background: var(--color-green-100);
+    border-style: solid;
+    border-color: var(--color-green-600);
+  }
+  .jy-drop__title {
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .jy-drop__sub {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  /* «بکش و رها کن» روی گوشی معنا ندارد */
+  @media (pointer: coarse) {
+    .jy-drop__sub {
+      display: none;
+    }
+  }
+  .jy-drop__formats {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .jy-drop__format {
+    padding: 1px 10px;
+    border: 1px solid var(--color-green-200);
+    border-radius: 999px;
+    background: var(--color-paper);
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-green-800);
+  }
+  .jy-upload__foot {
+    padding: 16px 12px 8px;
+    text-align: center;
+  }
+  .jy-upload__hint {
+    display: block;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+
+  /* «افزودن فایل به همین جزوه»: برچسب خط‌چین ورودی فایل */
+  .jy-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    border: 2px dashed var(--color-green-500);
+    border-radius: var(--radius-md);
+    color: var(--color-green-700);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .jy-add:hover {
+    background: var(--color-green-50);
+    border-style: solid;
+  }
+  .jy-add:has(input:focus-visible) {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--jy-focus-inner);
+  }
+
+  /* ===== فیلد متنی ===== */
+  .jy-input {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    font: inherit;
+    font-size: var(--text-base);
+    line-height: 1.6;
+    color: var(--color-ink);
+    background: var(--color-paper);
+    border: 1px solid var(--color-green-500);
+    border-radius: var(--radius-md);
+    transition: border-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .jy-input::placeholder {
+    color: var(--color-green-600);
+    opacity: 1;
+  }
+  .jy-input:hover {
+    border-color: var(--color-green-600);
+  }
+  .jy-input:focus {
+    border-color: var(--color-green-700);
+  }
+  /* خطا با سه نشانه: لبهٔ دوپیکسلی به رنگ متن خطا، آیکون، و پیامی که می‌گوید چه کنی */
+  .jy-input[aria-invalid='true'] {
+    padding: 0 11px;
+    border: 2px solid var(--color-error-text);
+  }
+  .jy-input:is(:disabled, [aria-disabled='true']) {
+    color: var(--color-green-500);
+    background: var(--color-green-50);
+    border-color: var(--color-green-200);
+    cursor: not-allowed;
+  }
+  .jy-input[readonly] {
+    background: var(--color-green-50);
+  }
+
+  /* ===== رادیو و کاشی انتخاب ===== */
+  .jy-radio {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    background: var(--color-paper);
+    border: 2px solid var(--color-green-500);
+    border-radius: 50%;
+    cursor: pointer;
+    appearance: none;
+    transition: background-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .jy-radio:checked {
+    background: var(--color-green-600);
+    border-color: var(--color-green-600);
+    box-shadow: inset 0 0 0 4px var(--color-paper);
+  }
+  .jy-radio:disabled {
+    background-color: var(--color-green-50);
+    border-color: var(--color-green-200);
+    cursor: not-allowed;
+  }
+  .jy-tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .jy-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 72px;
+    padding: 12px 16px;
+    padding-inline-start: 48px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-green-200);
+    border-radius: var(--radius-md);
+    line-height: 1.6;
+    cursor: pointer;
+    transition: border-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .jy-tile:hover {
+    border-color: var(--color-green-400);
+  }
+  .jy-tile .jy-radio {
+    position: absolute;
+    inset-inline-start: 16px;
+    inset-block-start: calc(50% - 10px);
+  }
+  /* انتخاب‌شده: لبهٔ دوپیکسلی، و یک پیکسل padding کمتر تا محتوا جابه‌جا نشود */
+  .jy-tile:has(.jy-radio:checked) {
+    padding: 11px 15px;
+    padding-inline-start: 47px;
+    background: var(--color-green-50);
+    border: 2px solid var(--color-green-600);
+  }
+  .jy-tile:has(.jy-radio:checked) .jy-radio {
+    inset-inline-start: 15px;
+  }
+  .jy-tile:has(.jy-radio:focus-visible) {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--jy-focus-inner);
+  }
+  .jy-tile .jy-radio:focus-visible {
+    outline: 0;
+    box-shadow: inset 0 0 0 4px var(--color-paper);
+  }
+  .jy-tile__title {
+    font-weight: 600;
+  }
+  .jy-tile__note {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  /* اثر این گزینه روی قیمت: «+48,000 تومان»، «همان قیمت» */
+  .jy-tile__delta {
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-green-700);
+  }
+
+  /* ===== شمارندهٔ یک‌تکه: − عدد + ===== */
+  .jy-stepper {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--color-green-500);
+    border-radius: var(--radius-md);
+  }
+  .jy-stepper button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    color: var(--color-green-700);
+    background: var(--color-paper);
+    border: 0;
+    cursor: pointer;
+  }
+  .jy-stepper button:first-child {
+    border-start-start-radius: 9px;
+    border-end-start-radius: 9px;
+  }
+  .jy-stepper button:last-child {
+    border-start-end-radius: 9px;
+    border-end-end-radius: 9px;
+  }
+  .jy-stepper button:hover {
+    background: var(--color-green-50);
+  }
+  .jy-stepper button:is(:disabled, [aria-disabled='true']) {
+    color: var(--color-green-400);
+    background: var(--color-paper);
+    cursor: not-allowed;
+  }
+  .jy-stepper :is(output, input) {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    min-width: 56px;
+    padding: 0;
+    font: inherit;
+    font-size: var(--text-h4);
+    font-weight: 600;
+    text-align: center;
+    color: var(--color-ink);
+    background: var(--color-paper);
+    border: 0;
+    border-inline: 1px solid var(--color-green-200);
+    appearance: textfield;
+  }
+  .jy-stepper input::-webkit-inner-spin-button,
+  .jy-stepper input::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+  }
+
+  /* ===== قدم‌های سفارش: ۱ جزوه و قیمت ← ۲ آدرس ← ۳ پرداخت؛ قدم جاری با aria-current ===== */
+  .jy-flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 0;
+    list-style: none;
+  }
+  .jy-flow > li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-muted);
+  }
+  .jy-flow > li:not(:last-child)::after {
+    content: '';
+    width: 40px;
+    margin-inline-start: 4px;
+    border-block-start: 2px solid var(--color-green-300);
+  }
+  .jy-flow__n {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--color-green-300);
+    border-radius: 50%;
+    background: var(--color-paper);
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-green-700);
+  }
+  .jy-flow [aria-current] {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .jy-flow [aria-current] .jy-flow__n {
+    background: var(--color-green-600);
+    border-color: var(--color-green-600);
+    color: var(--color-paper);
+  }
+
+  /* ===== سؤال‌ها: فهرست details، متن در HTML می‌ماند ===== */
+  .jy-faq {
+    border-block-start: 1px solid var(--color-line);
+  }
+  .jy-faq details {
+    border-block-end: 1px solid var(--color-line);
+  }
+  .jy-faq summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 60px;
+    padding-block: 12px;
+    font-weight: 600;
+    list-style: none;
+    cursor: pointer;
+  }
+  .jy-faq summary::-webkit-details-marker {
+    display: none;
+  }
+  .jy-faq summary .jy-icon {
+    color: var(--color-muted);
+    transition: rotate var(--jy-dur-base) var(--jy-ease);
+  }
+  .jy-faq details[open] summary .jy-icon {
+    rotate: 180deg;
+  }
+  .jy-faq details p {
+    max-width: 65ch;
+    padding-block-end: 16px;
+    color: var(--color-muted);
+  }
+
+  @media (max-width: 520px) {
+    .jy-card {
+      padding: 16px;
+    }
+    .jy-tiles {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+    .jy-tile {
+      min-height: 64px;
+    }
+    .jy-flow {
+      gap: 8px;
+      font-size: var(--text-small);
+    }
+    .jy-flow > li:not(:last-child)::after {
+      width: 16px;
+    }
+  }
+}
+
+@keyframes jy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

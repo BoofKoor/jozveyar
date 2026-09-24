@@ -13,6 +13,7 @@ const config: NextConfig = {
     '@jozveyar/pricing',
     '@jozveyar/storage',
     '@jozveyar/text',
+    '@jozveyar/ui',
   ],
   // پکیج‌های سمت سرور (db، storage) به سبک ESM نود import می‌کنند —
   // `./schema.js` برای فایل `schema.ts`. tsc و vitest این را می‌فهمند؛ webpack

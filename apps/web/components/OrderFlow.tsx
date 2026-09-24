@@ -79,7 +79,7 @@ export function OrderFlow() {
       */}
       {/* جای نوار قیمت ثابت؛ با یادداشت فایل شمرده‌نشده یا خوانده‌نشده بلندتر است. */}
       <div aria-hidden className={`sm:hidden ${pending.length > 0 || blocked.length > 0 ? 'h-72' : 'h-48'}`} />
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-hairline bg-page px-4 pb-3 pt-2 sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0">
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-page px-4 pb-3 pt-2 sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0">
         <PriceBar
           breakdown={breakdown}
           provisional={view.provisional}
@@ -132,7 +132,7 @@ function SingleFile({
     <button
       type="button"
       onClick={onReset}
-      className="mt-5 rounded-lg bg-sage-button px-6 py-2.5 font-semibold text-ink"
+      className="jy-btn jy-btn--primary mt-5"
     >
       فایل دیگری بینداز
     </button>
@@ -144,21 +144,21 @@ function SingleFile({
     const message = serverFailed ? serverFailureMessage(upload?.analysis?.failureReason, kind) : null;
     return (
       <div className="flex flex-col gap-4 sm:gap-5">
-        <div className="rounded-card border border-hairline bg-card p-6" data-testid="server-path">
+        <div className="jy-card" data-testid="server-path">
           <h2 className="truncate font-semibold text-ink" title={section.name}>
             {section.name}
           </h2>
-          <p className="num mt-1 text-sm text-ink-2">{formatBytes(section.size)}</p>
+          <p className="num mt-1 text-sm text-muted">{formatBytes(section.size)}</p>
           {message ? (
             <>
               <p className="mt-4 font-semibold text-ink">{message.title}</p>
-              <p className="mt-2 text-ink-2">{message.hint}</p>
+              <p className="mt-2 text-muted">{message.hint}</p>
             </>
           ) : uploadRefused ? (
-            <p className="mt-4 text-ink-2">{uploadRefusalMessage(upload?.reason)}</p>
+            <p className="mt-4 text-muted">{uploadRefusalMessage(upload?.reason)}</p>
           ) : (
             <>
-              <p className="mt-4 text-ink-2">
+              <p className="mt-4 text-muted">
                 {kind === 'pdf'
                   ? 'این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.'
                   : 'این فایل روی سرور به PDF تبدیل و کامل خوانده می‌شود؛ قیمت همین‌جا می‌آید.'}
@@ -177,9 +177,9 @@ function SingleFile({
 
   if (state.phase === 'error' && state.error && !serverReady) {
     return (
-      <div className="rounded-card border border-hairline bg-card p-6">
+      <div className="jy-card">
         <h2 className="font-semibold text-ink">{state.error.title}</h2>
-        <p className="mt-2 text-ink-2">{state.error.hint}</p>
+        <p className="mt-2 text-muted">{state.error.hint}</p>
         {anotherFile}
       </div>
     );

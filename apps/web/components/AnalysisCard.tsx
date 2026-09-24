@@ -64,11 +64,11 @@ export function Stat({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs text-ink-2">{label}</span>
+      <span className="text-xs text-muted">{label}</span>
       <span data-testid={testId} className="num text-lg font-semibold text-ink">
         {value}
       </span>
-      {hint ? <span className="text-xs text-ink-2">{hint}</span> : null}
+      {hint ? <span className="text-xs text-muted">{hint}</span> : null}
     </div>
   );
 }
@@ -94,13 +94,13 @@ export function AnalysisCard({
   const progress = target > 0 ? Math.min(100, Math.round((analyzedCount / target) * 100)) : 0;
 
   return (
-    <section className="rounded-card border border-hairline bg-card p-5 sm:p-6">
-      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-hairline pb-4">
+    <section className="jy-card">
+      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
         <div className="min-w-0">
           <h2 className="truncate font-semibold text-ink" title={fileName ?? ''}>
             {fileName}
           </h2>
-          <p className="num mt-1 text-sm text-ink-2">
+          <p className="num mt-1 text-sm text-muted">
             {formatBytes(fileSize)}
             {uploadLine(upload) ? (
               <span data-testid="upload-status">
@@ -113,7 +113,7 @@ export function AnalysisCard({
         <button
           type="button"
           onClick={onReset}
-          className="shrink-0 text-sm text-ink-2 underline underline-offset-4 hover:text-ink"
+          className="jy-btn jy-btn--text shrink-0 text-sm"
         >
           فایل دیگری بینداز
         </button>
@@ -122,26 +122,23 @@ export function AnalysisCard({
       {analyzing ? (
         <div className="pt-4">
           <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="text-ink-2">
+            <span className="text-muted">
               {pageCount > 0 ? 'در حال بررسی صفحات…' : 'در حال باز کردن فایل…'}
             </span>
-            <span className="num text-ink-2">
+            <span className="num text-muted">
               {pageCount > 0 ? `${formatNumber(analyzedCount)} / ${formatNumber(target)}` : ''}
             </span>
           </div>
           <div
-            className="mt-2 h-1.5 overflow-hidden rounded-full bg-chip"
+            className="jy-progress mt-2"
             role="progressbar"
             aria-valuenow={progress}
             aria-valuemin={0}
             aria-valuemax={100}
           >
-            <div
-              className="h-full rounded-full bg-sage-deep transition-[width] duration-200"
-              style={{ width: `${progress}%` }}
-            />
+            <span className="jy-progress__bar" style={{ width: `${progress}%` }} />
           </div>
-          <p className="mt-3 text-xs text-ink-2">
+          <p className="mt-3 text-xs text-muted">
             قیمت از همان اولین صفحات نشان داده می‌شود و تا آخر بررسی دقیق‌تر می‌شود.
           </p>
         </div>
@@ -175,20 +172,20 @@ export function AnalysisCard({
       </dl>
 
       {estimatedFrom === 'office' ? (
-        <p data-testid="office-estimate" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p data-testid="office-estimate" className="jy-note mt-4">
           این تعداد را خود فایل {program} نوشته. فایل روی سرور به PDF تبدیل می‌شود و قیمت با
           شمارش دقیق همان به‌روز می‌شود.
         </p>
       ) : null}
 
       {estimatedFrom === 'image' ? (
-        <p className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p className="jy-note mt-4">
           هر عکس یک صفحهٔ A4 می‌شود. رنگی بودن و کیفیتش بعد از بررسی روی سرور معلوم می‌شود.
         </p>
       ) : null}
 
       {serverUnavailable ? (
-        <p data-testid="estimate-unconfirmed" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p data-testid="estimate-unconfirmed" className="jy-note mt-4">
           الان نمی‌توانیم این فایل را بگیریم، پس این قیمت تقریبی می‌ماند. چند دقیقهٔ دیگر
           دوباره بینداز
           {estimatedFrom === 'office'
@@ -198,7 +195,7 @@ export function AnalysisCard({
       ) : null}
 
       {correctedFrom ? (
-        <p data-testid="server-corrected" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p data-testid="server-corrected" className="jy-note mt-4">
           بررسی کامل روی سرور{' '}
           <span className="num font-semibold text-ink">{formatNumber(state.pageCount)}</span> صفحه
           دید ({fromOffice ? `خود فایل ${program}` : 'مرورگر'}{' '}
@@ -208,7 +205,7 @@ export function AnalysisCard({
       ) : null}
 
       {summary.estimated ? (
-        <p className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p className="jy-note mt-4">
           سند بزرگ است، پس برای سرعت یکی از هر{' '}
           <span className="num">{formatNumber(sampleStride)}</span> صفحه بررسی شد. همهٔ صفحات پس
           از آپلود دقیق بررسی می‌شوند و قیمت نهایی از آن می‌آید.
@@ -216,7 +213,7 @@ export function AnalysisCard({
       ) : null}
 
       {phase === 'ready' && summary.colorPageCount > 0 ? (
-        <p className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p className="jy-note mt-4">
           <span className="num font-semibold text-ink">
             {formatNumber(summary.colorPageCount)}
           </span>{' '}
@@ -228,7 +225,7 @@ export function AnalysisCard({
       summary.lowDpiPageCount > 0 ||
       summary.tightMarginPageCount > 0 ||
       summary.blankPageCount > 0 ? (
-        <ul className="mt-4 flex flex-col gap-2 border-t border-hairline pt-4 text-sm text-ink-2">
+        <ul className="mt-4 flex flex-col gap-2 border-t border-line pt-4 text-sm text-muted">
           {summary.mismatchedFonts.length > 0 ? (
             <li data-testid="warning-fonts">
               {summary.mismatchedFonts.length === 1 ? 'فونت' : 'فونت‌های'}{' '}

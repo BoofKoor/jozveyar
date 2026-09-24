@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { PAGE_COLOR } from '@jozveyar/ui/tokens';
 import './globals.css';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jozveyar.com';
@@ -27,7 +28,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#F4F4F1',
+  // نوار مرورگر گوشی هم‌رنگ زمینهٔ صفحه (green-50)
+  themeColor: PAGE_COLOR,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

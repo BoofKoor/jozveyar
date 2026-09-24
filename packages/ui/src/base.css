@@ -1,0 +1,74 @@
+/*
+ * پایهٔ رابط: توکن‌های کیت که Tailwind فضای نامی برایشان ندارد، زمینه و متن صفحه، فوکوس
+ * دولایه، و عدد. رنگ فقط از theme.css.
+ */
+@layer base {
+  :root {
+    /* فوکوس دولایهٔ کیت: سفید کنار کامپوننت، green-700 بیرون. روی هر زمینه‌ای یکی از دو لایه دست‌کم ۳ به ۱ است. */
+    --jy-focus-inner: var(--color-paper);
+    --jy-focus-outer: var(--color-green-700);
+    --jy-dur-fast: 120ms;
+    --jy-dur-base: 200ms;
+    --jy-ease: cubic-bezier(.2,0,0,1);
+    --jy-container: 1080px;
+    --jy-gutter: 24px;
+  }
+
+  /* نقطه‌های شکست کیت عدد ثابت‌اند (در media query متغیر کار نمی‌کند): کوچک ≤ 520، میانه ≤ 860. */
+  @media (max-width: 520px) {
+    :root {
+      --jy-gutter: 16px;
+      --text-display: 39px;
+      --text-h1: 31px;
+      --text-h2: 25px;
+    }
+  }
+
+  /* only light: حالت تیرهٔ خودکار مرورگر (مثل Chrome اندروید) رنگ‌های برند را برنمی‌گرداند. */
+  html {
+    color-scheme: only light;
+    -webkit-text-size-adjust: 100%;
+    background: var(--color-page);
+    color: var(--color-ink);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-weight: 400;
+    line-height: 1.8;
+    background: var(--color-page);
+    color: var(--color-ink);
+  }
+
+  /* پیوند در متن با زیرخط هم دیده می‌شود، نه فقط با رنگ (WCAG 1.4.1). */
+  a {
+    color: var(--color-muted);
+    text-decoration-line: underline;
+    text-underline-offset: 4px;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--jy-focus-inner);
+  }
+
+  /*
+   * قیمت و تعداد با ارقام لاتین، فقط روی span خود عدد، نه کل جمله. `tabular-nums` عدد زنده را
+   * موقع به‌روز شدن ثابت نگه می‌دارد؛ قیمت هر بار که تحلیل جلو می‌رود عوض می‌شود.
+   */
+  .num {
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0s !important;
+      animation-duration: 0s !important;
+    }
+  }
+}
