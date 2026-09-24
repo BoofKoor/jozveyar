@@ -79,9 +79,9 @@ export default function HomePage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 pb-16 pt-10 sm:gap-10 sm:pt-16">
+      {/* نام سایت را لوگوی سربرگ می‌گوید؛ بالای تیتر دیگر خط «جزوه‌یار» نیست. پاورقی در layout است. */}
+      <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 pb-16 pt-2 sm:gap-10 sm:pt-12">
         <header className="flex flex-col gap-4">
-          <p className="text-sm font-semibold tracking-wide text-muted">جزوه‌یار</p>
           <h1 className="text-3xl font-semibold leading-tight text-ink sm:text-4xl">
             جزوه‌ات را بینداز، قیمت را همین حالا ببین
           </h1>
@@ -93,8 +93,11 @@ export default function HomePage() {
 
         <OrderFlow />
 
-        <section className="flex flex-col gap-5 border-t border-line pt-8">
-          <h2 className="text-xl font-semibold text-ink">سؤال‌های پرتکرار</h2>
+        {/* مقصد «سؤال‌ها» در سربرگ */}
+        <section id="faq" aria-labelledby="faq-title" className="flex flex-col gap-5 border-t border-line pt-8">
+          <h2 id="faq-title" className="text-xl font-semibold text-ink">
+            سؤال‌های پرتکرار
+          </h2>
           <div className="flex flex-col gap-5">
             {FAQ.map((item) => (
               <div key={item.q} className="flex flex-col gap-1.5">
@@ -104,13 +107,6 @@ export default function HomePage() {
             ))}
           </div>
         </section>
-
-        <footer className="border-t border-line pt-6 text-sm text-muted">
-          <p>
-            جزوه‌یار — چاپ و صحافی جزوه با ارسال به سراسر ایران. مسئولیت محتوای فایل ارسالی بر
-            عهدهٔ سفارش‌دهنده است.
-          </p>
-        </footer>
       </main>
     </>
   );

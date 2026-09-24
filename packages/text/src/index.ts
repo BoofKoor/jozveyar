@@ -225,6 +225,18 @@ export function formatJalali(date: Date): string {
   return `${Number(get('day'))} ${monthName} ${get('year').replace(/\D/g, '')}`;
 }
 
+/**
+ * سال شمسی به عدد: `1405`؛ برای «©» پاورقی. سال به وقت تهران عوض می‌شود، نه UTC: نوروز ۱۴۰۵
+ * ساعت ۲۰:۳۰ روز ۲۰ مارس به وقت UTC آمد، یعنی نیمه‌شب تهران.
+ */
+export function jalaliYear(date: Date): number {
+  const parts = new Intl.DateTimeFormat('en-u-ca-persian', {
+    year: 'numeric',
+    timeZone: 'Asia/Tehran',
+  }).formatToParts(date);
+  return Number(parts.find((p) => p.type === 'year')?.value.replace(/\D/g, ''));
+}
+
 /** تاریخ شمسی عددی: `1405/06/25`. همان شکلی که در فایل پست می‌آید. */
 export function formatJalaliNumeric(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-u-ca-persian', {

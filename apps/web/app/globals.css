@@ -25,3 +25,137 @@
   font-style: normal;
   font-display: swap;
 }
+
+/*
+ * ===== پوستهٔ سایت: سربرگ و پاورقی، از طرح ز (docs/UI.md، قدم ۳) =====
+ * صفحه‌آرایی خود سایت است، نه جزء کیت؛ پس اینجاست و پیشوندش `site-` است، نه `jy-`. اندازه‌ها
+ * همان طرح ز است، و نقطهٔ شکست کوچک کیت (۵۲۰ پیکسل). رنگ فقط توکن. فقط logical properties.
+ */
+@layer components {
+  /* پاورقی ته صفحه می‌نشیند، حتی وقتی صفحه کوتاه است (۴۰۴). */
+  .site {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .site-grow {
+    flex: 1 0 auto;
+  }
+
+  /* ظرف طرح ز: پهنای محتوا ۱۰۸۰ پیکسل، با حاشیهٔ کنار کیت (۲۴، و تا ۵۲۰ پیکسل ۱۶) بیرون از آن. */
+  .site-wrap {
+    max-width: calc(var(--jy-container) + 2 * var(--jy-gutter));
+    margin-inline: auto;
+    padding-inline: var(--jy-gutter);
+  }
+
+  /* نوار بالا green-50 است؛ در قدم ۴ زمینهٔ صفحه سفید می‌شود و این نوار می‌ماند. */
+  .site-top {
+    background: var(--color-green-50);
+  }
+  .site-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-block: 16px;
+  }
+  /* لوگو ۶۴ پیکسل (تا ۵۲۰ پیکسل ۵۶)؛ padding برای حلقهٔ فوکوس، و margin منفی تا لوگو با لبهٔ ظرف هم‌تراز بماند. */
+  .site-logo {
+    display: block;
+    padding: 6px;
+    margin-inline-start: -6px;
+    border-radius: var(--radius-md);
+  }
+  .site-logo img {
+    height: 64px;
+    width: auto;
+  }
+  .site-nav {
+    display: flex;
+    gap: 4px;
+  }
+  .site-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 14px;
+    border-radius: var(--radius-md);
+    color: var(--color-ink);
+    text-decoration: none;
+  }
+  .site-nav a:hover {
+    background: var(--color-green-100);
+  }
+
+  /*
+   * حالت سفارش: وقتی جزوه‌ای در کار است، جزیرهٔ سفارش نشانهٔ `[data-jozve]` را می‌گذارد. سربرگ
+   * بی ناوبری می‌شود و لوگو بی پیوند، تا جزوهٔ نیمه‌کاره با یک کلیک پاک نشود. بی JS.
+   */
+  .site-ordering {
+    display: none;
+  }
+  body:has([data-jozve]) .site-idle {
+    display: none;
+  }
+  body:has([data-jozve]) .site-ordering {
+    display: block;
+  }
+
+  /* پاورقی: ۹۶ پیکسل زیر آخرین بخش (تا ۵۲۰ پیکسل ۶۴)؛ ۶۴ تایش padding پایین خود صفحه است. */
+  .site-foot {
+    margin-block-start: 32px;
+    padding-block: 48px 24px;
+    background: var(--color-green-50);
+    border-block-start: 1px solid var(--color-line);
+  }
+  .site-foot__brand img {
+    height: 64px;
+    width: auto;
+  }
+  .site-foot__brand p {
+    max-width: 24em;
+    margin-block-start: 12px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .site-foot__legal {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 24px;
+    margin-block-start: 32px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+
+  /*
+   * در موبایل نوار قیمت ثابت پایین صفحه است (`fixed`، تا `sm`) و ته صفحه را می‌پوشاند. جزیرهٔ
+   * سفارش ارتفاع واقعی نوار را در `--price-dock` روی خود پاورقی می‌گذارد و پاورقی همان‌قدر پایین
+   * خودش خالی می‌گذارد، تا متنش زیر نوار نماند. بی نوار، متغیر نیست و فاصله همان ۲۴ پیکسل است.
+   */
+  @media (width < 40rem) {
+    .site-foot {
+      padding-block-end: calc(24px + var(--price-dock, 0px));
+    }
+  }
+
+  @media (max-width: 520px) {
+    .site-head {
+      padding-block: 12px;
+    }
+    .site-logo img {
+      height: 56px;
+    }
+    .site-nav a {
+      padding-inline: 10px;
+    }
+    .site-foot {
+      margin-block-start: 0;
+    }
+  }
+}

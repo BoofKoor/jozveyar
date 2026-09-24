@@ -28,6 +28,27 @@ const INITIAL_CONFIG: OrderConfig = {
 };
 
 /**
+ * ارتفاع نوار قیمت را در `--price-dock` روی پاورقی سایت می‌گذارد. در موبایل نوار ثابت پایین صفحه
+ * است و ته صفحه را می‌پوشاند؛ پاورقی (کامپوننت سرور، بی JS) همین‌قدر پایینش خالی می‌گذارد
+ * (globals.css). ارتفاع با یادداشت‌های نوار عوض می‌شود (در حال بررسی، فایل خوانده‌نشده، عرض
+ * باریک)، پس اندازه گرفته می‌شود نه حدس زده. React 19 پاک‌سازیِ ref را موقع برداشتن نوار اجرا می‌کند.
+ *
+ * روی خود پاورقی، نه `<html>`: متغیر ارث می‌رسد، پس عوض کردنش روی ریشه سبک کل صفحه را دوباره
+ * حساب می‌کرد؛ با پردازندهٔ ۴ برابر کند، قیمت سه‌فایلی حدود ۲۵ میلی‌ثانیه دیرتر می‌آمد.
+ */
+function publishDockHeight(dock: HTMLDivElement | null) {
+  if (!dock || typeof ResizeObserver === 'undefined') return;
+  const footer = document.querySelector<HTMLElement>('body > footer');
+  if (!footer) return;
+  const observer = new ResizeObserver(() => footer.style.setProperty('--price-dock', `${dock.offsetHeight}px`));
+  observer.observe(dock);
+  return () => {
+    observer.disconnect();
+    footer.style.removeProperty('--price-dock');
+  };
+}
+
+/**
  * فلوی سفارش: یک جزوه از یک یا چند فایل (ADR-030).
  *
  * یک فایل همان کارت همیشگی را می‌گیرد؛ از دو فایل به بعد فهرست جزوه می‌آید. قیمت در هر
@@ -79,7 +100,10 @@ export function OrderFlow() {
       */}
       {/* جای نوار قیمت ثابت؛ با یادداشت فایل شمرده‌نشده یا خوانده‌نشده بلندتر است. */}
       <div aria-hidden className={`sm:hidden ${pending.length > 0 || blocked.length > 0 ? 'h-72' : 'h-48'}`} />
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-page px-4 pb-3 pt-2 sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0">
+      <div
+        ref={publishDockHeight}
+        className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-page px-4 pb-3 pt-2 sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0"
+      >
         <PriceBar
           breakdown={breakdown}
           provisional={view.provisional}
@@ -91,23 +115,35 @@ export function OrderFlow() {
     </>
   );
 
+  // نشانهٔ حالت سفارش: سربرگ بی ناوبری و لوگوی بی پیوند می‌شود، تا جزوه با یک کلیک پاک نشود.
+  // سربرگ کامپوننت سرور است و JS ندارد؛ حالت را CSS با :has() از همین نشانه می‌خواند (globals.css).
+  const ordering = <span hidden data-jozve="" />;
+
   if (view.sections.length === 1) {
-    return <SingleFile section={view.sections[0]!} onReset={jozve.reset} addFiles={addFiles} price={price} />;
+    return (
+      <>
+        {ordering}
+        <SingleFile section={view.sections[0]!} onReset={jozve.reset} addFiles={addFiles} price={price} />
+      </>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-5">
-      <JozveFiles
-        view={view}
-        overflow={jozve.overflow}
-        onMove={jozve.move}
-        onRemove={jozve.remove}
-        onReplace={jozve.replace}
-        onReset={jozve.reset}
-      />
-      {addFiles}
-      {price}
-    </div>
+    <>
+      {ordering}
+      <div className="flex flex-col gap-4 sm:gap-5">
+        <JozveFiles
+          view={view}
+          overflow={jozve.overflow}
+          onMove={jozve.move}
+          onRemove={jozve.remove}
+          onReplace={jozve.replace}
+          onReset={jozve.reset}
+        />
+        {addFiles}
+        {price}
+      </div>
+    </>
   );
 }
 
