@@ -1,0 +1,89 @@
+/*
+ * رنگ‌های برند جزوه‌یار، از «راهنمای هویت بصری جزوه‌یار» (نسخهٔ ۳، مهر ۱۴۰۵).
+ * نقش هر رنگ و قاعده‌ها در README.md همین پوشه است.
+ *
+ * این فایل مرجع برند است، نه کد سایت. توکن‌های سایت در مرحلهٔ طراحی رابط
+ * از روی همین فایل در packages/ui ساخته می‌شوند.
+ */
+:root {
+  /* رنگ‌های پایه: برای گرافیک و متن درشت. سبز برند همان green-500 است. */
+  --jy-brand: #768468; /* = green-500 */
+  --jy-brand-teal: #688484; /* = teal-500 */
+  --jy-brand-purple: #766884; /* رنگ پایه؛ با پلهٔ 500 طیفش فرق دارد */
+  --jy-brand-rose: #846868; /* رنگ پایه؛ با پلهٔ 500 طیفش فرق دارد */
+
+  /* خنثی */
+  --jy-ink: #1D1F1E;
+  --jy-paper: #FFFFFF;
+  --jy-print-black: #000000; /* فقط چاپ تک‌رنگ */
+
+  /* طیف green: OKLCH، روشنایی هر پله در هر چهار طیف یکسان */
+  --jy-green-50: #F2F7EE;
+  --jy-green-100: #E7EEE0;
+  --jy-green-200: #D4DFCA;
+  --jy-green-300: #BCC9B0;
+  --jy-green-400: #99A78A;
+  --jy-green-500: #768468;
+  --jy-green-600: #6C795E;
+  --jy-green-700: #505D42;
+  --jy-green-800: #38452B;
+  --jy-green-900: #222D15;
+
+  /* طیف teal: OKLCH، روشنایی هر پله در هر چهار طیف یکسان */
+  --jy-teal-50: #EFF7F7;
+  --jy-teal-100: #E1EEEE;
+  --jy-teal-200: #CBE0DF;
+  --jy-teal-300: #B1CACA;
+  --jy-teal-400: #8BA8A8;
+  --jy-teal-500: #688484;
+  --jy-teal-600: #5E7A7A;
+  --jy-teal-700: #425D5D;
+  --jy-teal-800: #2B4545;
+  --jy-teal-900: #142E2E;
+
+  /* طیف purple: OKLCH، روشنایی هر پله در هر چهار طیف یکسان */
+  --jy-purple-50: #F7F3FC;
+  --jy-purple-100: #EFE8F6;
+  --jy-purple-200: #E0D6EB;
+  --jy-purple-300: #CBBED9;
+  --jy-purple-400: #A99AB8;
+  --jy-purple-500: #867794;
+  --jy-purple-600: #7B6D89;
+  --jy-purple-700: #5E516C;
+  --jy-purple-800: #463953;
+  --jy-purple-900: #2F233A;
+
+  /* طیف rose: OKLCH، روشنایی هر پله در هر چهار طیف یکسان */
+  --jy-rose-50: #FCF3F2;
+  --jy-rose-100: #F6E7E7;
+  --jy-rose-200: #EBD5D4;
+  --jy-rose-300: #D8BDBC;
+  --jy-rose-400: #B79999;
+  --jy-rose-500: #937676;
+  --jy-rose-600: #886C6C;
+  --jy-rose-700: #6A5050;
+  --jy-rose-800: #513838;
+  --jy-rose-900: #392222;
+
+  /* رنگ‌های وضعیت: فقط برای وضعیت در رابط، همیشه همراه آیکون و متن */
+  --jy-success-text: #227D32;
+  --jy-success-bg: #E8F7E8;
+  --jy-success-border: #B4DEB6;
+  --jy-success-solid: #227D32;
+  --jy-success-on-solid: #FFFFFF;
+  --jy-warning-text: #9B5F02;
+  --jy-warning-bg: #FBF0E0;
+  --jy-warning-border: #E9CD9D;
+  --jy-warning-solid: #FDBE45;
+  --jy-warning-on-solid: #1D1F1E;
+  --jy-error-text: #8D1B17;
+  --jy-error-bg: #FEEDEB;
+  --jy-error-border: #FCC0B8;
+  --jy-error-solid: #8D1B17;
+  --jy-error-on-solid: #FFFFFF;
+  --jy-info-text: #2158A7;
+  --jy-info-bg: #EAF3FF;
+  --jy-info-border: #B5D3FF;
+  --jy-info-solid: #2158A7;
+  --jy-info-on-solid: #FFFFFF;
+}
