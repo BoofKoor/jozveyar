@@ -35,20 +35,20 @@ export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onRese
   };
 
   return (
-    <section data-testid="jozve" className="rounded-card border border-hairline bg-card p-5 sm:p-6">
-      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-hairline pb-4">
+    <section data-testid="jozve" className="jy-card">
+      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
         <div className="min-w-0">
           <h2 className="font-semibold text-ink">
             جزوهٔ تو · <span className="num">{formatNumber(count)}</span> فایل
           </h2>
-          <p className="mt-1 text-sm text-ink-2">
+          <p className="mt-1 text-sm text-muted">
             به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند. ترتیب را با ↑ و ↓ عوض کن.
           </p>
         </div>
         <button
           type="button"
           onClick={onReset}
-          className="shrink-0 text-sm text-ink-2 underline underline-offset-4 hover:text-ink"
+          className="jy-btn jy-btn--text shrink-0 text-sm"
         >
           از اول
         </button>
@@ -87,7 +87,7 @@ export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onRese
         <Stat testId="stat-file-count" label="فایل‌ها" value={formatNumber(count)} />
       </dl>
 
-      <ol className="mt-5 border-t border-hairline">
+      <ol className="mt-5 border-t border-line">
         {view.sections.map((section, index) => (
           <SectionRow
             key={section.key}
@@ -102,7 +102,7 @@ export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onRese
       </ol>
 
       {overflow.length > 0 ? (
-        <p data-testid="jozve-overflow" className="mt-4 rounded-lg bg-chip px-4 py-3 text-sm text-ink-2">
+        <p data-testid="jozve-overflow" className="jy-note mt-4">
           جزوه بیش از {formatNumber(MAX_SECTIONS_PER_ITEM)} فایل نمی‌گیرد؛ این‌ها اضافه نشدند:{' '}
           <Names names={overflow} />. چند فایل را از برنامهٔ خودشان یک PDF کن و همان را بینداز.
         </p>
@@ -113,6 +113,8 @@ export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onRese
         id="jozve-replace"
         type="file"
         accept={ACCEPT}
+        tabIndex={-1}
+        aria-hidden="true"
         className="sr-only"
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -148,45 +150,45 @@ function SectionRow({
     <button
       type="button"
       onClick={() => onReplace(key)}
-      className="rounded-lg bg-sage-button px-4 py-2 font-semibold text-ink transition-opacity hover:opacity-90"
+      className="jy-btn jy-btn--primary"
     >
       جایگزین کن
     </button>
   );
 
   return (
-    <li data-testid="section" className="border-b border-hairline py-4 last:border-b-0">
+    <li data-testid="section" className="border-b border-line py-4 last:border-b-0">
       <div className="flex items-start gap-3">
-        <span className="num mt-0.5 w-6 shrink-0 text-center text-sm text-ink-2">{formatNumber(index + 1)}</span>
+        <span className="num mt-0.5 w-6 shrink-0 text-center text-sm text-muted">{formatNumber(index + 1)}</span>
         <div className="min-w-0 flex-1">
           <p data-testid="section-name" className="truncate font-semibold text-ink" title={name}>
             <bdi>{name}</bdi>
           </p>
-          <p data-testid="section-status" className="num mt-0.5 text-sm text-ink-2">
+          <p data-testid="section-status" className="num mt-0.5 text-sm text-muted">
             {statusLine(section)} · {formatBytes(section.size)}
           </p>
           {upload ? (
-            <p data-testid="section-upload" className="num mt-0.5 text-xs text-ink-2">
+            <p data-testid="section-upload" className="num mt-0.5 text-xs text-muted">
               {upload}
             </p>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <RowButton label={`«${name}» یکی بالاتر`} disabled={index === 0} onClick={() => onMove(key, -1)}>
-            ↑
+            <span className="jy-icon jy-icon-arrow jy-icon--up" aria-hidden="true" />
           </RowButton>
           <RowButton label={`«${name}» یکی پایین‌تر`} disabled={last} onClick={() => onMove(key, 1)}>
-            ↓
+            <span className="jy-icon jy-icon-arrow jy-icon--down" aria-hidden="true" />
           </RowButton>
           <RowButton label={`«${name}» را از جزوه بردار`} onClick={() => onRemove(key)}>
-            ✕
+            <span className="jy-icon jy-icon-close" aria-hidden="true" />
           </RowButton>
         </div>
       </div>
 
-      <div className="ms-9 flex flex-col gap-2 text-sm text-ink-2 empty:hidden">
+      <div className="ms-9 flex flex-col gap-2 text-sm text-muted empty:hidden">
         {blocked ? (
-          <div data-testid="section-blocked" className="mt-3 rounded-lg bg-chip px-4 py-3">
+          <div data-testid="section-blocked" className="jy-note mt-3">
             <p className="font-semibold text-ink">{blocked.title}</p>
             <p className="mt-1">{blocked.hint}</p>
             <p className="mt-1">تا تکلیف این فایل روشن نشود، قیمت بدون آن است.</p>
@@ -195,7 +197,7 @@ function SectionRow({
               <button
                 type="button"
                 onClick={() => onRemove(key)}
-                className="rounded-lg border border-hairline px-4 py-2 font-semibold text-ink transition-colors hover:border-sage-mid"
+                className="jy-btn jy-btn--secondary"
               >
                 حذف از جزوه
               </button>
@@ -238,7 +240,7 @@ function SectionRow({
                 {summary.mismatchedFonts.length === 1 ? 'فونت' : 'فونت‌های'} <FontNames fonts={summary.mismatchedFonts} />{' '}
                 روی سرور ما نیست و با فونت مشابه چاپ می‌شود؛ ظاهر و تعداد صفحه ممکن است فرق کند. برای
                 چاپ دقیقاً مثل فایل خودت، از {program} خروجی PDF بگیر و با{' '}
-                <button type="button" onClick={() => onReplace(key)} className="text-ink underline underline-offset-4">
+                <button type="button" onClick={() => onReplace(key)} className="jy-link">
                   جایگزین کن
                 </button>{' '}
                 جای همین بگذار.
@@ -303,7 +305,7 @@ function statusLine(section: SectionView): string {
 
 function Note({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
-    <p data-testid={testId} className="mt-2 rounded-lg bg-chip px-3 py-2">
+    <p data-testid={testId} className="jy-note mt-2">
       {children}
     </p>
   );
@@ -327,7 +329,7 @@ function RowButton({
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex h-9 w-9 items-center justify-center rounded-lg border border-hairline text-ink transition-colors hover:border-sage-mid disabled:opacity-30"
+      className="jy-btn jy-btn--text jy-btn--icon"
     >
       {children}
     </button>

@@ -21,8 +21,8 @@ interface Props {
 function Line({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5">
-      <span className={muted ? 'text-ink-2' : 'text-ink'}>{label}</span>
-      <span className={`num ${muted ? 'text-ink-2' : 'font-semibold text-ink'}`}>{value}</span>
+      <span className={muted ? 'text-muted' : 'text-ink'}>{label}</span>
+      <span className={`num ${muted ? 'text-muted' : 'font-semibold text-ink'}`}>{value}</span>
     </div>
   );
 }
@@ -42,7 +42,7 @@ export function PriceBar({ breakdown, provisional, onContinue, pending = [], blo
   const total = breakdown.totalWithoutShippingRials;
 
   return (
-    <div className="rounded-card border border-hairline bg-card p-5 sm:p-6">
+    <div className="jy-card">
       <div className="hidden text-sm sm:block">
         {item ? (
           <>
@@ -68,49 +68,49 @@ export function PriceBar({ breakdown, provisional, onContinue, pending = [], blo
             ) : null}
           </>
         ) : null}
-        <div className="mt-2 border-t border-hairline pt-2">
+        <div className="mt-2 border-t border-line pt-2">
           <Line label="وزن برآوردی" value={formatWeight(breakdown.estWeightGrams)} muted />
         </div>
       </div>
 
-      <div className="sm:mt-4 sm:border-t sm:border-hairline sm:pt-4">
+      <div className="sm:mt-4 sm:border-t sm:border-line sm:pt-4">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-ink-2">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
+          <span className="text-muted">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
           <span
             data-testid="price-total"
             className="num text-2xl font-semibold text-ink sm:text-3xl"
           >
             {formatTomans(total, false)}
-            <span className="ms-1.5 text-base font-normal text-ink-2">تومان</span>
+            <span className="ms-1.5 text-base font-normal text-muted">تومان</span>
           </span>
         </div>
 
         {breakdown.shippingFromRials !== null ? (
-          <p data-testid="shipping-from" className="mt-1 text-end text-sm text-ink-2">
+          <p data-testid="shipping-from" className="mt-1 text-end text-sm text-muted">
             + ارسال از <span className="num">{formatTomans(breakdown.shippingFromRials, false)}</span>{' '}
             تومان
           </p>
         ) : null}
 
         {pending.length > 0 ? (
-          <p data-testid="price-pending" className="mt-3 text-sm text-ink-2">
+          <p data-testid="price-pending" className="mt-3 text-sm text-muted">
             قیمت <Names names={pending} /> بعد از بررسی روی سرور به این اضافه می‌شود.
           </p>
         ) : provisional ? (
-          <p className="mt-3 text-sm text-ink-2">
+          <p className="mt-3 text-sm text-muted">
             بررسی فایل ادامه دارد — عدد ممکن است کمی جابه‌جا شود.
           </p>
         ) : null}
 
         {blocked.length > 0 ? (
-          <p data-testid="price-blocked" className="mt-3 rounded-lg bg-chip px-3 py-2 text-sm text-ink-2">
+          <p data-testid="price-blocked" className="jy-note mt-3">
             این قیمت بدون <Names names={blocked} /> است که خوانده نشد. حذفش کن یا فایل درستش را جایش
             بگذار.
           </p>
         ) : null}
 
         {breakdown.warnings.includes('below_min_order') ? (
-          <p className="mt-3 rounded-lg bg-chip px-3 py-2 text-sm text-ink-2">
+          <p className="jy-note mt-3">
             این سفارش از حداقل مبلغ کمتر است. چند جزوه را با هم بفرست تا هزینهٔ ارسال بین‌شان
             تقسیم شود.
           </p>
@@ -120,15 +120,16 @@ export function PriceBar({ breakdown, provisional, onContinue, pending = [], blo
           type="button"
           onClick={onContinue}
           disabled={held}
-          className="mt-5 w-full rounded-lg bg-sage-button py-3.5 font-semibold text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
+          className={`jy-btn jy-btn--primary jy-btn--lg jy-btn--block mt-5${provisional ? ' is-loading' : ''}`}
         >
           {provisional
             ? 'در حال بررسی…'
             : blocked.length > 0
               ? 'اول تکلیف فایل خوانده‌نشده را روشن کن'
               : 'ادامه — آدرس و تحویل'}
+          {held ? null : <span className="jy-icon jy-icon-arrow" aria-hidden="true" />}
         </button>
-        <p className="mt-2.5 hidden text-center text-xs text-ink-2 sm:block">
+        <p className="mt-2.5 hidden text-center text-xs text-muted sm:block">
           ثبت‌نام لازم نیست. شماره موبایل فقط در لحظهٔ پرداخت گرفته می‌شود.
         </p>
       </div>

@@ -1,0 +1,13 @@
+/*
+ * سیستم طراحی جزوه‌یار (ADR-031): توکن‌ها، پایه، اجزا و آیکون‌ها. اپ بعد از
+ * `@import 'tailwindcss'` همین را وارد می‌کند (`@import '@jozveyar/ui/styles.css'`)، تا
+ * `--color-*: initial` بعد از پالت پیش‌فرض Tailwind بیاید و خاموشش کند.
+ */
+@import './theme.css';
+@import './base.css';
+@import './components.css';
+@import './icons.css';
+
+/* کلاس‌های کامپوننت‌های همین بسته هم دیده شوند، جدا از اپی که واردش کرده؛ تست‌ها نه. */
+@source './';
+@source not './*.test.ts';

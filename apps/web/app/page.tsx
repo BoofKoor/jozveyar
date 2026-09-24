@@ -37,6 +37,11 @@ const FAQ = [
   },
 ];
 
+/** واژهٔ لاتین در bdi، تا «PDF، Word» کنار ویرگول فارسی برعکس دیده نشود. متن خود سؤال دست نمی‌خورد. */
+function isolateLatin(text: string) {
+  return text.split(/([A-Za-z]+)/).map((part, i) => (i % 2 ? <bdi key={i}>{part}</bdi> : part));
+}
+
 export default function HomePage() {
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -76,11 +81,11 @@ export default function HomePage() {
 
       <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 pb-16 pt-10 sm:gap-10 sm:pt-16">
         <header className="flex flex-col gap-4">
-          <p className="text-sm font-semibold tracking-wide text-sage-deep">جزوه‌یار</p>
+          <p className="text-sm font-semibold tracking-wide text-muted">جزوه‌یار</p>
           <h1 className="text-3xl font-semibold leading-tight text-ink sm:text-4xl">
             جزوه‌ات را بینداز، قیمت را همین حالا ببین
           </h1>
-          <p className="text-lg leading-relaxed text-ink-2">
+          <p className="text-lg leading-relaxed text-muted">
             تعداد صفحات را خودت نمی‌شماری و فرم پر نمی‌کنی. فایل را می‌خوانیم، قیمت را نشان
             می‌دهیم، چاپ می‌کنیم و برایت می‌فرستیم.
           </p>
@@ -88,19 +93,19 @@ export default function HomePage() {
 
         <OrderFlow />
 
-        <section className="flex flex-col gap-5 border-t border-hairline pt-8">
+        <section className="flex flex-col gap-5 border-t border-line pt-8">
           <h2 className="text-xl font-semibold text-ink">سؤال‌های پرتکرار</h2>
           <div className="flex flex-col gap-5">
             {FAQ.map((item) => (
               <div key={item.q} className="flex flex-col gap-1.5">
                 <h3 className="font-semibold text-ink">{item.q}</h3>
-                <p className="leading-relaxed text-ink-2">{item.a}</p>
+                <p className="leading-relaxed text-muted">{isolateLatin(item.a)}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <footer className="border-t border-hairline pt-6 text-sm text-ink-2">
+        <footer className="border-t border-line pt-6 text-sm text-muted">
           <p>
             جزوه‌یار — چاپ و صحافی جزوه با ارسال به سراسر ایران. مسئولیت محتوای فایل ارسالی بر
             عهدهٔ سفارش‌دهنده است.

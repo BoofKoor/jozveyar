@@ -1,0 +1,144 @@
+/*
+ * توکن‌های طراحی جزوه‌یار برای Tailwind (`@theme`).
+ *
+ * رنگ‌ها عیناً از docs/brand/jozveyar-colors.css، با همان نام و بی پیشوند `jy-`: `--jy-green-600`
+ * آنجا، `--color-green-600` اینجا و کلاس `bg-green-600` در کد. گوشه، سایه و زمان حرکت از بلوک توکن
+ * docs/brand/jozveyar-ui.css. نقش هر رنگ در README همان پوشه است. tokens.test.ts هم‌خوانی را قفل
+ * کرده: رنگی که اینجا با فایل برند نخواند، یا رنگی که در فایل برند هست و اینجا نیست، تست را
+ * می‌اندازد.
+ *
+ * پیش‌فرض‌های Tailwind برای رنگ، گوشه و سایه خاموش‌اند. کلاسی مثل `bg-white` یا `text-red-500`
+ * اصلاً ساخته نمی‌شود، پس رنگ بیرون از برند به صفحه نمی‌رسد. Tailwind فقط متغیری را در CSS
+ * خروجی می‌گذارد که جایی به کار رفته، پس رنگ‌های گرافیک هزینه‌ای ندارند.
+ */
+@theme {
+  --color-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+
+  /* رنگ‌های پایه: گرافیک و متن درشت. سبز برند همان green-500 است. سبزآبی، بنفش و رز فقط در گرافیک. */
+  --color-brand: #768468;
+  --color-brand-teal: #688484;
+  --color-brand-purple: #766884;
+  --color-brand-rose: #846868;
+
+  /* خنثی. مشکی چاپ فقط برای چاپ تک‌رنگ است، نه صفحه. */
+  --color-ink: #1D1F1E;
+  --color-paper: #FFFFFF;
+  --color-print-black: #000000;
+
+  /*
+   * طیف‌ها. رابط با پله‌های green ساخته می‌شود: 50 تا 200 زمینه، 300 و 400 خط و گرافیک،
+   * 500 لبهٔ کنترل و متن درشت، 600 رنگ تأکید و دکمه، 700 به بالا متن ریز.
+   */
+  --color-green-50: #F2F7EE;
+  --color-green-100: #E7EEE0;
+  --color-green-200: #D4DFCA;
+  --color-green-300: #BCC9B0;
+  --color-green-400: #99A78A;
+  --color-green-500: #768468;
+  --color-green-600: #6C795E;
+  --color-green-700: #505D42;
+  --color-green-800: #38452B;
+  --color-green-900: #222D15;
+
+  --color-teal-50: #EFF7F7;
+  --color-teal-100: #E1EEEE;
+  --color-teal-200: #CBE0DF;
+  --color-teal-300: #B1CACA;
+  --color-teal-400: #8BA8A8;
+  --color-teal-500: #688484;
+  --color-teal-600: #5E7A7A;
+  --color-teal-700: #425D5D;
+  --color-teal-800: #2B4545;
+  --color-teal-900: #142E2E;
+
+  --color-purple-50: #F7F3FC;
+  --color-purple-100: #EFE8F6;
+  --color-purple-200: #E0D6EB;
+  --color-purple-300: #CBBED9;
+  --color-purple-400: #A99AB8;
+  --color-purple-500: #867794;
+  --color-purple-600: #7B6D89;
+  --color-purple-700: #5E516C;
+  --color-purple-800: #463953;
+  --color-purple-900: #2F233A;
+
+  --color-rose-50: #FCF3F2;
+  --color-rose-100: #F6E7E7;
+  --color-rose-200: #EBD5D4;
+  --color-rose-300: #D8BDBC;
+  --color-rose-400: #B79999;
+  --color-rose-500: #937676;
+  --color-rose-600: #886C6C;
+  --color-rose-700: #6A5050;
+  --color-rose-800: #513838;
+  --color-rose-900: #392222;
+
+  /* رنگ‌های وضعیت: فقط برای وضعیت، و هیچ‌وقت بی آیکون و متن */
+  --color-success-text: #227D32;
+  --color-success-bg: #E8F7E8;
+  --color-success-border: #B4DEB6;
+  --color-success-solid: #227D32;
+  --color-success-on-solid: #FFFFFF;
+  --color-warning-text: #9B5F02;
+  --color-warning-bg: #FBF0E0;
+  --color-warning-border: #E9CD9D;
+  --color-warning-solid: #FDBE45;
+  --color-warning-on-solid: #1D1F1E;
+  --color-error-text: #8D1B17;
+  --color-error-bg: #FEEDEB;
+  --color-error-border: #FCC0B8;
+  --color-error-solid: #8D1B17;
+  --color-error-on-solid: #FFFFFF;
+  --color-info-text: #2158A7;
+  --color-info-bg: #EAF3FF;
+  --color-info-border: #B5D3FF;
+  --color-info-solid: #2158A7;
+  --color-info-on-solid: #FFFFFF;
+
+  /*
+   * لایهٔ معنایی کوچک: نقش هر رنگ در رابط، طبق «نگاشت پالت» در docs/UI.md. کد این‌ها را
+   * می‌نویسد (`text-muted`، `border-line`) تا اگر نقشی عوض شد، فقط همین‌جا عوض شود.
+   */
+  --color-page: var(--color-green-50); /* زمینهٔ صفحه تا قدم ۴؛ کارت‌ها روی آن سفیدند */
+  --color-card: var(--color-paper);
+  --color-line: var(--color-green-200); /* جداکننده و لبهٔ کارت؛ تزئینی */
+  --color-control: var(--color-green-500); /* لبهٔ فیلد و کنترل؛ 3.98 به 1 روی سفید */
+  --color-accent: var(--color-green-600); /* تأکید، انتخاب، دکمهٔ اصلی */
+  --color-muted: var(--color-green-700); /* متن ثانویه؛ 7.03 به 1 روی سفید، برند خاکستری ندارد */
+
+  /* گوشه و سایه از کیت: کنترل 10، کارت 16 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(29,31,30,.06), 0 1px 1px rgba(29,31,30,.04);
+  --shadow-md: 0 8px 24px rgba(29,31,30,.10), 0 2px 6px rgba(29,31,30,.06);
+
+  /* حرکت کیت، پیش‌فرض همهٔ transitionها */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(.2,0,0,1);
+
+  --font-sans: 'Vazirmatn', system-ui, 'Segoe UI', Tahoma, sans-serif;
+
+  /*
+   * مقیاس حروف راهنما: پایهٔ 16 با نسبت 1.25. تا 520 پیکسل سه تیتر بزرگ یک پله کوچک‌تر
+   * می‌شوند (base.css). اندازه‌های پیش‌فرض Tailwind (text-sm و بقیه) فعلاً می‌مانند؛ چیدمان
+   * امروز با آنهاست و در قدم ۴ با طرح ز عوض می‌شود.
+   */
+  --text-display: 49px;
+  --text-display--line-height: 1.35;
+  --text-h1: 39px;
+  --text-h1--line-height: 1.5;
+  --text-h2: 31px;
+  --text-h2--line-height: 1.5;
+  --text-h3: 25px;
+  --text-h3--line-height: 1.5;
+  --text-h4: 20px;
+  --text-h4--line-height: 1.5;
+  --text-small: 13px;
+  --text-small--line-height: 1.8;
+}

@@ -87,6 +87,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/storage/package.json packages/storage/
 COPY packages/pricing/package.json packages/pricing/
 COPY packages/text/package.json packages/text/
+COPY packages/ui/package.json packages/ui/
 
 # انبار pnpm روی کش BuildKit می‌نشیند و بین بیلدها زنده می‌ماند.
 #

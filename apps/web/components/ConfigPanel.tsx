@@ -31,10 +31,10 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-t border-hairline py-5 first:border-t-0 first:pt-0">
+    <div className="border-t border-line py-5 first:border-t-0 first:pt-0">
       <div className="mb-3">
         <h3 className="font-semibold text-ink">{label}</h3>
-        {hint ? <p className="mt-1 text-sm text-ink-2">{hint}</p> : null}
+        {hint ? <p className="mt-1 text-sm text-muted">{hint}</p> : null}
       </div>
       {children}
     </div>
@@ -64,14 +64,14 @@ function Choice<T extends string>({
             aria-checked={selected}
             disabled={option.disabled}
             onClick={() => onSelect(option.value)}
-            className={`flex flex-col items-start gap-0.5 rounded-lg border px-4 py-2.5 text-start transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`flex flex-col items-start gap-0.5 rounded-md text-start text-ink transition-colors disabled:cursor-not-allowed disabled:border-line disabled:bg-green-50 disabled:text-green-500 ${
               selected
-                ? 'border-sage-deep bg-chip font-semibold text-ink'
-                : 'border-hairline bg-card text-ink hover:border-sage-mid'
+                ? 'border-2 border-accent bg-green-50 px-[15px] py-[9px] font-semibold'
+                : 'border border-line bg-card px-4 py-2.5 hover:border-green-400'
             }`}
           >
             <span>{option.label}</span>
-            {option.note ? <span className="num text-xs text-ink-2">{option.note}</span> : null}
+            {option.note ? <span className="num text-xs text-muted">{option.note}</span> : null}
           </button>
         );
       })}
@@ -98,7 +98,7 @@ export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileC
   }));
 
   return (
-    <section className="rounded-card border border-hairline bg-card p-5 sm:p-6">
+    <section className="jy-card">
       <Field
         label="رنگ چاپ"
         hint={
@@ -167,9 +167,9 @@ export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileC
             aria-label="یکی کمتر"
             disabled={config.copies <= 1}
             onClick={() => set('copies', Math.max(1, config.copies - 1))}
-            className="h-11 w-11 rounded-lg border border-hairline text-xl text-ink transition-colors hover:border-sage-mid disabled:opacity-40"
+            className="jy-btn jy-btn--secondary jy-btn--icon"
           >
-            −
+            <span className="jy-icon jy-icon-minus" aria-hidden="true" />
           </button>
           <input
             id="copies"
@@ -182,16 +182,16 @@ export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileC
               const next = Number(event.target.value);
               if (Number.isFinite(next)) set('copies', Math.min(1000, Math.max(1, Math.trunc(next))));
             }}
-            className="num h-11 w-20 rounded-lg border border-hairline bg-card text-center text-lg font-semibold text-ink"
+            className="jy-input num w-20 text-center text-lg font-semibold"
           />
           <button
             type="button"
             aria-label="یکی بیشتر"
             disabled={config.copies >= 1000}
             onClick={() => set('copies', Math.min(1000, config.copies + 1))}
-            className="h-11 w-11 rounded-lg border border-hairline text-xl text-ink transition-colors hover:border-sage-mid disabled:opacity-40"
+            className="jy-btn jy-btn--secondary jy-btn--icon"
           >
-            +
+            <span className="jy-icon jy-icon-plus" aria-hidden="true" />
           </button>
         </div>
       </Field>

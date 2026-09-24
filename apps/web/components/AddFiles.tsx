@@ -23,7 +23,7 @@ export function AddFiles({ onFiles, room, count }: Props) {
 
   if (room <= 0) {
     return (
-      <p className="rounded-card border border-hairline bg-card px-4 py-3 text-sm text-ink-2">
+      <p className="rounded-lg border border-line bg-card px-4 py-3 text-sm text-muted">
         جزوه به سقف {formatNumber(MAX_SECTIONS_PER_ITEM)} فایل رسید. اگر فایل دیگری هم هست، چند فایل را از برنامهٔ
         خودشان یک PDF کن و همان را جای آنها بگذار.
       </p>
@@ -43,8 +43,8 @@ export function AddFiles({ onFiles, room, count }: Props) {
         const files = Array.from(event.dataTransfer.files);
         if (files.length > 0) onFiles(files);
       }}
-      className={`flex flex-wrap items-center justify-between gap-3 rounded-card border border-dashed px-4 py-3 transition-colors ${
-        dragging ? 'border-sage-deep bg-chip' : 'border-sage-mid bg-card'
+      className={`flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-dashed px-4 py-3 transition-colors ${
+        dragging ? 'border-solid border-accent bg-green-100' : 'border-control bg-card'
       }`}
     >
       <input
@@ -53,6 +53,8 @@ export function AddFiles({ onFiles, room, count }: Props) {
         type="file"
         multiple
         accept={ACCEPT}
+        tabIndex={-1}
+        aria-hidden="true"
         className="sr-only"
         onChange={(event) => {
           const files = event.target.files ? Array.from(event.target.files) : [];
@@ -60,7 +62,7 @@ export function AddFiles({ onFiles, room, count }: Props) {
           if (files.length > 0) onFiles(files);
         }}
       />
-      <p className="text-sm text-ink-2">
+      <p className="text-sm text-muted">
         {count === 1
           ? 'جزوه چند فایل است؟ بقیه را هم بینداز؛ پشت‌سرهم صحافی می‌شوند.'
           : 'فایل دیگری هم هست؟ بینداز؛ ته جزوه می‌آید.'}
@@ -68,9 +70,10 @@ export function AddFiles({ onFiles, room, count }: Props) {
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="shrink-0 rounded-lg border border-sage-mid px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-sage-deep"
+        className="jy-btn jy-btn--secondary shrink-0"
       >
-        + افزودن فایل
+        <span className="jy-icon jy-icon-plus" aria-hidden="true" />
+        افزودن فایل
       </button>
     </div>
   );
