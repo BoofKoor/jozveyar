@@ -1,0 +1,130 @@
+/*
+ * کیت رابط کاربری جزوه‌یار، عیناً از «راهنمای هویت بصری جزوه‌یار» نسخهٔ ۳ (مهر ۱۴۰۵)،
+ * فاز ۲ مراحل ۱ تا ۳: پایه‌ها، دکمه‌ها، فرم‌ها و بارگذاری فایل. مرجع برند است، نه کد سایت؛
+ * packages/ui در قدم ۲ از روی آن ساخته می‌شود (docs/UI.md). نقش هر جزء و تضادها در README.
+ * این فایل به jozveyar-colors.css تکیه دارد؛ jozveyar-type.css راهنما اینجا نیست و اندازه‌ها
+ * مقدار پیش‌فرض var() را می‌گیرند. کیت هنوز کامل نیست: کارت، سربرگ و پانویس در راهنما مانده‌اند.
+ */
+/* جزوه‌یار — کیت رابط کاربری، فاز ۲ مرحله‌ی ۱: پایه‌ها (مهر ۱۴۰۵)
+ * ترتیب بارگذاری: jozveyar-colors.css، jozveyar-type.css، بعد همین فایل.
+ * نقطه‌های شکست (در media query متغیر CSS کار نمی‌کند، پس عدد ثابت): کوچک ≤ 520px، میانه ≤ 860px.
+ */
+:root{
+  --jy-space-4: 4px;
+  --jy-space-8: 8px;
+  --jy-space-12: 12px;
+  --jy-space-16: 16px;
+  --jy-space-24: 24px;
+  --jy-space-32: 32px;
+  --jy-space-48: 48px;
+  --jy-space-64: 64px;
+  --jy-radius-sm: 6px;
+  --jy-radius-md: 10px;
+  --jy-radius-lg: 16px;
+  --jy-radius-full: 999px;
+  --jy-border-subtle: var(--jy-green-200);   /* جداکننده و کارت؛ تزئینی */
+  --jy-border-control: var(--jy-green-500);  /* لبه‌ی فیلد و کنترل؛ 3.98 روی سفید */
+  --jy-shadow-sm: 0 1px 2px rgba(29,31,30,.06), 0 1px 1px rgba(29,31,30,.04);
+  --jy-shadow-md: 0 8px 24px rgba(29,31,30,.10), 0 2px 6px rgba(29,31,30,.06);
+  --jy-focus-inner: #FFFFFF;
+  --jy-focus-outer: var(--jy-green-700);
+  --jy-dur-fast: 120ms;
+  --jy-dur-base: 200ms;
+  --jy-ease: cubic-bezier(.2,0,0,1);
+  --jy-container: 1080px;
+  --jy-gutter: 24px;
+}
+*,*::before,*::after{box-sizing:border-box}
+/* حلقه‌ی فوکوس دولایه: سفید کنار کامپوننت، green-700 بیرون. روی هر زمینه‌ای یکی از دو لایه دست‌کم ۳ به ۱ است. */
+:focus-visible{outline:2px solid var(--jy-focus-outer); outline-offset:2px; box-shadow:0 0 0 2px var(--jy-focus-inner)}
+.jy-container{max-width:var(--jy-container); margin-inline:auto; padding-inline:var(--jy-gutter)}
+.jy-visually-hidden{position:absolute!important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
+@media (max-width:520px){:root{--jy-gutter:16px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:0s!important; animation-duration:0s!important}}
+/* ===== buttons (phase 2, step 2) ===== */
+.jy-btn{display:inline-flex; align-items:center; justify-content:center; gap:var(--jy-space-8, 8px); min-height:44px; padding:0 20px;
+  font:inherit; font-size:var(--jy-text-base, 16px); font-weight:700; line-height:1.5; border:1px solid transparent; border-radius:var(--jy-radius-md, 10px);
+  cursor:pointer; text-decoration:none; white-space:nowrap; user-select:none; -webkit-tap-highlight-color:transparent;
+  transition:background-color var(--jy-dur-fast, 120ms) var(--jy-ease, ease), border-color var(--jy-dur-fast, 120ms) var(--jy-ease, ease)}
+.jy-btn svg{width:1.25em; height:1.25em; flex:none}
+.jy-btn--sm{min-height:36px; padding:0 14px; font-size:var(--jy-text-xs, 13px)}
+.jy-btn--lg{min-height:52px; padding:0 28px; font-size:var(--jy-text-base, 16px)}
+.jy-btn--icon{padding:0; width:44px} .jy-btn--icon.jy-btn--sm{width:36px} .jy-btn--icon.jy-btn--lg{width:52px}
+.jy-btn--block{display:flex; width:100%}
+.jy-btn--primary{background:#6C795E; color:#FFFFFF; border-color:#6C795E}
+.jy-btn--primary:is(:hover,.is-hover){background:#505D42; color:#FFFFFF; border-color:#505D42}
+.jy-btn--primary:is(:active,.is-active){background:#38452B; color:#FFFFFF; border-color:#38452B}
+.jy-btn--secondary{background:#FFFFFF; color:#505D42; border-color:#768468}
+.jy-btn--secondary:is(:hover,.is-hover){background:#F2F7EE; color:#505D42; border-color:#6C795E}
+.jy-btn--secondary:is(:active,.is-active){background:#E7EEE0; color:#505D42; border-color:#505D42}
+.jy-btn--text{background:#FFFFFF; color:#505D42; border-color:#FFFFFF}
+.jy-btn--text:is(:hover,.is-hover){background:#F2F7EE; color:#505D42; border-color:#F2F7EE}
+.jy-btn--text:is(:active,.is-active){background:#E7EEE0; color:#505D42; border-color:#E7EEE0}
+.jy-btn--danger{background:#8D1B17; color:#FFFFFF; border-color:#8D1B17}
+.jy-btn--danger:is(:hover,.is-hover){background:#800709; color:#FFFFFF; border-color:#800709}
+.jy-btn--danger:is(:active,.is-active){background:#6F0104; color:#FFFFFF; border-color:#6F0104}
+.jy-btn:is(:disabled,[aria-disabled="true"]){background:#F2F7EE; color:#768468; border-color:#D4DFCA; cursor:not-allowed}
+.jy-btn.is-loading{cursor:progress; pointer-events:none}
+.jy-btn.is-loading::before{content:""; width:1em; height:1em; flex:none; border:2px solid currentColor; border-inline-end-color:transparent; border-radius:50%; animation:jy-spin .8s linear infinite}
+@keyframes jy-spin{to{transform:rotate(360deg)}}
+/* ===== end buttons ===== */
+/* ===== forms (phase 2, step 3) ===== */
+.jy-field{display:flex; flex-direction:column; gap:6px; margin:0 0 var(--jy-space-24, 24px)}
+.jy-label{font-size:var(--jy-text-base, 16px); font-weight:700; color:#1D1F1E; line-height:1.6}
+.jy-optional{font-weight:400; color:#505D42}
+.jy-hint{font-size:var(--jy-text-xs, 13px); color:#505D42; line-height:1.7; margin-top:-2px}
+.jy-input{display:block; width:100%; min-height:44px; padding:0 12px; font:inherit; font-size:var(--jy-text-base, 16px); color:#1D1F1E;
+  background:#FFFFFF; border:1px solid #768468; border-radius:var(--jy-radius-md, 10px); line-height:1.6;
+  transition:border-color var(--jy-dur-fast, 120ms) var(--jy-ease, ease)}
+.jy-input::placeholder{color:#6C795E; opacity:1}
+.jy-input:is(:hover,.is-hover){border-color:#6C795E}
+.jy-input:is(:focus,.is-focus){border-color:#505D42}
+.jy-input[aria-invalid="true"]{border:2px solid #8D1B17; padding:0 11px}
+.jy-input:is(:disabled,[aria-disabled="true"]){background:#F2F7EE; color:#768468; border-color:#D4DFCA; cursor:not-allowed}
+.jy-input[readonly]{background:#F2F7EE}
+textarea.jy-input{min-height:120px; padding:10px 12px; line-height:1.8; resize:vertical}
+textarea.jy-input[aria-invalid="true"]{padding:9px 11px}
+.jy-input--ltr{direction:ltr; text-align:left}
+.jy-select{position:relative; display:block}
+.jy-select select{appearance:none; -webkit-appearance:none; padding-inline-end:44px; cursor:pointer}
+.jy-select::after{content:""; position:absolute; inset-inline-end:17px; top:50%; width:8px; height:8px; pointer-events:none;
+  border-right:2px solid #505D42; border-bottom:2px solid #505D42; transform:translateY(-70%) rotate(45deg)}
+.jy-error{display:flex; align-items:flex-start; gap:6px; font-size:var(--jy-text-xs, 13px); font-weight:700; color:#8D1B17; line-height:1.7}
+.jy-error svg{flex:none; width:16px; height:16px; margin-top:2px}
+.jy-fieldset{border:0; margin:0 0 var(--jy-space-24, 24px); padding:0; min-width:0}
+.jy-legend{font-size:var(--jy-text-base, 16px); font-weight:700; color:#1D1F1E; padding:0; margin-bottom:4px}
+.jy-check{display:flex; align-items:center; gap:10px; min-height:44px; cursor:pointer; line-height:1.6}
+.jy-checkbox,.jy-radio{appearance:none; -webkit-appearance:none; flex:none; width:20px; height:20px; margin:0; background:#FFFFFF;
+  border:2px solid #768468; cursor:pointer; transition:background-color var(--jy-dur-fast, 120ms) var(--jy-ease, ease)}
+.jy-checkbox{border-radius:5px}
+.jy-radio{border-radius:50%}
+.jy-checkbox:checked{background:#6C795E url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.4l3.3 3.3L15 7' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/16px no-repeat; border-color:#6C795E}
+.jy-radio:checked{background:#6C795E; border-color:#6C795E; box-shadow:inset 0 0 0 4px #FFFFFF}
+.jy-checkbox:disabled,.jy-radio:disabled{border-color:#D4DFCA; background-color:#F2F7EE; cursor:not-allowed}
+.jy-check:has(:disabled){color:#768468; cursor:not-allowed}
+.jy-upload{position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:168px; padding:24px 16px;
+  text-align:center; background:#F2F7EE; border:2px dashed #768468; border-radius:var(--jy-radius-lg, 16px); cursor:pointer;
+  transition:background-color var(--jy-dur-fast, 120ms) var(--jy-ease, ease), border-color var(--jy-dur-fast, 120ms) var(--jy-ease, ease)}
+.jy-upload:is(:hover,.is-dragover){background:#E7EEE0; border:2px solid #6C795E}
+.jy-upload:has(input:focus-visible){outline:2px solid var(--jy-focus-outer, #505D42); outline-offset:2px; box-shadow:0 0 0 2px var(--jy-focus-inner, #FFFFFF)}
+.jy-upload svg{width:32px; height:32px; color:#6C795E}
+.jy-upload-title{font-weight:700; color:#1D1F1E}
+.jy-upload-title u{color:#505D42; text-underline-offset:4px}
+.jy-upload-hint{font-size:var(--jy-text-xs, 13px); color:#505D42}
+.jy-files{list-style:none; margin:var(--jy-space-12, 12px) 0 0; padding:0; display:flex; flex-direction:column; gap:8px}
+.jy-file{display:flex; align-items:center; gap:12px; padding:10px 12px; background:#FFFFFF; border:1px solid var(--jy-border-subtle, #D4DFCA); border-radius:var(--jy-radius-md, 10px)}
+.jy-file.is-error{border:2px solid #8D1B17; padding:9px 11px}
+.jy-file-icon{flex:none; width:24px; height:24px; color:#6C795E}
+.jy-file-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:6px}
+.jy-file-top{display:flex; justify-content:space-between; gap:12px; font-size:var(--jy-text-xs, 13px); line-height:1.6}
+.jy-file-name{font-weight:700; color:#1D1F1E; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.jy-file-meta{flex:none; color:#505D42; font-variant-numeric:tabular-nums; display:inline-flex; align-items:center; gap:4px}
+.jy-file-meta svg{width:14px; height:14px}
+.jy-file.is-done .jy-file-meta{color:#227D32; font-weight:700}
+.jy-file.is-error .jy-file-meta{color:#8D1B17; font-weight:700; white-space:normal}
+.jy-progress{appearance:none; -webkit-appearance:none; display:block; width:100%; height:6px; border:0; border-radius:999px; overflow:hidden;
+  background:#E7EEE0; color:#6C795E}
+.jy-progress::-webkit-progress-bar{background:#E7EEE0; border-radius:999px}
+.jy-progress::-webkit-progress-value{background:#6C795E; border-radius:999px}
+.jy-progress::-moz-progress-bar{background:#6C795E; border-radius:999px}
+/* ===== end forms ===== */
