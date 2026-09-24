@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>طرح د: نهایی — جزوه‌یار</title>
+<link rel="stylesheet" href="base.css">
+<!--
+  طرح د، نهایی: ساختار ج، لوگوی کامل الف در سربرگ، و بخش‌های پایین ب؛ زمینهٔ سفید با نوار green-50.
+  فونت استداد (فونت برند؛ متغیر، ۴۰۰ متن، ۷۰۰ و ۸۰۰ تیتر، طبق مقیاس راهنما) و ارقام فارسی با عرض طبیعی.
+  پس از فایل: متن زیر تیتر و بخش‌های معرفی جمع می‌شوند (در سایت با :has، بی JS). دسکتاپ (بیشتر از
+  ۸۶۰ پیکسل) دو ستون می‌شود و قیمت در ستون کنار تا آخر صفحه می‌چسبد؛ سؤال‌ها در ستون اصلی می‌آیند.
+  موبایل: نوار فشردهٔ پایین، جمع و «ادامه» در یک ردیف و «ریز قیمت» با details.
+  حالت‌ها: home-d.html و home-d.html#after.
+-->
+<style>
+  @font-face {
+    font-family: "Estedad";
+    src: url("../../brand/fonts/Estedad-arabic.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+    unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+  }
+  @font-face {
+    font-family: "Estedad";
+    src: url("../../brand/fonts/Estedad-latin.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  :root { --pricebar-height: 120px; }
+  @media (min-width: 861px) { :root { --pricebar-height: 0px; } }
+  body { font-family: "Estedad", system-ui, Tahoma, sans-serif; }
+
+  /* مقیاس راهنما: ۳۱ پیکسل و بزرگ‌تر ۸۰۰، ۲۰ و ۲۵ پیکسل ۷۰۰؛ دکمه و برچسب ۷۰۰ */
+  .t-h1, .t-h2 { font-weight: 800; }
+  .t-h3, .t-h4, h3, .jy-card__title { font-weight: 700; }
+  .jy-btn, .jy-field__label, .jy-upload__title, .jy-file-name, .jy-note b, .jy-trust b,
+  .jy-total__value, .jy-stats dd, .jy-faq summary, .jy-file-meta .ok { font-weight: 700; }
+  /* ارقام فارسی، با عرض طبیعی: tabular-nums در استداد رقم فارسی را خیلی باز می‌کند
+     («۲ ۳ ۷ ، ۰ ۰ ۰»؛ docs/UI.md). جهت عوض نمی‌شود؛ فقط ایزوله. */
+  .num { font-variant-numeric: normal; direction: rtl; }
+
+  .d-header { border-block-end: 1px solid var(--line); }
+  .d-header__inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 8px; }
+  .d-logo { height: 64px; width: auto; }
+  @media (max-width: 520px) { .d-logo { height: 56px; } }
+  .d-nav { display: flex; gap: 4px; }
+
+  .d-hero { max-width: 760px; margin-inline: auto; padding-block: 28px 20px; }
+  .d-hero .lead { margin-block-start: 8px; }
+  body:has(#after:target) .d-hero .lead { display: none; }
+  body:has(#after:target) .d-hero { max-width: none; padding-block-end: 12px; }
+
+  .d-landing { max-width: 760px; margin-inline: auto; padding-block-end: 48px; }
+  .d-landing .jy-upload { min-height: 260px; }
+  @media (max-width: 520px) { .d-landing .jy-upload { min-height: 200px; } }
+  .d-landing .jy-trust { margin-block-start: 16px; }
+
+  .d-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 32px; align-items: start; padding-block-end: 48px; }
+  @media (max-width: 860px) { .d-grid { grid-template-columns: minmax(0, 1fr); } .d-side { display: none; } }
+  .d-side { position: sticky; inset-block-start: 24px; }
+  .d-side .jy-lines { margin-block: 12px; }
+  .d-side .jy-total__value { font-size: var(--fs-h2); }
+  .d-side .jy-btn { margin-block-start: 16px; }
+  .d-side__note { margin-block-start: 10px; text-align: center; }
+
+  .d-mbar__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .d-mbar .jy-total__value { font-size: var(--fs-h3); }
+  .d-mbar .jy-breakdown summary { min-height: 32px; }
+  .d-mbar .jy-lines { padding-block: 8px; }
+  @media (min-width: 861px) { .d-mbar { display: none; } }
+
+  .d-section { padding-block: 56px; }
+  @media (max-width: 520px) { .d-section { padding-block: 40px; } }
+  .d-section__title { text-align: center; }
+  .d-section__sub { text-align: center; color: var(--muted); margin-block-start: 4px; }
+
+  .d-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-block-start: 28px; padding: 0; list-style: none; }
+  @media (max-width: 860px) { .d-steps { grid-template-columns: 1fr; } }
+  .d-step { display: flex; flex-direction: column; gap: 8px; }
+  .d-step__tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: var(--radius-lg); }
+  .d-step__tile .i { width: 28px; height: 28px; stroke-width: 1.8; }
+  .d-step:nth-child(1) .d-step__tile { background: var(--jy-teal-100); color: var(--jy-teal-700); }
+  .d-step:nth-child(2) .d-step__tile { background: var(--jy-purple-100); color: var(--jy-purple-700); }
+  .d-step:nth-child(3) .d-step__tile { background: var(--jy-rose-100); color: var(--jy-rose-700); }
+  .d-step h3 { font-size: var(--fs-h4); }
+  .d-step p { color: var(--muted); }
+
+  .d-tariff { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-block-start: 28px; }
+  @media (max-width: 860px) { .d-tariff { grid-template-columns: 1fr; } }
+  .d-table { width: 100%; border-collapse: collapse; margin-block-start: 8px; }
+  .d-table th, .d-table td { padding-block: 10px; border-block-end: 1px solid var(--line); text-align: start; font-weight: 400; }
+  .d-table th { color: var(--muted); font-size: var(--fs-xs); }
+  .d-table td:last-child, .d-table th:last-child { text-align: end; }
+  .d-table tr:last-child td { border-block-end: 0; }
+
+  .d-work { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-block-start: 28px; }
+  @media (max-width: 860px) { .d-work { grid-template-columns: 1fr; } }
+  .d-photo {
+    display: grid; place-items: center; aspect-ratio: 4 / 3; padding: 16px; text-align: center;
+    border: 2px dashed var(--line-strong); border-radius: var(--radius-lg); color: var(--muted); font-size: var(--fs-xs);
+  }
+  .d-faq { max-width: 760px; margin: 28px auto 0; }
+</style>
+</head>
+<body>
+<span id="after"></span>
+<nav class="mock-bar" aria-label="حالت طرح نمونه"><span>طرح د</span><a href="#">پیش از فایل</a><a href="#after">پس از فایل</a></nav>
+
+<header class="d-header">
+  <div class="wrap d-header__inner">
+    <a href="#"><img class="d-logo" src="../../brand/jozveyar-logo.svg" alt="جزوه‌یار"></a>
+    <nav class="d-nav" aria-label="پیوندهای صفحه">
+      <a class="jy-btn jy-btn--text" href="#tariff">تعرفه</a>
+      <a class="jy-btn jy-btn--text" href="#faq">سؤال‌ها</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section class="d-hero">
+      <h1 class="t-h1">جزوه‌ات را بینداز، قیمت را همین حالا ببین</h1>
+      <p class="lead">فایل را می‌خوانیم و قیمت را همین‌جا نشان می‌دهیم؛ بی‌ثبت‌نام و بی فرم. بعد چاپ می‌کنیم و برایت می‌فرستیم.</p>
+    </section>
+
+    <!-- ===== پیش از فایل ===== -->
+    <div class="state-landing d-landing">
+      <label class="jy-upload" for="jozve-file">
+        <input id="jozve-file" class="sr-only" type="file" multiple>
+        <svg class="i jy-upload__icon" viewBox="0 0 20 20" aria-hidden="true" style="stroke-width:1.8"><path d="M10 13V3M6 7l4-4 4 4M3.5 13.5v2.5h13v-2.5"/></svg>
+        <span class="jy-upload__title">جزوه‌ات را همین‌جا بینداز</span>
+        <span class="jy-upload__sub">قیمت را فوری می‌بینی.</span>
+        <span class="jy-btn jy-btn--primary jy-btn--lg">انتخاب فایل</span>
+        <span class="jy-upload__hint">PDF، Word، پاورپوینت و عکس. چند فایل هم می‌شود؛ پشت‌سرهم در یک جزوه صحافی می‌شوند.</span>
+      </label>
+      <ul class="jy-trust" style="list-style:none;padding:0">
+        <li><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M6.6 10.3l2.3 2.3 4.5-4.7"/></svg><span><b>قیمت پیش از ثبت‌نام</b>شماره موبایل فقط موقع پرداخت</span></li>
+        <li><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5 10 3l7 3.5v7L10 17l-7-3.5z"/><path d="M3 6.5 10 10l7-3.5M10 10v7"/></svg><span><b>تحویل پست تا <span class="num">۲</span> روز کاری</b>با کد رهگیری</span></li>
+        <li><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg><span><b>فایل بعد از <span class="num">۲</span> روز پاک می‌شود</b>و جای دیگری نمی‌رود</span></li>
+      </ul>
+    </div>
+
+    <!-- ===== پس از فایل ===== -->
+    <div class="state-after">
+      <div class="d-grid">
+        <div class="stack">
+          <section class="jy-card" aria-label="فایل">
+            <div class="jy-filehead">
+              <svg class="i jy-file-icon" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width:1.8"><path d="M6 2.8h8l4.2 4.2V21.2H6z"/><path d="M14 2.8V7h4.2M9 12h6M9 15.5h6"/></svg>
+              <div class="jy-filehead__body">
+                <p class="jy-file-name" dir="auto">ریاضی عمومی ۲ - جلسه ۱ تا ۸.pdf</p>
+                <p class="jy-file-meta"><span><span class="num">۲٫۴</span> مگابایت</span><span class="ok"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M6.6 10.3l2.3 2.3 4.5-4.7"/></svg>همهٔ صفحه‌ها بررسی شد</span></p>
+              </div>
+              <a class="jy-btn jy-btn--text" href="#">فایل دیگر</a>
+            </div>
+            <dl class="jy-stats">
+              <div><dt>تعداد صفحه</dt><dd><span class="num">۱۲۰</span></dd></div>
+              <div><dt>اندازه</dt><dd>A4</dd></div>
+              <div><dt>صفحهٔ رنگی</dt><dd><span class="num">۰</span></dd></div>
+            </dl>
+            <div class="jy-note jy-note--warning" role="note">
+              <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 18 16.6H2Z"/><path d="M10 7.8v4"/><path d="M10 14.4v.01"/></svg>
+              <p><b>هشدار:</b> صفحه‌های <span class="num">۳</span> و <span class="num">۷</span> حاشیهٔ کمی دارند؛ صحافی ممکن است لبهٔ متن را بگیرد.</p>
+            </div>
+          </section>
+
+          <div class="jy-addfile">
+            <span>جزوه چند فایل است؟ بقیه را هم بینداز؛ پشت‌سرهم صحافی می‌شوند.</span>
+            <a class="jy-btn jy-btn--secondary" href="#"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>افزودن فایل</a>
+          </div>
+
+          <section class="jy-card" aria-label="تنظیمات چاپ">
+            <div class="jy-field" role="radiogroup" aria-labelledby="d-color">
+              <p class="jy-field__label" id="d-color">رنگ چاپ</p>
+              <p class="jy-field__hint">فایل تماماً سیاه‌سفید است.</p>
+              <div class="jy-options">
+                <label class="jy-option"><input type="radio" name="d-color" checked><span class="jy-option__text">سیاه‌سفید<span class="jy-option__note"><span class="num">۱٬۶۰۰</span> تومان هر صفحه</span></span></label>
+                <label class="jy-option"><input type="radio" name="d-color"><span class="jy-option__text">رنگی<span class="jy-option__note"><span class="num">۲٬۰۰۰</span> تومان هر صفحه</span></span></label>
+              </div>
+            </div>
+            <div class="jy-field" role="radiogroup" aria-labelledby="d-sides">
+              <p class="jy-field__label" id="d-sides">یکرو یا دورو</p>
+              <p class="jy-field__hint">دورو نصف کاغذ مصرف می‌کند و جزوه نازک‌تر می‌شود.</p>
+              <div class="jy-options">
+                <label class="jy-option"><input type="radio" name="d-sides" checked><span class="jy-option__text">دورو</span></label>
+                <label class="jy-option"><input type="radio" name="d-sides"><span class="jy-option__text">یکرو</span></label>
+              </div>
+            </div>
+            <div class="jy-field">
+              <p class="jy-field__label">صحافی</p>
+              <div class="jy-options">
+                <label class="jy-option"><input type="radio" name="d-bind" checked><span class="jy-option__text">طلق و سیم<span class="jy-option__note"><span class="num">۶۰</span> برگ</span></span></label>
+              </div>
+            </div>
+            <div class="jy-field">
+              <p class="jy-field__label">تعداد نسخه</p>
+              <div class="jy-stepper">
+                <a class="jy-btn jy-btn--secondary jy-btn--icon" href="#" aria-label="یکی کمتر" aria-disabled="true"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12"/></svg></a>
+                <output class="num">۱</output>
+                <a class="jy-btn jy-btn--secondary jy-btn--icon" href="#" aria-label="یکی بیشتر"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg></a>
+              </div>
+            </div>
+          </section>
+
+          <section class="jy-card" aria-labelledby="faq-title-after">
+            <h2 class="t-h4" id="faq-title-after">سؤال‌های پرتکرار</h2>
+            <div class="jy-faq" style="margin-block-start:8px">
+              <details><summary>ارسال چقدر طول می‌کشد؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>حداکثر دو روز کاری تا تحویل به پست.</p></details>
+              <details><summary>فایلم کجا می‌رود و چقدر نگه داشته می‌شود؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>دو روز بعد خودکار پاک می‌شود.</p></details>
+              <details><summary>برای گرفتن قیمت باید ثبت‌نام کنم؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>نه.</p></details>
+            </div>
+          </section>
+        </div>
+
+        <aside class="d-side jy-card" aria-label="قیمت">
+          <h2 class="t-h4">قیمت جزوه</h2>
+          <div class="jy-lines">
+            <div><span>چاپ <span class="num">۱۲۰</span> صفحه</span><span class="num">۱۹۲٬۰۰۰</span></div>
+            <div><span>صحافی <span class="num">۶۰</span> برگ</span><span class="num">۴۵٬۰۰۰</span></div>
+            <div><span>وزن برآوردی</span><span><span class="num">۴۵۹</span> گرم</span></div>
+          </div>
+          <div class="jy-total">
+            <span class="jy-total__label">جمع</span>
+            <span class="jy-total__value"><span class="num">۲۳۷٬۰۰۰</span><span class="jy-total__unit">تومان</span></span>
+          </div>
+          <p class="jy-ship" style="text-align:end">+ ارسال از <span class="num">۱۲۹٬۵۰۰</span> تومان</p>
+          <a class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block" href="#">ادامه — آدرس و تحویل</a>
+          <p class="t-xs muted d-side__note">ثبت‌نام لازم نیست. شماره موبایل فقط موقع پرداخت.</p>
+        </aside>
+      </div>
+
+      <div class="jy-pricebar d-mbar">
+        <div class="column">
+          <details class="jy-breakdown">
+            <summary>ریز قیمت</summary>
+            <div class="jy-lines">
+              <div><span>چاپ <span class="num">۱۲۰</span> صفحه</span><span class="num">۱۹۲٬۰۰۰</span></div>
+              <div><span>صحافی <span class="num">۶۰</span> برگ</span><span class="num">۴۵٬۰۰۰</span></div>
+            </div>
+          </details>
+          <div class="d-mbar__row">
+            <div>
+              <span class="jy-total__value"><span class="num">۲۳۷٬۰۰۰</span><span class="jy-total__unit">تومان</span></span>
+              <p class="jy-ship">+ ارسال از <span class="num">۱۲۹٬۵۰۰</span> تومان</p>
+            </div>
+            <a class="jy-btn jy-btn--primary jy-btn--lg" href="#" aria-label="ادامه — آدرس و تحویل">ادامه</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="state-landing">
+    <section class="band d-section" aria-labelledby="d-steps-title">
+      <div class="wrap">
+        <h2 class="t-h2 d-section__title" id="d-steps-title">سه قدم تا جزوهٔ چاپ‌شده</h2>
+        <ol class="d-steps">
+          <li class="d-step">
+            <span class="d-step__tile"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M3.5 13.5v2.5h13v-2.5"/></svg></span>
+            <h3><span class="num">۱</span>. فایل را بینداز</h3>
+            <p>PDF، Word، پاورپوینت یا عکس. چند فایل هم می‌شود؛ ترتیبشان را خودت می‌چینی.</p>
+          </li>
+          <li class="d-step">
+            <span class="d-step__tile"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h10v15l-2.5-1.5L10 17.5 7.5 16 5 17.5z"/><path d="M7.5 7h5M7.5 10.5h5"/></svg></span>
+            <h3><span class="num">۲</span>. قیمت را ببین</h3>
+            <p>صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم. قیمت همان لحظه می‌آید، بی ثبت‌نام.</p>
+          </li>
+          <li class="d-step">
+            <span class="d-step__tile"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5 10 3l7 3.5v7L10 17l-7-3.5z"/><path d="M3 6.5 10 10l7-3.5M10 10v7"/></svg></span>
+            <h3><span class="num">۳</span>. آدرس بده و پرداخت کن</h3>
+            <p>شماره موبایل فقط موقع پرداخت. حداکثر <span class="num">۲</span> روز کاری بعد، جزوه تحویل پست است.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="d-section" id="tariff" aria-labelledby="d-tariff-title">
+      <div class="wrap">
+        <h2 class="t-h2 d-section__title" id="d-tariff-title">تعرفه</h2>
+        <p class="d-section__sub">همان عددهایی که موقع سفارش حساب می‌شوند.</p>
+        <div class="d-tariff">
+          <div class="jy-card">
+            <h3 class="jy-card__title">چاپ، هر رو</h3>
+            <table class="d-table">
+              <tr><td>سیاه‌سفید</td><td><span class="num">۱٬۶۰۰</span> تومان</td></tr>
+              <tr><td>رنگی</td><td><span class="num">۲٬۰۰۰</span> تومان</td></tr>
+            </table>
+            <h3 class="jy-card__title" style="margin-block-start:20px">ارسال با پست پیشتاز</h3>
+            <table class="d-table">
+              <tr><td>تهران</td><td>از <span class="num">۱۲۹٬۵۰۰</span> تومان</td></tr>
+              <tr><td>شهرهای دیگر</td><td>از <span class="num">۱۳۷٬۷۵۰</span> تومان</td></tr>
+            </table>
+          </div>
+          <div class="jy-card">
+            <h3 class="jy-card__title">صحافی طلق و سیم</h3>
+            <table class="d-table">
+              <tr><th>تعداد برگ</th><th>تومان</th></tr>
+              <tr><td>تا <span class="num">۱۵۰</span></td><td><span class="num">۴۵٬۰۰۰</span></td></tr>
+              <tr><td><span class="num">۱۵۱</span> تا <span class="num">۳۰۰</span></td><td><span class="num">۵۰٬۰۰۰</span></td></tr>
+              <tr><td><span class="num">۳۰۱</span> تا <span class="num">۴۵۰</span></td><td><span class="num">۵۵٬۰۰۰</span></td></tr>
+              <tr><td><span class="num">۴۵۱</span> تا <span class="num">۶۰۰</span></td><td><span class="num">۶۲٬۰۰۰</span></td></tr>
+              <tr><td><span class="num">۶۰۱</span> تا <span class="num">۷۰۰</span></td><td><span class="num">۶۸٬۰۰۰</span></td></tr>
+              <tr><td><span class="num">۷۰۱</span> تا <span class="num">۸۰۰</span></td><td><span class="num">۷۸٬۰۰۰</span></td></tr>
+            </table>
+            <p class="t-xs muted" style="margin-block-start:16px">هر برگ در چاپ دورو دو صفحه است. بالای <span class="num">۸۰۰</span> برگ خودکار چند جلد می‌شود.</p>
+          </div>
+        </div>
+        <div class="jy-note jy-note--info" role="note" style="max-width:760px;margin-inline:auto;margin-block-start:16px">
+          <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 9.2v5"/><path d="M10 6.2v.01"/></svg>
+          <p><b>مثال:</b> جزوهٔ <span class="num">۱۲۰</span> صفحه‌ای، سیاه‌سفید و دورو: چاپ <span class="num">۱۹۲٬۰۰۰</span> و صحافی <span class="num">۴۵٬۰۰۰</span>، جمع <span class="num">۲۳۷٬۰۰۰</span> تومان به‌علاوهٔ ارسال.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="band d-section" aria-labelledby="d-work-title">
+      <div class="wrap">
+        <h2 class="t-h2 d-section__title" id="d-work-title">نمونهٔ کار</h2>
+        <p class="d-section__sub">وقتی عکس‌ها برسد؛ تا آن موقع این بخش نمی‌آید.</p>
+        <div class="d-work">
+          <div class="d-photo">[عکس جزوهٔ صحافی‌شده با طلق و سیم]</div>
+          <div class="d-photo">[عکس جزوهٔ باز، نمونهٔ چاپ]</div>
+          <div class="d-photo">[عکس بسته‌بندی ارسالی]</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="d-section" id="faq" aria-labelledby="faq-title">
+      <div class="wrap">
+        <h2 class="t-h2 d-section__title" id="faq-title">سؤال‌های پرتکرار</h2>
+        <div class="jy-faq d-faq">
+          <details open><summary>قیمت چاپ جزوه چطور حساب می‌شود؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+            <p>به‌ازای هر صفحهٔ چاپ‌شده: سیاه‌سفید <span class="num">۱٬۶۰۰</span> و رنگی <span class="num">۲٬۰۰۰</span> تومان. هزینهٔ صحافی جدا و بر اساس تعداد برگ محاسبه می‌شود. قیمت نهایی را قبل از هر ثبت‌نامی روی صفحه می‌بینید.</p></details>
+          <details><summary>باید تعداد صفحات را خودم بشمارم؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>نه. سایت خودش می‌شمارد.</p></details>
+          <details><summary>چه فایل‌هایی را می‌توانم بفرستم؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>PDF، Word، پاورپوینت و عکس.</p></details>
+          <details><summary>فایلم کجا می‌رود و چقدر نگه داشته می‌شود؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>دو روز بعد خودکار پاک می‌شود.</p></details>
+          <details><summary>ارسال چقدر طول می‌کشد؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>حداکثر دو روز کاری تا تحویل به پست.</p></details>
+          <details><summary>برای گرفتن قیمت باید ثبت‌نام کنم؟<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary><p>نه.</p></details>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="jy-footer">
+  <div class="wrap">
+    <div class="jy-footer__top">
+      <img class="jy-footer__logo" src="../../brand/jozveyar-logo.svg" alt="جزوه‌یار">
+      <nav aria-label="پیوندهای پاورقی">
+        <ul>
+          <li><a href="#">دربارهٔ ما</a></li>
+          <li><a href="#">تماس</a></li>
+          <li><a href="#">قوانین</a></li>
+          <li><a href="#">حریم خصوصی</a></li>
+        </ul>
+      </nav>
+    </div>
+    <p class="jy-footer__legal">چاپ و صحافی جزوه با ارسال به سراسر ایران. مسئولیت محتوای فایل ارسالی بر عهدهٔ سفارش‌دهنده است.</p>
+    <p class="jy-footer__legal" style="margin-block-start:8px">© <span class="num">۱۴۰۵</span> جزوه‌یار</p>
+  </div>
+</footer>
+</body>
+</html>
