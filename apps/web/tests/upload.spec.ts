@@ -184,3 +184,58 @@ test('Word خراب: پیام روشن سرور و راه جلو، نه انتظ
   await expect(page.getByText('محتوای این فایل با پسوندش جور نیست')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('button', { name: 'فایل دیگری بینداز' })).toBeVisible();
 });
+
+/*
+ * جزوهٔ چندفایلی (ADR-030) — آپلودها پشت‌سرهم، هر لحظه یکی؛ و قیمت جزوه جمع شمارش‌های
+ * سرور. کارگر اسناد را هم لازم دارد.
+ */
+
+/** کلید شیء از URL امضاشدهٔ تکه: `…/uploads/<id>.<ext>?partNumber=…`. */
+const objectOf = (url: string) => new URL(url).pathname.split('/').pop() ?? '';
+
+test('جزوهٔ سه‌فایلی: آپلودها روی هم نمی‌افتند و قیمت جمع شمارش‌های سرور است', async ({ page }) => {
+  const spans = new Map<string, { start: number; end: number }>();
+  page.on('request', (request) => {
+    if (request.method() !== 'PUT' || !/partNumber=/.test(request.url())) return;
+    const key = objectOf(request.url());
+    const span = spans.get(key);
+    spans.set(key, { start: span?.start ?? Date.now(), end: span?.end ?? Date.now() });
+  });
+  page.on('requestfinished', (request) => {
+    if (request.method() !== 'PUT' || !/partNumber=/.test(request.url())) return;
+    const span = spans.get(objectOf(request.url()));
+    if (span) span.end = Date.now();
+  });
+
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', [
+    bigPdf(),
+    { name: 'jozve-scan.pdf', mimeType: 'application/pdf', buffer: readFileSync(join(FIXTURES, 'image-scan-6.pdf')) },
+    { name: 'jozve-mixed.pdf', mimeType: 'application/pdf', buffer: readFileSync(join(FIXTURES, 'mixed-color-10.pdf')) },
+  ]);
+  const uploads = page.getByTestId('section-upload');
+  await expect(uploads.filter({ hasText: 'همهٔ صفحات بررسی شد' })).toHaveCount(3, { timeout: 120_000 });
+
+  // سه سند، هر کدام بعد از رسیدن کامل قبلی: هیچ تکه‌ای از یکی وسط تکه‌های دیگری نیست.
+  const ordered = [...spans.values()].sort((a, b) => a.start - b.start);
+  expect(ordered).toHaveLength(3);
+  for (let i = 1; i < ordered.length; i += 1) expect(ordered[i]!.start).toBeGreaterThanOrEqual(ordered[i - 1]!.end);
+
+  // سرور منبع حقیقت است: ۱۰ + ۶ + ۱۰ صفحه، یک صحافی — همان قیمت مرورگر.
+  await expect(page.getByTestId('stat-page-count')).toHaveText('26');
+  await expect(page.getByTestId('price-total')).toContainText('86,600');
+  await expect(page.getByTestId('stat-color-pages')).toHaveText('3');
+});
+
+test('شش فایل — بیشتر از سقف پنج آپلود باز هر نشست — همه می‌رسند', async ({ page }) => {
+  const pdf = readFileSync(join(FIXTURES, 'plain-bw-10.pdf'));
+  await page.goto('/');
+  await page.setInputFiles(
+    '#jozve-file',
+    Array.from({ length: 6 }, (_, i) => ({ name: `jozve-part-${i + 1}.pdf`, mimeType: 'application/pdf', buffer: pdf })),
+  );
+  const uploads = page.getByTestId('section-upload');
+  await expect(uploads.filter({ hasText: 'فایل رسید' })).toHaveCount(6, { timeout: 120_000 });
+  await expect(page.getByTestId('section-blocked')).toHaveCount(0);
+  await expect(page.getByTestId('stat-page-count')).toHaveText('60');
+});

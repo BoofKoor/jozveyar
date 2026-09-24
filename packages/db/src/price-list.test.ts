@@ -56,8 +56,7 @@ describe('تعرفهٔ پایه', () => {
     const spec = {
       items: [
         {
-          documentId: 'd1',
-          pageCount: 1500,
+          sections: [{ documentId: 'd1', pageCount: 1500 }],
           rules: [{ pageRanges: [[1, 1500]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }],
           copies: 10,
           sidesMode: 'double' as const,
@@ -122,8 +121,7 @@ describe('رفت‌وبرگشت تعرفه', () => {
     const spec = {
       items: [
         {
-          documentId: 'd1',
-          pageCount: 147,
+          sections: [{ documentId: 'd1', pageCount: 147 }],
           rules: [{ pageRanges: [[1, 147]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }],
           copies: 1,
           sidesMode: 'double' as const,

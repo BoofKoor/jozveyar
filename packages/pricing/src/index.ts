@@ -21,6 +21,16 @@ import type {
 
 /* ──────────────────────────── کمکی‌ها ──────────────────────────── */
 
+/**
+ * تعداد صفحهٔ جزوه: جمع بخش‌ها، پشت‌سرهم و بی صفحهٔ سفید بینشان (ADR-030).
+ *
+ * هم `quote()` این را صدا می‌زند و هم مرورگر برای ساختن قاعده، تا «صفحهٔ جزوه» یک
+ * تعریف داشته باشد.
+ */
+export function itemPageCount(sections: readonly { pageCount: number }[]): number {
+  return sections.reduce((sum, section) => sum + section.pageCount, 0);
+}
+
 /** تعداد صفحهٔ یکتا در مجموعه‌ای از بازه‌ها. بازهٔ همپوشان دوباره شمرده نمی‌شود. */
 export function countPages(ranges: readonly PageRange[], pageCount: number): number {
   if (ranges.length === 0) return 0;
@@ -78,7 +88,9 @@ function quoteItem(
   list: PriceList,
   warnings: Set<QuoteWarning>,
 ): ItemBreakdown {
-  const { pageCount, copies, sidesMode } = item;
+  const { copies, sidesMode } = item;
+  // یک جزوه، یک صحافی: برگ‌ها از جمع صفحه‌های همهٔ بخش‌ها می‌آیند، نه جدا از هر فایل.
+  const pageCount = itemPageCount(item.sections);
 
   // برگ به حالت رنگ بستگی ندارد — همهٔ صفحات چاپ می‌شوند.
   const printedSides = pageCount;
@@ -136,7 +148,10 @@ function quoteItem(
   const bindingWeightPerCopy = (binding?.weightPerVolumeGrams ?? 0) * sheetsPerVolume.length;
 
   return {
-    documentId: item.documentId,
+    sections: item.sections.map(({ documentId, pageCount: sectionPages }) => ({
+      documentId,
+      pageCount: sectionPages,
+    })),
     pageCount,
     printedSides,
     sheets,

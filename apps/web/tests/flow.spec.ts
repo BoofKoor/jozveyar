@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+
+/**
+ * سقف باندل اولیهٔ صفحهٔ اصلی، کیلوبایت (۱۰۰۰ بایت، مثل `next build`). عدد اندازه‌گرفته
+ * در CLAUDE.md است؛ سقف همان به‌علاوهٔ حدود ۳ کیلوبایت.
+ */
+const INITIAL_JS_BUDGET_KB = 121;
 
 // Playwright اجرا را از apps/web شروع می‌کند؛ مسیر نسبی از import.meta
 // مستقل‌تر است چون لودر تست به CommonJS ترجمه می‌کند.
@@ -30,6 +37,42 @@ test.describe('سئو و بار اولیه', () => {
     expect(html).toContain('"@type":"FAQPage"');
     expect(html).toMatch(/<html[^>]+dir="rtl"/);
     expect(html).toMatch(/<html[^>]+lang="fa"/);
+  });
+
+  /**
+   * باندل اولیهٔ صفحهٔ اصلی، اندازه‌گرفته نه فرض‌شده: همهٔ اسکریپت‌هایی که مرورگر پیش از
+   * هر تعاملی می‌گیرد، هر کدام gzip سطح ۹ — همان سنجهٔ «First Load JS» که `next build`
+   * چاپ می‌کند، مستقل از فشرده‌سازی سرور. سقف را فقط آگاهانه بالا ببر: عدد تازه و دلیلش
+   * در CLAUDE.md.
+   *
+   * و با **محتوا**، نه نام فایل: chunkها نام عددی دارند، پس pdf.js یا آپلودگری که ایستا
+   * وارد صفحه شود، از جست‌وجوی نام (تست پایین) رد می‌شد. هر نشانه رشته‌ای است که
+   * کوچک‌سازی عوضش نمی‌کند.
+   */
+  test('باندل اولیهٔ صفحهٔ اصلی زیر سقف، بی pdf.js و آپلودگر و خوانندهٔ Word و zod', async ({ page }) => {
+    const bodies = new Map<string, Promise<Buffer | null>>();
+    page.on('response', (response) => {
+      if (response.request().resourceType() !== 'script') return;
+      bodies.set(response.url(), response.body().catch(() => null));
+    });
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    const scripts = (await Promise.all(bodies.values())).filter((body): body is Buffer => body !== null);
+    const gzipBytes = scripts.reduce((sum, body) => sum + gzipSync(body, { level: 9 }).length, 0);
+    console.log(`باندل اولیه: ${(gzipBytes / 1000).toFixed(1)} kB در ${scripts.length} اسکریپت (سقف ${INITIAL_JS_BUDGET_KB} kB)`);
+    expect(scripts.length).toBeGreaterThan(0);
+    expect(gzipBytes).toBeLessThanOrEqual(INITIAL_JS_BUDGET_KB * 1000);
+
+    const code = scripts.map((body) => body.toString('latin1')).join('\n');
+    for (const [marker, module] of [
+      ['GlobalWorkerOptions', 'pdf.js'],
+      ['jy.upload.', 'آپلودگر'],
+      ['docProps/app.xml', 'خوانندهٔ فهرست zip (پیش‌فاکتور Word)'],
+      ['ZodError', 'zod'],
+    ] as const) {
+      expect(code.includes(marker), `${module} در باندل اولیه آمده`).toBe(false);
+    }
   });
 
   test('pdf.js در باندل اولیه نیست', async ({ page }) => {

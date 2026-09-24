@@ -59,6 +59,16 @@ export function fileKind(name: string): FileKind | null {
 
 export interface AnalyzeRequest {
   kind: 'analyze';
+  /**
+   * شمارهٔ کار. هر پاسخ همین را برمی‌گرداند، تا پاسخ دیررس کار قبلی روی فایل دیگری
+   * ننشیند. کارگر کارها را یکی‌یکی انجام می‌دهد: هر لحظه یک سند باز (ADR-030).
+   */
+  job: number;
+  /**
+   * فقط شمارش صفحه: باز کن، بشمار، ببند. قیمت کل جزوه به تعداد صفحهٔ همهٔ فایل‌ها بند
+   * است، و این برای هر PDF همان لحظهٔ باز شدن معلوم است؛ بررسی رنگ و کیفیت بعداً.
+   */
+  countOnly: boolean;
   /** بافر فایل. با transfer فرستاده می‌شود تا کپی نشود. */
   buffer: ArrayBuffer;
   thresholds: DetectionThresholds;
@@ -66,10 +76,12 @@ export interface AnalyzeRequest {
 }
 
 export type WorkerResponse =
-  | { kind: 'meta'; pageCount: number; sampleStride: number }
-  | { kind: 'page'; page: PageAnalysis; analyzedCount: number }
-  | { kind: 'done'; analysis: DocumentAnalysis }
-  | { kind: 'error'; code: AnalysisErrorCode; message: string };
+  | { kind: 'meta'; job: number; pageCount: number; sampleStride: number }
+  | { kind: 'page'; job: number; page: PageAnalysis; analyzedCount: number }
+  | { kind: 'done'; job: number; analysis: DocumentAnalysis }
+  /** پایان کار «فقط شمارش». */
+  | { kind: 'counted'; job: number; pageCount: number }
+  | { kind: 'error'; job: number; code: AnalysisErrorCode; message: string };
 
 export type AnalysisErrorCode =
   | 'password_protected'
@@ -171,4 +183,22 @@ export function uploadRefusalMessage(reason: string | undefined): string {
     return 'این فایل از سقف حجمی که می‌گیریم بزرگ‌تر است. از برنامه‌اش خروجی PDF با کیفیت کمتر بگیر و همان را بینداز.';
   }
   return 'الان نمی‌توانیم این فایل را بگیریم. چند دقیقهٔ دیگر دوباره بینداز؛ یا اگر فایل کوچک‌تری از همین جزوه داری، همان را امتحان کن.';
+}
+
+/**
+ * همان رد آپلود، برای یک فایل از جزوهٔ چندفایلی: عنوان کوتاه و راه جلو. «دوباره
+ * بینداز» اینجا یعنی «جایگزین کن» — همان فایل همان‌جای جزوه دوباره می‌رود.
+ */
+export function uploadRefusal(reason: string | undefined): { title: string; hint: string } {
+  if (reason === 'unsupported_type') return ERROR_MESSAGES.unsupported_type;
+  if (reason === 'too_large') {
+    return {
+      title: 'این فایل از سقف حجم بزرگ‌تر است',
+      hint: 'از برنامه‌اش خروجی PDF با کیفیت کمتر بگیر و با «جایگزین کن» جای همین بگذار.',
+    };
+  }
+  return {
+    title: 'الان نمی‌توانیم این فایل را بگیریم',
+    hint: 'چند دقیقهٔ دیگر با «جایگزین کن» همین فایل را دوباره بگذار؛ یا اگر PDF همین را داری، همان را.',
+  };
 }

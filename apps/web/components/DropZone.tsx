@@ -4,23 +4,24 @@ import { useCallback, useRef, useState } from 'react';
 import { ACCEPTED_EXTENSIONS } from '../lib/analysis-protocol';
 
 /** فرمت‌هایی که می‌پذیریم. PDF مسیر مرورگر، بقیه مسیر سرور (تبدیل، ADR-028). */
-const ACCEPT = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
+export const ACCEPT = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
 interface Props {
-  onFile: (file: File) => void;
+  /** یک یا چند فایل؛ چند فایل به ترتیب نام، بخش‌های یک جزوه می‌شوند (ADR-030). */
+  onFiles: (files: File[]) => void;
   busy: boolean;
 }
 
-export function DropZone({ onFile, busy }: Props) {
+export function DropZone({ onFiles, busy }: Props) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const take = useCallback(
     (files: FileList | null) => {
-      const file = files?.[0];
-      if (file) onFile(file);
+      const list = files ? Array.from(files) : [];
+      if (list.length > 0) onFiles(list);
     },
-    [onFile],
+    [onFiles],
   );
 
   return (
@@ -43,9 +44,14 @@ export function DropZone({ onFile, busy }: Props) {
         ref={inputRef}
         id="jozve-file"
         type="file"
+        multiple
         accept={ACCEPT}
         className="sr-only"
-        onChange={(event) => take(event.target.files)}
+        onChange={(event) => {
+          take(event.target.files);
+          // همان فایل دوباره هم انتخاب‌شدنی بماند.
+          event.target.value = '';
+        }}
       />
 
       <p className="text-xl font-semibold text-ink sm:text-2xl">جزوه‌ات را همین‌جا بینداز</p>
@@ -64,7 +70,7 @@ export function DropZone({ onFile, busy }: Props) {
 
       <p className="mt-6 text-sm text-ink-2">
         PDF، Word، پاورپوینت و عکس — PDF همین‌جا در مرورگر خوانده می‌شود، بقیه روی سرور به PDF
-        تبدیل می‌شوند
+        تبدیل می‌شوند. چند فایل هم می‌شود: پشت‌سرهم در یک جزوه صحافی می‌شوند.
       </p>
     </div>
   );

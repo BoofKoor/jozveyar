@@ -81,8 +81,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     const spec = {
       items: [
         {
-          documentId: 'd1',
-          pageCount: 147,
+          sections: [{ documentId: 'd1', pageCount: 147 }],
           rules: [
             {
               pageRanges: [[1, 147]] as [number, number][],
@@ -109,8 +108,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     const spec = {
       items: [
         {
-          documentId: 'd1',
-          pageCount: 1500,
+          sections: [{ documentId: 'd1', pageCount: 1500 }],
           rules: [
             {
               pageRanges: [[1, 1500]] as [number, number][],

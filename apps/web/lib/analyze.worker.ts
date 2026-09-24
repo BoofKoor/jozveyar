@@ -264,11 +264,13 @@ function tryGet(store: { get(name: string): unknown } | undefined, name: string)
   }
 }
 
+/**
+ * یک کار: سند را باز می‌کند، می‌شمارد یا کامل بررسی می‌کند، و **در هر حال** می‌بندد. کارگر
+ * برای همهٔ فایل‌های یک جزوه زنده می‌ماند، پس سندی که باز بماند حافظهٔ گوشی را تا آخر نگه
+ * می‌دارد.
+ */
 async function analyze(request: AnalyzeRequest): Promise<void> {
-  const startedAt = Date.now();
-  const { thresholds } = request;
-
-  const doc = await pdfjs.getDocument({
+  const loading = pdfjs.getDocument({
     data: new Uint8Array(request.buffer),
     // فایل لوکال است؛ واکشی تدریجی معنا ندارد و فقط سرباره اضافه می‌کند.
     disableAutoFetch: true,
@@ -276,16 +278,40 @@ async function analyze(request: AnalyzeRequest): Promise<void> {
     // قلم‌های استاندارد را لوکال نداریم و برای تحلیل رنگ لازم نیست.
     useSystemFonts: false,
     CanvasFactory: OffscreenCanvasFactory,
-  } as Parameters<typeof pdfjs.getDocument>[0]).promise;
+  } as Parameters<typeof pdfjs.getDocument>[0]);
+
+  let doc: pdfjs.PDFDocumentProxy;
+  try {
+    doc = await loading.promise;
+  } catch (error) {
+    await loading.destroy().catch(() => undefined);
+    throw error;
+  }
+  try {
+    await inspect(doc, request);
+  } finally {
+    await doc.destroy().catch(() => undefined);
+  }
+}
+
+async function inspect(doc: pdfjs.PDFDocumentProxy, request: AnalyzeRequest): Promise<void> {
+  const startedAt = Date.now();
+  const { thresholds, job } = request;
 
   const pageCount = doc.numPages;
   if (pageCount === 0) {
-    post({ kind: 'error', code: 'no_pages', message: 'سند صفحه‌ای ندارد' });
+    post({ kind: 'error', job, code: 'no_pages', message: 'سند صفحه‌ای ندارد' });
+    return;
+  }
+
+  if (request.countOnly) {
+    // قیمت کل جزوه فقط تعداد صفحه‌ها را لازم دارد؛ رنگ و کیفیت در نوبت خودش.
+    post({ kind: 'counted', job, pageCount });
     return;
   }
 
   const sampleStride = sampleStrideFor(pageCount, request.maxPagesToAnalyze);
-  post({ kind: 'meta', pageCount, sampleStride });
+  post({ kind: 'meta', job, pageCount, sampleStride });
 
   const pages: PageAnalysis[] = [];
   const sizeCounts: Record<string, number> = {};
@@ -338,13 +364,13 @@ async function analyze(request: AnalyzeRequest): Promise<void> {
       const analysis = buildPageAnalysis(measurement, stats, thresholds);
       pages.push(analysis);
       analyzedCount += 1;
-      post({ kind: 'page', page: analysis, analyzedCount });
+      post({ kind: 'page', job, page: analysis, analyzedCount });
     } catch (error) {
       renderFailures += 1;
       // یک صفحهٔ خراب کل سند را از دست نمی‌دهد. ولی اگر همه‌شان بشکنند،
       // نتیجه بی‌معناست و باید صادقانه به مسیر سرور بیفتیم.
       if (renderFailures > 3 && renderFailures >= analyzedCount) {
-        post({ kind: 'error', code: 'render_failed', message: String(error) });
+        post({ kind: 'error', job, code: 'render_failed', message: String(error) });
         return;
       }
     } finally {
@@ -353,7 +379,7 @@ async function analyze(request: AnalyzeRequest): Promise<void> {
   }
 
   if (pages.length === 0) {
-    post({ kind: 'error', code: 'render_failed', message: 'هیچ صفحه‌ای تحلیل نشد' });
+    post({ kind: 'error', job, code: 'render_failed', message: 'هیچ صفحه‌ای تحلیل نشد' });
     return;
   }
 
@@ -367,13 +393,21 @@ async function analyze(request: AnalyzeRequest): Promise<void> {
     elapsedMs: Date.now() - startedAt,
   };
 
-  post({ kind: 'done', analysis });
-  await doc.destroy();
+  post({ kind: 'done', job, analysis });
 }
 
+/**
+ * کارها یکی‌یکی: کار بعدی بعد از بسته شدن سند قبلی شروع می‌شود، پس هر لحظه فقط یک سند در
+ * حافظهٔ pdf.js است — حتی اگر صفحه زودتر فرستاده باشد (ADR-030).
+ */
+let queue: Promise<void> = Promise.resolve();
+
 self.onmessage = (event: MessageEvent<AnalyzeRequest>) => {
-  if (event.data?.kind !== 'analyze') return;
-  analyze(event.data).catch((error: unknown) => {
-    post({ kind: 'error', code: classifyError(error), message: String(error) });
-  });
+  const request = event.data;
+  if (request?.kind !== 'analyze') return;
+  queue = queue.then(() =>
+    analyze(request).catch((error: unknown) => {
+      post({ kind: 'error', job: request.job, code: classifyError(error), message: String(error) });
+    }),
+  );
 };

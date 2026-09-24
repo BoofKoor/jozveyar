@@ -11,6 +11,8 @@
 
 import { z } from 'zod';
 
+import { MAX_SECTIONS_PER_ITEM } from './constants.js';
+
 /* ────────────────────────────── پایه ────────────────────────────── */
 
 export const colorModeSchema = z.enum(['color', 'bw']);
@@ -57,22 +59,10 @@ export const detectionThresholdsSchema = z.object({
 export type DetectionThresholds = z.infer<typeof detectionThresholdsSchema>;
 
 /**
- * آستانه‌های پیش‌فرض.
- *
- * این اعداد نقطهٔ شروع‌اند، نه حقیقت. روی جزوه‌های اسکن‌شدهٔ واقعی باید کالیبره
- * شوند — به همین دلیل `colorRatio` و `chromaP95` خام ذخیره می‌شوند تا بازطبقه‌بندی
- * بدون داشتن فایل ممکن باشد (فایل خام بعد از ۱ تا ۲ روز پاک می‌شود).
+ * آستانه‌های پیش‌فرض — در `constants.ts`، بی zod، تا مرورگر بتواند فقط همین را بگیرد
+ * (`@jozveyar/contracts/constants`) و اسکیماها به باندل اولیه نیایند.
  */
-export const DEFAULT_THRESHOLDS: DetectionThresholds = {
-  chromaMin: 36,
-  colorPixelRatioMin: 0.004,
-  coloredInkRatioMin: 0.12,
-  sampleMaxDimension: 400,
-  nearWhiteLuma: 244,
-  nearBlackLuma: 26,
-  paperSampleRatio: 0.1,
-  lowDpiThreshold: 150,
-};
+export { DEFAULT_THRESHOLDS } from './constants.js';
 
 export const pageWarningSchema = z.enum([
   'low_dpi',
@@ -157,9 +147,31 @@ export const printRuleSchema = z.object({
 });
 export type PrintRule = z.infer<typeof printRuleSchema>;
 
-export const itemSpecSchema = z.object({
+/** سقف فایل‌های یک جزوه — در `constants.ts`، چون مرورگر هم لازمش دارد. (ADR-030) */
+export { MAX_SECTIONS_PER_ITEM };
+
+/**
+ * یک بخش جزوه: یک فایل آپلودشده (یک سند) و تعداد صفحه‌اش.
+ *
+ * در مرورگر `pageCount` پیش‌فاکتور است (شمارش مرورگر، یا عددی که خود Word نوشته)؛ سرور
+ * موقع ثبت سفارش آن را از تحلیل خودش می‌گذارد و عدد کلاینت را دور می‌ریزد.
+ */
+export const itemSectionSchema = z.object({
   documentId: z.string().min(1),
   pageCount: z.number().int().positive(),
+});
+export type ItemSection = z.infer<typeof itemSectionSchema>;
+
+/**
+ * یک قلم سفارش = یک جزوهٔ صحافی‌شده، از یک یا چند فایل.
+ *
+ * بخش‌ها به ترتیب صحافی پشت‌سرهم می‌آیند و بینشان صفحهٔ سفیدی اضافه نمی‌شود. تعداد
+ * صفحهٔ جزوه جمع بخش‌هاست و فقط `quote()` حسابش می‌کند (`itemPageCount`)، پس عددی که با
+ * بخش‌ها نخواند اصلاً وجود ندارد. شمارهٔ صفحهٔ قاعده‌ها سراسری است: صفحهٔ ۱ بخش دوم یعنی
+ * صفحه‌های بخش اول به‌علاوهٔ یک. (ADR-030)
+ */
+export const itemSpecSchema = z.object({
+  sections: z.array(itemSectionSchema).min(1).max(MAX_SECTIONS_PER_ITEM),
   rules: z.array(printRuleSchema).min(1),
   copies: z.number().int().positive().max(1000),
   sidesMode: sidesModeSchema,
@@ -263,7 +275,9 @@ export const quoteWarningSchema = z.enum([
 export type QuoteWarning = z.infer<typeof quoteWarningSchema>;
 
 export interface ItemBreakdown {
-  documentId: string;
+  /** بخش‌های جزوه به ترتیب صحافی — در ریز قیمت منجمد سفارش می‌ماند: کدام فایل‌ها، چند صفحه. */
+  sections: ItemSection[];
+  /** جمع صفحه‌های بخش‌ها. */
   pageCount: number;
   /** روهای چاپی برای یک نسخه. */
   printedSides: number;
