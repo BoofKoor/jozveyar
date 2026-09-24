@@ -3,6 +3,7 @@ import type { OrderSpec } from '@jozveyar/contracts';
 import {
   bandPriceRials,
   countPages,
+  itemPageCount,
   perPageColorRules,
   quote,
   shippingFloorRials,
@@ -19,19 +20,31 @@ import {
 /** تومان → ریال، برای خوانا ماندن انتظارهای تست. */
 const T = (tomans: number) => tomans * 10;
 
-function spec(partial: Partial<OrderSpec['items'][number]> & { pageCount: number }): OrderSpec {
-  const {
+type Item = OrderSpec['items'][number];
+
+/** یک قلم، از یک فایل یا چند فایل (`sections` به صفحه). */
+function item(
+  partial: Partial<Omit<Item, 'sections'>> & { pages: number | number[]; documentId?: string },
+): Item {
+  const counts = typeof partial.pages === 'number' ? [partial.pages] : partial.pages;
+  const base = partial.documentId ?? 'doc';
+  const sections = counts.map((pageCount, i) => ({
+    documentId: counts.length === 1 ? base : `${base}-${i + 1}`,
     pageCount,
-    rules = wholeDocumentRule(pageCount, 'bw', DEFAULT_PAPER_TYPE_ID),
-    copies = 1,
-    sidesMode = 'double',
-    bindingTypeId = DEFAULT_BINDING_TYPE_ID,
-    documentId = 'doc-1',
-  } = partial;
+  }));
+  const total = itemPageCount(sections);
   return {
-    items: [{ documentId, pageCount, rules, copies, sidesMode, bindingTypeId }],
-    shipping: null,
+    sections,
+    rules: partial.rules ?? wholeDocumentRule(total, 'bw', DEFAULT_PAPER_TYPE_ID),
+    copies: partial.copies ?? 1,
+    sidesMode: partial.sidesMode ?? 'double',
+    bindingTypeId: partial.bindingTypeId ?? DEFAULT_BINDING_TYPE_ID,
   };
+}
+
+function spec(partial: Partial<Omit<Item, 'sections'>> & { pageCount: number }): OrderSpec {
+  const { pageCount, ...rest } = partial;
+  return { items: [item({ ...rest, pages: pageCount })], shipping: null };
 }
 
 describe('countPages', () => {
@@ -214,27 +227,10 @@ describe('چند نسخه و چند فایل', () => {
     expect(Math.abs(three.items[0]!.weightGrams - one.items[0]!.weightGrams * 3)).toBeLessThanOrEqual(1);
   });
 
-  it('بسته‌بندی یک بار حساب می‌شود، نه به‌ازای هر فایل', () => {
+  it('بسته‌بندی یک بار حساب می‌شود، نه به‌ازای هر جزوه', () => {
     const two = quote(
       {
-        items: [
-          {
-            documentId: 'a',
-            pageCount: 100,
-            rules: wholeDocumentRule(100, 'bw', DEFAULT_PAPER_TYPE_ID),
-            copies: 1,
-            sidesMode: 'double',
-            bindingTypeId: DEFAULT_BINDING_TYPE_ID,
-          },
-          {
-            documentId: 'b',
-            pageCount: 60,
-            rules: wholeDocumentRule(60, 'bw', DEFAULT_PAPER_TYPE_ID),
-            copies: 1,
-            sidesMode: 'double',
-            bindingTypeId: DEFAULT_BINDING_TYPE_ID,
-          },
-        ],
+        items: [item({ pages: 100, documentId: 'a' }), item({ pages: 60, documentId: 'b' })],
         shipping: null,
       },
       L,
@@ -243,13 +239,10 @@ describe('چند نسخه و چند فایل', () => {
     expect(two.estWeightGrams).toBe(itemWeight + L.settings.packagingWeightGrams);
   });
 
-  it('سبد چندفایلی یک کرایه می‌دهد، نه دو تا', () => {
+  it('سبد چندجزوه‌ای یک کرایه می‌دهد، نه دو تا', () => {
     const together = quote(
       {
-        items: [
-          { documentId: 'a', pageCount: 100, rules: wholeDocumentRule(100, 'bw', DEFAULT_PAPER_TYPE_ID), copies: 1, sidesMode: 'double', bindingTypeId: DEFAULT_BINDING_TYPE_ID },
-          { documentId: 'b', pageCount: 100, rules: wholeDocumentRule(100, 'bw', DEFAULT_PAPER_TYPE_ID), copies: 1, sidesMode: 'double', bindingTypeId: DEFAULT_BINDING_TYPE_ID },
-        ],
+        items: [item({ pages: 100, documentId: 'a' }), item({ pages: 100, documentId: 'b' })],
         shipping: { methodId: 'post', zoneId: 'other' },
       },
       L,
@@ -260,6 +253,63 @@ describe('چند نسخه و چند فایل', () => {
     );
     // دو سفارش جدا دو کرایه می‌دهند؛ یک سبد فقط یکی.
     expect(together.shippingRials).toBeLessThan(alone.shippingRials! * 2);
+  });
+});
+
+describe('جزوهٔ چندفایلی — یک قلم، چند بخش، یک صحافی (ADR-030)', () => {
+  it('صفحه‌ها جمع می‌شوند و یک صحافی حساب می‌شود، نه سه تا', () => {
+    const jozve = quote({ items: [item({ pages: [100, 100, 100] })], shipping: null }, L);
+    const [one] = jozve.items;
+    expect(one!.pageCount).toBe(300);
+    expect(one!.sheets).toBe(150);
+    expect(one!.bindingRials).toBe(T(45_000));
+    expect(jozve.totalWithoutShippingRials).toBe(T(300 * 1_600 + 45_000));
+
+    // همان سه فایل، سه جزوهٔ جدا: همان چاپ، سه صحافی.
+    const apart = quote(
+      {
+        items: [item({ pages: 100, documentId: 'a' }), item({ pages: 100, documentId: 'b' }), item({ pages: 100, documentId: 'c' })],
+        shipping: null,
+      },
+      L,
+    );
+    expect(apart.totalWithoutShippingRials - jozve.totalWithoutShippingRials).toBe(T(2 * 45_000));
+  });
+
+  it('بین بخش‌ها صفحهٔ سفید نیست: ۳ + ۲۹۷ صفحهٔ دورو = ۱۵۰ برگ، بازهٔ اول صحافی', () => {
+    // اگر هر بخش از روی برگ تازه شروع می‌شد، بخش اول ۲ برگ و کل جزوه ۱۵۱ برگ می‌شد:
+    // بازهٔ دوم صحافی (۵۰,۰۰۰) و یک روی سفید چاپی بیشتر.
+    const b = quote({ items: [item({ pages: [3, 297] })], shipping: null }, L);
+    expect(b.items[0]).toMatchObject({ pageCount: 300, printedSides: 300, sheets: 150 });
+    expect(b.items[0]!.bindingRials).toBe(T(45_000));
+  });
+
+  it('بخش‌ها به همان ترتیب در ریز قیمت می‌مانند', () => {
+    const b = quote({ items: [item({ pages: [12, 1, 40], documentId: 'x' })], shipping: null }, L);
+    expect(b.items[0]!.sections).toEqual([
+      { documentId: 'x-1', pageCount: 12 },
+      { documentId: 'x-2', pageCount: 1 },
+      { documentId: 'x-3', pageCount: 40 },
+    ]);
+  });
+
+  it('شمارهٔ صفحهٔ قاعده‌ها سراسری است: صفحهٔ ۳ بخش دوم = صفحهٔ ۱۳ جزوه', () => {
+    const sections = [10, 10];
+    const total = itemPageCount(sections.map((pageCount) => ({ pageCount })));
+    const b = quote(
+      {
+        items: [item({ pages: sections, rules: perPageColorRules(total, [10 + 3], DEFAULT_PAPER_TYPE_ID) })],
+        shipping: null,
+      },
+      L,
+    );
+    expect(b.items[0]).toMatchObject({ colorSides: 1, bwSides: 19 });
+    expect(b.warnings).not.toContain('rules_do_not_cover_all_pages');
+  });
+
+  it('itemPageCount همان جمع است', () => {
+    expect(itemPageCount([{ pageCount: 3 }, { pageCount: 297 }])).toBe(300);
+    expect(itemPageCount([])).toBe(0);
   });
 });
 

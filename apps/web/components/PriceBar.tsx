@@ -2,12 +2,20 @@
 
 import { formatNumber, formatTomans, formatWeight } from '@jozveyar/text';
 import type { Breakdown } from '@jozveyar/contracts';
+import { Names } from './JozveFiles';
 
 interface Props {
   breakdown: Breakdown | null;
   /** تا وقتی تحلیل تمام نشده، قیمت با نشانگر «در حال بررسی» نشان داده می‌شود. */
   provisional: boolean;
   onContinue: () => void;
+  /** فایل‌هایی از جزوه که هنوز شمرده نشده‌اند؛ قیمتشان بعداً اضافه می‌شود (ADR-030). */
+  pending?: readonly string[];
+  /**
+   * فایل‌هایی که خوانده نشدند و در این قیمت نیستند. «ادامه» تا حذف یا جایگزینی‌شان بسته
+   * است: جزوه‌ای که یک فصلش کم است بی‌صدا سفارش داده نمی‌شود.
+   */
+  blocked?: readonly string[];
 }
 
 function Line({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
@@ -26,8 +34,9 @@ function Line({ label, value, muted }: { label: string; value: string; muted?: b
  * پست تقریباً ثابت است (کف ~۱۳۵ هزار تومان)، این عدد تخمین مبهم نیست و پرش قیمت
  * در مرحلهٔ آدرس را حذف می‌کند. (ADR-011)
  */
-export function PriceBar({ breakdown, provisional, onContinue }: Props) {
+export function PriceBar({ breakdown, provisional, onContinue, pending = [], blocked = [] }: Props) {
   if (!breakdown) return null;
+  const held = provisional || blocked.length > 0;
 
   const item = breakdown.items[0];
   const total = breakdown.totalWithoutShippingRials;
@@ -83,9 +92,20 @@ export function PriceBar({ breakdown, provisional, onContinue }: Props) {
           </p>
         ) : null}
 
-        {provisional ? (
+        {pending.length > 0 ? (
+          <p data-testid="price-pending" className="mt-3 text-sm text-ink-2">
+            قیمت <Names names={pending} /> بعد از بررسی روی سرور به این اضافه می‌شود.
+          </p>
+        ) : provisional ? (
           <p className="mt-3 text-sm text-ink-2">
             بررسی فایل ادامه دارد — عدد ممکن است کمی جابه‌جا شود.
+          </p>
+        ) : null}
+
+        {blocked.length > 0 ? (
+          <p data-testid="price-blocked" className="mt-3 rounded-lg bg-chip px-3 py-2 text-sm text-ink-2">
+            این قیمت بدون <Names names={blocked} /> است که خوانده نشد. حذفش کن یا فایل درستش را جایش
+            بگذار.
           </p>
         ) : null}
 
@@ -99,10 +119,14 @@ export function PriceBar({ breakdown, provisional, onContinue }: Props) {
         <button
           type="button"
           onClick={onContinue}
-          disabled={provisional}
+          disabled={held}
           className="mt-5 w-full rounded-lg bg-sage-button py-3.5 font-semibold text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {provisional ? 'در حال بررسی…' : 'ادامه — آدرس و تحویل'}
+          {provisional
+            ? 'در حال بررسی…'
+            : blocked.length > 0
+              ? 'اول تکلیف فایل خوانده‌نشده را روشن کن'
+              : 'ادامه — آدرس و تحویل'}
         </button>
         <p className="mt-2.5 hidden text-center text-xs text-ink-2 sm:block">
           ثبت‌نام لازم نیست. شماره موبایل فقط در لحظهٔ پرداخت گرفته می‌شود.

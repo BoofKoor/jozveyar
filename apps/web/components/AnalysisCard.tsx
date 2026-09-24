@@ -3,7 +3,7 @@
 import { Fragment, type ReactNode } from 'react';
 import { formatBytes, formatNumber, formatPages } from '@jozveyar/text';
 import type { FileKind } from '../lib/analysis-protocol';
-import type { AnalysisState, AnalysisSummaryView } from '../lib/useDocumentAnalysis';
+import type { AnalysisState, AnalysisSummaryView } from '../lib/fileAnalysis';
 import type { UploadSnapshot } from '../lib/upload/client';
 
 interface Props {
@@ -25,7 +25,9 @@ interface Props {
 export function uploadLine(upload: UploadSnapshot | null): string | null {
   if (!upload) return null;
   switch (upload.phase) {
+    // «شروع شد» فقط نوبت صف است (ADR-030)؛ تا سرور آپلود را نپذیرفته، حرفی از ارسال نیست.
     case 'starting':
+      return null;
     case 'uploading': {
       const percent = upload.totalBytes > 0 ? Math.floor((upload.sentBytes / upload.totalBytes) * 100) : 0;
       return `در حال ارسال فایل · ${percent}%`;
@@ -49,7 +51,7 @@ export function uploadLine(upload: UploadSnapshot | null): string | null {
   }
 }
 
-function Stat({
+export function Stat({
   label,
   value,
   hint,
@@ -82,7 +84,7 @@ export function AnalysisCard({
 }: Props) {
   const { phase, fileName, fileSize, pageCount, analyzedCount, sampleStride, elapsedMs, estimatedFrom } =
     state;
-  const analyzing = phase === 'analyzing' || phase === 'reading';
+  const analyzing = phase === 'analyzing' || phase === 'reading' || phase === 'queued';
   const program = kind === 'slides' ? 'پاورپوینت' : 'Word';
   /** عدد قبلی را خود فایل Word یا پاورپوینت گفته بود، نه مرورگر. */
   const fromOffice = kind === 'word' || kind === 'slides';
@@ -266,7 +268,7 @@ export function AnalysisCard({
  * یک هشدار با جایش روی سند (ADR-029): «صفحه‌های 3، 7 و 12 …». سند بزرگ فقط نمونه‌ای
  * بررسی شده، پس عدد برآوردی می‌آید و چند صفحهٔ نمونه با «مثلاً».
  */
-function PageWarning({
+export function PageWarning({
   pages,
   count,
   estimated,
@@ -294,7 +296,7 @@ function PageWarning({
 const MAX_FONT_NAMES = 3;
 
 /** «B Nazanin، B Titr و 2 فونت دیگر» — نام لاتین جدا، تا جهت متن فارسی را به هم نریزد. */
-function FontNames({ fonts }: { fonts: readonly string[] }) {
+export function FontNames({ fonts }: { fonts: readonly string[] }) {
   const parts: ReactNode[] = fonts.slice(0, MAX_FONT_NAMES).map((name) => (
     <bdi key={name} className="font-semibold text-ink">
       {name}

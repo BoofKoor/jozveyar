@@ -17,6 +17,8 @@ interface Props {
   priceList: PriceList;
   /** برای نشان دادن اثر انتخاب رنگ روی قیمت، قبل از انتخاب. */
   colorPageCount: number;
+  /** فایل‌های جزوه؛ رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030). */
+  fileCount?: number;
 }
 
 function Field({
@@ -77,7 +79,8 @@ function Choice<T extends string>({
   );
 }
 
-export function ConfigPanel({ config, onChange, priceList, colorPageCount }: Props) {
+export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileCount = 1 }: Props) {
+  const where = fileCount > 1 ? 'در فایل‌های این جزوه' : 'در فایل';
   const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) =>
     onChange({ ...config, [key]: value });
 
@@ -100,8 +103,10 @@ export function ConfigPanel({ config, onChange, priceList, colorPageCount }: Pro
         label="رنگ چاپ"
         hint={
           colorPageCount > 0
-            ? `${formatNumber(colorPageCount)} صفحهٔ رنگی در فایل پیدا شد.`
-            : 'فایل تماماً سیاه‌سفید است.'
+            ? `${formatNumber(colorPageCount)} صفحهٔ رنگی ${where} پیدا شد.`
+            : fileCount > 1
+              ? 'تا اینجا صفحهٔ رنگی‌ای پیدا نشد.'
+              : 'فایل تماماً سیاه‌سفید است.'
         }
       >
         <Choice
