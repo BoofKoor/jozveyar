@@ -2,7 +2,7 @@
 
 سند کامل معماری. دلیل هر تصمیم در `docs/DECISIONS.md`. تعرفه و فرمول قیمت در `docs/PRICING.md`.
 
-**وضعیت:** معماری تأیید شد. برش ۰ و ۱ ساخته و تست شده؛ برش ۲الف تا آپلود پیش رفته — جدول برش‌ها را ببینید.
+**وضعیت:** معماری تأیید شد. برش ۰ تا ۲ ساخته و تست شده؛ بعدی برش ۳ (سفارش) — جدول برش‌ها را ببینید.
 
 ---
 
@@ -141,18 +141,28 @@ CREATE TABLE documents (
   created_at        timestamptz NOT NULL DEFAULT now()
 );
 
--- انتخاب: «کاربر چه می‌خواهد». حالت فعلی = یک سطر. حالت ترکیبی = چند سطر.
+-- جزوه: یک قلم سفارش، از یک یا چند سند، پشت‌سرهم و بی صفحهٔ سفید (ADR-030).
+CREATE TABLE order_item_sections (
+  order_item_id uuid NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+  seq           smallint NOT NULL,          -- ترتیب صحافی
+  document_id   uuid NOT NULL REFERENCES documents(id),
+  page_count    integer NOT NULL,           -- شمارش سرور، نه عدد مرورگر
+  PRIMARY KEY (order_item_id, seq)
+);
+
+-- انتخاب: «کاربر چه می‌خواهد» — روی جزوه، نه روی سند. حالت فعلی = یک سطر.
+-- حالت ترکیبی = چند سطر.
 CREATE TABLE print_rules (
   id            uuid PRIMARY KEY,
-  document_id   uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  order_item_id uuid NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
   seq           smallint NOT NULL,
-  page_ranges   jsonb NOT NULL,             -- [[1,11],[13,14],[16,150]]
+  page_ranges   jsonb NOT NULL,             -- سراسری در جزوه: [[1,11],[13,14],[16,150]]
   color_mode    color_mode NOT NULL,        -- color | bw
   paper_type_id uuid NOT NULL REFERENCES paper_types(id),
-  UNIQUE (document_id, seq)
+  UNIQUE (order_item_id, seq)
 );
--- قاعده‌های یک سند باید ۱..page_count را دقیقاً و بدون همپوشانی بپوشانند.
--- در اپ و با یک trigger اعتبارسنجی می‌شود.
+-- قاعده‌های یک جزوه باید ۱..جمع صفحه‌های بخش‌ها را دقیقاً و بدون همپوشانی
+-- بپوشانند. در اپ و با یک trigger اعتبارسنجی می‌شود.
 
 -- سفارش: قیمت برای همیشه منجمد می‌شود، هیچ‌وقت بازمحاسبه نمی‌شود.
 CREATE TABLE orders (
@@ -190,7 +200,7 @@ CREATE TABLE orders (
 |---|---|---|
 | تعرفه | `price_lists` `paper_types` `binding_types` `binding_rate_bands` `shipping_methods` `shipping_rates` | ✅ ساخته شد. نسخه‌دار با `version` و دقیقاً یکی فعال. بازه‌های صحافی و وزن با `EXCLUDE` — دیتابیس اجازهٔ همپوشانی نمی‌دهد. `print_rates` و `pricing_settings` جدول جدا نشدند؛ دلیل در ADR-021. `discount_tiers` هنوز ساخته نشده |
 | سند | `documents` `document_analyses` `document_pages` | ✅ ساخته شد. سند = فایل آپلودشده، قبل از اینکه سفارشی باشد. مالکش هش کوکی نشست ناشناس است (`session_hash`) و شناسهٔ آپلود چندتکه کنارش می‌ماند. تحلیل مرورگر و سرور **هر دو** ذخیره می‌شوند تا واگرایی قابل اندازه‌گیری باشد. `document_pages` اعداد خام رنگ را نگه می‌دارد، نه فقط بولین |
-| سفارش | `order_items` `document_sources` `order_status_events` `payments` | `order_items` یک ردیف به‌ازای هر سند. `document_sources` ادغام چند PDF را می‌سازد |
+| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030) |
 | ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن) |
 | رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود |
 | دسترسی | `admin_users` `roles` `permissions` `role_permissions` `admin_user_roles` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` |
@@ -281,7 +291,7 @@ detection.sample_dpi                    = 40
 |---|---|---|
 | 0 | ✅ اسکلت قابل دیپلوی | Docker Compose، Nginx، Dockerfile چندمرحله‌ای، `deploy.sh`، `setup-tls.sh`، سلامت سرویس |
 | 1 | ✅ **لحظهٔ جادو** | فایل بینداز ← مرورگر می‌خواند ← قیمت زنده با تعرفهٔ واقعی ← تنظیمات. بدون دیتابیس و حساب. + پایه‌های سئو (رندر ایستا، متا، نقشهٔ سایت، JSON-LD). ۱۲۳ تست واحد + ۱۵ تست سرتاسری |
-| 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ ۲ب: ✅ ایمیج پایه با LibreOffice و فونت‌ها (ADR-027)، ✅ تبدیل Word/PPT/عکس با پیش‌فاکتور فوری (ADR-028)، ✅ هشدارها با شمارهٔ صفحه، DPI از جای تصویر و فونت جایگزین (ADR-029)، بعد چند فایل در یک جزوه |
+| 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ ۲ب: ✅ ایمیج پایه با LibreOffice و فونت‌ها (ADR-027)، ✅ تبدیل Word/PPT/عکس با پیش‌فاکتور فوری (ADR-028)، ✅ هشدارها با شمارهٔ صفحه، DPI از جای تصویر و فونت جایگزین (ADR-029)، ✅ چند فایل در یک جزوه، یک صحافی (ADR-030) |
 | 3 | سفارش کامل با پرداخت جعلی | شهر و آدرس، نرخ ارسال، OTP، ساخت سفارش، درگاه نمونه، صفحهٔ تأیید |
 | 4 | پنل ادمین نسخهٔ ۱ | TOTP روی ساب‌دامین جدا، فهرست و جزئیات سفارش، دانلود فایل، تغییر وضعیت، ویرایش تعرفه، ساعت SLA |
 | 5 | چاپخانه و خروجی چاپ | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ |
