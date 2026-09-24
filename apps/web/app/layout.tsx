@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { PAGE_COLOR } from '@jozveyar/ui/tokens';
+import { SiteFooter } from '../components/SiteFooter';
+import { SiteHeader } from '../components/SiteHeader';
 import './globals.css';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jozveyar.com';
@@ -32,10 +34,18 @@ export const viewport: Viewport = {
   themeColor: PAGE_COLOR,
 };
 
+/**
+ * سربرگ و پاورقی در همهٔ صفحه‌ها، از جمله ۴۰۴؛ هر دو کامپوننت سرورند و JS ندارند. بدنه ظرف
+ * `site-grow` دارد تا پاورقی در صفحهٔ کوتاه هم ته صفحه بنشیند.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fa" dir="rtl">
-      <body>{children}</body>
+      <body className="site">
+        <SiteHeader />
+        <div className="site-grow">{children}</div>
+        <SiteFooter />
+      </body>
     </html>
   );
 }

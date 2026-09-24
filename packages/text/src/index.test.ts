@@ -7,6 +7,7 @@ import {
   formatPages,
   formatTomans,
   formatWeight,
+  jalaliYear,
   normalizeFa,
   normalizeIranMobile,
   recipientSurname,
@@ -222,5 +223,12 @@ describe('تاریخ شمسی', () => {
 
   it('خروجی ارقام لاتین است', () => {
     expect(formatJalaliNumeric(new Date('2026-09-13T12:00:00Z'))).not.toMatch(/[۰-۹]/);
+  });
+
+  it('سال شمسی به وقت تهران عوض می‌شود، نه UTC', () => {
+    expect(jalaliYear(new Date('2026-09-24T12:00:00Z'))).toBe(1405);
+    // نیمه‌شب نوروز ۱۴۰۵ در تهران ساعت ۲۰:۳۰ UTC روز ۲۰ مارس است.
+    expect(jalaliYear(new Date('2026-03-20T20:00:00Z'))).toBe(1404);
+    expect(jalaliYear(new Date('2026-03-20T20:40:00Z'))).toBe(1405);
   });
 });
