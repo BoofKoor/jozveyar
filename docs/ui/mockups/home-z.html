@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>طرح ز — جزوه‌یار</title>
+<link rel="icon" href="../../brand/jozveyar-favicon.svg">
+<link rel="stylesheet" href="../../brand/jozveyar-colors.css">
+<link rel="stylesheet" href="../../brand/jozveyar-ui.css">
+<!--
+  طرح ز: آرام، ولی کامل.
+  پیش از فایل: نوار بالای سبز روشن با سربرگ و ناوبری، تیتر و سه نکتهٔ اطمینان، و کارت بارگذاری به‌عنوان تصویر اصلی صفحه.
+  زیرش سه قدم، تعرفهٔ شفاف و سؤال‌ها.
+  پس از فایل: قدم‌های سفارش، کارت «جزوهٔ تو»، کارت «تنظیمات چاپ» با اثر هر انتخاب روی قیمت، و خلاصهٔ سفارش
+  که در دسکتاپ کنار صفحه تا ته صفحه می‌چسبد و در موبایل در جریان صفحه است، با نوار ثابت پایین.
+  حالت‌ها: دکمه‌های بالای صفحه (پیش از فایل، در حال بررسی، آماده).
+  تأییدشدهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۲)، با لوگوی بی‌شعار؛ شرح و سنجش‌ها در docs/UI.md، قدم ۱.
+  دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/home-z.html
+-->
+<style>
+/*
+ * پایهٔ طرح نمونه. کد سایت نیست.
+ * رنگ، سایه، گوشه و فاصله فقط var(--jy-…) از دو فایل برند که پیش از این سبک بار می‌شوند
+ * (jozveyar-colors.css و بلوک توکن jozveyar-ui.css)؛ اینجا هیچ کد رنگی نیست.
+ * دکمه، فیلد، بارگذاری، پیشرفت و فوکوس از کیت رابط راهنما؛ وزن ۷۰۰ کیت اینجا ۶۰۰ است.
+ * فقط logical properties.
+ */
+:root {
+  --text: var(--jy-ink);
+  --muted: var(--jy-green-700);
+  --line: var(--jy-border-subtle);
+
+  --fs-display: 49px;
+  --fs-h1: 39px;
+  --fs-h2: 31px;
+  --fs-h3: 25px;
+  --fs-h4: 20px;
+  --fs-base: 16px;
+  --fs-xs: 13px;
+  --gutter: var(--jy-gutter);
+}
+@media (max-width: 520px) {
+  :root { --fs-display: 39px; --fs-h1: 31px; --fs-h2: 25px; --gutter: 16px; }
+}
+
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("../../../apps/web/public/fonts/Vazirmatn-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("../../../apps/web/public/fonts/Vazirmatn-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; color-scheme: only light; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  font-family: "Vazirmatn", system-ui, Tahoma, sans-serif;
+  font-size: var(--fs-base);
+  line-height: 1.8;
+  color: var(--text);
+  background: var(--jy-paper);
+}
+h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; }
+h1, h2, h3 { font-weight: 600; line-height: 1.5; text-wrap: balance; }
+p { text-wrap: pretty; }
+ul, ol { padding: 0; list-style: none; }
+a { color: var(--muted); text-underline-offset: 4px; }
+img, svg { display: block; }
+button { font: inherit; }
+b { font-weight: 600; }
+
+/* عدد با ارقام لاتین؛ فقط روی span خود عدد، نه کل جمله */
+.num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+/* تیتر فقط سر ویرگول می‌شکند، نه وسط عبارت */
+.clause { display: inline-block; }
+
+/* فوکوس دولایهٔ راهنما: سفید کنار کامپوننت، green-700 بیرون */
+:focus-visible { outline: 2px solid var(--jy-focus-outer); outline-offset: 2px; box-shadow: 0 0 0 2px var(--jy-focus-inner); }
+
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; }
+}
+
+.wrap { max-width: calc(var(--jy-container) + 2 * var(--gutter)); margin-inline: auto; padding-inline: var(--gutter); }
+
+.i { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== دکمه (کیت راهنما) ===== */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 20px;
+  font: inherit; font-weight: 600; line-height: 1.5;
+  color: inherit; background: none; border: 1px solid transparent; border-radius: var(--jy-radius-md);
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background-color var(--jy-dur-fast) var(--jy-ease), border-color var(--jy-dur-fast) var(--jy-ease);
+}
+.btn .i { width: 1.25em; height: 1.25em; }
+.btn--lg { min-height: 52px; padding-inline: 28px; }
+.btn--block { display: flex; width: 100%; }
+.btn--icon { width: 44px; padding: 0; }
+.btn--primary { background: var(--jy-green-600); border-color: var(--jy-green-600); color: var(--jy-paper); }
+.btn--primary:hover { background: var(--jy-green-700); border-color: var(--jy-green-700); }
+.btn--primary:active { background: var(--jy-green-800); border-color: var(--jy-green-800); }
+.btn--text { color: var(--jy-green-700); padding-inline: 12px; }
+.btn--text:hover { background: var(--jy-green-50); }
+.btn[aria-disabled="true"] { background: var(--jy-green-50); border-color: var(--jy-green-200); color: var(--jy-green-500); cursor: not-allowed; }
+.btn.is-loading::before {
+  content: ""; width: 1em; height: 1em; flex: none;
+  border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* رادیوی کیت */
+.radio {
+  appearance: none; -webkit-appearance: none; flex: none;
+  width: 20px; height: 20px; margin: 0;
+  background: var(--jy-paper); border: 2px solid var(--jy-green-500); border-radius: 50%; cursor: pointer;
+}
+.radio:checked { background: var(--jy-green-600); border-color: var(--jy-green-600); box-shadow: inset 0 0 0 4px var(--jy-paper); }
+
+/* نوار پیشرفت کیت */
+.progress {
+  appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 6px;
+  border: 0; border-radius: 999px; overflow: hidden; background: var(--jy-green-100); color: var(--jy-green-600);
+}
+.progress::-webkit-progress-bar { background: var(--jy-green-100); border-radius: 999px; }
+.progress::-webkit-progress-value { background: var(--jy-green-600); border-radius: 999px; }
+.progress::-moz-progress-bar { background: var(--jy-green-600); border-radius: 999px; }
+
+/* ===== فقط طرح نمونه: حالت‌ها بی JS ===== */
+.mock {
+  position: fixed; inset-block-start: 8px; inset-inline-end: 8px; z-index: 50;
+  display: flex; gap: 2px; padding: 4px; border-radius: 999px;
+  background: var(--jy-ink); color: var(--jy-paper); font-size: var(--fs-xs); line-height: 1.6;
+}
+.mock span { padding: 2px 8px; }
+.mock label { padding: 2px 10px; border-radius: 999px; cursor: pointer; }
+.mock label:has(input:checked) { background: var(--jy-green-700); }
+.mock label:has(input:focus-visible) { outline: 2px solid var(--jy-paper); }
+.mock input { position: absolute; opacity: 0; pointer-events: none; }
+/* پوشه‌های حالت خودشان جعبه نمی‌سازند (display: contents)، پس چیدمان فرزندان دست نمی‌خورد */
+.st-after, .st-busy, .st-ready { display: none; }
+.st-before { display: contents; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .st-before { display: none; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .st-after { display: contents; }
+:where(body:has(#s-busy:checked)) .st-busy { display: contents; }
+:where(body:has(#s-ready:checked)) .st-ready { display: contents; }
+
+
+/* ===== طرح ز ===== */
+/* پس از فایل کل صفحه زمینهٔ green-50 می‌گیرد و کارت‌ها سفیدند (انتخاب‌گر body باید از body پایه سنگین‌تر باشد) */
+body:has(#s-busy:checked), body:has(#s-ready:checked) { background: var(--jy-green-50); }
+@media (max-width: 860px) { body:has(#s-busy:checked), body:has(#s-ready:checked) { padding-block-end: 88px; } }
+
+/* سربرگ و نوار بالا */
+.z-top { background: var(--jy-green-50); }
+.z-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px; }
+.z-logo { display: block; padding: 6px; margin-inline-start: -6px; border-radius: var(--jy-radius-md); }
+.z-logo img { height: 64px; width: auto; }
+.z-nav { display: flex; gap: 4px; }
+.z-nav a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 14px; border-radius: var(--jy-radius-md); color: var(--text); text-decoration: none; }
+.z-nav a:hover { background: var(--jy-green-100); }
+@media (max-width: 520px) {
+  .z-head { padding-block: 12px; }
+  .z-logo img { height: 56px; }
+  .z-nav .z-nav__how { display: none; }
+  .z-nav a { padding-inline: 10px; }
+}
+
+/* قهرمان: متن در آغاز، کارت بارگذاری در پایان؛ در موبایل متن، کارت، اطمینان */
+.z-hero { padding-block: 32px 64px; }
+.z-hero__grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) 440px;
+  grid-template-areas: "text upload" "trust upload";
+  column-gap: 72px; row-gap: 40px; align-items: start;
+}
+.z-hero__text { grid-area: text; padding-block-start: 16px; }
+.z-upload { grid-area: upload; }
+.z-trust { grid-area: trust; }
+@media (max-width: 860px) {
+  .z-hero { padding-block: 8px 48px; }
+  .z-hero__grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "text" "upload" "trust"; row-gap: 24px; }
+  .z-hero__text { padding: 0; }
+}
+.z-eyebrow {
+  display: inline-block; padding: 2px 12px; border-radius: var(--jy-radius-full);
+  background: var(--jy-green-100); color: var(--jy-green-800); font-size: var(--fs-xs); font-weight: 600; line-height: 1.9;
+}
+.z-title { margin-block-start: 16px; font-size: var(--fs-display); line-height: 1.35; }
+.z-title mark {
+  padding-inline: 2px; color: inherit;
+  background: linear-gradient(transparent 58%, var(--jy-green-200) 58%, var(--jy-green-200) 90%, transparent 90%);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.z-lead { max-width: 32em; margin-block-start: 16px; font-size: var(--fs-h4); color: var(--muted); }
+/* پس از فایل تیتر فقط برای صفحه‌خوان می‌ماند؛ جای قهرمان را قدم‌های سفارش می‌گیرد */
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-hero { padding: 0; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-hero__grid { display: block; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-hero__text { padding: 0; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-title { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 520px) {
+  .z-title { margin-block-start: 12px; font-size: var(--fs-h1); }
+  .z-lead { margin-block-start: 8px; font-size: var(--fs-base); }
+}
+
+/* کارت بارگذاری: کل کارت برچسب ورودی فایل است */
+.z-upload {
+  display: flex; flex-direction: column; padding: 8px;
+  background: var(--jy-paper); border-radius: var(--jy-radius-lg); box-shadow: var(--jy-shadow-md); cursor: pointer;
+}
+.z-upload:has(input:focus-visible) { outline: 2px solid var(--jy-focus-outer); outline-offset: 2px; box-shadow: 0 0 0 2px var(--jy-focus-inner), var(--jy-shadow-md); }
+.z-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 24px 20px 20px; text-align: center;
+  background: var(--jy-green-50); border: 2px dashed var(--jy-green-500); border-radius: var(--jy-radius-md);
+  transition: background-color var(--jy-dur-fast) var(--jy-ease), border-color var(--jy-dur-fast) var(--jy-ease);
+}
+.z-upload:hover .z-drop { background: var(--jy-green-100); border-style: solid; border-color: var(--jy-green-600); }
+.z-art { width: 148px; height: auto; margin-block-end: 10px; }
+@media (max-width: 520px) { .z-art { width: 120px; } }
+.z-art .s1 { fill: var(--jy-green-200); }
+.z-art .s2 { fill: var(--jy-paper); stroke: var(--jy-green-300); stroke-width: 1.5; }
+.z-art .s3 { fill: var(--jy-paper); stroke: var(--jy-green-300); stroke-width: 1.5; }
+.z-art .ln { fill: none; stroke: var(--jy-green-200); stroke-width: 4; stroke-linecap: round; }
+.z-art .ln1 { stroke: var(--jy-green-400); }
+.z-art .bd { fill: var(--jy-green-600); }
+.z-art .ar { fill: none; stroke: var(--jy-paper); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.z-drop__title { font-size: var(--fs-h4); font-weight: 600; line-height: 1.5; }
+.z-drop__sub { font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
+@media (pointer: coarse) { .z-drop__sub { display: none; } }
+.z-formats { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-block-start: 12px; }
+.z-fmt {
+  padding: 1px 10px; border: 1px solid var(--jy-green-200); border-radius: var(--jy-radius-full);
+  background: var(--jy-paper); font-size: var(--fs-xs); line-height: 1.8; color: var(--jy-green-800);
+}
+.z-upload__foot { padding: 16px 12px 8px; text-align: center; }
+.z-upload__hint { display: block; margin-block-start: 10px; font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
+
+/* سه نکتهٔ اطمینان */
+.z-trust { display: grid; gap: 16px; }
+.z-trust li { display: flex; align-items: center; gap: 14px; }
+.z-trust__ic {
+  display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 50%;
+  background: var(--jy-paper); color: var(--jy-green-700); box-shadow: var(--jy-shadow-sm);
+}
+.z-trust__t { display: flex; flex-direction: column; line-height: 1.6; }
+.z-trust__t span { font-size: var(--fs-xs); color: var(--muted); }
+
+/* قدم‌های سفارش، پس از فایل */
+.z-flow { padding-block: 8px 24px; }
+.z-flow ol { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.z-flow li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.z-flow li:not(:last-child)::after { content: ""; width: 40px; margin-inline-start: 4px; border-block-start: 2px solid var(--jy-green-300); }
+.z-flow__n {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--jy-green-300); background: var(--jy-paper); font-size: var(--fs-xs); font-weight: 600; color: var(--jy-green-700);
+}
+.z-flow [aria-current] { font-weight: 600; color: var(--text); }
+.z-flow [aria-current] .z-flow__n { background: var(--jy-green-600); border-color: var(--jy-green-600); color: var(--jy-paper); }
+@media (max-width: 520px) {
+  .z-flow { padding-block: 4px 16px; font-size: var(--fs-xs); }
+  .z-flow ol { gap: 8px; }
+  .z-flow li:not(:last-child)::after { width: 16px; }
+}
+
+/*
+ * یک شبکه برای هر دو حالت. پس از فایل در دسکتاپ: کارت‌ها و سؤال‌ها در ستون اصلی، خلاصهٔ سفارش
+ * کنارشان و روی هر دو ردیف، تا تا ته صفحه بچسبد (sticky فقط داخل ظرف خودش می‌چسبد). در موبایل
+ * خلاصه بین کارت‌ها و سؤال‌ها می‌آید و قیمت در نوار ثابت پایین است.
+ */
+.z-grid { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "a" "b"; column-gap: 32px; align-items: start; }
+.z-a { grid-area: a; min-width: 0; }
+.z-b { grid-area: b; min-width: 0; }
+.z-side { grid-area: side; min-width: 0; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-grid { grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: "a side" "b side"; padding-block-end: 64px; }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-a { display: flex; flex-direction: column; gap: 16px; }
+@media (min-width: 861px) { .z-side { position: sticky; inset-block-start: 24px; } }
+@media (max-width: 860px) {
+  :where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "a" "side" "b"; }
+  .z-side { margin-block-start: 16px; }
+}
+
+/* کارت */
+.z-card { padding: 24px; background: var(--jy-paper); border: 1px solid var(--line); border-radius: var(--jy-radius-lg); }
+.z-card__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.z-card__title { font-size: var(--fs-h4); }
+.z-card__meta { font-size: var(--fs-xs); color: var(--muted); }
+@media (max-width: 520px) { .z-card { padding: 16px; } }
+
+/* جزوهٔ تو */
+.z-file { display: flex; align-items: flex-start; gap: 16px; margin-block-start: 16px; }
+.z-thumb { flex: none; width: 48px; height: 64px; }
+.z-thumb rect { fill: var(--jy-paper); stroke: var(--jy-green-300); stroke-width: 1.5; }
+.z-thumb path { fill: none; stroke: var(--jy-green-200); stroke-width: 2.5; stroke-linecap: round; }
+.z-thumb .h { stroke: var(--jy-green-400); }
+.z-file__body { flex: 1; min-width: 0; }
+.z-file__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.z-file__meta { font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
+.z-file > .btn--icon { margin-block-start: -8px; margin-inline-end: -10px; color: var(--muted); }
+.z-badge {
+  display: inline-flex; align-items: center; gap: 6px; margin-block-start: 8px; padding: 1px 12px;
+  border-radius: var(--jy-radius-full); font-size: var(--fs-xs); font-weight: 600; line-height: 1.8;
+}
+.z-badge .i { width: 16px; height: 16px; }
+.z-badge--ok { background: var(--jy-success-bg); color: var(--jy-success-text); }
+.z-prog { margin-block-start: 10px; }
+.z-prog__row { display: flex; justify-content: space-between; gap: 12px; margin-block-end: 6px; font-size: var(--fs-xs); color: var(--muted); }
+.z-prog__row .num { flex: none; white-space: nowrap; }
+.z-note { display: flex; align-items: flex-start; gap: 10px; margin-block-start: 16px; padding: 12px 14px; border-radius: var(--jy-radius-md); font-size: var(--fs-xs); line-height: 1.8; }
+.z-note .i { margin-block-start: 1px; }
+.z-note--warning { background: var(--jy-warning-bg); }
+.z-note--warning .i { color: var(--jy-warning-text); }
+.z-note--info { background: var(--jy-info-bg); }
+.z-note--info .i { color: var(--jy-info-text); }
+.z-add {
+  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; margin-block-start: 16px;
+  border: 2px dashed var(--jy-green-500); border-radius: var(--jy-radius-md);
+  color: var(--jy-green-700); font-weight: 600; cursor: pointer;
+  transition: background-color var(--jy-dur-fast) var(--jy-ease);
+}
+.z-add:hover { background: var(--jy-green-50); border-style: solid; }
+.z-add:has(input:focus-visible) { outline: 2px solid var(--jy-focus-outer); outline-offset: 2px; box-shadow: 0 0 0 2px var(--jy-focus-inner); }
+
+/* تنظیمات چاپ */
+/* جداکننده روی ظرف است، نه روی fieldset: legend همیشه روی لبهٔ بالای fieldset می‌نشیند */
+.z-fs { min-width: 0; margin: 0; padding: 0; border: 0; }
+.z-field + .z-field { margin-block-start: 20px; padding-block-start: 20px; border-block-start: 1px solid var(--jy-green-100); }
+.z-card__title + .z-field { margin-block-start: 16px; }
+.z-field__label { padding: 0; font-weight: 600; }
+.z-field__hint { display: flex; align-items: center; gap: 6px; margin-block-start: 10px; font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
+.z-field__hint .i { width: 16px; height: 16px; }
+.z-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-block-start: 10px; }
+.z-tile {
+  position: relative; display: flex; flex-direction: column; justify-content: center; min-height: 72px;
+  padding: 12px 16px; padding-inline-start: 48px;
+  background: var(--jy-paper); border: 1px solid var(--jy-green-200); border-radius: var(--jy-radius-md);
+  line-height: 1.6; cursor: pointer; transition: border-color var(--jy-dur-fast) var(--jy-ease);
+}
+.z-tile:hover { border-color: var(--jy-green-400); }
+.z-tile .radio { position: absolute; inset-inline-start: 16px; inset-block-start: calc(50% - 10px); }
+.z-tile:has(.radio:checked) { padding: 11px 15px; padding-inline-start: 47px; background: var(--jy-green-50); border: 2px solid var(--jy-green-600); }
+.z-tile:has(.radio:checked) .radio { inset-inline-start: 15px; }
+.z-tile:has(.radio:focus-visible) { outline: 2px solid var(--jy-focus-outer); outline-offset: 2px; box-shadow: 0 0 0 2px var(--jy-focus-inner); }
+.z-tile .radio:focus-visible { outline: 0; box-shadow: inset 0 0 0 4px var(--jy-paper); }
+.z-tile__title { font-weight: 600; }
+@media (max-width: 520px) { .z-tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; } .z-tile { min-height: 64px; } }
+.z-tile__note { font-size: var(--fs-xs); color: var(--muted); }
+.z-tile__delta { font-size: var(--fs-xs); font-weight: 600; color: var(--jy-green-700); }
+.z-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.z-row__value { display: flex; align-items: center; gap: 8px; }
+.z-row__value .i { color: var(--jy-green-600); }
+.z-stepper { display: inline-flex; align-items: stretch; border: 1px solid var(--jy-green-500); border-radius: var(--jy-radius-md); }
+.z-stepper button {
+  display: grid; place-items: center; width: 44px; min-height: 44px; padding: 0;
+  border: 0; background: var(--jy-paper); color: var(--jy-green-700); cursor: pointer;
+}
+.z-stepper button:first-child { border-start-start-radius: 9px; border-end-start-radius: 9px; }
+.z-stepper button:last-child { border-start-end-radius: 9px; border-end-end-radius: 9px; }
+.z-stepper button:hover { background: var(--jy-green-50); }
+.z-stepper button[aria-disabled="true"] { color: var(--jy-green-400); background: var(--jy-paper); cursor: not-allowed; }
+.z-stepper output { display: grid; place-items: center; min-width: 56px; border-inline: 1px solid var(--jy-green-200); font-size: var(--fs-h4); font-weight: 600; }
+
+/* خلاصهٔ سفارش */
+.z-sum__title { font-size: var(--fs-h4); }
+.z-lines { margin-block-start: 12px; }
+.z-lines div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 6px; }
+.z-lines dt { color: var(--muted); }
+.z-total { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-block-start: 12px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.z-total__label { font-weight: 600; }
+.z-total__v { font-size: var(--fs-h2); font-weight: 600; line-height: 1.3; white-space: nowrap; }
+.z-total__v small { margin-inline-start: 4px; font-size: var(--fs-base); font-weight: 400; color: var(--muted); }
+.z-ship { display: flex; align-items: flex-start; gap: 8px; margin-block-start: 8px; font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
+.z-ship .i { width: 18px; height: 18px; color: var(--jy-green-600); }
+.z-sum .btn { margin-block-start: 20px; }
+.z-secure { display: flex; align-items: center; justify-content: center; gap: 6px; margin-block-start: 12px; font-size: var(--fs-xs); color: var(--muted); }
+.z-secure .i { width: 16px; height: 16px; }
+@media (max-width: 860px) { .z-sum .btn, .z-secure { display: none; } }
+
+/* نوار قیمت موبایل و تبلت */
+.z-mbar {
+  position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 20;
+  padding-block: 12px; background: var(--jy-paper); border-block-start: 1px solid var(--line); box-shadow: var(--jy-shadow-md);
+}
+@media (min-width: 861px) { .z-mbar { display: none; } }
+.z-mbar__in { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.z-mbar__price { display: flex; flex-direction: column; line-height: 1.3; }
+.z-mbar__label { font-size: var(--fs-xs); color: var(--muted); }
+.z-mbar .z-total__v { font-size: var(--fs-h3); }
+.z-mbar__ship { font-size: var(--fs-xs); color: var(--muted); }
+
+/* بخش‌های پایین */
+.z-sec { padding-block-start: 80px; }
+@media (max-width: 520px) { .z-sec { padding-block-start: 64px; } }
+.z-sec__title { font-size: var(--fs-h2); }
+.z-sec__sub { max-width: 40em; margin-block-start: 8px; color: var(--muted); }
+
+.z-how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-block-start: 40px; }
+.z-how li { position: relative; }
+.z-how__n {
+  position: relative; z-index: 1; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
+  background: var(--jy-green-100); color: var(--jy-green-800); font-size: var(--fs-h4); font-weight: 600;
+}
+.z-how li:not(:last-child)::after {
+  content: ""; position: absolute; inset-block-start: 21px; inset-inline-start: 60px; inset-inline-end: -16px;
+  border-block-start: 2px dashed var(--jy-green-300);
+}
+.z-how h3 { margin-block-start: 16px; font-size: var(--fs-h4); }
+.z-how p { margin-block-start: 4px; color: var(--muted); }
+@media (max-width: 860px) {
+  .z-how { grid-template-columns: minmax(0, 1fr); gap: 28px; margin-block-start: 28px; }
+  .z-how li { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 16px; }
+  .z-how h3 { margin-block-start: 6px; }
+  .z-how li:not(:last-child)::after {
+    inset-block-start: 52px; inset-block-end: -24px; inset-inline-start: 21px; inset-inline-end: auto;
+    border-block-start: 0; border-inline-start: 2px dashed var(--jy-green-300);
+  }
+}
+
+.z-prices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-block-start: 32px; }
+@media (max-width: 860px) { .z-prices { grid-template-columns: minmax(0, 1fr); } }
+.z-price { display: flex; flex-direction: column; padding: 24px; border: 1px solid var(--line); border-radius: var(--jy-radius-lg); }
+.z-price__head { display: flex; align-items: center; gap: 10px; }
+.z-price__head .i { width: 24px; height: 24px; stroke-width: 1.8; color: var(--jy-green-600); }
+.z-price h3 { font-size: var(--fs-base); }
+.z-price dl { margin-block-start: 12px; }
+.z-price dl div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 8px; }
+.z-price dl div + div { border-block-start: 1px solid var(--jy-green-100); }
+.z-price dt { color: var(--muted); }
+.z-price dd { font-weight: 600; }
+.z-price dd small, .z-price__big small { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
+.z-price__big { margin-block-start: 16px; font-size: var(--fs-h3); font-weight: 600; line-height: 1.4; }
+.z-price__note { margin-block-start: auto; padding-block-start: 12px; font-size: var(--fs-xs); color: var(--muted); }
+.z-price details { margin-block-start: 8px; font-size: var(--fs-xs); }
+.z-price summary { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--jy-green-700); font-weight: 600; cursor: pointer; list-style: none; }
+.z-price summary::-webkit-details-marker { display: none; }
+.z-price summary .i { width: 16px; height: 16px; transition: transform var(--jy-dur-base) var(--jy-ease); }
+.z-price details[open] summary .i { transform: rotate(180deg); }
+.z-price table { width: 100%; border-collapse: collapse; }
+.z-price td { padding-block: 5px; border-block-start: 1px solid var(--jy-green-100); color: var(--muted); }
+.z-price td:last-child { text-align: end; color: var(--text); }
+.z-example { display: flex; align-items: flex-start; gap: 10px; margin-block-start: 16px; padding: 14px 16px; border-radius: var(--jy-radius-md); background: var(--jy-green-50); font-size: var(--fs-xs); line-height: 1.8; }
+.z-example .i { color: var(--jy-green-700); margin-block-start: 1px; }
+
+.z-faq { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 48px; align-items: start; }
+@media (max-width: 860px) { .z-faq { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+.z-faq__list { border-block-start: 1px solid var(--line); }
+.z-faq details { border-block-end: 1px solid var(--line); }
+.z-faq summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; padding-block: 12px; font-weight: 600; cursor: pointer; list-style: none; }
+.z-faq summary::-webkit-details-marker { display: none; }
+.z-faq summary .i { color: var(--muted); transition: transform var(--jy-dur-base) var(--jy-ease); }
+.z-faq details[open] summary .i { transform: rotate(180deg); }
+.z-faq details p { max-width: 65ch; padding-block-end: 16px; color: var(--muted); }
+/* پس از فایل، سؤال‌ها کارت ستون اصلی‌اند */
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-faq { grid-template-columns: minmax(0, 1fr); gap: 8px; margin-block-start: 16px; padding: 24px; background: var(--jy-paper); border: 1px solid var(--line); border-radius: var(--jy-radius-lg); }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-faq .z-sec__title { font-size: var(--fs-h4); }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-faq .z-sec__sub { display: none; }
+@media (max-width: 520px) { :where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-faq { padding: 16px; } }
+
+/* پاورقی */
+.z-foot { margin-block-start: 96px; padding-block: 48px 24px; background: var(--jy-green-50); border-block-start: 1px solid var(--line); }
+:where(body:has(#s-busy:checked), body:has(#s-ready:checked)) .z-foot { margin-block-start: 0; }
+.z-foot__in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 48px; }
+.z-foot__brand img { height: 64px; width: auto; }
+.z-foot__brand p { max-width: 24em; margin-block-start: 12px; font-size: var(--fs-xs); line-height: 1.8; color: var(--muted); }
+.z-foot__nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.z-foot__nav h2 { font-size: var(--fs-xs); font-weight: 600; }
+.z-foot__nav a { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; color: var(--muted); text-decoration: none; }
+.z-foot__nav a:hover { color: var(--text); text-decoration: underline; }
+.z-foot__legal { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 24px; margin-block-start: 32px; padding-block-start: 16px; border-block-start: 1px solid var(--line); font-size: var(--fs-xs); color: var(--muted); }
+@media (max-width: 860px) { .z-foot__in { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+@media (max-width: 520px) { .z-foot { margin-block-start: 64px; } }
+</style>
+</head>
+<body>
+<form class="mock" aria-label="حالت طرح نمونه">
+  <span>طرح ز</span>
+  <label><input type="radio" name="mock" id="s-before" checked>پیش از فایل</label>
+  <label><input type="radio" name="mock" id="s-busy">در حال بررسی</label>
+  <label><input type="radio" name="mock" id="s-ready">آماده</label>
+</form>
+
+<div class="z-top">
+  <header class="wrap z-head">
+    <div class="st-before"><a class="z-logo" href="#" aria-label="جزوه‌یار، صفحهٔ اصلی"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></a></div>
+    <div class="st-after"><span class="z-logo"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></span></div>
+    <div class="st-before">
+      <nav class="z-nav" aria-label="پیوندهای صفحه">
+        <a class="z-nav__how" href="#how">چطور کار می‌کند</a>
+        <a href="#tariff">تعرفه</a>
+        <a href="#faq">سؤال‌ها</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="z-hero" aria-labelledby="z-title">
+    <div class="wrap z-hero__grid">
+      <div class="z-hero__text">
+        <div class="st-before"><p class="z-eyebrow">چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران</p></div>
+        <h1 id="z-title" class="z-title"><span class="clause">جزوه‌ات را بینداز،</span> <span class="clause">قیمت را <mark>همین حالا</mark> ببین</span></h1>
+        <div class="st-before"><p class="z-lead">صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم؛ بی‌ثبت‌نام و بی فرم.</p></div>
+      </div>
+
+      <div class="st-before">
+        <label class="z-upload" for="f">
+          <input id="f" class="sr-only" type="file" multiple>
+          <span class="z-drop">
+            <svg class="z-art" viewBox="0 0 160 112" aria-hidden="true">
+              <rect class="s1" x="50" y="12" width="60" height="80" rx="8" transform="rotate(-10 80 52)"/>
+              <rect class="s2" x="50" y="12" width="60" height="80" rx="8" transform="rotate(6 80 52)"/>
+              <rect class="s3" x="50" y="12" width="60" height="80" rx="8"/>
+              <path class="ln ln1" d="M62 28h24"/>
+              <path class="ln" d="M62 40h36M62 50h36M62 60h28M62 70h36"/>
+              <circle class="bd" cx="50" cy="86" r="18"/>
+              <path class="ar" d="M50 95V78M43 84.5l7-7 7 7"/>
+            </svg>
+            <span class="z-drop__title">جزوه‌ات را همین‌جا بینداز</span>
+            <span class="z-drop__sub">فایل را بکش و روی همین کادر رها کن.</span>
+            <span class="z-formats" aria-label="فایل‌های پذیرفته"><span class="z-fmt">PDF</span><span class="z-fmt">Word</span><span class="z-fmt">پاورپوینت</span><span class="z-fmt">عکس</span></span>
+          </span>
+          <span class="z-upload__foot">
+            <span class="btn btn--primary btn--lg btn--block"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M3.5 13.5v2.5h13v-2.5"/></svg>انتخاب فایل</span>
+            <span class="z-upload__hint">چند فایل هم می‌شود؛ پشت‌سرهم در یک جزوه صحافی می‌شوند.</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="st-before">
+        <ul class="z-trust">
+          <li><span class="z-trust__ic"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 2.8h6.6v6.6l-7.6 7.6a1.6 1.6 0 0 1-2.3 0L3 12.7a1.6 1.6 0 0 1 0-2.3z"/><circle cx="13.6" cy="6.4" r="1.2"/></svg></span><span class="z-trust__t"><b>قیمت دقیق، پیش از ثبت‌نام</b><span>شمارهٔ موبایل فقط موقع پرداخت</span></span></li>
+          <li><span class="z-trust__ic"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h11v10H7z"/><path d="M7 7H4.2L1.8 9.6v3.9H7"/><circle cx="14.8" cy="15.4" r="1.9"/><circle cx="4.6" cy="15.4" r="1.9"/></svg></span><span class="z-trust__t"><b>تحویل پست تا <span class="num">2</span> روز کاری</b><span>با کد رهگیری، به سراسر ایران</span></span></li>
+          <li><span class="z-trust__ic"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg></span><span class="z-trust__t"><b>فایلت پیش ما نمی‌ماند</b><span><span class="num">2</span> روز بعد خودکار پاک می‌شود</span></span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="st-after">
+  <nav class="wrap z-flow" aria-label="قدم‌های سفارش">
+    <ol>
+      <li aria-current="step"><span class="z-flow__n num">1</span>جزوه و قیمت</li>
+      <li><span class="z-flow__n num">2</span>آدرس</li>
+      <li><span class="z-flow__n num">3</span>پرداخت</li>
+    </ol>
+  </nav>
+</div>
+
+<main class="wrap z-grid">
+  <div class="z-a">
+    <div class="st-after">
+      <section class="z-card" aria-labelledby="jozve-title">
+        <div class="z-card__head">
+          <h2 id="jozve-title" class="z-card__title">جزوهٔ تو</h2>
+          <span class="z-card__meta"><span class="num">1</span> فایل · <span class="num">120</span> صفحه</span>
+        </div>
+        <div class="z-file">
+          <svg class="z-thumb" viewBox="0 0 48 64" aria-hidden="true"><rect x=".75" y=".75" width="46.5" height="62.5" rx="4"/><path class="h" d="M9 12h22"/><path d="M9 21h30M9 28h30M9 35h22M9 44h30M9 51h16"/></svg>
+          <div class="z-file__body">
+            <p class="z-file__name" dir="auto" title="ریاضی عمومی ۲ - جلسه ۱ تا ۸.pdf">ریاضی عمومی ۲ - جلسه ۱ تا ۸.pdf</p>
+            <p class="z-file__meta"><span class="num">120</span> صفحه · A4 · <span class="num">2.4</span> مگابایت</p>
+            <div class="st-busy">
+              <div class="z-prog">
+                <div class="z-prog__row"><span>در حال بررسی صفحه‌ها…</span><span class="num">64 / 120</span></div>
+                <progress class="progress" max="120" value="64">64 از 120</progress>
+              </div>
+            </div>
+            <div class="st-ready"><p class="z-badge z-badge--ok"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M6.6 10.3l2.3 2.3 4.5-4.7"/></svg>همهٔ صفحه‌ها بررسی شد</p></div>
+          </div>
+          <button type="button" class="btn btn--text btn--icon" aria-label="فایل دیگری بینداز" title="فایل دیگری بینداز"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg></button>
+        </div>
+        <div class="st-ready">
+          <p class="z-note z-note--warning" role="note"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2.8 18 16.6H2Z"/><path d="M10 7.8v4"/><path d="M10 14.4v.01"/></svg><span><b>صفحه‌های <span class="num">3</span> و <span class="num">7</span></b> حاشیهٔ کمی دارند؛ صحافی ممکن است لبهٔ متن را بگیرد.</span></p>
+        </div>
+        <label class="z-add" for="f-add"><input id="f-add" class="sr-only" type="file" multiple><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>افزودن فایل به همین جزوه</label>
+      </section>
+
+      <section class="z-card" aria-labelledby="print-title">
+        <h2 id="print-title" class="z-card__title">تنظیمات چاپ</h2>
+        <div class="z-field"><fieldset class="z-fs">
+          <legend class="z-field__label">رنگ چاپ</legend>
+          <div class="z-tiles">
+            <label class="z-tile"><input class="radio" type="radio" name="color" checked><span class="z-tile__title">سیاه‌سفید</span><span class="z-tile__note"><span class="num">1,600</span> تومان هر صفحه</span></label>
+            <label class="z-tile"><input class="radio" type="radio" name="color"><span class="z-tile__title">رنگی</span><span class="z-tile__note"><span class="num">2,000</span> تومان هر صفحه</span><span class="z-tile__delta"><span class="num">+48,000</span> تومان</span></label>
+          </div>
+          <div class="st-busy"><p class="z-field__hint"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 9.2v5"/><path d="M10 6.2v.01"/></svg>تا اینجا صفحهٔ رنگی‌ای پیدا نشد.</p></div>
+          <div class="st-ready"><p class="z-field__hint"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 9.2v5"/><path d="M10 6.2v.01"/></svg>فایل تماماً سیاه‌سفید است.</p></div>
+        </fieldset></div>
+        <div class="z-field"><fieldset class="z-fs">
+          <legend class="z-field__label">یکرو یا دورو</legend>
+          <div class="z-tiles">
+            <label class="z-tile"><input class="radio" type="radio" name="sides" checked><span class="z-tile__title">دورو</span><span class="z-tile__note"><span class="num">60</span> برگ، جزوهٔ نازک‌تر</span></label>
+            <label class="z-tile"><input class="radio" type="radio" name="sides"><span class="z-tile__title">یکرو</span><span class="z-tile__note"><span class="num">120</span> برگ، همان قیمت</span></label>
+          </div>
+        </fieldset></div>
+        <div class="z-field z-row">
+          <p class="z-field__label">صحافی</p>
+          <p class="z-row__value"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3" width="11" height="14.5" rx="1.5"/><path d="M13 6h3.5M13 9.5h3.5M13 13h3.5"/><path d="M6.5 7h4M6.5 10h4"/></svg>طلق و سیم</p>
+        </div>
+        <div class="z-field z-row">
+          <p class="z-field__label" id="copies-label">تعداد نسخه</p>
+          <div class="z-stepper" role="group" aria-labelledby="copies-label">
+            <button type="button" aria-label="یکی کمتر" aria-disabled="true"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 10h11"/></svg></button>
+            <output class="num" aria-live="polite">1</output>
+            <button type="button" aria-label="یکی بیشتر"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg></button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="st-after">
+    <aside class="z-side" aria-labelledby="sum-title">
+      <div class="z-card z-sum">
+        <h2 id="sum-title" class="z-sum__title">خلاصهٔ سفارش</h2>
+        <dl class="z-lines">
+          <div><dt>چاپ سیاه‌سفید، دورو · <span class="num">120</span> صفحه</dt><dd class="num">192,000</dd></div>
+          <div><dt>صحافی طلق و سیم · <span class="num">60</span> برگ</dt><dd class="num">45,000</dd></div>
+          <div><dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd></div>
+        </dl>
+        <div class="z-total">
+          <span class="st-busy"><span class="z-total__label">قیمت تا این لحظه</span></span>
+          <span class="st-ready"><span class="z-total__label">جمع</span></span>
+          <span class="z-total__v"><span class="num">237,000</span><small>تومان</small></span>
+        </div>
+        <p class="z-ship"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h11v10H7z"/><path d="M7 7H4.2L1.8 9.6v3.9H7"/><circle cx="14.8" cy="15.4" r="1.9"/><circle cx="4.6" cy="15.4" r="1.9"/></svg><span>+ ارسال از <span class="num">129,500</span> تومان. شهر را در قدم بعد انتخاب می‌کنی.</span></p>
+        <div class="st-busy">
+          <p class="z-note z-note--info"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 9.2v5"/><path d="M10 6.2v.01"/></svg><span>بررسی فایل ادامه دارد؛ عدد ممکن است کمی جابه‌جا شود.</span></p>
+          <span class="btn btn--primary btn--lg btn--block is-loading" role="button" aria-disabled="true">در حال بررسی…</span>
+        </div>
+        <div class="st-ready"><a class="btn btn--primary btn--lg btn--block" href="#">ادامه — آدرس و تحویل<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 10H4.5M9 5.5 4.5 10 9 14.5"/></svg></a></div>
+        <p class="z-secure"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg>ثبت‌نام لازم نیست؛ موبایل فقط موقع پرداخت.</p>
+      </div>
+    </aside>
+  </div>
+
+  <div class="z-b">
+    <div class="st-before">
+      <section id="how" class="z-sec" aria-labelledby="how-title">
+        <h2 id="how-title" class="z-sec__title">سه قدم تا جزوهٔ چاپ‌شده</h2>
+        <ol class="z-how">
+          <li><span class="z-how__n num">1</span><div><h3>فایل را بینداز</h3><p><bdi>PDF</bdi>، <bdi>Word</bdi>، پاورپوینت یا عکس؛ چند فایل هم در یک جزوه، به همان ترتیبی که می‌خواهی.</p></div></li>
+          <li><span class="z-how__n num">2</span><div><h3>قیمت را همان لحظه ببین</h3><p>صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم. رنگ، دورو و تعداد را خودت انتخاب می‌کنی.</p></div></li>
+          <li><span class="z-how__n num">3</span><div><h3>آدرس بده و پرداخت کن</h3><p>شمارهٔ موبایل فقط همین‌جا لازم است. تا <span class="num">2</span> روز کاری بعد، جزوه تحویل پست می‌شود.</p></div></li>
+        </ol>
+      </section>
+
+      <section id="tariff" class="z-sec" aria-labelledby="tariff-title">
+        <h2 id="tariff-title" class="z-sec__title">تعرفه، بی هزینهٔ پنهان</h2>
+        <p class="z-sec__sub">همان عددهایی که موقع سفارش حساب می‌شوند. قیمت کامل را پیش از هر ثبت‌نامی می‌بینی.</p>
+        <div class="z-prices">
+          <article class="z-price">
+            <div class="z-price__head"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7.5V3h8v4.5"/><rect x="3" y="7.5" width="14" height="6.5" rx="1.5"/><path d="M6 12h8v5H6z"/></svg><h3>چاپ، هر رو</h3></div>
+            <dl>
+              <div><dt>سیاه‌سفید</dt><dd><span class="num">1,600</span> <small>تومان</small></dd></div>
+              <div><dt>رنگی</dt><dd><span class="num">2,000</span> <small>تومان</small></dd></div>
+            </dl>
+            <p class="z-price__note">کاغذ تحریر <span class="num">80</span> گرم. هر برگ در چاپ دورو دو صفحه است.</p>
+          </article>
+          <article class="z-price">
+            <div class="z-price__head"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3" width="11" height="14.5" rx="1.5"/><path d="M13 6h3.5M13 9.5h3.5M13 13h3.5"/><path d="M6.5 7h4M6.5 10h4"/></svg><h3>صحافی طلق و سیم</h3></div>
+            <p class="z-price__big">از <span class="num">45,000</span> <small>تومان</small></p>
+            <details>
+              <summary>بر اساس تعداد برگ<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+              <table>
+                <tr><td>تا <span class="num">150</span> برگ</td><td class="num">45,000</td></tr>
+                <tr><td><span class="num">151</span> تا <span class="num">300</span></td><td class="num">50,000</td></tr>
+                <tr><td><span class="num">301</span> تا <span class="num">450</span></td><td class="num">55,000</td></tr>
+                <tr><td><span class="num">451</span> تا <span class="num">600</span></td><td class="num">62,000</td></tr>
+                <tr><td><span class="num">601</span> تا <span class="num">700</span></td><td class="num">68,000</td></tr>
+                <tr><td><span class="num">701</span> تا <span class="num">800</span></td><td class="num">78,000</td></tr>
+              </table>
+            </details>
+            <p class="z-price__note">بالای <span class="num">800</span> برگ خودکار چند جلد می‌شود.</p>
+          </article>
+          <article class="z-price">
+            <div class="z-price__head"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5h11v10H7z"/><path d="M7 7H4.2L1.8 9.6v3.9H7"/><circle cx="14.8" cy="15.4" r="1.9"/><circle cx="4.6" cy="15.4" r="1.9"/></svg><h3>ارسال با پست پیشتاز</h3></div>
+            <dl>
+              <div><dt>تهران</dt><dd>از <span class="num">129,500</span> <small>تومان</small></dd></div>
+              <div><dt>شهرهای دیگر</dt><dd>از <span class="num">137,750</span> <small>تومان</small></dd></div>
+            </dl>
+            <p class="z-price__note">شهر را در قدم آدرس انتخاب می‌کنی؛ کرایه تقریباً همین است.</p>
+          </article>
+        </div>
+        <p class="z-example"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 9.2v5"/><path d="M10 6.2v.01"/></svg><span>مثال: جزوهٔ <span class="num">120</span> صفحه‌ای، سیاه‌سفید و دورو (<span class="num">60</span> برگ): چاپ <span class="num">192,000</span> و صحافی <span class="num">45,000</span>، روی هم <b><span class="num">237,000</span> تومان</b> به‌علاوهٔ ارسال.</span></p>
+      </section>
+    </div>
+
+    <section id="faq" class="z-sec z-faq" aria-labelledby="faq-title">
+      <div>
+        <h2 id="faq-title" class="z-sec__title">سؤال‌های پرتکرار</h2>
+        <p class="z-sec__sub">دربارهٔ قیمت، فایل و ارسال.</p>
+      </div>
+      <div class="z-faq__list">
+        <details><summary>قیمت چاپ جزوه چطور حساب می‌شود؟<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+          <p>به‌ازای هر صفحهٔ چاپ‌شده: سیاه‌سفید <span class="num">1,600</span> تومان و رنگی <span class="num">2,000</span> تومان. هزینهٔ صحافی جدا و بر اساس تعداد برگ محاسبه می‌شود. قیمت نهایی را قبل از هر ثبت‌نامی روی صفحه می‌بینید.</p></details>
+        <details><summary>باید تعداد صفحات را خودم بشمارم؟<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+          <p>نه. فایل را که انداختید، سایت خودش تعداد صفحات، اندازهٔ کاغذ و صفحات رنگی را تشخیص می‌دهد و قیمت را نشان می‌دهد.</p></details>
+        <details><summary>چه فایل‌هایی را می‌توانم بفرستم؟<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+          <p><bdi>PDF</bdi>، <bdi>Word</bdi>، پاورپوینت و عکس اسکن‌شده. فایل PDF همان لحظه در مرورگر خوانده می‌شود و بقیه سمت سرور تبدیل می‌شوند. چند فایل را هم می‌شود با هم انداخت: به ترتیبی که می‌خواهید پشت‌سرهم در یک جزوه صحافی می‌شوند و فقط یک بار هزینهٔ صحافی می‌گیرند.</p></details>
+        <details><summary>فایلم کجا می‌رود و چقدر نگه داشته می‌شود؟<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+          <p>قیمت را خود مرورگرتان حساب می‌کند. بعد از آن، فایل برای چاپ به سرور جزوه‌یار فرستاده می‌شود — اگر اینترنت قطع شد، از همان‌جا ادامه می‌دهد. فایل دو روز بعد خودکار پاک می‌شود و هیچ‌جای دیگری نمی‌رود.</p></details>
+        <details><summary>ارسال چقدر طول می‌کشد؟<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+          <p>تعهد ما این است که سفارش حداکثر دو روز کاری پس از پرداخت به پست تحویل داده شود. بعد از آن کد رهگیری پستی برایتان ارسال می‌شود تا خودتان مسیر مرسوله را ببینید.</p></details>
+        <details><summary>برای گرفتن قیمت باید ثبت‌نام کنم؟<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4"/></svg></summary>
+          <p>نه. قیمت قبل از هر ثبت‌نامی نشان داده می‌شود. شماره موبایل فقط در لحظهٔ پرداخت گرفته می‌شود، با کد پیامکی و بدون رمز.</p></details>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="st-after">
+  <div class="z-mbar" role="region" aria-label="قیمت">
+    <div class="wrap z-mbar__in">
+      <div class="z-mbar__price">
+        <span class="st-busy"><span class="z-mbar__label">قیمت تا این لحظه</span></span>
+        <span class="st-ready"><span class="z-mbar__label">جمع</span></span>
+        <span class="z-total__v"><span class="num">237,000</span><small>تومان</small></span>
+        <span class="z-mbar__ship">+ ارسال از <span class="num">129,500</span> تومان</span>
+      </div>
+      <div class="st-busy"><span class="btn btn--primary btn--lg is-loading" role="button" aria-disabled="true">بررسی…</span></div>
+      <div class="st-ready"><a class="btn btn--primary btn--lg" href="#" aria-label="ادامه — آدرس و تحویل">ادامه<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 10H4.5M9 5.5 4.5 10 9 14.5"/></svg></a></div>
+    </div>
+  </div>
+</div>
+
+<footer class="z-foot">
+  <div class="wrap">
+    <div class="z-foot__in">
+      <div class="z-foot__brand">
+        <img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435" loading="lazy">
+        <p>چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
+      </div>
+      <nav class="z-foot__nav" aria-label="پیوندهای پاورقی">
+        <div><h2>جزوه‌یار</h2><ul><li><a href="#" target="_blank" rel="noopener">دربارهٔ ما</a></li><li><a href="#" target="_blank" rel="noopener">تماس</a></li></ul></div>
+        <div><h2>قوانین</h2><ul><li><a href="#" target="_blank" rel="noopener">قوانین و مقررات</a></li><li><a href="#" target="_blank" rel="noopener">حریم خصوصی</a></li></ul></div>
+      </nav>
+    </div>
+    <div class="z-foot__legal">
+      <p>مسئولیت محتوای فایل ارسالی بر عهدهٔ سفارش‌دهنده است.</p>
+      <p>© <span class="num">1405</span> جزوه‌یار</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
