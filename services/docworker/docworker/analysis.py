@@ -44,9 +44,13 @@ MIN_SAFE_MARGIN_MM = 10
 
 # همان `ANALYSIS_REVISION` و `DPI_MIN_PAGE_COVERAGE` در packages/analysis؛ تست هم‌ارزی
 # هر دو را می‌سنجد. ۲: DPI از جای واقعی تصویر روی صفحه، نه از اندازهٔ کل صفحه؛ و رندر
-# سرور روی همان شبکهٔ پیکسل مرورگر (`pdf.py`، ADR-029).
-ANALYSIS_REVISION = 2
+# سرور روی همان شبکهٔ پیکسل مرورگر (`pdf.py`، ADR-029). ۳: رنگ کاغذ با همان روشنایی
+# گردشدهٔ هیستوگرام (`estimate_paper_cast`)، و تعادل سفیدی فقط روی ته‌رنگ روشن (ADR-009، اصلاح).
+ANALYSIS_REVISION = 3
 DPI_MIN_PAGE_COVERAGE = 0.2
+# همان `PAPER_CAST_MIN_LUMA`: ته‌رنگ تیره‌تر از خاکستری میانی کاغذ نیست (زمینهٔ اسلاید تیره،
+# صفحهٔ سیاه) و خنثی نمی‌شود؛ وگرنه زمینهٔ تیره سفید و صفحه «خالی» می‌شد (ADR-026، اصلاح).
+PAPER_CAST_MIN_LUMA = 128
 
 
 def placement_dpi(placement: dict) -> float | None:
@@ -106,14 +110,17 @@ def _channels(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def estimate_paper_cast(rgb: np.ndarray, sample_ratio: float) -> tuple[float, float, float]:
-    """میانگین روشن‌ترین دهک — همان `estimatePaperCast`."""
+    """میانگین روشن‌ترین دهک — همان `estimatePaperCast`.
+
+    هیستوگرام و انتخاب پیکسل‌ها هر دو با روشنایی گردشده؛ با روشنایی خام، زمینهٔ
+    یکدستی که کسر روشنایی‌اش ۰٫۵ یا بیشتر است کلاً از برآورد بیرون می‌افتاد."""
     r, g, b = _channels(rgb)
     pixel_count = r.size
     if pixel_count == 0:
         return (255.0, 255.0, 255.0)
 
-    l = _luma(r, g, b)
-    histogram = np.bincount(_js_round(l).astype(np.int64), minlength=256)
+    rounded = _js_round(_luma(r, g, b))
+    histogram = np.bincount(rounded.astype(np.int64), minlength=256)
 
     wanted = max(1, int(np.floor(pixel_count * sample_ratio)))
     cutoff = 255
@@ -124,7 +131,7 @@ def estimate_paper_cast(rgb: np.ndarray, sample_ratio: float) -> tuple[float, fl
             cutoff = level
             break
 
-    mask = l >= cutoff
+    mask = rounded >= cutoff
     count = int(mask.sum())
     if count == 0:
         return (255.0, 255.0, 255.0)
@@ -148,7 +155,9 @@ def analyze_pixels(rgb: np.ndarray, thresholds: dict[str, float]) -> PixelStats:
         return PixelStats((255.0, 255.0, 255.0), 0.0, 0.0, 0.0, 0)
 
     paper_cast = estimate_paper_cast(rgb, thresholds["paperSampleRatio"])
-    gain = [255 / c if c > 1 else 1 for c in paper_cast]
+    # فقط روی کاغذ؛ روشنایی با همان عبارت و ترتیب TS، پس مرز در هر دو طرف یکی است.
+    paper = 0.299 * paper_cast[0] + 0.587 * paper_cast[1] + 0.114 * paper_cast[2] >= PAPER_CAST_MIN_LUMA
+    gain = [255 / c if paper and c > 1 else 1 for c in paper_cast]
 
     r = np.minimum(255, r0 * gain[0])
     g = np.minimum(255, g0 * gain[1])

@@ -26,6 +26,7 @@ import { DEFAULT_THRESHOLDS, type DetectionThresholds } from '@jozveyar/contract
 
 import {
   ANALYSIS_REVISION,
+  PAPER_CAST_MIN_LUMA,
   analyzePixels,
   isBlankPage,
   isColorPage,
@@ -98,6 +99,27 @@ export const SPECS: ImageSpec[] = [
   { name: 'gray_scan', width: 120, height: 170, seed: 16, paper: [200, 200, 202], ink: [60, 60, 60], lineEvery: 7, lineHeight: 3, noise: 4 },
   { name: 'noisy_photo', width: 90, height: 130, seed: 17, paper: [128, 128, 128], ink: [0, 0, 0], lineEvery: 0, lineHeight: 0, noise: 100 },
   { name: 'dark_page', width: 60, height: 80, seed: 18, paper: [18, 18, 20], ink: [240, 240, 240], lineEvery: 6, lineHeight: 1, noise: 2 },
+  // زمینهٔ زرد یکدست بی‌نویز، مثل رندر یک PDF برداری. روشنایی اولی 238.43 است و دومی
+  // 238.54: نسخهٔ ۲ دومی را، که کسرش از ۰٫۵ بیشتر است، کلاً از برآورد کاغذ بیرون می‌انداخت و
+  // کل صفحه رنگی می‌شد (ANALYSIS_REVISION ۳).
+  { name: 'flat_yellow_200', width: 120, height: 170, seed: 19, paper: [250, 240, 200], ink: [40, 40, 42], lineEvery: 9, lineHeight: 2, noise: 0 },
+  { name: 'flat_yellow_201', width: 120, height: 170, seed: 20, paper: [250, 240, 201], ink: [40, 40, 42], lineEvery: 9, lineHeight: 2, noise: 0 },
+  // اسلاید تیره با یک تیتر سفید کوچک: روشن‌ترین دهک تقریباً همه زمینه است. زمینهٔ تیره
+  // کاغذ نیست و خنثی نمی‌شود (`PAPER_CAST_MIN_LUMA`)؛ وگرنه سفید و صفحه «خالی» می‌شد.
+  {
+    name: 'dark_slide_title',
+    width: 120, height: 170, seed: 21, paper: [40, 40, 46], ink: [0, 0, 0], lineEvery: 0, lineHeight: 0, noise: 0,
+    highlight: { x0: 10, y0: 10, x1: 30, y1: 14, color: [255, 255, 255] },
+  },
+  {
+    name: 'navy_slide_title',
+    width: 120, height: 170, seed: 22, paper: [26, 38, 89], ink: [0, 0, 0], lineEvery: 0, lineHeight: 0, noise: 0,
+    highlight: { x0: 10, y0: 10, x1: 30, y1: 14, color: [255, 255, 255] },
+  },
+  // دو سوی مرز کاغذ: روشنایی خاکستری ۱۲۸ در اعشار 127.99999999999999 است، پس هنوز کاغذ نیست؛
+  // ۱۲۹ هست. هر دو پیاده‌سازی باید مرز را با همان عبارت و همان ترتیب بسنجند.
+  { name: 'gray_128_text', width: 120, height: 170, seed: 23, paper: [128, 128, 128], ink: [20, 20, 20], lineEvery: 9, lineHeight: 2, noise: 0 },
+  { name: 'gray_129_text', width: 120, height: 170, seed: 24, paper: [129, 129, 129], ink: [20, 20, 20], lineEvery: 9, lineHeight: 2, noise: 0 },
 ];
 
 interface Vector {
@@ -191,6 +213,29 @@ describe('بردارهای هم‌ارزی مرورگر و کارگر', () => {
     expect(byName.red_highlight!.color).toBe(true);
     expect(byName.green_marker_on_yellow!.color).toBe(true);
     expect(byName.blank_white!.blank).toBe(true);
+  });
+
+  it('زمینهٔ یکدست، هر کسری که روشنایی‌اش داشته باشد، رنگ کاغذ است نه رنگ چاپ', () => {
+    const byName = Object.fromEntries(compute().vectors.map((v) => [v.spec.name, v]));
+    for (const name of ['flat_yellow_200', 'flat_yellow_201']) {
+      const vector = byName[name]!;
+      expect(vector.color, name).toBe(false);
+      // رنگ کاغذ دقیقاً خود زمینه است، نه سفیدی پیش‌فرضی که یعنی «کاغذی پیدا نشد».
+      expect(vector.stats.paperCast, name).toEqual(vector.spec.paper);
+      expect(vector.stats.colorRatio, name).toBe(0);
+    }
+  });
+
+  it('زمینهٔ تیره کاغذ نیست: اسلاید تیره با تیتر خالی نیست و اسلاید سرمه‌ای رنگی است', () => {
+    const byName = Object.fromEntries(compute().vectors.map((v) => [v.spec.name, v]));
+    expect(byName.dark_slide_title!).toMatchObject({ blank: false, color: false });
+    expect(byName.navy_slide_title!).toMatchObject({ blank: false, color: true });
+    // صفحهٔ یکدست تیره همچنان «سفید» است (ADR-026): آنجا کاغذ روشن، خط سفید است.
+    expect(byName.dark_page!).toMatchObject({ blank: true, color: false });
+    // مرز: خاکستری ۱۲۸ خنثی نمی‌شود و زمینه‌اش مرکب است؛ ۱۲۹ خنثی می‌شود و فقط خط‌ها می‌مانند.
+    expect(byName.gray_128_text!.stats.inkRatio).toBeGreaterThan(0.5);
+    expect(byName.gray_129_text!.stats.inkRatio).toBeLessThan(0.5);
+    expect(PAPER_CAST_MIN_LUMA).toBe(128);
   });
 
   it('DPI از جای واقعی تصویر؛ لوگوی کوچک هشدار کیفیت نمی‌سازد', () => {
