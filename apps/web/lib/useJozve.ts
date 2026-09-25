@@ -42,6 +42,9 @@ function browserDeps(): JozveDeps {
   };
 }
 
+/** جزوه و کارهای کاربر روی آن، همان که پوستهٔ فلوی سفارش به رابط پس از فایل می‌دهد. */
+export type JozveHandle = ReturnType<typeof useJozve>;
+
 /** جزوهٔ این صفحه: فهرست فایل‌ها و کارهای کاربر روی آن. */
 export function useJozve() {
   const [jozve] = useState(() => createJozve(browserDeps()));

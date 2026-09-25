@@ -3,10 +3,11 @@
 import { useRef, type ReactNode } from 'react';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { formatNumber } from '@jozveyar/text';
-import type { JozveView, SectionView } from '../lib/jozve';
+import type { JozveView, SectionView } from '../lib/jozveView';
 import { AddFiles } from './AddFiles';
 import { CardHead, DoneBadge, FileInfo, FileName, Note, Warnings, uploadLine } from './AnalysisCard';
 import { ACCEPT } from './DropZone';
+import { Inline } from './Inline';
 
 interface Props {
   view: JozveView;
@@ -148,8 +149,12 @@ function SectionRow({
       <div className="ms-9 mt-3 flex flex-col gap-2 empty:hidden">
         {blocked ? (
           <Note tone="error" testId="section-blocked">
-            <p className="font-semibold">{blocked.title}</p>
-            <p className="mt-1">{blocked.hint}</p>
+            <p className="font-semibold">
+              <Inline text={blocked.title} />
+            </p>
+            <p className="mt-1">
+              <Inline text={blocked.hint} />
+            </p>
             <p className="mt-1">تا تکلیف این فایل روشن نشود، قیمت بدون آن است.</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" onClick={() => onReplace(key)} className="jy-btn jy-btn--primary">

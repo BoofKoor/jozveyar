@@ -12,10 +12,10 @@ import {
   initialAnalysis,
   isFileError,
   isServerPath,
-  summarize,
   toServerPath,
   type AnalysisState,
 } from './fileAnalysis';
+import { summarize } from './fileSummary';
 
 function page(n: number, warnings: PageWarning[] = [], size: [number, number] = [595, 842]): PageAnalysis {
   return {

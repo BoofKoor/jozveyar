@@ -7,17 +7,8 @@ import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { INITIAL, type AnalysisState } from './fileAnalysis';
-import {
-  jozveCounted,
-  jozveSpec,
-  jozveView,
-  moveSection,
-  nextAnalysisJob,
-  nextUpload,
-  orderBatch,
-  sectionView,
-  type Section,
-} from './jozve';
+import { jozveCounted, moveSection, nextAnalysisJob, nextUpload, orderBatch, type Section } from './jozve';
+import { jozveSpec, jozveView, sectionView } from './jozveView';
 import type { UploadSnapshot } from './upload/client';
 
 const CONFIG = {

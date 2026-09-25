@@ -2,21 +2,19 @@
 
 import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
-import type { ColorMode, PriceList, SidesMode } from '@jozveyar/contracts';
+import type { Breakdown, PriceList } from '@jozveyar/contracts';
 import type { Sentence } from '../lib/fileCard';
-
-export interface OrderConfig {
-  colorMode: ColorMode;
-  sidesMode: SidesMode;
-  bindingTypeId: string;
-  paperTypeId: string;
-  copies: number;
-}
+import type { OrderConfig } from '../lib/orderConfig';
 
 interface Props {
   config: OrderConfig;
   onChange: (next: OrderConfig) => void;
   priceList: PriceList;
+  /**
+   * قیمت همین جزوه با انتخاب‌های دیگر، با همان `quote()` قیمت اصلی: اثر هر گزینه روی قیمت و برگ‌های
+   * یکرو و دورو از همین می‌آید، نه از حسابی دیگر (قاعدهٔ ۱). null یعنی هنوز صفحه‌ای شمرده نشده.
+   */
+  quoteFor: (config: OrderConfig) => Breakdown | null;
   /**
    * صفحه‌های رنگی جزوه، کنار انتخاب رنگ (`colorHint` در lib/fileCard.ts): حکم قطعی فقط بعد از
    * بررسی همهٔ صفحه‌ها. رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030).
@@ -24,160 +22,205 @@ interface Props {
   colorHint: Sentence;
 }
 
-function Field({
-  label,
-  hint,
-  hintTestId,
+interface Option<T extends string> {
+  value: T;
+  title: string;
+  note?: ReactNode;
+  disabled?: boolean;
+}
+
+/**
+ * یک انتخاب با کاشی‌های رادیوی واقعی (`jy-tile` و `jy-radio`، طرح ز): کلید جهت بین گزینه‌ها
+ * می‌رود و کلیک هر جای کاشی انتخابش می‌کند. زیر هر گزینهٔ دیگر اثرش روی قیمت می‌آید.
+ */
+function Tiles<T extends string>({
+  legend,
+  name,
+  value,
+  options,
+  onSelect,
+  effectOf,
   children,
 }: {
-  label: string;
-  hint?: ReactNode;
-  hintTestId?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="border-t border-line py-5 first:border-t-0 first:pt-0">
-      <div className="mb-3">
-        <h3 className="font-semibold text-ink">{label}</h3>
-        {hint ? (
-          <p data-testid={hintTestId} className="mt-1 text-sm text-muted">
-            {hint}
-          </p>
-        ) : null}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Choice<T extends string>({
-  options,
-  value,
-  onSelect,
-  name,
-}: {
-  options: { value: T; label: string; note?: ReactNode; disabled?: boolean }[];
-  value: T;
-  onSelect: (value: T) => void;
+  legend: string;
   name: string;
+  value: T;
+  options: Option<T>[];
+  onSelect: (value: T) => void;
+  /** اثر گزینهٔ دیگر روی قیمت، خط جدای زیر کاشی. */
+  effectOf?: (value: T) => ReactNode;
+  children?: ReactNode;
 }) {
   return (
-    <div role="radiogroup" aria-label={name} className="flex flex-wrap gap-2">
-      {options.map((option) => {
-        const selected = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            disabled={option.disabled}
-            onClick={() => onSelect(option.value)}
-            className={`flex flex-col items-start gap-0.5 rounded-md text-start text-ink transition-colors disabled:cursor-not-allowed disabled:border-line disabled:bg-green-50 disabled:text-green-500 ${
-              selected
-                ? 'border-2 border-accent bg-green-50 px-[15px] py-[9px] font-semibold'
-                : 'border border-line bg-card px-4 py-2.5 hover:border-green-400'
-            }`}
-          >
-            <span>{option.label}</span>
-            {option.note ? <span className="text-xs text-muted">{option.note}</span> : null}
-          </button>
-        );
-      })}
+    // جداکننده روی ظرف است، نه روی fieldset: legend همیشه روی لبهٔ بالای fieldset می‌نشیند
+    <div className="home-field">
+      <fieldset className="min-w-0">
+        <legend className="home-field__label">{legend}</legend>
+        <div className="jy-tiles home-tiles">
+          {options.map((option) => {
+            const selected = option.value === value;
+            const effect = selected || option.disabled ? null : effectOf?.(option.value);
+            return (
+              <label key={option.value} className="jy-tile">
+                <input
+                  type="radio"
+                  name={name}
+                  value={option.value}
+                  checked={selected}
+                  disabled={option.disabled}
+                  onChange={() => onSelect(option.value)}
+                  className="jy-radio"
+                />
+                <span className="jy-tile__title">{option.title}</span>
+                {option.note ? <span className="jy-tile__note">{option.note}</span> : null}
+                {effect ? <span className="jy-tile__delta">{effect}</span> : null}
+              </label>
+            );
+          })}
+        </div>
+        {children}
+      </fieldset>
     </div>
   );
 }
 
-/** «1,600 هر صفحه»: فقط عدد در span خودش. */
+/** «1,600 تومان هر صفحه»: فقط عدد در span خودش. */
 function perPage(rials: number) {
   return (
     <>
-      <span className="num">{formatTomans(rials, false)}</span> هر صفحه
+      <span className="num">{formatTomans(rials, false)}</span> تومان هر صفحه
     </>
   );
 }
 
-export function ConfigPanel({ config, onChange, priceList, colorHint }: Props) {
-  const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) =>
-    onChange({ ...config, [key]: value });
+/**
+ * «تنظیمات چاپ» (طرح ز، docs/UI.md بخش ۴): رنگ و یکرو یا دورو با کاشی، صحافی به شکل متن وقتی یک
+ * گزینه بیشتر ندارد، و شمارندهٔ یک‌تکهٔ تعداد نسخه (`jy-stepper`).
+ */
+export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }: Props) {
+  const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) => onChange({ ...config, [key]: value });
+  const current = quoteFor(config);
 
-  const bindingOptions = Object.entries(priceList.bindingTypes).map(([id, binding]) => ({
-    value: id,
-    label: binding.nameFa,
-    disabled: !binding.enabled,
-    note: binding.enabled ? undefined : 'فعلاً موجود نیست',
-  }));
+  /** «+48,000 تومان»، «همان قیمت»، «−48,000 تومان»: قیمت جزوه با یک گزینهٔ دیگر، منهای قیمت امروز. */
+  const effectOf =
+    <K extends keyof OrderConfig>(key: K) =>
+    (value: OrderConfig[K]): ReactNode => {
+      const other = quoteFor({ ...config, [key]: value });
+      if (!current || !other) return null;
+      const deltaRials = other.totalWithoutShippingRials - current.totalWithoutShippingRials;
+      if (deltaRials === 0) return 'همان قیمت';
+      return (
+        <>
+          <span className="num">
+            {deltaRials > 0 ? '+' : '−'}
+            {formatTomans(Math.abs(deltaRials), false)}
+          </span>{' '}
+          تومان
+        </>
+      );
+    };
 
-  const paperOptions = Object.entries(priceList.paperTypes).map(([id, paper]) => ({
-    value: id,
-    label: paper.nameFa,
-    disabled: !paper.enabled,
-  }));
+  /** برگ‌های جزوه در یکرو یا دورو، از همان `quote()`. */
+  const sheets = (sidesMode: OrderConfig['sidesMode']) => quoteFor({ ...config, sidesMode })?.items[0]?.sheets ?? 0;
+  const [doubleSheets, singleSheets] = [sheets('double'), sheets('single')];
+  /**
+   * یادداشت کاشی یکرو و دورو، مثل طرح ز: برگ‌ها، و برای گزینهٔ دیگر اثرش روی قیمت در همان خط («120 برگ،
+   * همان قیمت»)؛ دوروی انتخاب‌شده «جزوهٔ نازک‌تر». اثر رنگ جداست، چون عددش درشت است و خودش خبر است.
+   */
+  const sidesNote = (sidesMode: OrderConfig['sidesMode'], count: number) => {
+    const effect = sidesMode === config.sidesMode ? null : effectOf('sidesMode')(sidesMode);
+    const thinner = sidesMode === 'double' && doubleSheets < singleSheets;
+    return (
+      <>
+        <span className="num">{formatNumber(count)}</span> برگ
+        {effect ? <>، {effect}</> : thinner ? '، جزوهٔ نازک‌تر' : null}
+      </>
+    );
+  };
+
+  const bindings = Object.entries(priceList.bindingTypes).filter(([, binding]) => binding.enabled);
+  const papers = Object.entries(priceList.paperTypes);
 
   return (
-    <section className="jy-card">
-      <Field
-        label="رنگ چاپ"
-        hintTestId="color-hint"
-        hint={
-          <>
+    <section className="jy-card" aria-labelledby="print-title">
+      <h2 id="print-title" className="jy-card__title">
+        تنظیمات چاپ
+      </h2>
+
+      <Tiles
+        legend="رنگ چاپ"
+        name="jozve-color"
+        value={config.colorMode}
+        onSelect={(value) => set('colorMode', value)}
+        effectOf={effectOf('colorMode')}
+        options={[
+          { value: 'bw', title: 'سیاه‌سفید', note: perPage(priceList.clickRates.bw ?? 0) },
+          { value: 'color', title: 'رنگی', note: perPage(priceList.clickRates.color ?? 0) },
+        ]}
+      >
+        <p data-testid="color-hint" className="home-field__hint">
+          <span className="jy-icon jy-icon-info" aria-hidden="true" />
+          <span>
             {colorHint.lead}
             {colorHint.count === null ? null : <span className="num">{formatNumber(colorHint.count)}</span>}
             {colorHint.rest}
-          </>
-        }
-      >
-        <Choice
-          name="رنگ چاپ"
-          value={config.colorMode}
-          onSelect={(value) => set('colorMode', value)}
-          options={[
-            { value: 'bw', label: 'سیاه‌سفید', note: perPage(priceList.clickRates.bw ?? 0) },
-            { value: 'color', label: 'رنگی', note: perPage(priceList.clickRates.color ?? 0) },
-          ]}
-        />
-      </Field>
+          </span>
+        </p>
+      </Tiles>
 
-      <Field label="یکرو یا دورو" hint="دورو نصف کاغذ مصرف می‌کند و جزوه نازک‌تر می‌شود.">
-        <Choice
-          name="یکرو یا دورو"
-          value={config.sidesMode}
-          onSelect={(value) => set('sidesMode', value)}
-          options={[
-            { value: 'double', label: 'دورو' },
-            { value: 'single', label: 'یکرو' },
-          ]}
-        />
-      </Field>
+      <Tiles
+        legend="یکرو یا دورو"
+        name="jozve-sides"
+        value={config.sidesMode}
+        onSelect={(value) => set('sidesMode', value)}
+        options={[
+          { value: 'double', title: 'دورو', note: sidesNote('double', doubleSheets) },
+          { value: 'single', title: 'یکرو', note: sidesNote('single', singleSheets) },
+        ]}
+      />
 
-      <Field label="صحافی">
-        <Choice
-          name="صحافی"
+      {bindings.length > 1 ? (
+        <Tiles
+          legend="صحافی"
+          name="jozve-binding"
           value={config.bindingTypeId}
           onSelect={(value) => set('bindingTypeId', value)}
-          options={bindingOptions}
+          effectOf={effectOf('bindingTypeId')}
+          options={bindings.map(([id, binding]) => ({ value: id, title: binding.nameFa }))}
         />
-      </Field>
+      ) : (
+        // یک گزینه: متن، نه انتخابی که انتخاب نیست
+        <div className="home-field home-row">
+          <p className="home-field__label">صحافی</p>
+          <p className="home-row__value">
+            <span className="jy-icon jy-icon-binding" aria-hidden="true" />
+            {priceList.bindingTypes[config.bindingTypeId]?.nameFa}
+          </p>
+        </div>
+      )}
 
-      {paperOptions.length > 1 ? (
-        <Field label="کاغذ">
-          <Choice
-            name="کاغذ"
-            value={config.paperTypeId}
-            onSelect={(value) => set('paperTypeId', value)}
-            options={paperOptions}
-          />
-        </Field>
+      {papers.length > 1 ? (
+        <Tiles
+          legend="کاغذ"
+          name="jozve-paper"
+          value={config.paperTypeId}
+          onSelect={(value) => set('paperTypeId', value)}
+          effectOf={effectOf('paperTypeId')}
+          options={papers.map(([id, paper]) => ({ value: id, title: paper.nameFa, disabled: !paper.enabled }))}
+        />
       ) : null}
 
-      <Field label="تعداد نسخه">
-        <div className="flex items-center gap-3">
+      <div className="home-field home-row">
+        <p id="copies-label" className="home-field__label">
+          تعداد نسخه
+        </p>
+        {/* − و + بسته هم فوکوس را نگه می‌دارند (aria-disabled، نه disabled)، تا کلید پشت‌سرهم تا ۱ فوکوس را گم نکند */}
+        <div className="jy-stepper" role="group" aria-labelledby="copies-label">
           <button
             type="button"
             aria-label="یکی کمتر"
-            disabled={config.copies <= 1}
-            onClick={() => set('copies', Math.max(1, config.copies - 1))}
-            className="jy-btn jy-btn--secondary jy-btn--icon"
+            aria-disabled={config.copies <= 1}
+            onClick={() => config.copies > 1 && set('copies', config.copies - 1)}
           >
             <span className="jy-icon jy-icon-minus" aria-hidden="true" />
           </button>
@@ -187,24 +230,24 @@ export function ConfigPanel({ config, onChange, priceList, colorHint }: Props) {
             min={1}
             max={1000}
             inputMode="numeric"
+            aria-labelledby="copies-label"
             value={config.copies}
             onChange={(event) => {
               const next = Number(event.target.value);
               if (Number.isFinite(next)) set('copies', Math.min(1000, Math.max(1, Math.trunc(next))));
             }}
-            className="jy-input num w-20 text-center text-lg font-semibold"
+            className="num"
           />
           <button
             type="button"
             aria-label="یکی بیشتر"
-            disabled={config.copies >= 1000}
-            onClick={() => set('copies', Math.min(1000, config.copies + 1))}
-            className="jy-btn jy-btn--secondary jy-btn--icon"
+            aria-disabled={config.copies >= 1000}
+            onClick={() => config.copies < 1000 && set('copies', config.copies + 1)}
           >
             <span className="jy-icon jy-icon-plus" aria-hidden="true" />
           </button>
         </div>
-      </Field>
+      </div>
     </section>
   );
 }

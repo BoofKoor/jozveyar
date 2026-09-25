@@ -1,29 +1,31 @@
 /*
- * ===== صفحهٔ اصلی، از طرح ز (docs/ui/mockups/home-z.html؛ docs/UI.md، ۴الف) =====
+ * ===== صفحهٔ اصلی، از طرح ز (docs/ui/mockups/home-z.html؛ docs/UI.md، ۴الف و ۴ب) =====
  * صفحه‌آرایی خود سایت است، نه جزء کیت؛ پس پیشوندش `home-` است، مثل `site-` سربرگ و پاورقی. اندازه‌ها
  * و فاصله‌ها همان طرح ز است، با توکن‌های packages/ui و نقطه‌های شکست کیت (۵۲۰ و ۸۶۰). رنگ فقط توکن.
  * فقط logical properties.
  *
  * پیش از فایل: نوار بالای green-50 (سربرگ و قهرمان: تیتر، کارت بارگذاری، سه نکتهٔ اطمینان)، و روی
  * سفید سه قدم، تعرفه و سؤال‌ها. پس از فایل (`body:has([data-jozve])`، پایین فایل): کل صفحه green-50
- * است، قهرمان و سه قدم و تعرفه کنار می‌روند، جزیرهٔ سفارش ستون خودش را دارد و سؤال‌ها کارت می‌شوند.
+ * است، قهرمان و سه قدم و تعرفه کنار می‌روند، و `home-more` شبکهٔ سفارش می‌شود: قدم‌های سفارش، کارت‌ها،
+ * خلاصهٔ سفارش در کنار، و سؤال‌ها به شکل کارت.
  */
 @layer components {
   /*
-   * پایهٔ طرح ز، فقط در بخش‌های ثابت همین صفحه: تیتر متوازن، پاراگراف بی تک‌واژهٔ ته خط، و وزن ۶۰۰
-   * برای b. جزیرهٔ سفارش (`.home-hero__order`) بیرون می‌ماند: کارت‌هایش چیدمان خودشان را دارند، و
-   * شکستن متوازن خط در اولین رسم کارت‌ها، درست وسط بازهٔ انداختن فایل تا اولین قیمت است. با `:where()`
-   * وزن انتخاب‌گر عنصر را دارد، مثل خود طرح؛ پس هر کلاس صفحه (مثل ارتفاع خط تیتر) بر آن غلبه می‌کند.
+   * پایهٔ طرح ز، فقط در بخش‌های ثابت همین صفحه (`home-sec`: سه قدم، تعرفه، سؤال‌ها): تیتر متوازن،
+   * پاراگراف بی تک‌واژهٔ ته خط، و وزن ۶۰۰ برای b. رابط پس از فایل بیرون می‌ماند: کارت‌هایش چیدمان
+   * خودشان را دارند، و شکستن متوازن خط در اولین رسم کارت‌ها، درست وسط بازهٔ انداختن فایل تا اولین قیمت
+   * است. با `:where()` وزن انتخاب‌گر عنصر را دارد، مثل خود طرح؛ پس هر کلاس صفحه (مثل ارتفاع خط تیتر)
+   * بر آن غلبه می‌کند.
    */
-  :where(.home-hero__text, .home-more) :is(h1, h2, h3) {
+  :where(.home-hero__text, .home-sec) :is(h1, h2, h3) {
     font-weight: 600;
     line-height: 1.5;
     text-wrap: balance;
   }
-  :where(.home-hero__text, .home-trust, .home-more) p {
+  :where(.home-hero__text, .home-trust, .home-sec) p {
     text-wrap: pretty;
   }
-  :where(.home-trust, .home-more) b {
+  :where(.home-trust, .home-sec) b {
     font-weight: 600;
   }
 
@@ -396,13 +398,16 @@
   }
 
   /*
-   * ===== پس از فایل =====
+   * ===== پس از فایل (۴ب) =====
    * همه با نشانهٔ `data-jozve` جزیرهٔ سفارش و `:has()`، بی JS؛ زمینهٔ green-50 کل صفحه در globals.css.
-   * تیتر فقط برای صفحه‌خوان می‌ماند. جزیرهٔ سفارش و سؤال‌ها یک ستون‌اند، به پهنای فلوی سفارش امروز؛
-   * چیدمان کامل پس از فایل (قدم‌های سفارش، خلاصهٔ چسبان) قدم ۴ب است.
+   * قهرمان جمع می‌شود و تیتر فقط برای صفحه‌خوان می‌ماند؛ سه قدم و تعرفه کنار می‌روند. `home-more` شبکهٔ
+   * سفارش می‌شود (طرح ز): قدم‌های سفارش در ردیف اول، کارت‌ها در ستون اصلی، خلاصهٔ سفارش در ستون کنار و
+   * روی هر دو ردیف، و سؤال‌ها (کارت) زیر کارت‌ها. خلاصه sticky است و sticky فقط تا ته ظرف خودش
+   * می‌چسبد؛ سؤال‌ها در همان شبکه‌اند تا خلاصه تا ته صفحه روی صفحه بماند. تا ۸۶۰ پیکسل یک ستون است:
+   * کارت‌ها، خلاصه، سؤال‌ها؛ و جمع و «ادامه» در نوار ثابت پایین (`home-dock`).
    */
   :where(body:has([data-jozve])) .home-hero {
-    padding-block: 8px 0;
+    padding: 0;
   }
   :where(body:has([data-jozve])) .home-hero__grid {
     display: block;
@@ -422,12 +427,39 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  /* ۶۴۰ پیکسل، همان ستون فلوی سفارش پیش از ۴الف */
-  :where(body:has([data-jozve])) :is(.home-hero__order, .home-faq) {
-    max-width: 40rem;
-    margin-inline: auto;
+  :where(body:has([data-jozve])) .home-more {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-areas:
+      'flow flow'
+      'desk side'
+      'faq side';
+    column-gap: 32px;
+    align-items: start;
+  }
+  .home-flow {
+    grid-area: flow;
+    padding-block: 8px 24px;
+  }
+  .home-desk {
+    grid-area: desk;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .home-side {
+    grid-area: side;
+    min-width: 0;
+  }
+  @media (width > 860px) {
+    .home-side {
+      position: sticky;
+      inset-block-start: 24px;
+    }
   }
   :where(body:has([data-jozve])) .home-faq {
+    grid-area: faq;
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     margin-block-start: 16px;
@@ -442,12 +474,185 @@
   :where(body:has([data-jozve])) .home-faq .home-sec__sub {
     display: none;
   }
+  @media (width <= 860px) {
+    :where(body:has([data-jozve])) .home-more {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'flow' 'desk' 'side' 'faq';
+    }
+    .home-side {
+      margin-block-start: 16px;
+    }
+  }
   @media (max-width: 520px) {
-    :where(body:has([data-jozve])) .home-hero {
-      padding-block-start: 4px;
+    .home-flow {
+      padding-block: 4px 16px;
     }
     :where(body:has([data-jozve])) .home-faq {
       padding: 16px;
+    }
+  }
+
+  /* ===== تنظیمات چاپ (components/ConfigPanel.tsx) ===== */
+  .jy-card__title + .home-field {
+    margin-block-start: 16px;
+  }
+  .home-field + .home-field {
+    margin-block-start: 20px;
+    padding-block-start: 20px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .home-field__label {
+    padding: 0;
+    font-weight: 600;
+  }
+  .home-tiles {
+    margin-block-start: 10px;
+  }
+  .home-field__hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-block-start: 10px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .home-field__hint .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .home-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+  }
+  .home-row__value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .home-row__value .jy-icon {
+    color: var(--color-green-600);
+  }
+
+  /* ===== خلاصهٔ سفارش (components/OrderSummary.tsx) ===== */
+  .home-sum__lines {
+    margin-block-start: 12px;
+  }
+  .home-sum__lines > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding-block: 6px;
+  }
+  .home-sum__lines dt {
+    color: var(--color-muted);
+  }
+  .home-sum__total {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+    margin-block-start: 12px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .home-sum__label {
+    font-weight: 600;
+  }
+  .home-sum__value {
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+  .home-sum__value small {
+    margin-inline-start: 4px;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .home-sum__ship {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-block-start: 8px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .home-sum__ship .jy-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--color-green-600);
+  }
+  .home-sum__notes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block-start: 16px;
+  }
+  .home-sum__go {
+    margin-block-start: 20px;
+  }
+  .home-sum__secure {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-block-start: 12px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .home-sum__secure .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* ===== نوار قیمت موبایل و تبلت (components/OrderSummary.tsx، PriceDock) ===== */
+  .home-dock {
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    z-index: 20;
+    padding-block: 12px;
+    background: var(--color-page);
+    border-block-start: 1px solid var(--color-line);
+    box-shadow: var(--shadow-md);
+  }
+  .home-dock__in {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .home-dock__price {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.3;
+  }
+  .home-dock__label,
+  .home-dock__ship {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .home-dock .home-sum__value {
+    font-size: var(--text-h3);
+  }
+  @media (width <= 860px) {
+    /* «ادامه» و «ثبت‌نام لازم نیست» در نوار پایین‌اند؛ خلاصهٔ در جریان صفحه ریز قیمت و یادداشت‌ها را دارد */
+    .home-sum :is(.home-sum__go, .home-sum__secure) {
+      display: none;
+    }
+  }
+  @media (width > 860px) {
+    .home-dock {
+      display: none;
     }
   }
 }
