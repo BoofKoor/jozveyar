@@ -15,6 +15,7 @@
   که در دسکتاپ کنار صفحه تا ته صفحه می‌چسبد و در موبایل در جریان صفحه است، با نوار ثابت پایین.
   حالت‌ها: دکمه‌های بالای صفحه (پیش از فایل، در حال بررسی، آماده).
   تأییدشدهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۲)، با لوگوی بی‌شعار؛ شرح و سنجش‌ها در docs/UI.md، قدم ۱.
+  ۱۴۰۵/۰۷/۰۳: نوار پیشرفت سبزآبی شد (تنها رنگ tetrad در رابط)، و متن دکمهٔ «در حال بررسی…» خواندنی؛ قاعدهٔ رنگ در docs/UI.md.
   دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/home-z.html
 -->
 <style>
@@ -115,6 +116,8 @@ b { font-weight: 600; }
 .btn--text { color: var(--jy-green-700); padding-inline: 12px; }
 .btn--text:hover { background: var(--jy-green-50); }
 .btn[aria-disabled="true"] { background: var(--jy-green-50); border-color: var(--jy-green-200); color: var(--jy-green-500); cursor: not-allowed; }
+/* دکمهٔ در حال کار: متنش وضعیت است، پس خواندنی (green-700، 6.47 به 1 روی green-50؛ رنگ بسته 3.66) */
+.btn.is-loading[aria-disabled="true"] { color: var(--muted); }
 .btn.is-loading::before {
   content: ""; width: 1em; height: 1em; flex: none;
   border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%;
@@ -130,14 +133,14 @@ b { font-weight: 600; }
 }
 .radio:checked { background: var(--jy-green-600); border-color: var(--jy-green-600); box-shadow: inset 0 0 0 4px var(--jy-paper); }
 
-/* نوار پیشرفت کیت */
+/* نوار پیشرفت کیت، با سبزآبی: تنها جای tetrad در رابط (۱۴۰۵/۰۷/۰۳)؛ پُر روی خط 3.38 به 1 */
 .progress {
   appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 6px;
-  border: 0; border-radius: 999px; overflow: hidden; background: var(--jy-green-100); color: var(--jy-green-600);
+  border: 0; border-radius: 999px; overflow: hidden; background: var(--jy-teal-100); color: var(--jy-teal-500);
 }
-.progress::-webkit-progress-bar { background: var(--jy-green-100); border-radius: 999px; }
-.progress::-webkit-progress-value { background: var(--jy-green-600); border-radius: 999px; }
-.progress::-moz-progress-bar { background: var(--jy-green-600); border-radius: 999px; }
+.progress::-webkit-progress-bar { background: var(--jy-teal-100); border-radius: 999px; }
+.progress::-webkit-progress-value { background: var(--jy-teal-500); border-radius: 999px; }
+.progress::-moz-progress-bar { background: var(--jy-teal-500); border-radius: 999px; }
 
 /* ===== فقط طرح نمونه: حالت‌ها بی JS ===== */
 .mock {
