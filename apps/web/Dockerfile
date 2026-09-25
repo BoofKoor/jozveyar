@@ -84,6 +84,7 @@ COPY apps/web/package.json apps/web/
 COPY packages/analysis/package.json packages/analysis/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/db/package.json packages/db/
+COPY packages/geo/package.json packages/geo/
 COPY packages/storage/package.json packages/storage/
 COPY packages/pricing/package.json packages/pricing/
 COPY packages/text/package.json packages/text/

@@ -90,6 +90,9 @@ importers:
       '@jozveyar/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@jozveyar/geo':
+        specifier: workspace:*
+        version: link:../geo
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(postgres@3.4.9)
@@ -109,6 +112,16 @@ importers:
       tsx:
         specifier: 4.23.15
         version: 4.23.15
+
+  packages/geo:
+    dependencies:
+      '@jozveyar/text':
+        specifier: workspace:*
+        version: link:../text
+    devDependencies:
+      '@jozveyar/pricing':
+        specifier: workspace:*
+        version: link:../pricing
 
   packages/pricing:
     dependencies:

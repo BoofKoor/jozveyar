@@ -2,7 +2,7 @@
 
 سند کامل معماری. دلیل هر تصمیم در `docs/DECISIONS.md`. تعرفه و فرمول قیمت در `docs/PRICING.md`.
 
-**وضعیت:** معماری تأیید شد. برش ۰ تا ۲ ساخته و تست شده؛ بعدی مرحلهٔ طراحی رابط کاربری با هویت برند (`docs/brand/`؛ برنامه و وضعیت در `docs/UI.md`)، و پس از آن برش ۳ (سفارش) — جدول برش‌ها را ببینید.
+**وضعیت:** معماری تأیید شد. برش ۰ تا ۲ ساخته و تست شده، و مرحلهٔ طراحی رابط کاربری جز قدم ۵ تمام است (`docs/UI.md`). برش ۳ (سفارش) در حال ساخت است؛ برنامه و وضعیتش در بخش ۸، «برش ۳».
 
 ---
 
@@ -16,7 +16,7 @@
 | کارگر اسناد | Python + PyMuPDF + numpy + LibreOffice (بدون رابط گرافیکی)، روی ایمیج پایه‌ای که فقط CI می‌سازد (ADR-027). الگوریتم رنگ با بردارهای هم‌ارزی به مرورگر قفل است (ADR-025) | همه‌چیز در Node با `node-canvas` |
 | پایگاه داده | PostgreSQL 17 | MySQL — محدودیت بازه‌ای ندارد |
 | صف کار | جدول `jobs` با `FOR UPDATE SKIP LOCKED` | Celery / BullMQ / Redis Streams |
-| کش و نرخ | Redis (فقط کش و محدودیت OTP) | — |
+| کش و نرخ | سقف کد پیامکی در پستگرس (`otp_requests`، ADR-033). Redis در compose هست و فعلاً کاری ندارد | Redis برای سقف OTP — یک وابستگی بیشتر در کد (۱۴۰۵/۰۷/۰۴) |
 | ذخیره‌سازی | S3 API؛ Garage محلی → پارس‌پک یا آروان (ADR-023) | دیسک محلی — آپلود از سرور رد می‌شد؛ MinIO — از Docker Hub حذف و بایگانی شد |
 | ORM | Drizzle | Prisma — مهاجرت کم‌شفاف‌تر |
 | استایل | Tailwind v4 با توکن‌های پالت | CSS Modules |
@@ -89,7 +89,8 @@ jozveyar/
 │  ├─ contracts/        اسکیمای zod و تایپ‌های مشترک
 │  ├─ db/               اسکیمای drizzle + مهاجرت‌ها
 │  ├─ storage/          آداپتور استوریج — SigV4 دست‌نویس، بدون SDK
-│  ├─ text/             نرمال‌سازی فارسی، ارقام، تاریخ شمسی
+│  ├─ geo/              استان‌ها، شهرها، منطقهٔ کرایه و جست‌وجوی شهر (برش ۳)
+│  ├─ text/             نرمال‌سازی فارسی، ارقام، تاریخ شمسی، روز کاری
 │  └─ ui/               کامپوننت و توکن‌های پالت
 ├─ services/
 │  └─ docworker/        Python — LibreOffice، PyMuPDF (Dockerfile.base: ایمیج پایه، ADR-027)
@@ -158,40 +159,47 @@ CREATE TABLE print_rules (
   seq           smallint NOT NULL,
   page_ranges   jsonb NOT NULL,             -- سراسری در جزوه: [[1,11],[13,14],[16,150]]
   color_mode    color_mode NOT NULL,        -- color | bw
-  paper_type_id uuid NOT NULL REFERENCES paper_types(id),
+  paper_type_id text NOT NULL,              -- با تعرفهٔ سفارش سنجیده، بی کلید خارجی (نسخه‌دار)
   UNIQUE (order_item_id, seq)
 );
 -- قاعده‌های یک جزوه باید ۱..جمع صفحه‌های بخش‌ها را دقیقاً و بدون همپوشانی
--- بپوشانند. در اپ و با یک trigger اعتبارسنجی می‌شود.
+-- بپوشانند. در اپ و با تریگر معوق `order_items_cover_pages` در پایان تراکنش
+-- (0006_order_guards). قلم، بخش‌ها و قاعده‌ها بعد از درج عوض نمی‌شوند.
 
--- سفارش: قیمت برای همیشه منجمد می‌شود، هیچ‌وقت بازمحاسبه نمی‌شود.
+-- سفارش (✅ جدول‌ها در ۳الف): قیمت برای همیشه منجمد می‌شود، هیچ‌وقت بازمحاسبه
+-- نمی‌شود — تریگر `orders_price_frozen` عوض کردنش را رد می‌کند (ADR-034).
 CREATE TABLE orders (
   id                  uuid PRIMARY KEY,
-  order_number        integer UNIQUE NOT NULL,  -- انسانی، همین در فایل پست می‌رود
+  order_number        integer UNIQUE NOT NULL,  -- از 10001؛ همین در پیامک، درگاه و فایل پست
   public_token        uuid UNIQUE NOT NULL,     -- برای URL، غیرقابل شمارش
-  user_id             uuid REFERENCES users(id),
-  status              order_status NOT NULL,
+  checkout_key        uuid UNIQUE NOT NULL,     -- دو کلیک «پرداخت»، یک سفارش
+  user_id             uuid NOT NULL REFERENCES users(id),
+  status              order_status NOT NULL,    -- awaiting_payment | paid | expired
   price_list_version  integer NOT NULL,
   price_breakdown     jsonb NOT NULL,           -- عکس کامل محاسبه
   quote_snapshot      jsonb,                    -- آنچه مرورگر نشان داده بود
   subtotal_rials      bigint NOT NULL,
   discount_rials      bigint NOT NULL DEFAULT 0,
-  shipping_rials      bigint NOT NULL DEFAULT 0,
+  shipping_rials      bigint NOT NULL,
   vat_rials           bigint NOT NULL DEFAULT 0,
-  total_rials         bigint NOT NULL,
+  rounding_rials      bigint NOT NULL DEFAULT 0,
+  total_rials         bigint NOT NULL,          -- CHECK: جمع تکه‌ها
   est_weight_grams    integer NOT NULL,
   sla_days            smallint NOT NULL,
   paid_at             timestamptz,
-  post_handoff_due_at timestamptz,              -- ساعت تعهد تحویل به پست
-  print_partner_id    uuid REFERENCES print_partners(id),
-  shipping_method_id  uuid NOT NULL,
-  city_id             integer NOT NULL,
+  post_handoff_due_at timestamptz,              -- پایان روز کاری تعهد تحویل به پست (ADR-013)
+  shipping_method_id  text NOT NULL,            -- (نسخهٔ تعرفه، روش) ← shipping_methods
+  shipping_zone_id    text NOT NULL,            -- منطقهٔ کرایه در لحظهٔ سفارش
+  province_id         smallint NOT NULL,
+  city_id             integer,                  -- null: شهر در فهرست نبود؛ (شهر، استان) ← cities
   recipient_name      text NOT NULL,
-  recipient_phone     text NOT NULL,
+  recipient_phone     text NOT NULL,            -- همان موبایل تأییدشدهٔ پرداخت
   address_text        text NOT NULL,
   postal_code         text,
-  created_at          timestamptz NOT NULL DEFAULT now()
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
 );
+-- `print_partner_id` (ADR-012) با برش ۵ می‌آید، همراه جدول چاپخانه‌ها.
 ```
 
 ### بقیهٔ جدول‌ها
@@ -200,18 +208,19 @@ CREATE TABLE orders (
 |---|---|---|
 | تعرفه | `price_lists` `paper_types` `binding_types` `binding_rate_bands` `shipping_methods` `shipping_rates` | ✅ ساخته شد. نسخه‌دار با `version` و دقیقاً یکی فعال. بازه‌های صحافی و وزن با `EXCLUDE` — دیتابیس اجازهٔ همپوشانی نمی‌دهد. `print_rates` و `pricing_settings` جدول جدا نشدند؛ دلیل در ADR-021. `discount_tiers` هنوز ساخته نشده |
 | سند | `documents` `document_analyses` `document_pages` | ✅ ساخته شد. سند = فایل آپلودشده، قبل از اینکه سفارشی باشد. مالکش هش کوکی نشست ناشناس است (`session_hash`) و شناسهٔ آپلود چندتکه کنارش می‌ماند. تحلیل مرورگر و سرور **هر دو** ذخیره می‌شوند تا واگرایی قابل اندازه‌گیری باشد. `document_pages` اعداد خام رنگ را نگه می‌دارد، نه فقط بولین |
-| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030) |
-| ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن) |
+| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش |
+| ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن). ✅ منطقه‌ها، استان‌ها و شهرها در ۳الف، از `@jozveyar/geo` (۳۱ استان، ۱۳۲۳ شهر)؛ منطقه مال استان است: استان تهران `tehran`، بقیه `other`. `shipments` با برش ۶ |
 | رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود |
 | دسترسی | `admin_users` `roles` `permissions` `role_permissions` `admin_user_roles` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` |
-| هویت | `users` `otp_requests` `sessions` | موبایل نرمال‌شده. محدودیت نرخ روی شماره و IP |
-| عملیات | `jobs` `sms_messages` `settings` | پیامک توسعه در دیتابیس می‌نشیند. `settings` کلید/مقدار تایپ‌شده با zod |
+| هویت | `users` `otp_requests` `sessions` | ✅ در ۳الف (ADR-033). موبایل نرمال‌شده. محدودیت نرخ روی شماره، IP و کل سایت، از شمردن `otp_requests`. کد و IP فقط هش |
+| عملیات | `jobs` `sms_messages` `settings` | پیامک توسعه در دیتابیس می‌نشیند (✅ `sms_messages` در ۳الف). `settings` کلید/مقدار تایپ‌شده با zod |
 | سئو و آمار | `landing_pages` `landing_templates` `flow_events` | `flow_events` قیف و نرخ رها کردن سبد را می‌سازد |
 
 ### تنظیمات کلیدی در `settings`
 
 ```
-order.sla_days                          = 2
+order.sla_days                          = 2       # روز کاری تا تحویل به پست؛ ✅ پیش‌فرضش را seedReferenceData می‌نشاند
+calendar.holidays                       = [...]   # تعطیلی‌های رسمی ۱۴۰۵ و ۱۴۰۶، `{ date: '1405/10/02', title }`؛ ✅ همان‌طور
 order.min_order_rials                   = 0
 file.max_pages                          = 1500
 file.max_bytes                          = 1_610_612_736   # 1.5 GiB
@@ -295,13 +304,42 @@ detection.sample_dpi                    = 40
 | 0 | ✅ اسکلت قابل دیپلوی | Docker Compose، Nginx، Dockerfile چندمرحله‌ای، `deploy.sh`، `setup-tls.sh`، سلامت سرویس |
 | 1 | ✅ **لحظهٔ جادو** | فایل بینداز ← مرورگر می‌خواند ← قیمت زنده با تعرفهٔ واقعی ← تنظیمات. بدون دیتابیس و حساب. + پایه‌های سئو (رندر ایستا، متا، نقشهٔ سایت، JSON-LD). ۱۲۳ تست واحد + ۱۵ تست سرتاسری |
 | 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ ۲ب: ✅ ایمیج پایه با LibreOffice و فونت‌ها (ADR-027)، ✅ تبدیل Word/PPT/عکس با پیش‌فاکتور فوری (ADR-028)، ✅ هشدارها با شمارهٔ صفحه، DPI از جای تصویر و فونت جایگزین (ADR-029)، ✅ چند فایل در یک جزوه، یک صحافی (ADR-030) |
-| 3 | سفارش کامل با پرداخت جعلی | شهر و آدرس، نرخ ارسال، OTP، ساخت سفارش، درگاه نمونه، صفحهٔ تأیید |
+| 3 | سفارش کامل با پرداخت جعلی | در حال ساخت (پایین). شهر و آدرس، نرخ ارسال، OTP، ساخت سفارش، درگاه نمونه (فقط بیرون از سایت زنده، ADR-035)، صفحهٔ تأیید |
 | 4 | پنل ادمین نسخهٔ ۱ | TOTP روی ساب‌دامین جدا، فهرست و جزئیات سفارش، دانلود فایل، تغییر وضعیت، ویرایش تعرفه، ساعت SLA |
 | 5 | چاپخانه و خروجی چاپ | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ |
 | 6 | ارسال و رهگیری | ورود فایل پست، تطبیق، صف تأیید، نمایش رهگیری، گزارش حاشیهٔ ارسال |
 | 7 | پیامک و درگاه واقعی | جایگزینی آداپتورها — تغییر `.env` و یک کلاس |
 | 8 | پنل کاربری و آمار | سفارش‌های قبلی، سفارش مجدد، پیگیری زنده، داشبورد قیف و درآمد |
 | 9 | موتور سئو و انتقال به ایران | CMS لندینگ، صفحات استانی، انتقال به پارس‌پک |
+
+### برش ۳: برنامه و وضعیت
+
+برنامه تأیید شد (۱۴۰۵/۰۷/۰۴). رابطش طرح تأییدشدهٔ `docs/ui/mockups/checkout.html` است (`docs/UI.md`،
+بخش ۶). تصمیم‌ها: ADR-033 (کد پیامکی و نشست)، ADR-034 (سفارش با «پرداخت»، مسیر خرید در همان صفحه، و
+محافظ‌های پایگاه داده) و ADR-035 (حالت مسیر خرید؛ درگاه نمونه هرگز روی سایت زنده).
+
+| PR | دامنه | وضعیت |
+|---|---|---|
+| ۳الف | داده: جدول‌های هویت، سفارش، پرداخت و پیامک، با محافظ‌هایشان؛ استان‌ها و شهرها (`@jozveyar/geo`)؛ روز کاری و مهلت تحویل به پست (`@jozveyar/text`)؛ دادهٔ پایه هنگام بالا آمدن سرور. روی سایت چیزی عوض نمی‌شود | #34 |
+| ۳ب | سرور: کد پیامکی با پیامک کنسولی، نشست، ساخت سفارش، درگاه نمونه و برگشت از آن، کار `prepare_order` کارگر، `CHECKOUT_MODE`. روی سایت زنده خاموش | — |
+| ۳ج | رابط: اجزای تازهٔ کیت و دو آیکون، قدم‌ها طبق طرح، درگاه نمونه، صفحهٔ سفارش، حالت `off` سایت زنده؛ مرحلهٔ تازهٔ CI: تست سرتاسری با پستگرس، Garage و کارگر واقعی | — |
+| ۳د | برگشت بعد از رفرش: اگر گوشی صفحه را از نو بار کند، جزوه و نشانی برمی‌گردند | — |
+
+تصمیم‌های ۱۴۰۵/۰۷/۰۴، همه طبق پیشنهاد:
+- سؤال ۹: «تهران» در کرایهٔ ارسال یعنی **استان** تهران؛ منطقه مال استان است. سؤال ۱۰: «کد با تماس صوتی»
+  تا برش ۷ ساخته نمی‌شود، و آنجا فقط اگر پنل پیامک داشته باشد.
+- سایت زنده تا برش ۷ در حالت `off`: «ادامه» بسته، با «ثبت سفارش آنلاین به‌زودی» (ADR-035).
+- شمارهٔ سفارش از 10001، دور از کدهای دستی 6004 تا 6098 فایل پست.
+- روز کاری تحویل به پست: شنبه تا چهارشنبه. پنجشنبه، جمعه و تعطیلی رسمی نه، و روز پرداخت شمرده نمی‌شود
+  (پرداخت شنبه، تحویل به پست تا دوشنبه). تعطیلی‌ها در `settings`.
+- کد پیامکی ۵ رقمی، ۲ دقیقه اعتبار، ۳ فرصت، ارسال دوباره پس از ۹۰ ثانیه؛ سقف ۵ کد در ساعت برای هر شماره،
+  ۲۰ برای هر IP، و سقف ساعتی کل سایت (ADR-033).
+- سقف کد پیامکی در پستگرس، نه Redis.
+- متن کارت شهر: «کرایهٔ پست پیشتاز در استان تهران X و بقیهٔ کشور Y تومان».
+- ۳د در همین برش.
+
+**پیش از باز شدن مسیر خرید روی سایت زنده** (با برش ۷): صفحهٔ قوانین (قدم ۵ مرحلهٔ طراحی، `docs/UI.md`)،
+و تطبیق تعطیلی‌های قمری ۱۴۰۶ در `settings` با تقویم رسمی منتشرشده.
 
 ---
 
