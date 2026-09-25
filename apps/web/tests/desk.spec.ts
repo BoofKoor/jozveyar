@@ -205,9 +205,17 @@ test.describe('قیمت همیشه روی صفحه', () => {
     // نوار موبایل در دسکتاپ نیست
     await expect(page.getByRole('region', { name: 'قیمت' })).toBeHidden();
 
-    // شاهد: بی چسبیدن خلاصه، در ته صفحه جمع از صفحه بیرون می‌رود
+    // شاهد ۱: بی چسبیدن خلاصه، در ته صفحه جمع از صفحه بیرون می‌رود
+    const bottom = () => page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
     await page.locator('.home-side').evaluate((side) => side.style.setProperty('position', 'static'));
-    await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+    await bottom();
+    await expect(summaryTotal(page)).not.toBeInViewport();
+    // شاهد ۲: خلاصه می‌چسبد، ولی سؤال‌ها بیرون شبکه‌اند؛ sticky فقط تا ته ظرف خودش می‌چسبد
+    await page.locator('.home-side').evaluate((side) => side.style.removeProperty('position'));
+    await bottom();
+    await expect(summaryTotal(page)).toBeInViewport();
+    await page.evaluate(() => document.querySelector('.home-more')!.after(document.getElementById('faq')!));
+    await bottom();
     await expect(summaryTotal(page)).not.toBeInViewport();
   });
 
