@@ -457,6 +457,19 @@
   .jy-input[readonly] {
     background: var(--color-green-50);
   }
+  /*
+   * فیلد عددی (تعداد نسخه): بی دکمه‌های کوچک بالا و پایین مرورگر، که پنهان هم جا می‌گیرند و عدد
+   * وسط‌چین را به یک سو می‌برند؛ − و + کنارش مال صفحه است. رقم وسط، نه خط متن (--jy-digit-rise).
+   */
+  .jy-input[type='number'] {
+    padding-block-start: calc(2 * var(--jy-digit-rise));
+    appearance: textfield;
+  }
+  .jy-input[type='number']::-webkit-inner-spin-button,
+  .jy-input[type='number']::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+  }
 
   /* ===== رادیو و کاشی انتخاب ===== */
   .jy-radio {
@@ -582,6 +595,8 @@
     width: 56px;
     min-width: 56px;
     padding: 0;
+    /* رقم وسط جعبه، نه خط متن (--jy-digit-rise در base.css) */
+    padding-block-start: calc(2 * var(--jy-digit-rise));
     font: inherit;
     font-size: var(--text-h4);
     font-weight: 600;
@@ -622,6 +637,8 @@
   .jy-flow__n {
     display: grid;
     place-items: center;
+    /* رقم وسط دایره، نه خط متن (--jy-digit-rise در base.css) */
+    padding-block-start: calc(2 * var(--jy-digit-rise));
     width: 28px;
     height: 28px;
     border: 2px solid var(--color-green-300);

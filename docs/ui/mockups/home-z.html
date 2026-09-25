@@ -16,6 +16,7 @@
   حالت‌ها: دکمه‌های بالای صفحه (پیش از فایل، در حال بررسی، آماده).
   تأییدشدهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۲)، با لوگوی بی‌شعار؛ شرح و سنجش‌ها در docs/UI.md، قدم ۱.
   ۱۴۰۵/۰۷/۰۳: نوار پیشرفت سبزآبی شد (تنها رنگ tetrad در رابط)، و متن دکمهٔ «در حال بررسی…» خواندنی؛ قاعدهٔ رنگ در docs/UI.md.
+  ۱۴۰۵/۰۷/۰۳: عدد دایره‌های قدم و شمارنده دقیق وسط افتاد (پیش‌تر ۲ تا ۲٫۷ پیکسل بالا بود)؛ «عدد وسط دایره» در docs/UI.md.
   دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/home-z.html
 -->
 <style>
@@ -39,6 +40,8 @@
   --fs-base: 16px;
   --fs-xs: 13px;
   --gutter: var(--jy-gutter);
+  /* رقم لاتین تنها در جعبه، با وسط‌چینی خط متن، این‌قدر بالاتر از وسط می‌افتد (وزیرمتن؛ --jy-digit-rise در packages/ui) */
+  --digit-rise: 0.115em;
 }
 @media (max-width: 520px) {
   :root { --fs-display: 39px; --fs-h1: 31px; --fs-h2: 25px; --gutter: 16px; }
@@ -267,7 +270,7 @@ body:has(#s-busy:checked), body:has(#s-ready:checked) { background: var(--jy-gre
 .z-flow li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .z-flow li:not(:last-child)::after { content: ""; width: 40px; margin-inline-start: 4px; border-block-start: 2px solid var(--jy-green-300); }
 .z-flow__n {
-  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; padding-block-start: calc(2 * var(--digit-rise)); width: 28px; height: 28px; border-radius: 50%;
   border: 2px solid var(--jy-green-300); background: var(--jy-paper); font-size: var(--fs-xs); font-weight: 600; color: var(--jy-green-700);
 }
 .z-flow [aria-current] { font-weight: 600; color: var(--text); }
@@ -373,7 +376,7 @@ body:has(#s-busy:checked), body:has(#s-ready:checked) { background: var(--jy-gre
 .z-stepper button:last-child { border-start-end-radius: 9px; border-end-end-radius: 9px; }
 .z-stepper button:hover { background: var(--jy-green-50); }
 .z-stepper button[aria-disabled="true"] { color: var(--jy-green-400); background: var(--jy-paper); cursor: not-allowed; }
-.z-stepper output { display: grid; place-items: center; min-width: 56px; border-inline: 1px solid var(--jy-green-200); font-size: var(--fs-h4); font-weight: 600; }
+.z-stepper output { display: grid; place-items: center; padding-block-start: calc(2 * var(--digit-rise)); min-width: 56px; border-inline: 1px solid var(--jy-green-200); font-size: var(--fs-h4); font-weight: 600; }
 
 /* خلاصهٔ سفارش */
 .z-sum__title { font-size: var(--fs-h4); }
@@ -412,7 +415,7 @@ body:has(#s-busy:checked), body:has(#s-ready:checked) { background: var(--jy-gre
 .z-how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-block-start: 40px; }
 .z-how li { position: relative; }
 .z-how__n {
-  position: relative; z-index: 1; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
+  position: relative; z-index: 1; display: grid; place-items: center; padding-block-start: calc(2 * var(--digit-rise)); width: 44px; height: 44px; border-radius: 50%;
   background: var(--jy-green-100); color: var(--jy-green-800); font-size: var(--fs-h4); font-weight: 600;
 }
 .z-how li:not(:last-child)::after {
