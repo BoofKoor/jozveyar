@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 /**
  * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک، آیکون گوشی،
- * manifest، تصویر اشتراک و ۴۰۴.
+ * manifest، تصویر اشتراک، ۴۰۴، و اینماد (فایل تأیید دامنه و نشان پاورقی، ADR-032).
  *
  * مثل flow.spec.ts روی build تولیدی و بی استوریج. سربرگ و پاورقی کامپوننت سرورند و JS ندارند؛
  * حالت سفارش را CSS با `:has()` از نشانهٔ جزیرهٔ سفارش می‌گیرد، پس اینجا در مرورگر سنجیده می‌شود.
@@ -139,17 +139,55 @@ test.describe('پاورقی', () => {
 });
 
 /**
- * تأیید مالکیت دامنه در اینماد (تصمیم صاحب پروژه، ۱۴۰۵/۰۷/۰۳): فایلی خالی با نام کد اینماد در ریشهٔ
- * سایت (`public/77170883.txt`). اینماد ممکن است دوباره سرش بزند، پس فایل می‌ماند و این تست جلوی پاک
- * شدنش را می‌گیرد.
+ * کد نشان اینماد، همان‌طور که اینماد داده (۱۴۰۵/۰۷/۰۳). اینماد می‌خواهد «بدون تغییر» در سایت بنشیند؛
+ * سایت فقط نام پیوند را به آن افزوده، چون `alt` خالی است (ADR-032).
  */
+const ENAMAD_SNIPPET =
+  "<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=7896821&Code=pyzBITp0WBebVFYdP4CZIvGX69k9oy6R'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=7896821&Code=pyzBITp0WBebVFYdP4CZIvGX69k9oy6R' alt='' style='cursor:pointer' code='pyzBITp0WBebVFYdP4CZIvGX69k9oy6R'></a>";
+const ENAMAD_LOGO = 'https://trustseal.enamad.ir/logo.aspx?id=7896821&Code=pyzBITp0WBebVFYdP4CZIvGX69k9oy6R';
+const SEAL_NAME = 'نماد اعتماد الکترونیکی';
+
 test.describe('اینماد', () => {
+  /*
+   * تأیید مالکیت دامنه (تصمیم صاحب پروژه، ۱۴۰۵/۰۷/۰۳): فایلی خالی با نام کد اینماد در ریشهٔ سایت
+   * (`public/77170883.txt`). اینماد ممکن است دوباره سرش بزند، پس فایل می‌ماند و این تست جلوی پاک
+   * شدنش را می‌گیرد.
+   */
   test('فایل خالی تأیید دامنه در ریشهٔ سایت است', async ({ request }) => {
     const response = await request.get('/77170883.txt');
     expect(response.status()).toBe(200);
     expect(response.headers()['content-type']).toContain('text/plain');
     expect((await response.body()).length).toBe(0);
   });
+
+  /*
+   * نشان در پاورقی همهٔ صفحه‌ها. ویژگی‌های پیوند و تصویر باید همان کد اینماد باشند: `referrerpolicy`
+   * که دامنه را به اینماد می‌رساند، `target` که جزوهٔ نیمه‌کاره را نگه می‌دارد، و بی `rel`، که به گفتهٔ
+   * اینماد با `noopener noreferrer` نشان نمایش داده نمی‌شود. تنها افزوده `aria-label` پیوند است.
+   */
+  for (const { name, path, order } of [
+    { name: 'صفحهٔ اصلی', path: '/', order: false },
+    { name: 'حالت سفارش', path: '/', order: true },
+    { name: '۴۰۴', path: '/no-such-page', order: false },
+  ]) {
+    test(`نشان در پاورقی، عین کد اینماد و با نام پیوند: ${name}`, async ({ page }) => {
+      await page.goto(path);
+      if (order) await dropFile(page);
+      const seal = footer(page).getByRole('link', { name: SEAL_NAME });
+      await expect(seal).toBeVisible();
+      const { actual, given } = await seal.evaluate((link, snippet) => {
+        const attributes = (el: Element) => Object.fromEntries([...el.attributes].map((a) => [a.name, a.value]));
+        const template = document.createElement('template');
+        template.innerHTML = snippet;
+        const code = template.content.firstElementChild!;
+        return {
+          actual: { link: attributes(link), children: [...link.children].map(attributes) },
+          given: { link: attributes(code), children: [...code.children].map(attributes) },
+        };
+      }, ENAMAD_SNIPPET);
+      expect(actual).toEqual({ ...given, link: { ...given.link, 'aria-label': SEAL_NAME } });
+    });
+  }
 });
 
 test.describe('نشانک', () => {
@@ -277,7 +315,7 @@ test.describe('۴۰۴', () => {
 });
 
 for (const width of [320, 390, 1280]) {
-  test.describe(`بی منبع بیرونی و بی اسکرول افقی در ${width} پیکسل`, () => {
+  test.describe(`تنها منبع بیرونی نشان اینماد، و بی اسکرول افقی در ${width} پیکسل`, () => {
     test.use({ viewport: { width, height: width < 1000 ? 844 : 800 } });
 
     const pages = [
@@ -289,10 +327,12 @@ for (const width of [320, 390, 1280]) {
     for (const { name, path, order } of pages) {
       test(name, async ({ page, baseURL }) => {
         const origin = new URL(baseURL!).origin;
-        const external: string[] = [];
+        const external: { url: string; referer?: string }[] = [];
         page.on('request', (request) => {
           const url = new URL(request.url());
-          if (url.protocol.startsWith('http') && url.origin !== origin) external.push(request.url());
+          if (url.protocol.startsWith('http') && url.origin !== origin) {
+            external.push({ url: request.url(), referer: request.headers()['referer'] });
+          }
         });
 
         await page.goto(path);
@@ -302,7 +342,9 @@ for (const width of [320, 390, 1280]) {
         await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
         await page.waitForLoadState('networkidle');
 
-        expect(external).toEqual([]);
+        // تنها منبع بیرونی تصویر نشان اینماد است، یک بار (ADR-032). اینماد دامنه را از Referer می‌خواند:
+        // فقط دامنه می‌رسد، نه نشانی صفحه (۴۰۴ مسیر دارد)، و نه هیچ، که بی آن نشان نمایش داده نمی‌شود.
+        expect(external).toEqual([{ url: ENAMAD_LOGO, referer: `${origin}/` }]);
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );

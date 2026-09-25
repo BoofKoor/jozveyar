@@ -140,6 +140,27 @@
     line-height: 1.8;
     color: var(--color-muted);
   }
+  /*
+   * بالای خط «©»: معرفی در یک سو و نشان اینماد (ADR-032) در سوی دیگر؛ جایی که کنار هم جا نشوند
+   * (موبایل)، نشان زیر معرفی. جعبهٔ نشان ثابت است و تصویر درونش جا می‌گیرد: اندازهٔ تصویر را خود
+   * اینماد تعیین می‌کند، و جعبهٔ ثابت با رسیدن تصویر چیدمان را تکان نمی‌دهد. پیوند بلوک است، تا جای
+   * کلیک و حلقهٔ فوکوس همهٔ نشان باشد.
+   */
+  .site-foot__top {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+  }
+  .site-foot__seal a {
+    display: block;
+  }
+  .site-foot__seal img {
+    width: 96px;
+    height: 104px;
+    object-fit: contain;
+  }
   .site-foot__legal {
     display: flex;
     flex-wrap: wrap;
