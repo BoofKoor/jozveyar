@@ -258,7 +258,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
     { width: 390, height: 844 },
     { width: 1280, height: 800 },
   ]) {
-    test(`ترتیب Tab در ${viewport.width}: ✕، افزودن فایل، رنگ، دورو، شمارنده، «ادامه» و سؤال‌ها`, async ({ page }) => {
+    test(`ترتیب Tab در ${viewport.width}: ✕، افزودن فایل، رنگ، دورو، شمارنده، «ادامه»، سؤال‌ها و نشان اینماد`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await dropReady(page);
@@ -266,7 +266,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
       expect(questions).toHaveLength(6);
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       const order: string[] = [];
-      for (let i = 0; i < 8 + questions.length; i++) {
+      for (let i = 0; i < 9 + questions.length; i++) {
         await page.keyboard.press('Tab');
         order.push(await focused(page));
       }
@@ -280,6 +280,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
         'یکی بیشتر',
         'ادامه — آدرس و تحویل',
         ...questions.map((q) => q.trim()),
+        'نماد اعتماد الکترونیکی',
       ]);
 
       // فوکوس دیدنی با صفحه‌کلید: حلقهٔ دولایهٔ کیت روی کل کاشی می‌نشیند، نه روی دایرهٔ کوچک رادیو

@@ -17,6 +17,10 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     launchOptions: {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+      // نشان اینماد تنها منبع بیرونی سایت است (ADR-032). تست‌ها به سرور اینماد بند نیستند: نامش «پیدا
+      // نشد» می‌شود و درخواست همان لحظه می‌افتد، نه اینکه اگر CI به آن نرسید `networkidle` گیر کند.
+      // درخواست هنوز دیده می‌شود؛ `site.spec.ts` خودش و Referer آن را می‌سنجد.
+      args: ['--host-resolver-rules=MAP trustseal.enamad.ir ~NOTFOUND'],
     },
   },
   webServer: {

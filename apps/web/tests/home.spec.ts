@@ -175,12 +175,12 @@ test.describe('کارت بارگذاری', () => {
 });
 
 test.describe('دسترس‌پذیری پیش از فایل', () => {
-  test('ترتیب Tab: لوگو، سه پیوند، کارت بارگذاری، ریز تعرفه و سؤال‌ها', async ({ page }) => {
+  test('ترتیب Tab: لوگو، سه پیوند، کارت بارگذاری، ریز تعرفه، سؤال‌ها و نشان اینماد', async ({ page }) => {
     await page.goto('/');
     const questions = await page.locator('#faq summary').allTextContents();
     expect(questions).toHaveLength(6);
     const order: string[] = [];
-    for (let i = 0; i < 6 + questions.length; i++) {
+    for (let i = 0; i < 7 + questions.length; i++) {
       await page.keyboard.press('Tab');
       order.push(
         await page.evaluate(() => {
@@ -197,6 +197,7 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
       'jozve-file',
       'بر اساس تعداد برگ',
       ...questions.map((q) => q.trim()),
+      'نماد اعتماد الکترونیکی',
     ]);
   });
 
