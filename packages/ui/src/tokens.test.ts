@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { LOGO_BOX, MARK_BOX, PAGE_COLOR } from './tokens.js';
+import { BAND_COLOR, LOGO_BOX, MARK_BOX } from './tokens.js';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const read = (path: string) => readFileSync(join(REPO, path), 'utf8');
@@ -108,7 +108,9 @@ describe('رنگ‌ها: theme.css آینهٔ docs/brand/jozveyar-colors.css', (
 
   it('نقش‌ها همان نگاشت پالت‌اند', () => {
     const role = (token: string) => resolve(theme.get(token)!, theme);
-    expect(role('--color-page')).toBe(brand.get('--jy-green-50'));
+    // طرح ز (قدم ۴): صفحه کاغذ، و نوار بالا و پاورقی و حالت سفارش green-50
+    expect(role('--color-page')).toBe(brand.get('--jy-paper'));
+    expect(role('--color-band')).toBe(brand.get('--jy-green-50'));
     expect(role('--color-card')).toBe(brand.get('--jy-paper'));
     expect(role('--color-line')).toBe(resolve(kit.get('--jy-border-subtle')!, brand));
     expect(role('--color-control')).toBe(resolve(kit.get('--jy-border-control')!, brand));
@@ -135,8 +137,8 @@ describe('رنگ‌ها: theme.css آینهٔ docs/brand/jozveyar-colors.css', (
     expect(contrast('#8BA8A8', '#E1EEEE')).toBeLessThan(3); // teal-400 روی teal-100
   });
 
-  it('themeColor همان زمینهٔ صفحه است', () => {
-    expect(PAGE_COLOR).toBe(resolve(theme.get('--color-page')!, theme));
+  it('themeColor همان نوار بالای صفحه است', () => {
+    expect(BAND_COLOR).toBe(resolve(theme.get('--color-band')!, theme));
   });
 });
 

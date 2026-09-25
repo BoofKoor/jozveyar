@@ -4,4 +4,4 @@
  * کامپوننت‌های سرورند؛ هیچ کامپوننت کلاینتی در این بسته نیست.
  */
 export { Logo, Mark } from './brand.js';
-export { LOGO_BOX, LOGO_MIN_HEIGHT, MARK_BOX, MARK_MIN_HEIGHT, PAGE_COLOR } from './tokens.js';
+export { BAND_COLOR, LOGO_BOX, LOGO_MIN_HEIGHT, MARK_BOX, MARK_MIN_HEIGHT } from './tokens.js';

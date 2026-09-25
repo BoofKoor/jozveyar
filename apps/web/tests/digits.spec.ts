@@ -3,9 +3,9 @@ import { join } from 'node:path';
 
 /**
  * عدد تنها وسط جعبه (docs/UI.md، «عدد وسط دایره»): دایرهٔ قدم‌های سفارش (`jy-flow__n`)، عدد
- * شمارندهٔ کیت (`jy-stepper`) و فیلد تعداد نسخهٔ امروز صفحه (`jy-input` عددی). وسط‌چینی خط متن را
- * وسط می‌گذارد، نه خود رقم را؛ با وزیرمتن رقم لاتین ۲ تا ۲٫۷ پیکسل بالاتر از وسط می‌افتاد.
- * `--jy-digit-rise` در packages/ui/src/base.css جبرانش می‌کند.
+ * شمارندهٔ کیت (`jy-stepper`)، فیلد تعداد نسخهٔ امروز صفحه (`jy-input` عددی) و دایره‌های «سه قدم»
+ * صفحهٔ اصلی (۴الف). وسط‌چینی خط متن را وسط می‌گذارد، نه خود رقم را؛ با وزیرمتن رقم لاتین ۲ تا ۲٫۷
+ * پیکسل بالاتر از وسط می‌افتاد. `--jy-digit-rise` در packages/ui/src/base.css جبرانش می‌کند.
  *
  * جای جوهر رقم از خود پیکسل‌های صفحه سنجیده می‌شود، نه از فرمول؛ پس اگر فونت عوض شد (سؤال باز ۱) و
  * رقم دوباره کج افتاد، همین‌جا می‌افتد. تا یک پیکسل جا هست: مرورگر خط پایهٔ متن و لبهٔ جعبه را جدا به
@@ -172,6 +172,14 @@ for (const viewport of [
       await mount(page);
       const circles = page.locator('#digits-probe .jy-flow__n');
       await expect(circles).toHaveCount(3);
+      for (const circle of await circles.all()) await expectCentered(page, circle);
+    });
+
+    test('«سه قدم» صفحهٔ اصلی: رقم وسط دایره است', async ({ page }) => {
+      await page.goto('/', { waitUntil: 'networkidle' });
+      await fontsReady(page);
+      const circles = page.locator('#how .home-how__n');
+      await expect(circles).toHaveText(['1', '2', '3']);
       for (const circle of await circles.all()) await expectCentered(page, circle);
     });
 

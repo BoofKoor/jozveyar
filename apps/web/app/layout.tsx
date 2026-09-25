@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { PAGE_COLOR } from '@jozveyar/ui/tokens';
+import { BAND_COLOR } from '@jozveyar/ui/tokens';
 import { SiteFooter } from '../components/SiteFooter';
 import { SiteHeader } from '../components/SiteHeader';
 import './globals.css';
@@ -30,8 +30,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  // نوار مرورگر گوشی هم‌رنگ زمینهٔ صفحه (green-50)
-  themeColor: PAGE_COLOR,
+  // نوار مرورگر گوشی هم‌رنگ نوار بالای صفحه (green-50)، تا با سربرگ یکی شود
+  themeColor: BAND_COLOR,
 };
 
 /**

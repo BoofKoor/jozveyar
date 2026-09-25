@@ -340,8 +340,9 @@
       background-color var(--jy-dur-fast) var(--jy-ease),
       border-color var(--jy-dur-fast) var(--jy-ease);
   }
+  /* فایلی روی کارت کشیده شده: `is-dragover` روی خود کارت، که فایل را می‌گیرد (مثل jy-add) */
   label.jy-upload:hover .jy-drop,
-  .jy-drop.is-dragover {
+  .jy-upload.is-dragover .jy-drop {
     background: var(--color-green-100);
     border-style: solid;
     border-color: var(--color-green-600);

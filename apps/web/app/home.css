@@ -1,0 +1,453 @@
+/*
+ * ===== صفحهٔ اصلی، از طرح ز (docs/ui/mockups/home-z.html؛ docs/UI.md، ۴الف) =====
+ * صفحه‌آرایی خود سایت است، نه جزء کیت؛ پس پیشوندش `home-` است، مثل `site-` سربرگ و پاورقی. اندازه‌ها
+ * و فاصله‌ها همان طرح ز است، با توکن‌های packages/ui و نقطه‌های شکست کیت (۵۲۰ و ۸۶۰). رنگ فقط توکن.
+ * فقط logical properties.
+ *
+ * پیش از فایل: نوار بالای green-50 (سربرگ و قهرمان: تیتر، کارت بارگذاری، سه نکتهٔ اطمینان)، و روی
+ * سفید سه قدم، تعرفه و سؤال‌ها. پس از فایل (`body:has([data-jozve])`، پایین فایل): کل صفحه green-50
+ * است، قهرمان و سه قدم و تعرفه کنار می‌روند، جزیرهٔ سفارش ستون خودش را دارد و سؤال‌ها کارت می‌شوند.
+ */
+@layer components {
+  /*
+   * پایهٔ طرح ز، فقط در بخش‌های ثابت همین صفحه: تیتر متوازن، پاراگراف بی تک‌واژهٔ ته خط، و وزن ۶۰۰
+   * برای b. جزیرهٔ سفارش (`.home-hero__order`) بیرون می‌ماند: کارت‌هایش چیدمان خودشان را دارند، و
+   * شکستن متوازن خط در اولین رسم کارت‌ها، درست وسط بازهٔ انداختن فایل تا اولین قیمت است. با `:where()`
+   * وزن انتخاب‌گر عنصر را دارد، مثل خود طرح؛ پس هر کلاس صفحه (مثل ارتفاع خط تیتر) بر آن غلبه می‌کند.
+   */
+  :where(.home-hero__text, .home-more) :is(h1, h2, h3) {
+    font-weight: 600;
+    line-height: 1.5;
+    text-wrap: balance;
+  }
+  :where(.home-hero__text, .home-trust, .home-more) p {
+    text-wrap: pretty;
+  }
+  :where(.home-trust, .home-more) b {
+    font-weight: 600;
+  }
+
+  /* ===== نوار بالا و قهرمان: متن در آغاز، کارت بارگذاری در پایان؛ در موبایل متن، کارت، اطمینان ===== */
+  .home-top {
+    background: var(--color-band);
+  }
+  .home-hero {
+    padding-block: 32px 64px;
+  }
+  .home-hero__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 440px;
+    grid-template-areas:
+      'text order'
+      'trust order';
+    column-gap: 72px;
+    row-gap: 40px;
+    align-items: start;
+  }
+  .home-hero__text {
+    grid-area: text;
+    padding-block-start: 16px;
+  }
+  .home-hero__order {
+    grid-area: order;
+    min-width: 0;
+  }
+  .home-trust {
+    grid-area: trust;
+  }
+  @media (max-width: 860px) {
+    .home-hero {
+      padding-block: 8px 48px;
+    }
+    .home-hero__grid {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'text' 'order' 'trust';
+      row-gap: 24px;
+    }
+    .home-hero__text {
+      padding: 0;
+    }
+  }
+
+  .home-eyebrow {
+    display: inline-block;
+    padding: 2px 12px;
+    border-radius: 999px;
+    background: var(--color-green-100);
+    color: var(--color-green-800);
+    font-size: var(--text-small);
+    font-weight: 600;
+    line-height: 1.9;
+  }
+  .home-title {
+    margin-block-start: 16px;
+    font-size: var(--text-display);
+    line-height: 1.35;
+  }
+  /* تأکید «همین حالا»: زیرخط پهن green-200، که با شکستن خط هر تکه را جدا می‌گیرد */
+  .home-title mark {
+    padding-inline: 2px;
+    color: inherit;
+    background: linear-gradient(
+      transparent 58%,
+      var(--color-green-200) 58%,
+      var(--color-green-200) 90%,
+      transparent 90%
+    );
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  /* تیتر فقط سر ویرگول می‌شکند، نه وسط عبارت */
+  .home-clause {
+    display: inline-block;
+  }
+  .home-lead {
+    max-width: 32em;
+    margin-block-start: 16px;
+    font-size: var(--text-h4);
+    color: var(--color-muted);
+  }
+  @media (max-width: 520px) {
+    .home-title {
+      margin-block-start: 12px;
+      font-size: var(--text-h1);
+    }
+    .home-lead {
+      margin-block-start: 8px;
+      font-size: var(--text-base);
+    }
+  }
+  /* گوشی خیلی باریک (۳۲۰): «قیمت را همین حالا ببین» با ۳۱ پیکسل ۳۰۲ پیکسل است و در ۲۸۸ جا نمی‌شود؛ یک پله کوچک‌تر، تا تیتر باز فقط سر ویرگول بشکند */
+  @media (max-width: 359px) {
+    .home-title {
+      font-size: var(--text-h2);
+    }
+  }
+
+  /* کارت بارگذاری (jy-upload در DropZone، محتوا UploadCard): تصویر و فاصله‌ها کار صفحه است، نه کیت */
+  .home-art {
+    width: 148px;
+    height: auto;
+    margin-block-end: 10px;
+  }
+  @media (max-width: 520px) {
+    .home-art {
+      width: 120px;
+    }
+  }
+  .home-formats {
+    margin-block-start: 12px;
+  }
+  .home-upload-hint {
+    margin-block-start: 10px;
+  }
+
+  /* سه نکتهٔ اطمینان */
+  .home-trust {
+    display: grid;
+    gap: 16px;
+  }
+  .home-trust li {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .home-trust__ic {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--color-paper);
+    color: var(--color-green-700);
+    box-shadow: var(--shadow-sm);
+  }
+  .home-trust__t {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.6;
+  }
+  /* فقط خط دوم؛ عدد درون خط پررنگ («تا 2 روز کاری») اندازه و رنگ خط خودش را دارد */
+  .home-trust__t > span {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+
+  /* ===== بخش‌های پایین، روی سفید ===== */
+  .home-more {
+    padding-block-end: 64px;
+  }
+  .home-sec {
+    padding-block-start: 80px;
+  }
+  @media (max-width: 520px) {
+    .home-sec {
+      padding-block-start: 64px;
+    }
+  }
+  .home-sec__title {
+    font-size: var(--text-h2);
+  }
+  .home-sec__sub {
+    max-width: 40em;
+    margin-block-start: 8px;
+    color: var(--color-muted);
+  }
+
+  /* سه قدم: دایره‌ها با خط‌چین به هم وصل‌اند؛ در موبایل ستونی */
+  .home-how {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 32px;
+    margin-block-start: 40px;
+  }
+  .home-how li {
+    position: relative;
+  }
+  .home-how__n {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    /* رقم وسط دایره، نه خط متن (--jy-digit-rise در packages/ui/src/base.css) */
+    padding-block-start: calc(2 * var(--jy-digit-rise));
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--color-green-100);
+    color: var(--color-green-800);
+    font-size: var(--text-h4);
+    font-weight: 600;
+  }
+  .home-how li:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    inset-block-start: 21px;
+    inset-inline-start: 60px;
+    inset-inline-end: -16px;
+    border-block-start: 2px dashed var(--color-green-300);
+  }
+  .home-how h3 {
+    margin-block-start: 16px;
+    font-size: var(--text-h4);
+  }
+  .home-how p {
+    margin-block-start: 4px;
+    color: var(--color-muted);
+  }
+  @media (max-width: 860px) {
+    .home-how {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 28px;
+      margin-block-start: 28px;
+    }
+    .home-how li {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr);
+      column-gap: 16px;
+    }
+    .home-how h3 {
+      margin-block-start: 6px;
+    }
+    .home-how li:not(:last-child)::after {
+      inset-block-start: 52px;
+      inset-block-end: -24px;
+      inset-inline-start: 21px;
+      inset-inline-end: auto;
+      border-block-start: 0;
+      border-inline-start: 2px dashed var(--color-green-300);
+    }
+  }
+
+  /* تعرفه: سه کارت و یک مثال؛ عددها از تعرفه و quote() (components/Tariff.tsx) */
+  .home-prices {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-block-start: 32px;
+  }
+  @media (max-width: 860px) {
+    .home-prices {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .home-price {
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+  }
+  .home-price__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  /* آیکون ۲۰ پیکسل با خط ۲، مثل بقیهٔ آیکون‌ها (تصمیم صاحب پروژه) */
+  .home-price__head .jy-icon {
+    color: var(--color-green-600);
+  }
+  .home-price h3 {
+    font-size: var(--text-base);
+  }
+  .home-price dl {
+    margin-block-start: 12px;
+  }
+  .home-price dl div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding-block: 8px;
+  }
+  .home-price dl div + div {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .home-price dt {
+    color: var(--color-muted);
+  }
+  .home-price dd {
+    font-weight: 600;
+  }
+  .home-price :is(dd, .home-price__big) small {
+    font-size: var(--text-small);
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .home-price__big {
+    margin-block-start: 16px;
+    font-size: var(--text-h3);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .home-price__note {
+    margin-block-start: auto;
+    padding-block-start: 12px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .home-price details {
+    margin-block-start: 8px;
+    font-size: var(--text-small);
+  }
+  .home-price summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    color: var(--color-green-700);
+    font-weight: 600;
+    list-style: none;
+    cursor: pointer;
+  }
+  .home-price summary::-webkit-details-marker {
+    display: none;
+  }
+  .home-price summary .jy-icon {
+    width: 16px;
+    height: 16px;
+    transition: rotate var(--jy-dur-base) var(--jy-ease);
+  }
+  .home-price details[open] summary .jy-icon {
+    rotate: 180deg;
+  }
+  .home-price table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .home-price td {
+    padding-block: 5px;
+    border-block-start: 1px solid var(--color-green-100);
+    color: var(--color-muted);
+  }
+  .home-price td:last-child {
+    text-align: end;
+    color: var(--color-ink);
+  }
+  .home-example {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-block-start: 16px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    background: var(--color-green-50);
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .home-example .jy-icon {
+    margin-block-start: 1px;
+    color: var(--color-green-700);
+  }
+
+  /* سؤال‌ها: تیتر در آغاز، فهرست `jy-faq` کیت در پایان؛ در موبایل زیر هم */
+  .home-faq {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 48px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .home-faq {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+    }
+  }
+
+  /*
+   * ===== پس از فایل =====
+   * همه با نشانهٔ `data-jozve` جزیرهٔ سفارش و `:has()`، بی JS؛ زمینهٔ green-50 کل صفحه در globals.css.
+   * تیتر فقط برای صفحه‌خوان می‌ماند. جزیرهٔ سفارش و سؤال‌ها یک ستون‌اند، به پهنای فلوی سفارش امروز؛
+   * چیدمان کامل پس از فایل (قدم‌های سفارش، خلاصهٔ چسبان) قدم ۴ب است.
+   */
+  :where(body:has([data-jozve])) .home-hero {
+    padding-block: 8px 0;
+  }
+  :where(body:has([data-jozve])) .home-hero__grid {
+    display: block;
+  }
+  :where(body:has([data-jozve])) .home-hero__text {
+    padding: 0;
+  }
+  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff) {
+    display: none;
+  }
+  :where(body:has([data-jozve])) .home-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* ۶۴۰ پیکسل، همان ستون فلوی سفارش پیش از ۴الف */
+  :where(body:has([data-jozve])) :is(.home-hero__order, .home-faq) {
+    max-width: 40rem;
+    margin-inline: auto;
+  }
+  :where(body:has([data-jozve])) .home-faq {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-block-start: 16px;
+    padding: 24px;
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+  }
+  :where(body:has([data-jozve])) .home-faq .home-sec__title {
+    font-size: var(--text-h4);
+  }
+  :where(body:has([data-jozve])) .home-faq .home-sec__sub {
+    display: none;
+  }
+  @media (max-width: 520px) {
+    :where(body:has([data-jozve])) .home-hero {
+      padding-block-start: 4px;
+    }
+    :where(body:has([data-jozve])) .home-faq {
+      padding: 16px;
+    }
+  }
+}

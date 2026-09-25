@@ -3,8 +3,12 @@
  * tokens.test.ts با همان‌جا می‌سنجدش.
  */
 
-/** زمینهٔ صفحه، برای `themeColor` (نوار مرورگر گوشی). برابر `--color-page` در theme.css، یعنی green-50. */
-export const PAGE_COLOR = '#F2F7EE';
+/**
+ * رنگ نوار بالای صفحه، برای `themeColor` (نوار مرورگر گوشی) و manifest: نوار مرورگر با سربرگ یکی
+ * می‌شود. برابر `--color-band` در theme.css، یعنی green-50. زمینهٔ خود صفحه (`--color-page`) از
+ * قدم ۴ کاغذ است.
+ */
+export const BAND_COLOR = '#F2F7EE';
 
 /** اندازهٔ ذاتی لوگوی بی‌شعار، از viewBox خود فایل. */
 export const LOGO_BOX = { width: 395, height: 435 } as const;
