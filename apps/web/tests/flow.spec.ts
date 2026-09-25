@@ -4,9 +4,11 @@ import { gzipSync } from 'node:zlib';
 
 /**
  * سقف باندل اولیهٔ صفحهٔ اصلی، کیلوبایت (۱۰۰۰ بایت، مثل `next build`). عدد اندازه‌گرفته
- * در CLAUDE.md است؛ سقف همان به‌علاوهٔ حدود ۳ کیلوبایت.
+ * در CLAUDE.md است؛ سقف همان به‌علاوهٔ حدود ۳ کیلوبایت. از ۴ب (تصمیم صاحب پروژه): ۱۰۷٫۷ و سقف ۱۱۱،
+ * چون رابط پس از فایل و موتور قیمت تکهٔ جدا شدند؛ با سقف پیشین (۱۲۱) برگشت اشتباهی همان رابط به
+ * باندل اولیه (۱۱۹٫۶، سنجیده) از تست اندازه رد می‌شد.
  */
-const INITIAL_JS_BUDGET_KB = 121;
+const INITIAL_JS_BUDGET_KB = 111;
 
 // Playwright اجرا را از apps/web شروع می‌کند؛ مسیر نسبی از import.meta
 // مستقل‌تر است چون لودر تست به CommonJS ترجمه می‌کند.
@@ -57,7 +59,7 @@ test.describe('سئو و بار اولیه', () => {
    * وارد صفحه شود، از جست‌وجوی نام (تست پایین) رد می‌شد. هر نشانه رشته‌ای است که
    * کوچک‌سازی عوضش نمی‌کند.
    */
-  test('باندل اولیهٔ صفحهٔ اصلی زیر سقف، بی pdf.js و آپلودگر و خوانندهٔ Word و zod', async ({ page }) => {
+  test('باندل اولیهٔ صفحهٔ اصلی زیر سقف، بی pdf.js و آپلودگر و خوانندهٔ Word و zod و رابط پس از فایل', async ({ page }) => {
     const bodies = new Map<string, Promise<Buffer | null>>();
     page.on('response', (response) => {
       if (response.request().resourceType() !== 'script') return;
@@ -78,6 +80,9 @@ test.describe('سئو و بار اولیه', () => {
       ['jy.upload.', 'آپلودگر'],
       ['docProps/app.xml', 'خوانندهٔ فهرست zip (پیش‌فاکتور Word)'],
       ['ZodError', 'zod'],
+      // رابط پس از فایل و موتور قیمت با اولین فایل (یا نشانهٔ قصد) بار می‌شوند، نه با صفحه (docs/UI.md، ۴ب)
+      ['home-sum__total', 'رابط پس از فایل (خلاصهٔ سفارش)'],
+      ['binding_band_missing', 'موتور قیمت (quote)'],
     ] as const) {
       expect(code.includes(marker), `${module} در باندل اولیه آمده`).toBe(false);
     }
@@ -214,8 +219,10 @@ test.describe('تحلیل در مرورگر', () => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', join(FIXTURES, 'plain-bw-10.pdf'));
     await expect(price(page)).toContainText('61,000', { timeout: 15_000 });
-    // تز محصول: قیمت قبل از هویت. تنها ورودی متنی، تعداد نسخه است.
-    const textInputs = page.locator('input:not([type="file"]):not([type="number"])');
+    // تز محصول: قیمت قبل از هویت. تنها ورودی‌ها رادیوهای «تنظیمات چاپ» (رنگ، یکرو یا دورو) و
+    // تعداد نسخه‌اند؛ هیچ فیلد متنی نیست.
+    await expect(page.locator('input[type="radio"]')).toHaveCount(4);
+    const textInputs = page.locator('input:not([type="file"]):not([type="number"]):not([type="radio"])');
     await expect(textInputs).toHaveCount(0);
   });
 });
@@ -286,9 +293,9 @@ test.describe('بن‌بست نداریم', () => {
       mimeType: 'application/pdf',
       buffer: Buffer.from('%PDF-1.4 this is not a real pdf at all'),
     });
-    await expect(page.getByRole('button', { name: 'فایل دیگری بینداز' })).toBeVisible({
-      timeout: 20_000,
-    });
+    // خود پیام، نه فقط دکمه: ✕ کارت در حال بررسی هم همین نام را دارد و زودتر دیده می‌شد
+    await expect(page.getByTestId('file-error')).toContainText('این فایل خوانده نشد', { timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'فایل دیگری بینداز' })).toHaveText('فایل دیگری بینداز');
     // پیام نباید کاربر را به جایی بیرون سایت بفرستد.
     await expect(page.getByText('تلگرام')).toHaveCount(0);
   });

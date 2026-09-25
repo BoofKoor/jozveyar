@@ -274,27 +274,30 @@ test.describe('زمینه و حالت سفارش', () => {
   /**
    * پایهٔ طرح ز (تیتر متوازن، پاراگراف `pretty`، ارتفاع خط ۱٫۵ تیترها) فقط مال بخش‌های ثابت صفحه است.
    * روی کارت‌های فلوی سفارش هم نشسته بود: تیترهای «تنظیمات چاپ» کوتاه‌تر شدند، و شکستن متوازن خط در
-   * اولین رسم کارت‌ها، وسط بازهٔ انداختن فایل تا اولین قیمت، کار اضافه داشت.
+   * اولین رسم کارت‌ها، وسط بازهٔ انداختن فایل تا اولین قیمت، کار اضافه داشت. از ۴ب رابط پس از فایل در
+   * همان `home-more` بخش‌های ثابت است، پس پایه فقط روی خود بخش‌هاست (`home-sec`).
    */
-  test('پایهٔ طرح ز به کارت‌های فلوی سفارش نمی‌رسد: تیتر و پاراگراف همان سبک پیش از ۴الف', async ({ page }) => {
+  test('پایهٔ طرح ز به کارت‌های فلوی سفارش نمی‌رسد: تیتر، برچسب و پاراگراف سبک خود کارت‌ها را دارند', async ({ page }) => {
     await page.goto('/');
     // شاهد روی خود صفحه: بخش‌های ثابت همان پایه را دارند
     const section = await page.locator('#how h3').first().evaluate((el) => [getComputedStyle(el).lineHeight, getComputedStyle(el).textWrapStyle]);
     expect(section).toEqual(['30px', 'balance']);
 
     await dropFile(page);
-    const island = await page.locator('.home-hero__order').evaluate((root) => {
+    const island = await page.locator('.home-desk, .home-side').evaluateAll((roots) => {
       const body = parseFloat(getComputedStyle(document.body).lineHeight);
-      return [...root.querySelectorAll('h2, h3, p')].map((el) => {
-        const s = getComputedStyle(el);
-        return { tag: el.tagName, text: el.textContent!.trim().slice(0, 20), wrap: s.textWrapStyle, ratio: parseFloat(s.lineHeight) / parseFloat(s.fontSize), body };
-      });
+      return roots.flatMap((root) =>
+        [...root.querySelectorAll('h2, h3, p, legend')].map((el) => {
+          const s = getComputedStyle(el);
+          return { tag: el.tagName, text: el.textContent!.trim().slice(0, 20), label: el.matches('.home-field__label'), wrap: s.textWrapStyle, ratio: parseFloat(s.lineHeight) / parseFloat(s.fontSize), body };
+        }),
+      );
     });
-    expect(island.length).toBeGreaterThan(5);
+    expect(island.length).toBeGreaterThan(10);
     for (const { tag, text, wrap } of island) expect(wrap, `${tag} «${text}»`).toBe('auto');
-    // تیترهای «تنظیمات چاپ» (h3 بی کلاس ارتفاع خط) ارتفاع خط متن صفحه را دارند، نه ۱٫۵ تیترهای طرح
-    const labels = island.filter(({ tag }) => tag === 'H3');
-    expect(labels.length).toBeGreaterThanOrEqual(3);
+    // برچسب‌های «تنظیمات چاپ» (رنگ، یکرو یا دورو، صحافی، تعداد) ارتفاع خط متن صفحه را دارند، نه ۱٫۵ تیترهای طرح
+    const labels = island.filter(({ label }) => label);
+    expect(labels.map(({ text }) => text)).toEqual(['رنگ چاپ', 'یکرو یا دورو', 'صحافی', 'تعداد نسخه']);
     for (const { text, ratio, body } of labels) expect(ratio, text).toBeCloseTo(body / 16, 2);
   });
 

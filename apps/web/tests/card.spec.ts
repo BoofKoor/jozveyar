@@ -88,9 +88,10 @@ const holdAfter = (after: number) => `(() => {
 
 /**
  * سرور آپلود ساختگی: تکهٔ اول (۵ از ۱۲ مگابایت) رسیده و بقیه در راه‌اند و هیچ‌وقت نمی‌رسند —
- * «در حال ارسال فایل · 41%» ثابت می‌ماند.
+ * «در حال ارسال فایل · 41%» ثابت می‌ماند. فایل پیش‌فرض PDF است؛ با نام دیگر (مثلاً Word قدیمی) همان
+ * بایت‌ها مسیر سرور می‌گیرند.
  */
-async function stalledUpload(page: Page) {
+async function stalledUpload(page: Page, { name = 'jozve-big.pdf', mimeType = 'application/pdf' } = {}) {
   const part = 5 * 1024 * 1024;
   await page.route('**/api/uploads', async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
@@ -115,7 +116,7 @@ async function stalledUpload(page: Page) {
   await page.route('**/api/uploads/card-1/browser-analysis', (route) => route.fulfill({ json: {} }));
   const pdf = readFileSync(fixture('plain-bw-10.pdf'));
   const size = 12 * 1024 * 1024;
-  return { name: 'jozve-big.pdf', mimeType: 'application/pdf', buffer: Buffer.concat([pdf, Buffer.alloc(size - pdf.length, '%')]) };
+  return { name, mimeType, buffer: Buffer.concat([pdf, Buffer.alloc(size - pdf.length, '%')]) };
 }
 
 test.describe('عدد کنار متن فارسی', () => {
@@ -207,6 +208,30 @@ test.describe('دکمه‌های کارت', () => {
     await expect(another.locator('.jy-icon-close')).toHaveCount(1);
     await another.click();
     await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+  });
+
+  test('کارت مسیر سرور هم در حالت عادی ✕ دارد، با همان نام و راهنما؛ در شکست، دکمهٔ متنی تنها راه است', async ({
+    page,
+  }) => {
+    // Word قدیمی (.doc) پیش‌فاکتور ندارد، پس قیمتش با سرور است؛ آپلود ساختگی وسط راه می‌ماند.
+    const doc = await stalledUpload(page, { name: 'jozve.doc', mimeType: 'application/msword' });
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', doc);
+    const server = page.getByTestId('server-path');
+    await expect(server.getByTestId('upload-status')).toHaveText('در حال ارسال فایل · 41%', { timeout: 30_000 });
+    await expect(server).toContainText('این فایل روی سرور به PDF تبدیل و کامل خوانده می‌شود');
+    const another = server.getByRole('button', { name: 'فایل دیگری بینداز', exact: true });
+    await expect(another).toHaveAttribute('title', 'فایل دیگری بینداز');
+    await expect(another).toHaveText('');
+    await expect(another.locator('.jy-icon-close')).toHaveCount(1);
+    await another.click();
+    await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+
+    // شکست (سرور فایل را نگرفت): ✕ نیست، و «فایل دیگری بینداز» با متن تنها راه جلوست
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await page.setInputFiles('#jozve-file', doc);
+    await expect(server.locator('.jy-note--error')).toContainText('چند دقیقهٔ دیگر دوباره بینداز', { timeout: 30_000 });
+    await expect(server.getByRole('button', { name: 'فایل دیگری بینداز' })).toHaveText('فایل دیگری بینداز');
   });
 });
 

@@ -8,7 +8,7 @@ import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts/constants';
 
 import type { WorkerResponse } from './analysis-protocol';
-import { jozveView } from './jozve';
+import { jozveView } from './jozveView';
 import { createJozve, type JozveDeps } from './jozveController';
 import type { UploadHandle, UploadSnapshot } from './upload/client';
 

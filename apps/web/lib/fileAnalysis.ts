@@ -2,12 +2,12 @@
  * وضعیت بررسی مرورگر برای یک فایل — خالص، بی React.
  *
  * هر فایل جزوه یکی از این دارد (`lib/jozve.ts`). اینجا فقط «فایل چه هست» حساب می‌شود:
- * حالت اولیه از نوع فایل، اعمال پیام‌های کارگر تحلیل، و تجمیع برای کارت و قیمت. اینکه
- * کدام فایل کِی به کارگر برود کار صف است، نه این ماژول.
+ * حالت اولیه از نوع فایل و اعمال پیام‌های کارگر تحلیل. اینکه کدام فایل کِی به کارگر برود کار
+ * صف است، نه این ماژول؛ تجمیع برای کارت و قیمت در `fileSummary.ts` است، که فقط رابط پس از فایل
+ * آن را می‌خواهد (docs/UI.md، ۴ب).
  */
 
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
-import { isSlidePage, paperSizeName } from '@jozveyar/analysis';
 import {
   ERROR_MESSAGES,
   FIRST_PRICE_AFTER_PAGES,
@@ -167,75 +167,4 @@ export function browserPriceReady(state: AnalysisState): boolean {
   return (
     state.pageCount > 0 && (state.phase === 'ready' || state.analyzedCount >= FIRST_PRICE_AFTER_PAGES)
   );
-}
-
-export interface AnalysisSummaryView {
-  pageCount: number;
-  colorPageCount: number;
-  blankPageCount: number;
-  lowDpiPageCount: number;
-  tightMarginPageCount: number;
-  pageSizes: { name: string; count: number }[];
-  /** صفحاتی که رنگی تشخیص داده شده‌اند — ورودی حالت ترکیبی در آینده. */
-  colorPages: number[];
-  /**
-   * شمارهٔ صفحه‌های هر هشدار، از ۱ (ADR-029). در سند نمونه‌برداری‌شده فقط صفحه‌های
-   * بررسی‌شده‌اند، پس نمونه‌اند نه فهرست کامل؛ شمارش بالا برآورد است.
-   */
-  blankPages: number[];
-  lowDpiPages: number[];
-  /** بدون صفحه‌های اسلاید: اسلاید برای چاپ کوچک می‌شود و لبه‌اش لبهٔ کاغذ نیست. */
-  tightMarginPages: number[];
-  /** فونت‌هایی که روی سرور نبودند و جایگزینشان اندازهٔ دیگری دارد — فقط از سرور. */
-  mismatchedFonts: string[];
-  /** true یعنی عددها از نمونه برآورد شده‌اند، نه شمارش کامل. */
-  estimated: boolean;
-}
-
-/**
- * تجمیع تحلیل برای نمایش و قیمت.
- *
- * وقتی نمونه‌برداری شده، شمارش‌ها به نسبت گام نمونه بزرگ می‌شوند تا عدد نمایشی
- * با تعداد واقعی صفحات جور باشد. برآورد صریحاً علامت می‌خورد، چون قیمت قطعی
- * را سرور می‌دهد نه این عدد.
- */
-export function summarize(state: AnalysisState): AnalysisSummaryView {
-  const { pages, pageCount, sampleStride } = state;
-  const sizes = new Map<string, number>();
-  const colorPages: number[] = [];
-  const blankPages: number[] = [];
-  const lowDpiPages: number[] = [];
-  const tightMarginPages: number[] = [];
-
-  for (const page of pages) {
-    const name = paperSizeName(page.widthPt, page.heightPt);
-    sizes.set(name, (sizes.get(name) ?? 0) + 1);
-    if (page.color) colorPages.push(page.n);
-    if (page.blank) blankPages.push(page.n);
-    if (page.warnings.includes('low_dpi')) lowDpiPages.push(page.n);
-    // همان قاعدهٔ سرور (`analysisView`): حاشیهٔ اسلاید حساب می‌شود ولی هشدار نمی‌شود.
-    if (page.warnings.includes('tight_margin') && !isSlidePage(page.widthPt, page.heightPt)) {
-      tightMarginPages.push(page.n);
-    }
-  }
-
-  const scale = (value: number) =>
-    sampleStride > 1 ? Math.min(pageCount, Math.round(value * sampleStride)) : value;
-
-  return {
-    pageCount,
-    colorPageCount: scale(colorPages.length),
-    blankPageCount: scale(blankPages.length),
-    lowDpiPageCount: scale(lowDpiPages.length),
-    tightMarginPageCount: scale(tightMarginPages.length),
-    pageSizes: [...sizes.entries()]
-      .map(([name, count]) => ({ name, count: scale(count) }))
-      .sort((a, b) => b.count - a.count),
-    colorPages,
-    blankPages,
-    lowDpiPages,
-    tightMarginPages,
-    mismatchedFonts: [],
-    estimated: sampleStride > 1,
-  };
 }

@@ -97,16 +97,18 @@ export function createJozve(deps: JozveDeps) {
     jobs += 1;
     const job = jobs;
     inFlight = { job, key: next.key, startedAt: deps.now() };
+    // کارگر همین حالا، هم‌زمان با خواندن فایل، نه بعد از آن: بالا آمدنش (گرفتن اسکریپت و بار pdf.js)
+    // طولانی‌ترین تکهٔ راه تا اولین قیمت است و به خود فایل بند نیست (docs/UI.md، ۴ب).
+    worker ??= deps.createWorker(onWorkerMessage, onWorkerError);
+    if (!worker) {
+      finish(toServerPath);
+      return;
+    }
     if (!next.countOnly) patchAnalysis(next.key, (a) => ({ ...a, phase: 'reading' }));
 
     deps.readFile(section.file).then(
       (buffer) => {
-        if (inFlight?.job !== job) return;
-        worker ??= deps.createWorker(onWorkerMessage, onWorkerError);
-        if (!worker) {
-          finish(toServerPath);
-          return;
-        }
+        if (inFlight?.job !== job || !worker) return;
         worker.post({
           kind: 'analyze',
           job,

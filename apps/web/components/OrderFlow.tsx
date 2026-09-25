@@ -1,241 +1,147 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
-import { quote } from '@jozveyar/pricing';
-import {
-  DEFAULT_BINDING_TYPE_ID,
-  DEFAULT_PAPER_TYPE_ID,
-  SEED_PRICE_LIST,
-} from '@jozveyar/pricing/seed';
-import { serverFailureMessage, uploadRefusalMessage } from '../lib/analysis-protocol';
-import { colorHint } from '../lib/fileCard';
-import { jozveSpec, jozveView, type SectionView } from '../lib/jozve';
+import { startTransition, useCallback, useDeferredValue, useEffect, useState, type ReactNode } from 'react';
+import type { OrderConfig } from '../lib/orderConfig';
 import { useJozve } from '../lib/useJozve';
-import { AddFiles } from './AddFiles';
-import { AnalysisCard, Bytes, uploadLine } from './AnalysisCard';
-import { ConfigPanel, type OrderConfig } from './ConfigPanel';
 import { DropZone } from './DropZone';
-import { JozveFiles } from './JozveFiles';
-import { PriceBar } from './PriceBar';
 
-const INITIAL_CONFIG: OrderConfig = {
-  colorMode: 'bw',
-  sidesMode: 'double',
-  bindingTypeId: DEFAULT_BINDING_TYPE_ID,
-  paperTypeId: DEFAULT_PAPER_TYPE_ID,
-  copies: 1,
-};
+/** رابط پس از فایل: تکهٔ جدای JS، بیرون از باندل اولیه (docs/UI.md، ۴ب). */
+type DeskModule = typeof import('./OrderDesk');
+let deskModule: DeskModule | null = null;
+let deskLoading: Promise<DeskModule> | null = null;
 
 /**
- * ارتفاع نوار قیمت را در `--price-dock` روی پاورقی سایت می‌گذارد. در موبایل نوار ثابت پایین صفحه
- * است و ته صفحه را می‌پوشاند؛ پاورقی (کامپوننت سرور، بی JS) همین‌قدر پایینش خالی می‌گذارد
- * (globals.css). ارتفاع با یادداشت‌های نوار عوض می‌شود (در حال بررسی، فایل خوانده‌نشده، عرض
- * باریک)، پس اندازه گرفته می‌شود نه حدس زده. React 19 پاک‌سازیِ ref را موقع برداشتن نوار اجرا می‌کند.
- *
- * روی خود پاورقی، نه `<html>`: متغیر ارث می‌رسد، پس عوض کردنش روی ریشه سبک کل صفحه را دوباره
- * حساب می‌کرد؛ با پردازندهٔ ۴ برابر کند، قیمت سه‌فایلی حدود ۲۵ میلی‌ثانیه دیرتر می‌آمد.
+ * رابط پس از فایل را بار می‌کند، یک بار: با اولین فایل، و زودتر با نشانهٔ قصد کاربر روی کارت
+ * بارگذاری (اشاره‌گر، لمس، فوکوس یا کشیدن فایل)، تا وقتی فایل‌گزین بسته می‌شود تکه رسیده باشد. در
+ * زمان بیکاری بار نمی‌شود: کسی که فایلی نمی‌اندازد، آن را نمی‌گیرد. بار ناموفق (شبکه) قفل نمی‌ماند؛
+ * بار بعدی دوباره می‌خواهد.
  */
-function publishDockHeight(dock: HTMLDivElement | null) {
-  if (!dock || typeof ResizeObserver === 'undefined') return;
-  const footer = document.querySelector<HTMLElement>('body > footer');
-  if (!footer) return;
-  const observer = new ResizeObserver(() => footer.style.setProperty('--price-dock', `${dock.offsetHeight}px`));
-  observer.observe(dock);
-  return () => {
-    observer.disconnect();
-    footer.style.removeProperty('--price-dock');
-  };
+function loadDesk(): Promise<DeskModule> {
+  deskLoading ??= import('./OrderDesk').then(
+    (module) => (deskModule = module),
+    (error: unknown) => {
+      deskLoading = null;
+      throw error;
+    },
+  );
+  return deskLoading;
+}
+
+const preloadDesk = () => void loadDesk().catch(() => undefined);
+
+interface Props {
+  /** تیتر و متن قهرمان (کامپوننت سرور). */
+  hero: ReactNode;
+  /** محتوای ثابت کارت بارگذاری (`UploadCard`، کامپوننت سرور). */
+  upload: ReactNode;
+  /** سه نکتهٔ اطمینان قهرمان (کامپوننت سرور). */
+  trust: ReactNode;
+  /** «سه قدم» و «تعرفه» (کامپوننت سرور). */
+  more: ReactNode;
+  /** سؤال‌ها (کامپوننت سرور): پس از فایل در همان شبکهٔ خلاصهٔ سفارش، تا خلاصهٔ چسبان تا ته صفحه بماند. */
+  children: ReactNode;
 }
 
 /**
- * فلوی سفارش: یک جزوه از یک یا چند فایل (ADR-030).
+ * فلوی سفارش: یک جزوه از یک یا چند فایل (ADR-030)، و چیدمان صفحهٔ اصلی دور آن (طرح ز، home.css).
  *
- * پیش از فایل، کارت بارگذاری؛ محتوای ثابتش (`upload`) کامپوننت سرور است. یک فایل همان کارت
- * همیشگی را می‌گیرد؛ از دو فایل به بعد فهرست جزوه می‌آید. قیمت در هر دو حالت یک قلم است —
- * صفحه‌های همهٔ فایل‌ها جمع و یک صحافی — با همان `quote()`.
+ * پوسته است و در باندل اولیه: صف جزوه (`useJozve`)، کارت بارگذاری، انتخاب‌های چاپ و بار کردن رابط
+ * پس از فایل (`OrderDesk`). محتوای ثابت صفحه کامپوننت سرور است و از props می‌آید، پس متنش در HTML
+ * است و در باندل نیست.
+ *
+ * پیش از فایل: قهرمان با کارت بارگذاری، و زیرش سه قدم، تعرفه و سؤال‌ها. پس از فایل نشانهٔ
+ * `data-jozve` می‌آید و CSS با `:has()` قهرمان و بخش‌ها را کنار می‌برد و `home-more` را شبکهٔ
+ * سفارش می‌کند؛ رابط پس از فایل و سؤال‌ها در همان شبکه‌اند. سؤال‌ها و بخش‌ها جای خودشان در DOM
+ * می‌مانند و React دوباره نمی‌سازدشان. نشانه با خود رابط پس از فایل می‌آید: اگر تکه هنوز نرسیده،
+ * کارت بارگذاری تا رسیدنش سر جایش است، نه صفحه‌ای نیمه‌خالی.
  */
-export function OrderFlow({ upload }: { upload: React.ReactNode }) {
+export function OrderFlow({ hero, upload, trust, more, children }: Props) {
   const jozve = useJozve();
-  const [config, setConfig] = useState<OrderConfig>(INITIAL_CONFIG);
-  const view = useMemo(() => jozveView(jozve.sections), [jozve.sections]);
+  // پیش‌فرض‌ها از تعرفه‌اند و رابط پس از فایل می‌گذاردشان؛ حالت اینجاست تا با «از اول» نرود.
+  const [config, setConfig] = useState<OrderConfig | null>(null);
+  const [loaded, setLoaded] = useState<DeskModule | null>(null);
+  const [failed, setFailed] = useState(false);
+  const ordering = jozve.sections.length > 0;
+  // تکه‌ای که پیش از فایل (با نشانهٔ قصد) رسیده، همان لحظهٔ انداختن فایل رسم می‌شود.
+  const desk = loaded ?? deskModule;
 
-  const breakdown = useMemo(() => {
-    const spec = jozveSpec(view, config);
-    return spec ? quote(spec, SEED_PRICE_LIST) : null;
-  }, [view, config]);
-
-  if (view.sections.length === 0) {
-    return <DropZone onFiles={jozve.add}>{upload}</DropZone>;
-  }
-
-  const pending = view.pending.filter((s) => s.serverPath).map((s) => s.name);
-  const blocked = view.blocked.map((s) => s.name);
-
-  const price = (
-    <>
-      {view.pageCount > 0 ? (
-        <ConfigPanel
-          config={config}
-          onChange={setConfig}
-          priceList={SEED_PRICE_LIST}
-          // صفحه‌های رنگی جای خودشان را دارند، کنار انتخاب رنگ؛ حکم «تماماً» فقط بعد از بررسی همه.
-          colorHint={colorHint({
-            colorPages: view.summary.colorPageCount,
-            unknown: view.summary.colorUnknown,
-            pending: view.provisional || view.blocked.length > 0,
-            estimated: view.summary.estimated,
-            jozve: view.sections.length > 1,
-          })}
-        />
-      ) : null}
-
-      {/*
-        یک نمونه، دو رفتار: در موبایل نوار ثابت پایین صفحه، در دسکتاپ داخل جریان.
-
-        `fixed` است نه `sticky`: عنصر sticky فقط داخل مرزهای ظرف خودش می‌چسبد،
-        و این نوار آخرین فرزند جریان سفارش است — یعنی وقتی کاربر تا پرسش‌های
-        پرتکرار پایین می‌رود، با ظرفش از صفحه بیرون می‌رفت. اصل «قیمت همیشه روی
-        صفحه» با sticky شکسته می‌شد.
-      */}
-      {/* جای نوار قیمت ثابت؛ با یادداشت فایل شمرده‌نشده یا خوانده‌نشده بلندتر است. */}
-      <div aria-hidden className={`sm:hidden ${pending.length > 0 || blocked.length > 0 ? 'h-72' : 'h-48'}`} />
-      <div
-        ref={publishDockHeight}
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-page px-4 pb-3 pt-2 sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0"
-      >
-        <PriceBar
-          breakdown={breakdown}
-          provisional={view.provisional}
-          pending={pending}
-          blocked={blocked}
-          onContinue={() => undefined}
-        />
-      </div>
-    </>
-  );
-
-  // نشانهٔ حالت سفارش: سربرگ بی ناوبری و لوگوی بی پیوند می‌شود، تا جزوه با یک کلیک پاک نشود.
-  // سربرگ کامپوننت سرور است و JS ندارد؛ حالت را CSS با :has() از همین نشانه می‌خواند (globals.css).
-  const ordering = <span hidden data-jozve="" />;
-
-  if (view.sections.length === 1) {
-    return (
-      <>
-        {ordering}
-        <SingleFile section={view.sections[0]!} onAdd={jozve.add} onReset={jozve.reset} price={price} />
-      </>
+  // بار ناموفق کارت خطای خودش را نشان می‌دهد تا «دوباره تلاش کن» بار بعدی را بخواهد.
+  const requestDesk = useCallback(() => {
+    loadDesk().then(
+      (module) => startTransition(() => setLoaded(module)),
+      () => setFailed(true),
     );
-  }
+  }, []);
+
+  useEffect(() => {
+    if (ordering && !desk) requestDesk();
+  }, [ordering, desk, requestDesk]);
+
+  // فایلی که به پنجره کشیده شد، قصد است؛ روی خود کارت هم DropZone همین را می‌گوید.
+  useEffect(() => {
+    window.addEventListener('dragenter', preloadDesk, { once: true });
+    return () => window.removeEventListener('dragenter', preloadDesk);
+  }, []);
+
+  /*
+   * رابط پس از فایل در رسم کم‌اولویت (transition) می‌آید، نه در همان کار انداختن فایل: رسمش چند تکه
+   * می‌شود و بینش مرورگر کار کارگر تحلیل را راه می‌اندازد، که همان لحظه ساخته شده و تا اولین قیمت
+   * طولانی‌ترین راه است (docs/UI.md، ۴ب). برگشت («از اول») فوری است.
+   */
+  const deskReady = ordering && (desk !== null || failed);
+  const showDesk = useDeferredValue(deskReady) && deskReady;
 
   return (
     <>
-      {ordering}
-      <div className="flex flex-col gap-4 sm:gap-5">
-        <JozveFiles
-          view={view}
-          overflow={jozve.overflow}
-          onAdd={jozve.add}
-          onMove={jozve.move}
-          onRemove={jozve.remove}
-          onReplace={jozve.replace}
-          onReset={jozve.reset}
-        />
-        {price}
+      <div className="home-top">
+        <section className="home-hero" aria-labelledby="hero-title">
+          <div className="site-wrap home-hero__grid">
+            {hero}
+            {showDesk ? null : (
+              <div className="home-hero__order">
+                <DropZone
+                  onFiles={(files) => {
+                    preloadDesk();
+                    jozve.add(files);
+                  }}
+                  onIntent={preloadDesk}
+                >
+                  {upload}
+                </DropZone>
+              </div>
+            )}
+            {trust}
+          </div>
+        </section>
+      </div>
+
+      <div className="site-wrap home-more">
+        {/*
+          نشانهٔ حالت سفارش: سربرگ بی ناوبری و لوگوی بی پیوند می‌شود، تا جزوه با یک کلیک پاک نشود، و
+          صفحه چیدمان سفارش را می‌گیرد. سربرگ کامپوننت سرور است و JS ندارد؛ حالت را CSS با :has() از
+          همین نشانه می‌خواند (globals.css و home.css).
+        */}
+        {showDesk ? <span hidden data-jozve="" /> : null}
+        {showDesk ? (
+          desk ? (
+            <desk.OrderDesk jozve={jozve} config={config} onConfig={setConfig} />
+          ) : (
+            <div className="home-desk">
+              <div className="jy-card">
+                <p className="jy-note jy-note--error">
+                  <span className="jy-icon jy-icon-error" aria-hidden="true" />
+                  <span>بخش سفارش کامل بار نشد. اینترنت را ببین و دوباره تلاش کن؛ فایلت همین‌جا مانده.</span>
+                </p>
+                <button type="button" onClick={requestDesk} className="jy-btn jy-btn--primary mt-4">
+                  دوباره تلاش کن
+                </button>
+              </div>
+            </div>
+          )
+        ) : null}
+        {more}
+        {children}
       </div>
     </>
-  );
-}
-
-/**
- * جزوهٔ تک‌فایلی: کارت «جزوهٔ تو» با یک فایل و «افزودن فایل به همین جزوه» داخلش؛ و مسیر سرور
- * و شکست با کارت خودشان.
- */
-function SingleFile({
-  section,
-  onAdd,
-  onReset,
-  price,
-}: {
-  section: SectionView;
-  onAdd: (files: File[]) => void;
-  onReset: () => void;
-  price: React.ReactNode;
-}) {
-  const { state, upload, kind, serverPath, serverReady, serverFailed, estimate, uploadRefused } = section;
-
-  const anotherFile = (
-    <button
-      type="button"
-      onClick={onReset}
-      className="jy-btn jy-btn--primary mt-5"
-    >
-      فایل دیگری بینداز
-    </button>
-  );
-
-  // مسیر سرور بی‌پیش‌فاکتور (PDF بزرگ، Word قدیمی)، تا وقتی قیمت سرور نیامده؛ و
-  // هر شکست سرور — آنجا پیش‌فاکتور دیگر معنا ندارد.
-  if (serverPath && !serverReady && (!estimate || serverFailed)) {
-    const message = serverFailed ? serverFailureMessage(upload?.analysis?.failureReason, kind) : null;
-    return (
-      <div className="flex flex-col gap-4 sm:gap-5">
-        <div className="jy-card" data-testid="server-path">
-          <h2 className="truncate font-semibold text-ink" title={section.name}>
-            {section.name}
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            <Bytes size={section.size} />
-          </p>
-          {message ? (
-            <>
-              <p className="mt-4 font-semibold text-ink">{message.title}</p>
-              <p className="mt-2 text-muted">{message.hint}</p>
-            </>
-          ) : uploadRefused ? (
-            <p className="mt-4 text-muted">{uploadRefusalMessage(upload?.reason)}</p>
-          ) : (
-            <>
-              <p className="mt-4 text-muted">
-                {kind === 'pdf'
-                  ? 'این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.'
-                  : 'این فایل روی سرور به PDF تبدیل و کامل خوانده می‌شود؛ قیمت همین‌جا می‌آید.'}
-              </p>
-              <p data-testid="upload-status" className="mt-3 text-sm text-ink">
-                {uploadLine(upload) ?? 'در حال آماده‌سازی…'}
-              </p>
-            </>
-          )}
-          {/* شکست: تنها راه جلو همین دکمه است، با متن؛ در کارت «جزوهٔ تو» همین کار ✕ ته ردیف است. */}
-          {message || uploadRefused ? (
-            anotherFile
-          ) : (
-            <AddFiles
-              onFiles={onAdd}
-              room={MAX_SECTIONS_PER_ITEM - 1}
-              label="افزودن فایل به همین جزوه"
-              className="mt-5"
-            />
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (state.phase === 'error' && state.error && !serverReady) {
-    return (
-      <div className="jy-card">
-        <h2 className="font-semibold text-ink">{state.error.title}</h2>
-        <p className="mt-2 text-muted">{state.error.hint}</p>
-        {anotherFile}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4 sm:gap-5">
-      <AnalysisCard section={section} serverUnavailable={estimate && uploadRefused} onAdd={onAdd} onReset={onReset} />
-      {price}
-    </div>
   );
 }

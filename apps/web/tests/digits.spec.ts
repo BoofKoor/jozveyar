@@ -3,47 +3,29 @@ import { join } from 'node:path';
 
 /**
  * عدد تنها وسط جعبه (docs/UI.md، «عدد وسط دایره»): دایرهٔ قدم‌های سفارش (`jy-flow__n`)، عدد
- * شمارندهٔ کیت (`jy-stepper`)، فیلد تعداد نسخهٔ امروز صفحه (`jy-input` عددی) و دایره‌های «سه قدم»
- * صفحهٔ اصلی (۴الف). وسط‌چینی خط متن را وسط می‌گذارد، نه خود رقم را؛ با وزیرمتن رقم لاتین ۲ تا ۲٫۷
- * پیکسل بالاتر از وسط می‌افتاد. `--jy-digit-rise` در packages/ui/src/base.css جبرانش می‌کند.
+ * شمارندهٔ تعداد نسخه (`jy-stepper`) و دایره‌های «سه قدم» صفحهٔ اصلی (۴الف). وسط‌چینی خط متن را وسط
+ * می‌گذارد، نه خود رقم را؛ با وزیرمتن رقم لاتین ۲ تا ۲٫۷ پیکسل بالاتر از وسط می‌افتاد.
+ * `--jy-digit-rise` در packages/ui/src/base.css جبرانش می‌کند.
  *
  * جای جوهر رقم از خود پیکسل‌های صفحه سنجیده می‌شود، نه از فرمول؛ پس اگر فونت عوض شد (سؤال باز ۱) و
  * رقم دوباره کج افتاد، همین‌جا می‌افتد. تا یک پیکسل جا هست: مرورگر خط پایهٔ متن و لبهٔ جعبه را جدا به
  * پیکسل می‌چسباند و هر کدام تا نیم پیکسل جابه‌جا می‌شود. کج بودن پیش از این دست‌کم ۱٫۸ پیکسل بود.
  *
- * صفحه تا ۴ب دایره‌های قدم و `jy-stepper` را ندارد، پس تست نشانه‌گذاری کیت را خودش در صفحهٔ اصلی
- * می‌گذارد؛ CSS همان CSS سایت است. ۴ب که آنها را واقعاً نشان داد، تست سراغ خود صفحه می‌رود.
+ * تا ۴ب قدم‌های سفارش و شمارنده در صفحه نبودند و تست نشانه‌گذاری کیت را خودش می‌گذاشت؛ از ۴ب همه روی
+ * خود صفحهٔ سفارش سنجیده می‌شوند. شمارنده جای فیلد تعداد نسخهٔ پیشین را گرفت (همان `#copies`).
  */
 
 const FIXTURES = join(process.cwd(), 'tests', 'fixtures');
 
-/** همان نشانه‌گذاری کیت، روی زمینهٔ کارت. */
-const PROBE = `
-<div id="digits-probe" style="padding: 24px; background: var(--color-card)">
-  <ol class="jy-flow" aria-label="قدم‌های سفارش">
-    <li aria-current="step"><span class="jy-flow__n num">1</span>جزوه و قیمت</li>
-    <li><span class="jy-flow__n num">2</span>آدرس</li>
-    <li><span class="jy-flow__n num">3</span>پرداخت</li>
-  </ol>
-  <div style="height: 24px"></div>
-  <div class="jy-stepper" role="group" aria-label="تعداد نسخه، output">
-    <button type="button" aria-label="یکی کمتر"><span class="jy-icon jy-icon-minus" aria-hidden="true"></span></button>
-    <output class="num">1</output>
-    <button type="button" aria-label="یکی بیشتر"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span></button>
-  </div>
-  <div style="height: 24px"></div>
-  <div class="jy-stepper" role="group" aria-label="تعداد نسخه، input">
-    <button type="button" aria-label="یکی کمتر"><span class="jy-icon jy-icon-minus" aria-hidden="true"></span></button>
-    <input class="num" type="number" value="7" aria-label="تعداد نسخه">
-    <button type="button" aria-label="یکی بیشتر"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span></button>
-  </div>
-</div>`;
-
-/** بعد از hydrate، تا React نشانه‌گذاری افزوده را برندارد؛ و بعد از بار شدن وزیرمتن. */
-async function mount(page: Page) {
-  await page.goto('/', { waitUntil: 'networkidle' });
-  await page.evaluate((html) => document.body.insertAdjacentHTML('afterbegin', html), PROBE);
-  await fontsReady(page);
+/**
+ * صفحهٔ سفارش پس از پایان بررسی: قدم‌ها، تنظیمات و قیمت پیش از پایان بررسی رنگ می‌آیند، و با پایانش
+ * کارت «جزوهٔ تو» کوتاه‌تر می‌شود و هرچه زیرش است جابه‌جا می‌شود (در ۳۹۰ پیکسل حدود ۶۰ پیکسل). نشانهٔ
+ * پایان، حکم نهایی راهنمای رنگ است، نه قیمت.
+ */
+async function orderPage(page: Page) {
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', join(FIXTURES, 'plain-bw-10.pdf'));
+  await expect(page.getByTestId('color-hint')).toHaveText('فایل تماماً سیاه‌سفید است.', { timeout: 20_000 });
 }
 
 async function fontsReady(page: Page) {
@@ -169,9 +151,10 @@ for (const viewport of [
     test.use({ viewport });
 
     test('دایره‌های قدم‌های سفارش: رقم وسط دایره است، در قدم جاری و بقیه', async ({ page }) => {
-      await mount(page);
-      const circles = page.locator('#digits-probe .jy-flow__n');
-      await expect(circles).toHaveCount(3);
+      await orderPage(page);
+      await fontsReady(page);
+      const circles = page.locator('.home-flow .jy-flow__n');
+      await expect(circles).toHaveText(['1', '2', '3']);
       for (const circle of await circles.all()) await expectCentered(page, circle);
     });
 
@@ -183,22 +166,12 @@ for (const viewport of [
       for (const circle of await circles.all()) await expectCentered(page, circle);
     });
 
-    test('شمارندهٔ کیت: رقم وسط جعبه است، هم output و هم input', async ({ page }) => {
-      await mount(page);
-      await expectCentered(page, page.locator('#digits-probe .jy-stepper output'));
-      await expectCentered(page, page.locator('#digits-probe .jy-stepper input'));
-    });
-
-    test('تعداد نسخهٔ صفحهٔ سفارش: رقم وسط فیلد است، افقی و عمودی', async ({ page }) => {
-      await page.goto('/');
-      await page.setInputFiles('#jozve-file', join(FIXTURES, 'plain-bw-10.pdf'));
-      // فیلد و قیمت پیش از پایان بررسی رنگ می‌آیند، و با پایان بررسی کارت بالای فیلد کوتاه‌تر می‌شود (در
-      // ۳۹۰ پیکسل فیلد حدود ۶۰ پیکسل بالا می‌رود). نشانهٔ پایان، حکم نهایی راهنمای رنگ است، نه قیمت.
-      await expect(page.getByTestId('color-hint')).toHaveText('فایل تماماً سیاه‌سفید است.', { timeout: 20_000 });
-      const copies = page.locator('#copies');
+    test('شمارندهٔ تعداد نسخه (jy-stepper): رقم وسط جعبه است، افقی و عمودی', async ({ page }) => {
+      await orderPage(page);
+      const copies = page.locator('.jy-stepper #copies');
       await copies.fill('8');
       await copies.blur();
-      // ۸ نسخه: ۶۱,۰۰۰ × ۸؛ نوار قیمت هم با خط «8 نسخه» قد عوض می‌کند
+      // ۸ نسخه: ۶۱,۰۰۰ × ۸؛ خلاصهٔ سفارش هم با خط «8 نسخه» عوض می‌شود
       await expect(page.getByTestId('price-total')).toContainText('488,000');
       await fontsReady(page);
       await expectCentered(page, copies, { horizontal: true });

@@ -3,16 +3,18 @@
 import { Fragment, type ReactNode } from 'react';
 import { bytesParts, formatNumber, formatPages } from '@jozveyar/text';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
-import type { AnalysisSummaryView } from '../lib/fileAnalysis';
+import type { AnalysisSummaryView } from '../lib/fileSummary';
 import { paperSizeLabel } from '../lib/fileCard';
-import type { SectionView } from '../lib/jozve';
+import type { SectionView } from '../lib/jozveView';
+import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import type { UploadSnapshot } from '../lib/upload/client';
 import { AddFiles } from './AddFiles';
+import { Inline } from './Inline';
 
 /*
  * کارت «جزوهٔ تو» (docs/UI.md): سر کارت با تعداد فایل و صفحه، ردیف فایل با برگهٔ عمومی، نام و یک
- * خط اطلاعات، وضع بررسی زیرش، و یادداشت‌ها با رنگ وضعیت و آیکون. این فایل جزوهٔ تک‌فایلی است و
- * تکه‌های مشترک با فهرست جزوه (JozveFiles.tsx).
+ * خط اطلاعات، وضع بررسی زیرش، و یادداشت‌ها با رنگ وضعیت و آیکون. این فایل جزوهٔ تک‌فایلی است، در
+ * هر حالتش (بررسی مرورگر، مسیر سرور، شکست)، و تکه‌های مشترک با فهرست جزوه (JozveFiles.tsx).
  *
  * `.num` فقط روی خود عدد: روی متن فارسی جهت را چپ‌به‌راست می‌کند و ترتیب به هم می‌ریزد.
  */
@@ -255,16 +257,154 @@ export function Warnings({
   );
 }
 
+/** ✕ ته ردیف فایل: «فایل دیگری بینداز»، فقط آیکون، با نام و راهنما. */
+function AnotherFileIcon({ onReset }: { onReset: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onReset}
+      aria-label="فایل دیگری بینداز"
+      title="فایل دیگری بینداز"
+      className="jy-btn jy-btn--text jy-btn--icon -me-2.5 -mt-2 shrink-0"
+    >
+      <span className="jy-icon jy-icon-close" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** شکست: تنها راه جلو همین دکمه است، پس با متن؛ در حالت عادی همین کار ✕ ته ردیف است. */
+function AnotherFileButton({ onReset }: { onReset: () => void }) {
+  return (
+    <button type="button" onClick={onReset} className="jy-btn jy-btn--primary mt-4">
+      فایل دیگری بینداز
+    </button>
+  );
+}
+
+/** ردیف فایل: برگهٔ عمومی، نام، خط اطلاعات و وضعش، و ✕ وقتی راهی جز آن هم هست. */
+function FileRow({
+  section,
+  pages,
+  sizes,
+  onReset,
+  children,
+}: {
+  section: SectionView;
+  pages: number;
+  sizes: readonly { name: string }[];
+  onReset?: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="mt-4 flex items-start gap-4">
+      <PageThumb />
+      <div className="min-w-0 flex-1">
+        <FileName name={section.name} />
+        <p data-testid="file-info" className="text-small text-muted">
+          <FileInfo pages={pages} sizes={sizes} size={section.size} />
+        </p>
+        {children}
+      </div>
+      {onReset ? <AnotherFileIcon onReset={onReset} /> : null}
+    </div>
+  );
+}
+
+/** یادداشت خطا: عنوان پررنگ و راه جلو؛ نام لاتین و عدد درونش جدا از متن فارسی. */
+function Failure({ title, hint, testId }: { title?: string; hint: string; testId?: string }) {
+  return (
+    <Note tone="error" testId={testId}>
+      {title ? (
+        <p className="font-semibold">
+          <Inline text={title} />
+        </p>
+      ) : null}
+      <p className={title ? 'mt-1' : undefined}>
+        <Inline text={hint} />
+      </p>
+    </Note>
+  );
+}
+
 interface Props {
   section: SectionView;
-  /** پیش‌فاکتور Word یا عکس که سرور نمی‌تواند تأییدش کند (آپلود پذیرفته نشد). */
-  serverUnavailable?: boolean;
   onAdd: (files: File[]) => void;
   onReset: () => void;
 }
 
-/** جزوهٔ تک‌فایلی: کارت «جزوهٔ تو» با یک ردیف فایل و «افزودن فایل به همین جزوه». */
-export function AnalysisCard({ section, serverUnavailable, onAdd, onReset }: Props) {
+/**
+ * جزوهٔ تک‌فایلی، هر حالتی که باشد، با زبان کارت «جزوهٔ تو»: همان سر کارت و ردیف فایل.
+ *  - مسیر سرور بی‌پیش‌فاکتور (PDF بزرگ، Word قدیمی) تا قیمت سرور بیاید؛ با ✕ و «افزودن فایل».
+ *  - شکست سرور یا آپلود رد‌شدهٔ همان مسیر، و فایلی که خوانده نشد (رمز، خراب، نوع ناشناس): یادداشت
+ *    خطا و «فایل دیگری بینداز» با متن، چون تنها راه جلوست. پیش‌فاکتوری که سرور نتوانست تأییدش
+ *    کند دیگر معنا ندارد.
+ *  - بقیه: بررسی مرورگر، یا پیش‌فاکتور مسیر سرور (`AnalysisCard`).
+ */
+export function SingleFileCard({ section, onAdd, onReset }: Props) {
+  const { state, upload, kind, serverPath, serverReady, serverFailed, estimate, uploadRefused } = section;
+
+  if (serverPath && !serverReady && (!estimate || serverFailed)) {
+    const failure = serverFailed
+      ? serverFailureMessage(upload?.analysis?.failureReason, kind)
+      : uploadRefused
+        ? { hint: uploadRefusalMessage(upload?.reason) }
+        : null;
+    return (
+      <section data-testid="server-path" className="jy-card" aria-labelledby="jozve-title">
+        <CardHead files={1} pages={0} />
+        <FileRow section={section} pages={0} sizes={[]} onReset={failure ? undefined : onReset}>
+          {failure ? null : (
+            <p data-testid="upload-status" className="mt-1 text-small text-muted">
+              {uploadLine(upload) ?? 'در حال آماده‌سازی…'}
+            </p>
+          )}
+        </FileRow>
+        <div className="mt-4">
+          {failure ? (
+            <Failure {...failure} />
+          ) : (
+            <Note tone="info">
+              {kind === 'pdf'
+                ? 'این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.'
+                : 'این فایل روی سرور به PDF تبدیل و کامل خوانده می‌شود؛ قیمت همین‌جا می‌آید.'}
+            </Note>
+          )}
+        </div>
+        {failure ? (
+          <AnotherFileButton onReset={onReset} />
+        ) : (
+          <AddFiles onFiles={onAdd} room={MAX_SECTIONS_PER_ITEM - 1} label="افزودن فایل به همین جزوه" className="mt-4" />
+        )}
+      </section>
+    );
+  }
+
+  if (state.phase === 'error' && state.error && !serverReady) {
+    return (
+      <section className="jy-card" aria-labelledby="jozve-title">
+        <CardHead files={1} pages={0} />
+        <FileRow section={section} pages={0} sizes={[]} />
+        <div className="mt-4">
+          <Failure title={state.error.title} hint={state.error.hint} testId="file-error" />
+        </div>
+        <AnotherFileButton onReset={onReset} />
+      </section>
+    );
+  }
+
+  return <AnalysisCard section={section} serverUnavailable={estimate && uploadRefused} onAdd={onAdd} onReset={onReset} />;
+}
+
+/** بررسی مرورگر، یا پیش‌فاکتور مسیر سرور: کارت «جزوهٔ تو» با یک ردیف فایل و «افزودن فایل به همین جزوه». */
+function AnalysisCard({
+  section,
+  serverUnavailable,
+  onAdd,
+  onReset,
+}: Props & {
+  /** پیش‌فاکتور Word یا عکس که سرور نمی‌تواند تأییدش کند (آپلود پذیرفته نشد). */
+  serverUnavailable: boolean;
+}) {
   const { state, summary, upload, kind, correctedFrom } = section;
   const { phase, pageCount, analyzedCount, sampleStride, estimatedFrom } = state;
   const analyzing = phase === 'analyzing' || phase === 'reading' || phase === 'queued';
@@ -281,58 +421,41 @@ export function AnalysisCard({ section, serverUnavailable, onAdd, onReset }: Pro
     <section className="jy-card" aria-labelledby="jozve-title">
       <CardHead files={1} pages={pageCount} />
 
-      <div className="mt-4 flex items-start gap-4">
-        <PageThumb />
-        <div className="min-w-0 flex-1">
-          <FileName name={section.name} />
-          <p data-testid="file-info" className="text-small text-muted">
-            <FileInfo pages={pageCount} sizes={summary.pageSizes} size={section.size} />
-          </p>
-
-          {analyzing ? (
-            <div className="mt-2.5">
-              <div className="mb-1.5 flex justify-between gap-3 text-small text-muted">
-                <span>{pageCount > 0 ? 'در حال بررسی صفحه‌ها…' : 'در حال باز کردن فایل…'}</span>
-                {pageCount > 0 ? (
-                  <span className="num shrink-0 whitespace-nowrap">
-                    {formatNumber(analyzedCount)} / {formatNumber(target)}
-                  </span>
-                ) : null}
-              </div>
-              <div
-                className="jy-progress"
-                role="progressbar"
-                aria-label="بررسی صفحه‌ها"
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <span className="jy-progress__bar" style={{ width: `${progress}%` }} />
-              </div>
-              <p className="mt-2 text-small text-muted">
-                قیمت از همان اولین صفحه‌ها نشان داده می‌شود و تا آخر بررسی دقیق‌تر می‌شود.
-              </p>
+      <FileRow section={section} pages={pageCount} sizes={summary.pageSizes} onReset={onReset}>
+        {analyzing ? (
+          <div className="mt-2.5">
+            <div className="mb-1.5 flex justify-between gap-3 text-small text-muted">
+              <span>{pageCount > 0 ? 'در حال بررسی صفحه‌ها…' : 'در حال باز کردن فایل…'}</span>
+              {pageCount > 0 ? (
+                <span className="num shrink-0 whitespace-nowrap">
+                  {formatNumber(analyzedCount)} / {formatNumber(target)}
+                </span>
+              ) : null}
             </div>
-          ) : section.settled && !summary.estimated ? (
-            <DoneBadge className="mt-2" />
-          ) : null}
-
-          {sending ? (
-            <p data-testid="upload-status" className="mt-1 text-small text-muted">
-              {sending}
+            <div
+              className="jy-progress"
+              role="progressbar"
+              aria-label="بررسی صفحه‌ها"
+              aria-valuenow={progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <span className="jy-progress__bar" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="mt-2 text-small text-muted">
+              قیمت از همان اولین صفحه‌ها نشان داده می‌شود و تا آخر بررسی دقیق‌تر می‌شود.
             </p>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          onClick={onReset}
-          aria-label="فایل دیگری بینداز"
-          title="فایل دیگری بینداز"
-          className="jy-btn jy-btn--text jy-btn--icon -me-2.5 -mt-2 shrink-0"
-        >
-          <span className="jy-icon jy-icon-close" aria-hidden="true" />
-        </button>
-      </div>
+          </div>
+        ) : section.settled && !summary.estimated ? (
+          <DoneBadge className="mt-2" />
+        ) : null}
+
+        {sending ? (
+          <p data-testid="upload-status" className="mt-1 text-small text-muted">
+            {sending}
+          </p>
+        ) : null}
+      </FileRow>
 
       <div className="mt-4 flex flex-col gap-2 empty:hidden">
         {estimatedFrom === 'office' ? (

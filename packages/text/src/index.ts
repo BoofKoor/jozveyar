@@ -131,9 +131,17 @@ export function tomansToRials(tomans: number): number {
   return Math.round(tomans * 10);
 }
 
+/**
+ * یک قالب‌ساز برای همه، ساخته در اولین استفاده. ساختن `Intl.NumberFormat` گران است و فلوی سفارش
+ * با هر پیام کارگر تحلیل ده‌ها عدد را دوباره می‌نویسد: قالب‌ساز تازه برای هر عدد، در بازهٔ انداختن فایل
+ * تا اولین قیمت ده‌ها میلی‌ثانیه (با پردازندهٔ ۴× کند) کار رشتهٔ اصلی بود (docs/UI.md، ۴ب).
+ */
+let numberFormat: Intl.NumberFormat | undefined;
+
 /** جداکنندهٔ هزارگان با ارقام لاتین: `245,000`. */
 export function formatNumber(value: number): string {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+  numberFormat ??= new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  return numberFormat.format(value);
 }
 
 /** مبلغ به تومان برای نمایش: `245,000 تومان`. ورودی **ریال** است. */
