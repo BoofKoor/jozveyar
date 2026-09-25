@@ -457,6 +457,19 @@
   .jy-input[readonly] {
     background: var(--color-green-50);
   }
+  /*
+   * فیلد عددی (تعداد نسخه): بی دکمه‌های کوچک بالا و پایین مرورگر، که پنهان هم جا می‌گیرند و عدد
+   * وسط‌چین را به یک سو می‌برند؛ − و + کنارش مال صفحه است. رقم وسط، نه خط متن (--jy-digit-rise).
+   */
+  .jy-input[type='number'] {
+    padding-block-start: calc(2 * var(--jy-digit-rise));
+    appearance: textfield;
+  }
+  .jy-input[type='number']::-webkit-inner-spin-button,
+  .jy-input[type='number']::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+  }
 
   /* ===== رادیو و کاشی انتخاب ===== */
   .jy-radio {
