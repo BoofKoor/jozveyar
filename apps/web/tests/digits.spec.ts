@@ -92,6 +92,11 @@ async function ink(page: Page, target: Locator): Promise<Ink> {
   const y = Math.floor(box.y) - 2;
   const clip = { x, y, width: Math.ceil(box.x + box.width) + 2 - x, height: Math.ceil(box.y + box.height) + 2 - y };
   const png = (await page.screenshot({ clip, animations: 'disabled', caret: 'hide' })).toString('base64');
+  // اگر چیدمان وسط سنجش عوض شده باشد، برش جای دیگری از صفحه را گرفته و جوهری پیدا نمی‌شود. تا نیم
+  // پیکسل جا هست: وقتی چیزی بالای جعبه قد عوض می‌کند، مرورگر جای اسکرول را نگه می‌دارد، ولی گردش می‌کند.
+  const after = (await target.boundingBox())!;
+  const shift = Math.hypot(after.x - box.x, after.y - box.y);
+  expect(shift, `جعبه وسط سنجش ${shift.toFixed(2)} پیکسل جابه‌جا شد`).toBeLessThanOrEqual(0.5);
   const scale = await page.evaluate(() => devicePixelRatio);
 
   const bounds = await page.evaluate(
@@ -179,10 +184,14 @@ for (const viewport of [
     test('تعداد نسخهٔ صفحهٔ سفارش: رقم وسط فیلد است، افقی و عمودی', async ({ page }) => {
       await page.goto('/');
       await page.setInputFiles('#jozve-file', join(FIXTURES, 'plain-bw-10.pdf'));
+      // فیلد و قیمت پیش از پایان بررسی رنگ می‌آیند، و با پایان بررسی کارت بالای فیلد کوتاه‌تر می‌شود (در
+      // ۳۹۰ پیکسل فیلد حدود ۶۰ پیکسل بالا می‌رود). نشانهٔ پایان، حکم نهایی راهنمای رنگ است، نه قیمت.
+      await expect(page.getByTestId('color-hint')).toHaveText('فایل تماماً سیاه‌سفید است.', { timeout: 20_000 });
       const copies = page.locator('#copies');
-      await expect(copies).toBeVisible({ timeout: 20_000 });
       await copies.fill('8');
       await copies.blur();
+      // ۸ نسخه: ۶۱,۰۰۰ × ۸؛ نوار قیمت هم با خط «8 نسخه» قد عوض می‌کند
+      await expect(page.getByTestId('price-total')).toContainText('488,000');
       await fontsReady(page);
       await expectCentered(page, copies, { horizontal: true });
     });
