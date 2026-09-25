@@ -8,12 +8,12 @@ import {
   DEFAULT_PAPER_TYPE_ID,
   SEED_PRICE_LIST,
 } from '@jozveyar/pricing/seed';
-import { formatBytes } from '@jozveyar/text';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/analysis-protocol';
+import { colorHint } from '../lib/fileCard';
 import { jozveSpec, jozveView, type SectionView } from '../lib/jozve';
 import { useJozve } from '../lib/useJozve';
 import { AddFiles } from './AddFiles';
-import { AnalysisCard, uploadLine } from './AnalysisCard';
+import { AnalysisCard, Bytes, uploadLine } from './AnalysisCard';
 import { ConfigPanel, type OrderConfig } from './ConfigPanel';
 import { DropZone } from './DropZone';
 import { JozveFiles } from './JozveFiles';
@@ -68,13 +68,6 @@ export function OrderFlow() {
     return <DropZone onFiles={jozve.add} busy={false} />;
   }
 
-  const addFiles = (
-    <AddFiles
-      onFiles={jozve.add}
-      room={MAX_SECTIONS_PER_ITEM - view.sections.length}
-      count={view.sections.length}
-    />
-  );
   const pending = view.pending.filter((s) => s.serverPath).map((s) => s.name);
   const blocked = view.blocked.map((s) => s.name);
 
@@ -85,8 +78,14 @@ export function OrderFlow() {
           config={config}
           onChange={setConfig}
           priceList={SEED_PRICE_LIST}
-          colorPageCount={view.summary.colorPageCount}
-          fileCount={view.sections.length}
+          // صفحه‌های رنگی جای خودشان را دارند، کنار انتخاب رنگ؛ حکم «تماماً» فقط بعد از بررسی همه.
+          colorHint={colorHint({
+            colorPages: view.summary.colorPageCount,
+            unknown: view.summary.colorUnknown,
+            pending: view.provisional || view.blocked.length > 0,
+            estimated: view.summary.estimated,
+            jozve: view.sections.length > 1,
+          })}
         />
       ) : null}
 
@@ -123,7 +122,7 @@ export function OrderFlow() {
     return (
       <>
         {ordering}
-        <SingleFile section={view.sections[0]!} onReset={jozve.reset} addFiles={addFiles} price={price} />
+        <SingleFile section={view.sections[0]!} onAdd={jozve.add} onReset={jozve.reset} price={price} />
       </>
     );
   }
@@ -135,12 +134,12 @@ export function OrderFlow() {
         <JozveFiles
           view={view}
           overflow={jozve.overflow}
+          onAdd={jozve.add}
           onMove={jozve.move}
           onRemove={jozve.remove}
           onReplace={jozve.replace}
           onReset={jozve.reset}
         />
-        {addFiles}
         {price}
       </div>
     </>
@@ -148,18 +147,18 @@ export function OrderFlow() {
 }
 
 /**
- * جزوهٔ تک‌فایلی: همان کارت‌هایی که پیش از چند فایل بود، رفتار به رفتار، به‌علاوهٔ «افزودن
- * فایل» زیرش.
+ * جزوهٔ تک‌فایلی: کارت «جزوهٔ تو» با یک فایل و «افزودن فایل به همین جزوه» داخلش؛ و مسیر سرور
+ * و شکست با کارت خودشان.
  */
 function SingleFile({
   section,
+  onAdd,
   onReset,
-  addFiles,
   price,
 }: {
   section: SectionView;
+  onAdd: (files: File[]) => void;
   onReset: () => void;
-  addFiles: React.ReactNode;
   price: React.ReactNode;
 }) {
   const { state, upload, kind, serverPath, serverReady, serverFailed, estimate, uploadRefused } = section;
@@ -184,7 +183,9 @@ function SingleFile({
           <h2 className="truncate font-semibold text-ink" title={section.name}>
             {section.name}
           </h2>
-          <p className="num mt-1 text-sm text-muted">{formatBytes(section.size)}</p>
+          <p className="mt-1 text-sm text-muted">
+            <Bytes size={section.size} />
+          </p>
           {message ? (
             <>
               <p className="mt-4 font-semibold text-ink">{message.title}</p>
@@ -199,14 +200,23 @@ function SingleFile({
                   ? 'این فایل را سرور کامل می‌خواند و قیمت را همین‌جا نشان می‌دهد.'
                   : 'این فایل روی سرور به PDF تبدیل و کامل خوانده می‌شود؛ قیمت همین‌جا می‌آید.'}
               </p>
-              <p data-testid="upload-status" className="num mt-3 text-sm text-ink">
+              <p data-testid="upload-status" className="mt-3 text-sm text-ink">
                 {uploadLine(upload) ?? 'در حال آماده‌سازی…'}
               </p>
             </>
           )}
-          {message || uploadRefused ? anotherFile : null}
+          {/* شکست: تنها راه جلو همین دکمه است، با متن؛ در کارت «جزوهٔ تو» همین کار ✕ ته ردیف است. */}
+          {message || uploadRefused ? (
+            anotherFile
+          ) : (
+            <AddFiles
+              onFiles={onAdd}
+              room={MAX_SECTIONS_PER_ITEM - 1}
+              label="افزودن فایل به همین جزوه"
+              className="mt-5"
+            />
+          )}
         </div>
-        {message || uploadRefused ? null : addFiles}
       </div>
     );
   }
@@ -223,16 +233,7 @@ function SingleFile({
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
-      <AnalysisCard
-        state={state}
-        summary={section.summary}
-        upload={upload}
-        correctedFrom={section.correctedFrom}
-        kind={kind}
-        serverUnavailable={estimate && uploadRefused}
-        onReset={onReset}
-      />
-      {addFiles}
+      <AnalysisCard section={section} serverUnavailable={estimate && uploadRefused} onAdd={onAdd} onReset={onReset} />
       {price}
     </div>
   );

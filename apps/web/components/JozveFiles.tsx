@@ -2,15 +2,17 @@
 
 import { useRef, type ReactNode } from 'react';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
-import { formatBytes, formatNumber } from '@jozveyar/text';
+import { formatNumber } from '@jozveyar/text';
 import type { JozveView, SectionView } from '../lib/jozve';
+import { AddFiles } from './AddFiles';
+import { CardHead, DoneBadge, FileInfo, FileName, Note, Warnings, uploadLine } from './AnalysisCard';
 import { ACCEPT } from './DropZone';
-import { FontNames, PageWarning, Stat, uploadLine } from './AnalysisCard';
 
 interface Props {
   view: JozveView;
   /** فایل‌هایی که از سقف جزوه بیشتر بودند و اضافه نشدند. */
   overflow: readonly string[];
+  onAdd: (files: File[]) => void;
   onMove: (key: string, delta: -1 | 1) => void;
   onRemove: (key: string) => void;
   onReplace: (key: string, file: File) => void;
@@ -18,15 +20,15 @@ interface Props {
 }
 
 /**
- * جزوهٔ چندفایلی: فایل‌ها به ترتیب صحافی، هر کدام با وضع و هشدارهای خودش (ADR-030).
+ * جزوهٔ چندفایلی در کارت «جزوهٔ تو»: فایل‌ها به ترتیب صحافی، هر کدام با وضع و هشدارهای خودش
+ * (ADR-030).
  *
  * هشدار زیر همان فایل می‌آید و شمارهٔ صفحهٔ **خود آن فایل** را می‌گوید: کاربر فایل خودش
  * را باز می‌کند و «صفحهٔ 3» را پیدا می‌کند؛ «صفحهٔ 51 جزوه» را در هیچ فایلی نمی‌بیند.
  */
-export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onReset }: Props) {
+export function JozveFiles({ view, overflow, onAdd, onMove, onRemove, onReplace, onReset }: Props) {
   const replaceInput = useRef<HTMLInputElement>(null);
   const replaceTarget = useRef<string | null>(null);
-  const { summary } = view;
   const count = view.sections.length;
 
   const askReplace = (key: string) => {
@@ -35,59 +37,11 @@ export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onRese
   };
 
   return (
-    <section data-testid="jozve" className="jy-card">
-      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
-        <div className="min-w-0">
-          <h2 className="font-semibold text-ink">
-            جزوهٔ تو · <span className="num">{formatNumber(count)}</span> فایل
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند. ترتیب را با ↑ و ↓ عوض کن.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onReset}
-          className="jy-btn jy-btn--text shrink-0 text-sm"
-        >
-          از اول
-        </button>
-      </header>
+    <section data-testid="jozve" className="jy-card" aria-labelledby="jozve-title">
+      <CardHead files={count} pages={view.pageCount} />
+      <p className="mt-1 text-small text-muted">به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند.</p>
 
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-5 pt-5 sm:grid-cols-4">
-        <Stat
-          testId="stat-page-count"
-          label="تعداد صفحه"
-          value={formatNumber(view.pageCount)}
-          hint={view.pending.length > 0 ? `+ ${formatNumber(view.pending.length)} فایل در راه` : undefined}
-        />
-        <Stat
-          label="اندازه"
-          value={summary.pageSizes[0]?.name ?? '—'}
-          hint={
-            summary.pageSizes.length > 1
-              ? `و ${formatNumber(summary.pageSizes.length - 1)} اندازهٔ دیگر`
-              : undefined
-          }
-        />
-        <Stat
-          testId="stat-color-pages"
-          label="صفحات رنگی"
-          value={summary.colorUnknown ? '—' : formatNumber(summary.colorPageCount)}
-          hint={
-            summary.colorUnknown
-              ? 'پس از بررسی'
-              : view.provisional
-                ? 'تا اینجا'
-                : summary.estimated
-                  ? 'برآوردی'
-                  : undefined
-          }
-        />
-        <Stat testId="stat-file-count" label="فایل‌ها" value={formatNumber(count)} />
-      </dl>
-
-      <ol className="mt-5 border-t border-line">
+      <ol className="mt-3">
         {view.sections.map((section, index) => (
           <SectionRow
             key={section.key}
@@ -101,12 +55,24 @@ export function JozveFiles({ view, overflow, onMove, onRemove, onReplace, onRese
         ))}
       </ol>
 
+      {/* یک نشان برای کل جزوه: همهٔ فایل‌ها قطعی، هیچ‌کدام برآوردی یا خوانده‌نشده. */}
+      {!view.provisional && view.blocked.length === 0 && !view.summary.estimated ? <DoneBadge className="mt-3" /> : null}
+
       {overflow.length > 0 ? (
-        <p data-testid="jozve-overflow" className="jy-note mt-4">
-          جزوه بیش از {formatNumber(MAX_SECTIONS_PER_ITEM)} فایل نمی‌گیرد؛ این‌ها اضافه نشدند:{' '}
-          <Names names={overflow} />. چند فایل را از برنامهٔ خودشان یک PDF کن و همان را بینداز.
-        </p>
+        <div className="mt-4">
+          <Note tone="warning" testId="jozve-overflow">
+            جزوه بیش از <span className="num">{formatNumber(MAX_SECTIONS_PER_ITEM)}</span> فایل نمی‌گیرد؛ این‌ها اضافه
+            نشدند: <Names names={overflow} />. چند فایل را از برنامهٔ خودشان یک PDF کن و همان را بینداز.
+          </Note>
+        </div>
       ) : null}
+
+      <div className="mt-4 flex items-center gap-2">
+        <AddFiles onFiles={onAdd} room={MAX_SECTIONS_PER_ITEM - count} label="افزودن فایل" className="min-w-0 flex-1" />
+        <button type="button" onClick={onReset} className="jy-btn jy-btn--text shrink-0">
+          از اول
+        </button>
+      </div>
 
       <input
         ref={replaceInput}
@@ -146,34 +112,27 @@ function SectionRow({
   const { key, name, blocked, summary, state } = section;
   const program = section.kind === 'slides' ? 'پاورپوینت' : 'Word';
   const upload = blocked ? null : uploadLine(section.upload);
-  const replace = (
-    <button
-      type="button"
-      onClick={() => onReplace(key)}
-      className="jy-btn jy-btn--primary"
-    >
-      جایگزین کن
-    </button>
-  );
+  const now = sectionState(section);
 
   return (
-    <li data-testid="section" className="border-b border-line py-4 last:border-b-0">
+    <li data-testid="section" className="border-t border-green-100 py-3 first:border-t-0 first:pt-1">
       <div className="flex items-start gap-3">
-        <span className="num mt-0.5 w-6 shrink-0 text-center text-sm text-muted">{formatNumber(index + 1)}</span>
+        <span className="num w-6 shrink-0 text-center font-semibold text-muted">{formatNumber(index + 1)}</span>
         <div className="min-w-0 flex-1">
-          <p data-testid="section-name" className="truncate font-semibold text-ink" title={name}>
-            <bdi>{name}</bdi>
-          </p>
-          <p data-testid="section-status" className="num mt-0.5 text-sm text-muted">
-            {statusLine(section)} · {formatBytes(section.size)}
-          </p>
+          <FileName name={name} testId="section-name" />
+          <div data-testid="section-status" className="text-small text-muted">
+            <p data-testid="file-info">
+              <FileInfo pages={section.pageCount} sizes={summary.pageSizes} size={section.size} />
+            </p>
+            {now ? <p>{now}</p> : null}
+          </div>
           {upload ? (
-            <p data-testid="section-upload" className="num mt-0.5 text-xs text-muted">
+            <p data-testid="section-upload" className="text-small text-muted">
               {upload}
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="-me-2.5 -mt-2 flex shrink-0">
           <RowButton label={`«${name}» یکی بالاتر`} disabled={index === 0} onClick={() => onMove(key, -1)}>
             <span className="jy-icon jy-icon-arrow jy-icon--up" aria-hidden="true" />
           </RowButton>
@@ -186,35 +145,33 @@ function SectionRow({
         </div>
       </div>
 
-      <div className="ms-9 flex flex-col gap-2 text-sm text-muted empty:hidden">
+      <div className="ms-9 mt-3 flex flex-col gap-2 empty:hidden">
         {blocked ? (
-          <div data-testid="section-blocked" className="jy-note mt-3">
-            <p className="font-semibold text-ink">{blocked.title}</p>
+          <Note tone="error" testId="section-blocked">
+            <p className="font-semibold">{blocked.title}</p>
             <p className="mt-1">{blocked.hint}</p>
             <p className="mt-1">تا تکلیف این فایل روشن نشود، قیمت بدون آن است.</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {replace}
-              <button
-                type="button"
-                onClick={() => onRemove(key)}
-                className="jy-btn jy-btn--secondary"
-              >
+              <button type="button" onClick={() => onReplace(key)} className="jy-btn jy-btn--primary">
+                جایگزین کن
+              </button>
+              <button type="button" onClick={() => onRemove(key)} className="jy-btn jy-btn--secondary">
                 حذف از جزوه
               </button>
             </div>
-          </div>
+          </Note>
         ) : null}
 
         {!blocked && section.estimate && !section.serverReady && section.uploadRefused ? (
-          <Note testId="section-unconfirmed">
-            الان نمی‌توانیم این فایل را بگیریم، پس عددش تقریبی می‌ماند. چند دقیقهٔ دیگر با «جایگزین
-            کن» دوباره بگذارش
+          <Note tone="warning" testId="section-unconfirmed">
+            الان نمی‌توانیم این فایل را بگیریم، پس عددش تقریبی می‌ماند. چند دقیقهٔ دیگر با «جایگزین کن» دوباره
+            بگذارش
             {state.estimatedFrom === 'office' ? ` — یا از خود ${program} خروجی PDF بگیر و همان را.` : '.'}
           </Note>
         ) : null}
 
         {section.correctedFrom ? (
-          <Note testId="section-corrected">
+          <Note tone="info" testId="section-corrected">
             بررسی کامل روی سرور <span className="num font-semibold text-ink">{formatNumber(section.pageCount)}</span>{' '}
             صفحه دید ({section.kind === 'word' || section.kind === 'slides' ? `خود فایل ${program}` : 'مرورگر'}{' '}
             <span className="num">{formatNumber(section.correctedFrom)}</span>{' '}
@@ -223,92 +180,68 @@ function SectionRow({
         ) : null}
 
         {!blocked && summary.estimated ? (
-          <Note>
-            فایل بزرگ است، پس برای سرعت یکی از هر <span className="num">{formatNumber(state.sampleStride)}</span>{' '}
-            صفحه بررسی شد؛ همهٔ صفحه‌ها بعد از آپلود دقیق بررسی می‌شوند.
+          <Note tone="info">
+            فایل بزرگ است، پس برای سرعت یکی از هر <span className="num">{formatNumber(state.sampleStride)}</span> صفحه
+            بررسی شد؛ همهٔ صفحه‌ها بعد از آپلود دقیق بررسی می‌شوند.
           </Note>
         ) : null}
 
-        {!blocked &&
-        (summary.mismatchedFonts.length > 0 ||
-          summary.lowDpiPageCount > 0 ||
-          summary.tightMarginPageCount > 0 ||
-          summary.blankPageCount > 0) ? (
-          <ul className="mt-2 flex flex-col gap-1.5">
-            {summary.mismatchedFonts.length > 0 ? (
-              <li data-testid="warning-fonts">
-                {summary.mismatchedFonts.length === 1 ? 'فونت' : 'فونت‌های'} <FontNames fonts={summary.mismatchedFonts} />{' '}
-                روی سرور ما نیست و با فونت مشابه چاپ می‌شود؛ ظاهر و تعداد صفحه ممکن است فرق کند. برای
-                چاپ دقیقاً مثل فایل خودت، از {program} خروجی PDF بگیر و با{' '}
+        {blocked ? null : (
+          <Warnings
+            summary={summary}
+            program={program}
+            fontsAdvice={
+              <>
+                با{' '}
                 <button type="button" onClick={() => onReplace(key)} className="jy-link">
                   جایگزین کن
                 </button>{' '}
                 جای همین بگذار.
-              </li>
-            ) : null}
-            <PageWarning
-              testId="warning-low-dpi"
-              pages={summary.lowDpiPages}
-              count={summary.lowDpiPageCount}
-              estimated={summary.estimated}
-              text="کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود"
-            />
-            <PageWarning
-              testId="warning-tight-margin"
-              pages={summary.tightMarginPages}
-              count={summary.tightMarginPageCount}
-              estimated={summary.estimated}
-              text="حاشیهٔ کمی دارد — صحافی ممکن است لبهٔ متن را بگیرد"
-            />
-            <PageWarning
-              testId="warning-blank"
-              pages={summary.blankPages}
-              count={summary.blankPageCount}
-              estimated={summary.estimated}
-              text="خالی است و هزینهٔ چاپ می‌گیرد"
-            />
-          </ul>
-        ) : null}
+              </>
+            }
+          />
+        )}
       </div>
     </li>
   );
 }
 
-/** یک خط کوتاه: این فایل الان کجای کار است و چند صفحه در قیمت دارد. */
-function statusLine(section: SectionView): string {
+/**
+ * این فایل الان کجای کار است، اگر هنوز قطعی نیست. تعداد صفحه و حجمش در خط اطلاعات بالای همین
+ * است؛ اینجا فقط وضع.
+ */
+function sectionState(section: SectionView): ReactNode {
   const { state, pageCount } = section;
-  const pages = `${formatNumber(pageCount)} صفحه`;
   if (section.blocked) return 'در قیمت نیست';
-  if (section.serverReady) return pages;
+  if (section.serverReady) return null;
   if (section.serverPath) {
     if (section.estimate) {
       if (state.estimatedFrom === 'office') {
-        return `${pages} به گفتهٔ خود فایل ${section.kind === 'slides' ? 'پاورپوینت' : 'Word'}`;
+        return `تعداد صفحه به گفتهٔ خود فایل ${section.kind === 'slides' ? 'پاورپوینت' : 'Word'}`;
       }
-      return `${pages} · رنگ و کیفیت بعد از بررسی روی سرور`;
+      return 'رنگ و کیفیت بعد از بررسی روی سرور';
     }
     return 'قیمتش بعد از بررسی روی سرور می‌آید';
   }
   switch (state.phase) {
     case 'queued':
-      return pageCount > 0 ? `${pages} · بررسی رنگ و کیفیت در صف` : 'در صف شمارش';
+      return pageCount > 0 ? 'بررسی رنگ و کیفیت در صف' : 'در صف شمارش';
     case 'reading':
-      return pageCount > 0 ? `${pages} · در حال بررسی…` : 'در حال باز کردن…';
+      return pageCount > 0 ? 'در حال بررسی…' : 'در حال باز کردن…';
     case 'analyzing': {
       const target = state.sampleStride > 1 ? Math.ceil(pageCount / state.sampleStride) : pageCount;
-      return `${pages} · در حال بررسی ${formatNumber(state.analyzedCount)} / ${formatNumber(target)}`;
+      return (
+        <>
+          در حال بررسی صفحه‌ها{' '}
+          <span className="num whitespace-nowrap">
+            {formatNumber(state.analyzedCount)} / {formatNumber(target)}
+          </span>
+        </>
+      );
     }
     default:
-      return pages;
+      return null;
   }
-}
-
-function Note({ children, testId }: { children: ReactNode; testId?: string }) {
-  return (
-    <p data-testid={testId} className="jy-note mt-2">
-      {children}
-    </p>
-  );
 }
 
 function RowButton({
@@ -346,7 +279,13 @@ export function Names({ names, max = 3 }: { names: readonly string[]; max?: numb
       «<bdi>{name}</bdi>»
     </span>
   ));
-  if (rest > 0) parts.push(`${formatNumber(rest)} فایل دیگر`);
+  if (rest > 0) {
+    parts.push(
+      <>
+        <span className="num">{formatNumber(rest)}</span> فایل دیگر
+      </>,
+    );
+  }
   return (
     <>
       {parts.map((part, i) => (

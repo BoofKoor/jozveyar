@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bytesParts,
   extractOrderCodeFromRecipient,
   formatBytes,
   formatJalaliNumeric,
@@ -15,6 +16,7 @@ import {
   toLatinDigits,
   tomansToRials,
   unifyLetters,
+  weightParts,
 } from './index.js';
 
 describe('toLatinDigits', () => {
@@ -186,6 +188,35 @@ describe('formatBytes', () => {
     expect(formatBytes(512)).toBe('512 بایت');
     expect(formatBytes(2 * 1024 * 1024)).toBe('2.0 مگابایت');
     expect(formatBytes(Math.round(1.5 * 1024 ** 3))).toBe('1.5 گیگابایت');
+  });
+});
+
+/** رابط عدد را در span خودش ایزوله می‌کند؛ واحد فارسی بیرون می‌ماند (docs/UI.md، کارت «جزوهٔ تو»). */
+describe('عدد و واحد، جدا', () => {
+  it('حجم: عدد فقط رقم و نقطه است، واحد فقط حرف فارسی', () => {
+    expect(bytesParts(512)).toEqual({ value: '512', unit: 'بایت' });
+    expect(bytesParts(14 * 1024)).toEqual({ value: '14', unit: 'کیلوبایت' });
+    expect(bytesParts(Math.round(2.4 * 1024 ** 2))).toEqual({ value: '2.4', unit: 'مگابایت' });
+    expect(bytesParts(Math.round(1.5 * 1024 ** 3))).toEqual({ value: '1.5', unit: 'گیگابایت' });
+  });
+
+  it('وزن: همان مرزهای formatWeight', () => {
+    expect(weightParts(529)).toEqual({ value: '529', unit: 'گرم' });
+    expect(weightParts(2_400)).toEqual({ value: '2.4', unit: 'کیلوگرم' });
+    expect(weightParts(19_180)).toEqual({ value: '19', unit: 'کیلوگرم' });
+  });
+
+  it('متن کامل همان جمع دو تکه است', () => {
+    for (const bytes of [0, 1023, 1024, 14_336, 5 * 1024 ** 2, 3 * 1024 ** 3]) {
+      const { value, unit } = bytesParts(bytes);
+      expect(formatBytes(bytes)).toBe(`${value} ${unit}`);
+      expect(value).toMatch(/^[\d.]+$/);
+    }
+    for (const grams of [0, 185, 999, 1_000, 12_345]) {
+      const { value, unit } = weightParts(grams);
+      expect(formatWeight(grams)).toBe(`${value} ${unit}`);
+      expect(value).toMatch(/^[\d.,]+$/);
+    }
   });
 });
 

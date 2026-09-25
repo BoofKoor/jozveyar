@@ -396,6 +396,12 @@
     background: var(--color-green-50);
     border-style: solid;
   }
+  /* فایلی رویش کشیده شده: مثل محل انداختن کارت بارگذاری */
+  .jy-add.is-dragover {
+    background: var(--color-green-100);
+    border-style: solid;
+    border-color: var(--color-green-600);
+  }
   .jy-add:has(input:focus-visible) {
     outline: 2px solid var(--jy-focus-outer);
     outline-offset: 2px;

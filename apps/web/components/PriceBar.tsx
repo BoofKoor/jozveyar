@@ -1,6 +1,6 @@
 'use client';
 
-import { formatNumber, formatTomans, formatWeight } from '@jozveyar/text';
+import { formatNumber, formatTomans, weightParts } from '@jozveyar/text';
 import type { Breakdown } from '@jozveyar/contracts';
 import { Names } from './JozveFiles';
 
@@ -18,11 +18,15 @@ interface Props {
   blocked?: readonly string[];
 }
 
-function Line({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+/** یک سطر ریز قیمت؛ `.num` فقط روی عدد، واحد بیرون آن («185 گرم»، نه «گرم 185»). */
+function Line({ label, value, unit, muted }: { label: string; value: string; unit?: string; muted?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5">
       <span className={muted ? 'text-muted' : 'text-ink'}>{label}</span>
-      <span className={`num ${muted ? 'text-muted' : 'font-semibold text-ink'}`}>{value}</span>
+      <span className={muted ? 'text-muted' : 'font-semibold text-ink'}>
+        <span className="num">{value}</span>
+        {unit ? ` ${unit}` : null}
+      </span>
     </div>
   );
 }
@@ -69,18 +73,17 @@ export function PriceBar({ breakdown, provisional, onContinue, pending = [], blo
           </>
         ) : null}
         <div className="mt-2 border-t border-line pt-2">
-          <Line label="وزن برآوردی" value={formatWeight(breakdown.estWeightGrams)} muted />
+          <Line label="وزن برآوردی" {...weightParts(breakdown.estWeightGrams)} muted />
         </div>
       </div>
 
       <div className="sm:mt-4 sm:border-t sm:border-line sm:pt-4">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-muted">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
-          <span
-            data-testid="price-total"
-            className="num text-2xl font-semibold text-ink sm:text-3xl"
-          >
-            {formatTomans(total, false)}
+          <span className="text-2xl font-semibold text-ink sm:text-3xl">
+            <span data-testid="price-total" className="num">
+              {formatTomans(total, false)}
+            </span>
             <span className="ms-1.5 text-base font-normal text-muted">تومان</span>
           </span>
         </div>

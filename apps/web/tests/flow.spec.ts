@@ -22,8 +22,12 @@ const FIXTURES = join(process.cwd(), 'tests', 'fixtures');
 // locator پایدار: متن «تومان» در پرسش‌های پرتکرار هم هست، پس جست‌وجوی متنی
 // نوار قیمت را نمی‌گیرد. testid تنها چیزی است که به بازنویسی متن حساس نیست.
 const price = (page: import('@playwright/test').Page) => page.getByTestId('price-total');
-const colorPages = (page: import('@playwright/test').Page) =>
-  page.getByTestId('stat-color-pages');
+/**
+ * صفحه‌های رنگی در راهنمای «رنگ چاپ» (کارت «جزوهٔ تو»، docs/UI.md). حکم قطعی فقط بعد از بررسی همهٔ
+ * صفحه‌ها می‌آید، پس هر ادعای «صفر صفحهٔ رنگی» پایان بررسی را هم می‌سنجد.
+ */
+const colorHint = (page: import('@playwright/test').Page) => page.getByTestId('color-hint');
+const ALL_BW = 'فایل تماماً سیاه‌سفید است.';
 
 test.describe('سئو و بار اولیه', () => {
   test('صفحه سمت سرور رندر می‌شود و متن در HTML خام هست', async ({ request }) => {
@@ -119,8 +123,8 @@ test.describe('تحلیل در مرورگر', () => {
     await expect(price(page)).toContainText('280,200', { timeout: 30_000 });
     await expect(price(page)).not.toContainText('339,000');
 
-    // و شمارندهٔ صفحات رنگی صفر می‌مانَد — این خودِ ادعاست، نه قیمت.
-    await expect(colorPages(page)).toHaveText('0');
+    // و صفحهٔ رنگی‌ای پیدا نمی‌شود — این خودِ ادعاست، نه قیمت. «تماماً» فقط بعد از بررسی هر ۱۴۷ صفحه.
+    await expect(colorHint(page)).toHaveText(ALL_BW, { timeout: 30_000 });
     await expect(page.getByTestId('stat-page-count')).toHaveText('147');
 
     console.log(`اسکن زرد ۱۴۷ صفحه‌ای: قیمت در ${Date.now() - startedAt}ms`);
@@ -140,7 +144,7 @@ test.describe('تحلیل در مرورگر', () => {
     // ۶ صفحه سیاه‌سفید: ۹,۶۰۰ + صحافی ۴۵,۰۰۰ = ۵۴,۶۰۰ تومان
     await expect(price(page)).toContainText('54,600', { timeout: 15_000 });
     await expect(page.getByTestId('stat-page-count')).toHaveText('6');
-    await expect(colorPages(page)).toHaveText('0');
+    await expect(colorHint(page)).toHaveText(ALL_BW, { timeout: 15_000 });
     await expect(page.getByText('تحلیل در مرورگر کامل نشد')).toHaveCount(0);
   });
 
@@ -148,7 +152,10 @@ test.describe('تحلیل در مرورگر', () => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', join(FIXTURES, 'mixed-color-10.pdf'));
     // سه صفحه هایلایت قرمز دارند.
-    await expect(colorPages(page)).toHaveText('3', { timeout: 20_000 });
+    await expect(colorHint(page)).toHaveText(
+      '3 صفحهٔ رنگی در فایل پیدا شد. اگر سیاه‌سفید انتخاب کنی، این صفحه‌ها هم سیاه‌سفید چاپ می‌شوند.',
+      { timeout: 20_000 },
+    );
   });
 
   /**
@@ -222,7 +229,8 @@ test.describe('Word، پاورپوینت و عکس', () => {
     // ۱۲ صفحه سیاه‌سفید: ۱۹,۲۰۰ + صحافی ۴۵,۰۰۰ = ۶۴,۲۰۰ تومان — پیش‌فاکتور.
     await expect(price(page)).toContainText('64,200');
     await expect(page.getByTestId('office-estimate')).toBeVisible();
-    await expect(colorPages(page)).toHaveText('—');
+    // رنگ Word را فقط سرور بعد از تبدیل می‌داند؛ نه «صفر»، نه «تماماً».
+    await expect(colorHint(page)).toHaveText('رنگی بودن صفحه‌ها بعد از بررسی روی سرور معلوم می‌شود.');
     // سرور نیست: قیمت تقریبی می‌ماند و راه جلو گفته می‌شود — نه خطا، نه انتظار بی‌پایان.
     await expect(page.getByTestId('estimate-unconfirmed')).toContainText('خروجی PDF');
   });
@@ -334,7 +342,7 @@ test.describe('کارایی روی موبایل ضعیف', () => {
     expect(firstPriceMs).toBeLessThan(2_000);
 
     // و تحلیل تا آخر کامل می‌شود، بدون اینکه عدد عوض شود.
-    await expect(page.getByTestId('stat-color-pages')).toHaveText('0', { timeout: 30_000 });
+    await expect(colorHint(page)).toHaveText(ALL_BW, { timeout: 30_000 });
     await expect(price(page)).toContainText('280,200');
   });
 });

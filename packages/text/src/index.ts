@@ -142,24 +142,46 @@ export function formatTomans(rials: number, withUnit = true): string {
   return withUnit ? `${text} تومان` : text;
 }
 
+/**
+ * عدد و واحدش، جدا. رابط عدد را در span خودش ایزوله می‌کند و واحد فارسی را بیرون آن
+ * می‌گذارد: `.num` روی کل «14 کیلوبایت» جهتش را چپ‌به‌راست می‌کند و «کیلوبایت 14» دیده می‌شود.
+ */
+export interface Measure {
+  value: string;
+  unit: string;
+}
+
+/** وزن: `530` و `گرم`، یا `2.4` و `کیلوگرم`. */
+export function weightParts(grams: number): Measure {
+  if (grams < 1000) return { value: formatNumber(Math.round(grams)), unit: 'گرم' };
+  const kg = grams / 1000;
+  return { value: kg.toFixed(kg < 10 ? 1 : 0), unit: 'کیلوگرم' };
+}
+
 /** وزن خوانا: `530 گرم` یا `2.4 کیلوگرم`. */
 export function formatWeight(grams: number): string {
-  if (grams < 1000) return `${formatNumber(Math.round(grams))} گرم`;
-  const kg = grams / 1000;
-  return `${kg.toFixed(kg < 10 ? 1 : 0)} کیلوگرم`;
+  const { value, unit } = weightParts(grams);
+  return `${value} ${unit}`;
+}
+
+const BYTE_UNITS = ['کیلوبایت', 'مگابایت', 'گیگابایت'] as const;
+
+/** حجم فایل با ارقام لاتین: `14` و `کیلوبایت`، یا `2.4` و `مگابایت`. */
+export function bytesParts(bytes: number): Measure {
+  if (bytes < 1024) return { value: String(bytes), unit: 'بایت' };
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return { value: value.toFixed(value < 10 ? 1 : 0), unit: BYTE_UNITS[unitIndex]! };
 }
 
 /** حجم فایل خوانا با ارقام لاتین. */
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} بایت`;
-  const units = ['کیلوبایت', 'مگابایت', 'گیگابایت'];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unitIndex]}`;
+  const { value, unit } = bytesParts(bytes);
+  return `${value} ${unit}`;
 }
 
 /** جمع فارسی بدون «ها»ی اضافه: `147 صفحه`. فارسی شکل جمع عددی ندارد. */
