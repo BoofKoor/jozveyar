@@ -3,14 +3,18 @@ import {
   bytesParts,
   extractOrderCodeFromRecipient,
   formatBytes,
+  formatDeadlineDay,
   formatJalaliNumeric,
+  formatJalaliWeekday,
   formatNumber,
   formatPages,
   formatTomans,
   formatWeight,
+  isWorkingDay,
   jalaliYear,
   normalizeFa,
   normalizeIranMobile,
+  postHandoffDue,
   recipientSurname,
   rialsToTomans,
   toLatinDigits,
@@ -261,5 +265,54 @@ describe('تاریخ شمسی', () => {
     // نیمه‌شب نوروز ۱۴۰۵ در تهران ساعت ۲۰:۳۰ UTC روز ۲۰ مارس است.
     expect(jalaliYear(new Date('2026-03-20T20:00:00Z'))).toBe(1404);
     expect(jalaliYear(new Date('2026-03-20T20:40:00Z'))).toBe(1405);
+  });
+});
+
+describe('روز کاری و مهلت تحویل به پست (ADR-013)', () => {
+  /** لحظه‌ای به ساعت تهران: `tehran('2026-09-26 10:00')`. تهران از ۱۴۰۱ ساعت تابستانی ندارد: +۳:۳۰. */
+  const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
+  const none = new Set<string>();
+
+  it('روز هفته و تاریخ بی سال: «شنبه 4 مهر»', () => {
+    expect(formatJalaliWeekday(tehran('2026-09-26 10:00'))).toBe('شنبه 4 مهر');
+    // نیمه‌شب تهران روز را عوض می‌کند، نه نیمه‌شب UTC.
+    expect(formatJalaliWeekday(tehran('2026-09-26 23:59'))).toBe('شنبه 4 مهر');
+    expect(formatJalaliWeekday(tehran('2026-09-27 00:01'))).toBe('یکشنبه 5 مهر');
+  });
+
+  it('شنبه تا چهارشنبه کاری است؛ پنجشنبه و جمعه نه', () => {
+    const days = ['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02'];
+    expect(days.map((d) => isWorkingDay(tehran(`${d} 12:00`), none))).toEqual([true, true, true, true, true, false, false]);
+  });
+
+  it('پرداخت شنبه با ۲ روز: تا پایان دوشنبه، همان مثال طرح', () => {
+    const due = postHandoffDue(tehran('2026-09-26 10:00'), 2, none);
+    // پایان دوشنبه ۶ مهر = نیمه‌شب آغاز سه‌شنبه به وقت تهران.
+    expect(due.toISOString()).toBe(tehran('2026-09-29 00:00').toISOString());
+    expect(formatDeadlineDay(due)).toBe('دوشنبه 6 مهر');
+  });
+
+  it('ساعت پرداخت در روزش اثری ندارد، و نیمه‌شب تهران روز را عوض می‌کند', () => {
+    expect(postHandoffDue(tehran('2026-09-26 00:00'), 2, none)).toEqual(postHandoffDue(tehran('2026-09-26 23:59'), 2, none));
+    // ۰۰:۱۰ یکشنبه به وقت تهران هنوز شنبه است به وقت UTC.
+    expect(formatDeadlineDay(postHandoffDue(tehran('2026-09-27 00:10'), 2, none))).toBe('سه‌شنبه 7 مهر');
+  });
+
+  it('پرداخت چهارشنبه، پنجشنبه یا جمعه: پنجشنبه و جمعه شمرده نمی‌شوند', () => {
+    for (const paid of ['2026-09-30 11:00', '2026-10-01 11:00', '2026-10-02 11:00']) {
+      expect(formatDeadlineDay(postHandoffDue(tehran(paid), 2, none)), paid).toBe('یکشنبه 12 مهر');
+    }
+  });
+
+  it('تعطیلی رسمی روز کاری نیست', () => {
+    // دوشنبه ۳۰ آذر: سه‌شنبه کاری، چهارشنبه ۲ دی ولادت امام علی، بعد پنجشنبه و جمعه، بعد شنبه.
+    const paid = tehran('2026-12-21 09:00');
+    expect(formatDeadlineDay(postHandoffDue(paid, 2, none))).toBe('چهارشنبه 2 دی');
+    expect(formatDeadlineDay(postHandoffDue(paid, 2, new Set(['1405/10/02'])))).toBe('شنبه 5 دی');
+  });
+
+  it('روز کاری صفر، منفی یا کسری پذیرفته نمی‌شود', () => {
+    expect(() => postHandoffDue(new Date(), 0, none)).toThrow(RangeError);
+    expect(() => postHandoffDue(new Date(), 1.5, none)).toThrow(RangeError);
   });
 });
