@@ -582,6 +582,8 @@
     width: 56px;
     min-width: 56px;
     padding: 0;
+    /* رقم وسط جعبه، نه خط متن (--jy-digit-rise در base.css) */
+    padding-block-start: calc(2 * var(--jy-digit-rise));
     font: inherit;
     font-size: var(--text-h4);
     font-weight: 600;
@@ -622,6 +624,8 @@
   .jy-flow__n {
     display: grid;
     place-items: center;
+    /* رقم وسط دایره، نه خط متن (--jy-digit-rise در base.css) */
+    padding-block-start: calc(2 * var(--jy-digit-rise));
     width: 28px;
     height: 28px;
     border: 2px solid var(--color-green-300);
