@@ -271,6 +271,33 @@ test.describe('زمینه و حالت سفارش', () => {
     expect(channels(await background(page, 'body'))).toEqual(brandChannels('green-50'));
   });
 
+  /**
+   * پایهٔ طرح ز (تیتر متوازن، پاراگراف `pretty`، ارتفاع خط ۱٫۵ تیترها) فقط مال بخش‌های ثابت صفحه است.
+   * روی کارت‌های فلوی سفارش هم نشسته بود: تیترهای «تنظیمات چاپ» کوتاه‌تر شدند، و شکستن متوازن خط در
+   * اولین رسم کارت‌ها، وسط بازهٔ انداختن فایل تا اولین قیمت، کار اضافه داشت.
+   */
+  test('پایهٔ طرح ز به کارت‌های فلوی سفارش نمی‌رسد: تیتر و پاراگراف همان سبک پیش از ۴الف', async ({ page }) => {
+    await page.goto('/');
+    // شاهد روی خود صفحه: بخش‌های ثابت همان پایه را دارند
+    const section = await page.locator('#how h3').first().evaluate((el) => [getComputedStyle(el).lineHeight, getComputedStyle(el).textWrapStyle]);
+    expect(section).toEqual(['30px', 'balance']);
+
+    await dropFile(page);
+    const island = await page.locator('.home-hero__order').evaluate((root) => {
+      const body = parseFloat(getComputedStyle(document.body).lineHeight);
+      return [...root.querySelectorAll('h2, h3, p')].map((el) => {
+        const s = getComputedStyle(el);
+        return { tag: el.tagName, text: el.textContent!.trim().slice(0, 20), wrap: s.textWrapStyle, ratio: parseFloat(s.lineHeight) / parseFloat(s.fontSize), body };
+      });
+    });
+    expect(island.length).toBeGreaterThan(5);
+    for (const { tag, text, wrap } of island) expect(wrap, `${tag} «${text}»`).toBe('auto');
+    // تیترهای «تنظیمات چاپ» (h3 بی کلاس ارتفاع خط) ارتفاع خط متن صفحه را دارند، نه ۱٫۵ تیترهای طرح
+    const labels = island.filter(({ tag }) => tag === 'H3');
+    expect(labels.length).toBeGreaterThanOrEqual(3);
+    for (const { text, ratio, body } of labels) expect(ratio, text).toBeCloseTo(body / 16, 2);
+  });
+
   test('پس از فایل قهرمان، سه قدم و تعرفه کنار می‌روند و تیتر فقط برای صفحه‌خوان می‌ماند؛ با «فایل دیگری بینداز» برمی‌گردند', async ({
     page,
   }) => {
