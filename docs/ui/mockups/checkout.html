@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مسیر خرید، طرح نمونه — جزوه‌یار</title>
+<link rel="icon" href="../../brand/jozveyar-favicon.svg">
+<!--
+  طرح نمونهٔ مسیر خرید برش ۳ (docs/UI.md، قدم ۶): از «ادامه»ی صفحهٔ اصلی تا تأیید سفارش.
+  صفحه‌ها: شهر با یک تپ (و جست‌وجو)، نشانی، موبایل و کد پیامکی، مرور و پرداخت، درگاه نمونه، تأیید.
+  حالت‌های شکست: کد اشتباه، کد منقضی، پیامکی که نرسید، پرداخت ناموفق.
+  به زبان طرح ز و با خود کیت: packages/ui/src/base.css و components.css مستقیم بار می‌شوند و توکن‌ها از
+  docs/brand/jozveyar-colors.css می‌آیند؛ اینجا هیچ کد رنگی نیست. اجزای تازه‌ای که برش ۳ به کیت می‌برد
+  (فیلد، برچسب، راهنما، خطا، کد پیامکی، قدم انجام‌شده) نام jy- دارند؛ چیدمان همین صفحه‌ها ck- است.
+  حالت‌ها: فهرست «طرح نمونه» گوشهٔ صفحه؛ دکمه‌های خود صفحه هم به حالت بعد می‌روند. در طرح نمونه هر شهری
+  به «مشهد» می‌رود. شماره‌ها، کد پیگیری و تاریخ نمونه‌اند.
+  تأییدشدهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۴)، با پیشنهادها؛ تصمیم‌ها و سنجش‌ها در docs/UI.md، قدم ۶. ساختنش در برش ۳ است.
+  دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/checkout.html
+-->
+<style>@layer base, components;</style>
+<link rel="stylesheet" href="../../brand/jozveyar-colors.css">
+<style>
+/*
+ * توکن‌های کیت (packages/ui/src/theme.css) از روی فایل برند، چون @theme مال Tailwind است و مرورگر
+ * نمی‌خواندش. رنگ فقط var(--jy-…)؛ سایه با color-mix از جوهر، همان عددهای theme.css.
+ * در لایهٔ base، پیش از base.css کیت، تا اندازه‌های موبایل کیت (تا ۵۲۰ پیکسل) بر این‌ها غلبه کنند.
+ */
+@layer base {
+  :root {
+    --color-paper: var(--jy-paper);
+    --color-ink: var(--jy-ink);
+    --color-green-50: var(--jy-green-50);
+    --color-green-100: var(--jy-green-100);
+    --color-green-200: var(--jy-green-200);
+    --color-green-300: var(--jy-green-300);
+    --color-green-400: var(--jy-green-400);
+    --color-green-500: var(--jy-green-500);
+    --color-green-600: var(--jy-green-600);
+    --color-green-700: var(--jy-green-700);
+    --color-green-800: var(--jy-green-800);
+    --color-success-text: var(--jy-success-text);
+    --color-success-bg: var(--jy-success-bg);
+    --color-warning-text: var(--jy-warning-text);
+    --color-warning-bg: var(--jy-warning-bg);
+    --color-error-text: var(--jy-error-text);
+    --color-error-bg: var(--jy-error-bg);
+    --color-info-text: var(--jy-info-text);
+    --color-info-bg: var(--jy-info-bg);
+    --color-page: var(--color-paper);
+    --color-band: var(--color-green-50);
+    --color-card: var(--color-paper);
+    --color-line: var(--color-green-200);
+    --color-control: var(--color-green-500);
+    --color-accent: var(--color-green-600);
+    --color-muted: var(--color-green-700);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 2px color-mix(in srgb, var(--jy-ink) 6%, transparent), 0 1px 1px color-mix(in srgb, var(--jy-ink) 4%, transparent);
+    --shadow-md: 0 8px 24px color-mix(in srgb, var(--jy-ink) 10%, transparent), 0 2px 6px color-mix(in srgb, var(--jy-ink) 6%, transparent);
+    --font-sans: 'Vazirmatn', system-ui, 'Segoe UI', Tahoma, sans-serif;
+    --text-base: 16px;
+    --text-small: 13px;
+    --text-h4: 20px;
+    --text-h3: 25px;
+    --text-h2: 31px;
+    --text-h1: 39px;
+    --text-display: 49px;
+  }
+
+  /* کمینهٔ preflight Tailwind، که سایت دارد */
+  *, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
+  html { line-height: 1.5; }
+  h1, h2, h3 { font-size: inherit; font-weight: inherit; }
+  a { color: inherit; text-decoration: inherit; }
+  ol, ul { list-style: none; }
+  img, svg { display: block; vertical-align: middle; }
+  img { max-width: 100%; height: auto; }
+  button, input, textarea { font: inherit; color: inherit; border-radius: 0; background-color: transparent; }
+  ::placeholder { opacity: 1; }
+  b { font-weight: 600; }
+}
+</style>
+<link rel="stylesheet" href="../../../packages/ui/src/base.css">
+<link rel="stylesheet" href="../../../packages/ui/src/components.css">
+<style>
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../../../apps/web/public/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../../../apps/web/public/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+
+@layer components {
+  /* ===== آیکون‌ها: فایل‌های برند؛ دو آیکون تازه (ذره‌بین و تیک) با قاعدهٔ راهنما: خط ۲، سر گرد ===== */
+  .jy-icon-truck { mask-image: url('../../brand/icons/truck.svg'); }
+  .jy-icon-lock { mask-image: url('../../brand/icons/lock.svg'); }
+  .jy-icon-arrow { mask-image: url('../../brand/icons/arrow.svg'); }
+  .jy-icon-success { mask-image: url('../../brand/icons/success.svg'); }
+  .jy-icon-warning { mask-image: url('../../brand/icons/warning.svg'); }
+  .jy-icon-error { mask-image: url('../../brand/icons/error.svg'); }
+  .jy-icon-info { mask-image: url('../../brand/icons/info.svg'); }
+  .jy-icon-chevron { mask-image: url('../../brand/icons/chevron.svg'); }
+  .jy-icon-search { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8.75' cy='8.75' r='5.75'/%3E%3Cpath d='M13 13l4 4'/%3E%3C/svg%3E"); }
+  .jy-icon-check { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 10.5l3.5 3.5 7.5-8'/%3E%3C/svg%3E"); }
+
+  /* ===== پوستهٔ سایت در حالت سفارش (globals.css): صفحه green-50، سربرگ بی ناوبری، لوگو بی پیوند ===== */
+  body { background: var(--color-band); }
+  .site { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+  .site-grow { flex: 1 0 auto; }
+  .site-wrap { max-width: calc(var(--jy-container) + 2 * var(--jy-gutter)); margin-inline: auto; padding-inline: var(--jy-gutter); }
+  .site-top { background: var(--color-band); }
+  .site-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px; }
+  .site-logo { display: block; padding: 6px; margin-inline-start: -6px; border-radius: var(--radius-md); }
+  .site-logo img { height: 64px; width: auto; }
+  .site-foot { padding-block: 48px 24px; background: var(--color-band); border-block-start: 1px solid var(--color-line); }
+  .site-foot__top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 24px; }
+  .site-foot__brand img { height: 64px; width: auto; }
+  .site-foot__brand p { max-width: 24em; margin-block-start: 12px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  /* جای نشان اینماد، همان جعبهٔ ۹۶×۱۰۴ سایت؛ طرح نمونه منبع بیرونی بار نمی‌کند */
+  .site-foot__seal {
+    display: grid; place-items: center; width: 96px; height: 104px; padding: 8px;
+    border: 1px dashed var(--color-green-300); border-radius: var(--radius-md);
+    font-size: var(--text-small); line-height: 1.6; text-align: center; color: var(--color-muted);
+  }
+  .site-foot__legal {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 24px;
+    margin-block-start: 32px; padding-block-start: 16px; border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-small); color: var(--color-muted);
+  }
+  /* نوار قیمت موبایل ته صفحه را می‌پوشاند؛ سایت ارتفاعش را می‌سنجد (--price-dock)، طرح نمونه عدد ۳۹۰ را دارد */
+  @media (width <= 860px) { .site-foot { padding-block-end: calc(24px + 92px); } }
+  @media (max-width: 520px) {
+    .site-head { padding-block: 12px; }
+    .site-logo img { height: 56px; }
+  }
+
+  /* ===== شبکهٔ سفارش (home.css، ۴ب): قدم‌ها، ستون اصلی، و خلاصه در ستون کنار ===== */
+  .ck {
+    display: grid; grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-areas: 'flow flow' 'main side';
+    column-gap: 32px; align-items: start; padding-block-end: 64px;
+  }
+  .ck-flow { grid-area: flow; padding-block: 8px 24px; }
+  .ck-main { grid-area: main; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .ck-side { grid-area: side; min-width: 0; }
+  @media (width > 860px) { .ck-side { position: sticky; inset-block-start: 24px; } }
+  @media (width <= 860px) {
+    .ck { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'flow' 'main' 'side'; }
+    .ck-side { margin-block-start: 16px; }
+  }
+  @media (max-width: 520px) {
+    .ck { padding-block-end: 48px; }
+    .ck-flow { padding-block: 4px 16px; }
+  }
+
+  /* قدم انجام‌شده (تازه برای کیت): تیک به جای عدد، و پیوند برای برگشتن؛ هدف لمسی ۴۴ */
+  .jy-flow__n:has(> .jy-icon) { padding: 0; }
+  .jy-flow > li.is-done .jy-flow__n { border-color: var(--color-green-600); color: var(--color-green-700); }
+  .jy-flow__n > .jy-icon { width: 16px; height: 16px; }
+  .jy-flow > li > a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: inherit; }
+
+  .ck-sub { margin-block-start: 4px; color: var(--color-muted); }
+  /* پیوند درون جمله یک‌جا می‌شکند، نه وسطش */
+  .ck-sub .jy-link, .ck-late__text .jy-link { white-space: nowrap; }
+
+  /* ===== فیلد (تازه برای کیت، از کیت راهنما: برچسب بالای فیلد، راهنما، خطا با سه نشانه) ===== */
+  .jy-field { display: flex; flex-direction: column; gap: 6px; }
+  .jy-label { font-weight: 600; line-height: 1.6; }
+  .jy-optional { font-weight: 400; color: var(--color-muted); }
+  .jy-hint { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .jy-error { display: flex; align-items: flex-start; gap: 6px; font-size: var(--text-small); font-weight: 600; line-height: 1.7; color: var(--color-error-text); }
+  .jy-error > .jy-icon { width: 16px; height: 16px; margin-block-start: 3px; }
+  textarea.jy-input { min-height: 104px; padding: 10px 12px; line-height: 1.8; resize: vertical; }
+  /* عدد و شماره: چپ‌به‌راست، از آغاز خودش */
+  .jy-input--ltr { direction: ltr; text-align: start; }
+  /* کد پیامکی: رقم درشت و باز، وسط جعبه (--jy-digit-rise) */
+  .jy-input--code {
+    max-width: 220px; min-height: 56px; direction: ltr; text-align: center;
+    font-size: var(--text-h3); font-weight: 600; letter-spacing: .5em; text-indent: .5em;
+    padding-block-start: calc(2 * var(--jy-digit-rise));
+  }
+  .jy-input--code[aria-invalid='true'] { padding-block-start: calc(2 * var(--jy-digit-rise)); }
+
+  .ck-form { display: flex; flex-direction: column; gap: 20px; margin-block-start: 20px; }
+  .ck-short { max-width: 260px; }
+
+  /* ===== شهر ===== */
+  .ck-cities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-block-start: 12px; }
+  .ck-cities .jy-btn { padding-inline: 8px; }
+  @media (max-width: 520px) { .ck-cities { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ck-search { position: relative; margin-block-start: 16px; }
+  .ck-search > .jy-icon { position: absolute; inset-block-start: 12px; inset-inline-start: 12px; color: var(--color-muted); pointer-events: none; }
+  .ck-search .jy-input { padding-inline-start: 42px; }
+  .ck-results { margin-block-start: 8px; border: 1px solid var(--color-line); border-radius: var(--radius-md); overflow: hidden; }
+  .ck-results li + li { border-block-start: 1px solid var(--color-green-100); }
+  .ck-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding-inline: 14px; cursor: pointer; }
+  .ck-result:hover { background: var(--color-green-50); }
+  .ck-result__prov { font-size: var(--text-small); color: var(--color-muted); }
+  .ck-miss { margin-block-start: 12px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+
+  /* دکمهٔ متنی در سر کارت، بی آنکه سر کارت را بلند کند */
+  .ck-head-btn { margin-block: -10px; margin-inline-end: -12px; }
+
+  /* ===== کد پیامکی ===== */
+  .ck-resend { margin-block-start: 12px; font-size: var(--text-small); color: var(--color-muted); }
+  .ck-late { margin-block-start: 20px; padding-block-start: 20px; border-block-start: 1px solid var(--color-green-100); }
+  .ck-late__title { font-weight: 600; }
+  .ck-late__text { margin-block-start: 4px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .ck-late__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 12px; margin-block-end: 8px; }
+  .ck-card-note { margin-block-start: 16px; }
+
+  /* ===== مرور ===== */
+  .ck-recap { margin-block-start: 8px; }
+  .ck-recap > div {
+    display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px;
+    align-items: baseline; padding-block: 14px;
+  }
+  .ck-recap > div + div { border-block-start: 1px solid var(--color-green-100); }
+  .ck-recap dt { font-size: var(--text-small); color: var(--color-muted); }
+  .ck-recap dd { min-width: 0; }
+  .ck-recap__meta { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  /* هدف لمسی ۴۴ در ۴۴، بی آنکه ردیف بلندتر یا ستون پهن‌تر شود */
+  .ck-edit { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin-block: -12px; }
+  .ck-recap .jy-badge { margin-inline-start: 6px; vertical-align: 1px; }
+  @media (max-width: 520px) {
+    .ck-recap > div { grid-template-columns: minmax(0, 1fr) auto; }
+    .ck-recap dt { grid-column: 1 / -1; }
+  }
+
+  /* ردیف فایل و فهرست فایل‌های جزوه */
+  .ck-file { display: flex; align-items: flex-start; gap: 12px; }
+  .ck-file img { flex: none; width: 30px; height: 40px; margin-block-start: 3px; }
+  /* خط پایهٔ ردیف از نام فایل است، نه از لبهٔ پایین تصویر؛ پس برچسب و «تغییر» با نام هم‌خط‌اند */
+  .ck-file__body { flex: 1; min-width: 0; align-self: baseline; }
+  .ck-file__name { width: fit-content; max-width: 100%; font-weight: 600; overflow-wrap: anywhere; line-height: 1.6; }
+  .ck-file__meta { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  /* خط اطلاعات فقط بعد از «·» می‌شکند (FileInfo در سایت) */
+  .nw { white-space: nowrap; }
+  .ck-files { display: flex; flex-direction: column; max-width: 26rem; margin-block-start: 4px; }
+  .ck-files li { display: flex; align-items: baseline; gap: 8px; font-size: var(--text-small); line-height: 1.9; }
+  .ck-files__n { flex: none; min-width: 1.2em; color: var(--color-muted); }
+  .ck-files__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ck-files__pages { flex: none; color: var(--color-muted); }
+  .ck-files-d summary {
+    display: inline-flex; align-items: center; gap: 4px; min-height: 44px; margin-block: -8px;
+    font-size: var(--text-small); font-weight: 600; color: var(--color-green-700); cursor: pointer; list-style: none;
+  }
+  .ck-files-d summary::-webkit-details-marker { display: none; }
+  .ck-files-d summary .jy-icon { width: 16px; height: 16px; transition: rotate var(--jy-dur-base) var(--jy-ease); }
+  .ck-files-d[open] summary .jy-icon { rotate: 180deg; }
+  .ck-files-d[open] .ck-files { margin-block-start: 8px; }
+
+  /* ===== تأیید ===== */
+  .ck-done__icon { width: 44px; height: 44px; color: var(--color-success-text); }
+  .ck-done__title { margin-block-start: 12px; font-size: var(--text-h3); font-weight: 600; line-height: 1.5; }
+  .ck-steps { margin-block: 24px; }
+  .ck-steps li { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 14px; padding-block-end: 20px; }
+  .ck-steps li:last-child { padding-block-end: 0; }
+  .ck-steps li:not(:last-child)::after {
+    content: ''; position: absolute; inset-block: 32px 4px; inset-inline-start: 13px;
+    border-inline-start: 2px solid var(--color-green-200);
+  }
+  .ck-steps__dot {
+    grid-row: span 2; display: grid; place-items: center; width: 28px; height: 28px;
+    border: 2px solid var(--color-green-300); border-radius: 50%; background: var(--color-paper); color: var(--color-green-700);
+  }
+  .ck-steps__dot > .jy-icon { width: 16px; height: 16px; }
+  .ck-steps .is-done .ck-steps__dot { border-color: var(--color-green-600); }
+  .ck-steps .is-now .ck-steps__dot { background: var(--color-green-100); border-color: var(--color-green-600); }
+  .ck-steps b { line-height: 1.6; }
+  .ck-steps__t { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+
+  /* ===== درگاه نمونه: بیرون از پوستهٔ سایت، مثل صفحهٔ بانک ===== */
+  .ck-gate { display: none; min-height: 100vh; min-height: 100dvh; padding: 32px var(--jy-gutter) 48px; background: var(--color-green-50); }
+  .ck-gate__in { width: 100%; max-width: 420px; margin-inline: auto; }
+  .ck-gate__logo { height: 56px; width: auto; margin-inline: auto; margin-block-end: 16px; }
+  .ck-gate .jy-note { margin-block-start: 12px; }
+  .ck-gate__lines { margin-block-start: 12px; }
+  .ck-gate__lines div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 8px; }
+  .ck-gate__lines div + div { border-block-start: 1px solid var(--color-green-100); }
+  .ck-gate__lines dt { color: var(--color-muted); }
+  .ck-gate__lines dd { font-weight: 600; }
+  .ck-gate__actions { display: flex; flex-direction: column; gap: 8px; margin-block-start: 20px; }
+
+  /* ===== خلاصهٔ سفارش (home.css، ۴ب)، به‌علاوهٔ جزوه در سرش ===== */
+  .ck-sum-jozve { margin-block-start: 12px; padding-block-end: 12px; border-block-end: 1px solid var(--color-line); }
+  .home-sum__lines { margin-block-start: 8px; }
+  .home-sum__lines > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 6px; }
+  .home-sum__lines dt { color: var(--color-muted); }
+  .home-sum__total {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px;
+    margin-block-start: 12px; padding-block-start: 16px; border-block-start: 1px solid var(--color-line);
+  }
+  .home-sum__label { font-weight: 600; }
+  .home-sum__value { font-size: var(--text-h2); font-weight: 600; line-height: 1.3; white-space: nowrap; }
+  .home-sum__value small { margin-inline-start: 4px; font-size: var(--text-base); font-weight: 400; color: var(--color-muted); }
+  .home-sum__ship { display: flex; align-items: flex-start; gap: 8px; margin-block-start: 8px; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .home-sum__ship .jy-icon { width: 18px; height: 18px; color: var(--color-green-600); }
+  .home-sum__go { margin-block-start: 20px; }
+  .home-sum__secure { display: flex; align-items: center; justify-content: center; gap: 6px; margin-block-start: 12px; font-size: var(--text-small); color: var(--color-muted); }
+  .home-sum__secure .jy-icon { width: 16px; height: 16px; }
+  .home-sum__terms { margin-block-start: 4px; font-size: var(--text-small); text-align: center; color: var(--color-muted); }
+
+  .home-dock {
+    position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 20; padding-block: 12px;
+    background: var(--color-page); border-block-start: 1px solid var(--color-line); box-shadow: var(--shadow-md);
+  }
+  .home-dock__in { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; }
+  .home-dock__price { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+  .home-dock__label, .home-dock__ship { font-size: var(--text-small); color: var(--color-muted); }
+  .home-dock .home-sum__value { font-size: var(--text-h3); }
+  .home-dock .jy-btn { flex-shrink: 0; }
+  @media (width <= 860px) { .home-sum :is(.home-sum__go, .home-sum__secure, .home-sum__terms) { display: none; } }
+  @media (width > 860px) { .home-dock { display: none; } }
+}
+
+/* ===== فقط طرح نمونه: حالت‌ها بی JS، با رادیوهای پنهان و :has() ===== */
+.mock-radios { position: fixed; inset-block-start: 0; inset-inline-start: 0; opacity: 0; pointer-events: none; }
+.mock {
+  position: fixed; inset-block-start: 8px; inset-inline-end: 8px; z-index: 50; max-width: calc(100vw - 16px);
+  font-size: 13px; line-height: 1.6; color: var(--jy-paper);
+}
+.mock summary { display: inline-block; padding: 4px 14px; border-radius: 999px; background: var(--jy-ink); cursor: pointer; list-style: none; }
+.mock summary::-webkit-details-marker { display: none; }
+.mock__list {
+  display: grid; grid-template-columns: repeat(2, auto); gap: 2px 4px; margin-block-start: 4px; padding: 6px;
+  border-radius: 12px; background: var(--jy-ink);
+}
+.mock__list label { padding: 2px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.mock__list hr { grid-column: 1 / -1; margin-block: 4px; border: 0; border-block-start: 1px solid var(--jy-green-700); }
+
+.st, .j-three { display: none; }
+body:has(#m-city:checked) :is(.st-city, .st-s2),
+body:has(#m-search:checked) :is(.st-search, .st-s2),
+body:has(#m-address:checked) :is(.st-address, .st-s2, .st-set),
+body:has(#m-mobile:checked) :is(.st-mobile, .st-s3, .st-set),
+body:has(#m-code:checked) :is(.st-code, .st-otp, .st-s3, .st-set),
+body:has(#m-wrong:checked) :is(.st-wrong, .st-otp, .st-s3, .st-set),
+body:has(#m-expired:checked) :is(.st-expired, .st-otp, .st-s3, .st-set),
+body:has(#m-late:checked) :is(.st-late, .st-otp, .st-s3, .st-set),
+body:has(#m-review:checked) :is(.st-review, .st-pay, .st-s3, .st-set),
+body:has(#m-failed:checked) :is(.st-failed, .st-pay, .st-s3, .st-set),
+body:has(#m-done:checked) :is(.st-done, .st-set),
+body:has(:is(#m-city, #m-search):checked) .st-unset { display: contents; }
+body:has(#j-three:checked) .j-three { display: contents; }
+body:has(#j-three:checked) .j-one { display: none; }
+/* ردیف ارسال خلاصه، وقتی شهر معلوم است */
+.ck-ship-row { display: none !important; }
+body:not(:has(:is(#m-city, #m-search):checked)) .ck-ship-row { display: flex !important; }
+body:has(#m-done:checked) .home-dock { display: none; }
+@media (width <= 860px) { body:has(#m-done:checked) .site-foot { padding-block-end: 24px; } }
+body:has(#m-gate:checked) :is(.site, .home-dock) { display: none; }
+body:has(#m-gate:checked) .ck-gate { display: block; }
+
+body:has(#m-city:checked) .mock [for='m-city'],
+body:has(#m-search:checked) .mock [for='m-search'],
+body:has(#m-address:checked) .mock [for='m-address'],
+body:has(#m-mobile:checked) .mock [for='m-mobile'],
+body:has(#m-code:checked) .mock [for='m-code'],
+body:has(#m-wrong:checked) .mock [for='m-wrong'],
+body:has(#m-expired:checked) .mock [for='m-expired'],
+body:has(#m-late:checked) .mock [for='m-late'],
+body:has(#m-review:checked) .mock [for='m-review'],
+body:has(#m-gate:checked) .mock [for='m-gate'],
+body:has(#m-failed:checked) .mock [for='m-failed'],
+body:has(#m-done:checked) .mock [for='m-done'],
+body:has(#j-one:checked) .mock [for='j-one'],
+body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-700); }
+</style>
+</head>
+<body>
+<div class="mock-radios" aria-hidden="true">
+  <input type="radio" name="m" id="m-city" checked tabindex="-1">
+  <input type="radio" name="m" id="m-search" tabindex="-1">
+  <input type="radio" name="m" id="m-address" tabindex="-1">
+  <input type="radio" name="m" id="m-mobile" tabindex="-1">
+  <input type="radio" name="m" id="m-code" tabindex="-1">
+  <input type="radio" name="m" id="m-wrong" tabindex="-1">
+  <input type="radio" name="m" id="m-expired" tabindex="-1">
+  <input type="radio" name="m" id="m-late" tabindex="-1">
+  <input type="radio" name="m" id="m-review" tabindex="-1">
+  <input type="radio" name="m" id="m-gate" tabindex="-1">
+  <input type="radio" name="m" id="m-failed" tabindex="-1">
+  <input type="radio" name="m" id="m-done" tabindex="-1">
+  <input type="radio" name="j" id="j-one" checked tabindex="-1">
+  <input type="radio" name="j" id="j-three" tabindex="-1">
+</div>
+<details class="mock">
+  <summary>طرح نمونه · حالت‌ها</summary>
+  <div class="mock__list">
+    <label for="m-city">شهر</label>
+    <label for="m-search">جست‌وجوی شهر</label>
+    <label for="m-address">نشانی</label>
+    <label for="m-mobile">موبایل</label>
+    <label for="m-code">کد پیامکی</label>
+    <label for="m-wrong">کد اشتباه</label>
+    <label for="m-expired">کد منقضی</label>
+    <label for="m-late">پیامک نرسید</label>
+    <label for="m-review">مرور و پرداخت</label>
+    <label for="m-gate">درگاه نمونه</label>
+    <label for="m-failed">پرداخت ناموفق</label>
+    <label for="m-done">تأیید</label>
+    <hr>
+    <label for="j-one">جزوهٔ یک‌فایلی</label>
+    <label for="j-three">جزوهٔ سه‌فایلی</label>
+  </div>
+</details>
+
+<div class="site">
+  <div class="site-top">
+    <header class="site-wrap site-head">
+      <span class="site-logo"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></span>
+    </header>
+  </div>
+
+  <main class="site-grow">
+    <div class="site-wrap ck">
+      <!-- قدم‌های سفارش: قدم انجام‌شده پیوند است تا کاربر برگردد -->
+      <div class="st st-s2">
+        <nav class="ck-flow" aria-label="قدم‌های سفارش">
+          <ol class="jy-flow">
+            <li class="is-done"><a href="#"><span class="jy-flow__n"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span>جزوه و قیمت</a></li>
+            <li aria-current="step"><span class="jy-flow__n num">2</span>آدرس</li>
+            <li><span class="jy-flow__n num">3</span>پرداخت</li>
+          </ol>
+        </nav>
+      </div>
+      <div class="st st-s3">
+        <nav class="ck-flow" aria-label="قدم‌های سفارش">
+          <ol class="jy-flow">
+            <li class="is-done"><a href="#"><span class="jy-flow__n"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span>جزوه و قیمت</a></li>
+            <li class="is-done"><a href="#"><span class="jy-flow__n"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span>آدرس</a></li>
+            <li aria-current="step"><span class="jy-flow__n num">3</span>پرداخت</li>
+          </ol>
+        </nav>
+      </div>
+      <div class="st st-done">
+        <nav class="ck-flow" aria-label="قدم‌های سفارش">
+          <ol class="jy-flow">
+            <li class="is-done"><span class="jy-flow__n"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span>جزوه و قیمت</li>
+            <li class="is-done"><span class="jy-flow__n"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span>آدرس</li>
+            <li class="is-done"><span class="jy-flow__n"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span>پرداخت</li>
+          </ol>
+        </nav>
+      </div>
+
+      <div class="ck-main">
+        <!-- ===== شهر: پرتکرارها با یک تپ، بقیه با جست‌وجو ===== -->
+        <div class="st st-city st-search">
+          <section class="jy-card" aria-labelledby="t-city">
+            <h1 id="t-city" class="jy-card__title">به کدام شهر بفرستیم؟</h1>
+            <p class="ck-sub">کرایهٔ پست پیشتاز به تهران <span class="num">129,500</span> و به شهرهای دیگر <span class="num">137,750</span> تومان است.</p>
+            <!-- جست‌وجو بالای دکمه‌ها: در گوشی صفحه‌کلید نیمهٔ پایین را می‌گیرد، پس نتیجه باید درست زیر فیلد بیاید -->
+            <div class="ck-search">
+              <span class="jy-icon jy-icon-search" aria-hidden="true"></span>
+              <div class="st st-city"><input id="city-q" class="jy-input" type="search" placeholder="شهر دیگر؟ نامش را بنویس" autocomplete="off" aria-labelledby="t-city"></div>
+              <div class="st st-search"><input id="city-q2" class="jy-input" type="search" value="بندر" autocomplete="off" aria-labelledby="t-city" aria-controls="city-list" aria-expanded="true"></div>
+            </div>
+            <div class="st st-city">
+              <div class="ck-cities" role="group" aria-label="شهرهای پرتکرار">
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">تهران</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">مشهد</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">اصفهان</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">کرج</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">شیراز</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">تبریز</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">قم</label>
+                <label for="m-address" class="jy-btn jy-btn--secondary jy-btn--lg">اهواز</label>
+              </div>
+            </div>
+            <div class="st st-search">
+              <ul id="city-list" class="ck-results" role="listbox" aria-label="شهرهای پیدا شده">
+                <li role="option" aria-selected="false"><label for="m-address" class="ck-result"><span>بندرعباس</span><span class="ck-result__prov">هرمزگان</span></label></li>
+                <li role="option" aria-selected="false"><label for="m-address" class="ck-result"><span>بندر انزلی</span><span class="ck-result__prov">گیلان</span></label></li>
+                <li role="option" aria-selected="false"><label for="m-address" class="ck-result"><span>بندر ماهشهر</span><span class="ck-result__prov">خوزستان</span></label></li>
+                <li role="option" aria-selected="false"><label for="m-address" class="ck-result"><span>بندر گناوه</span><span class="ck-result__prov">بوشهر</span></label></li>
+                <li role="option" aria-selected="false"><label for="m-address" class="ck-result"><span>بندر لنگه</span><span class="ck-result__prov">هرمزگان</span></label></li>
+              </ul>
+              <p class="ck-miss">شهرت در فهرست نیست؟ <a class="jy-link" href="#">استان را انتخاب کن</a> و نام شهر یا روستا را در نشانی بنویس.</p>
+            </div>
+          </section>
+        </div>
+
+        <!-- ===== نشانی: اولین جای تایپ ===== -->
+        <div class="st st-address">
+          <section class="jy-card" aria-labelledby="t-address">
+            <div class="jy-card__head">
+              <h1 id="t-address" class="jy-card__title">نشانی در مشهد</h1>
+              <label for="m-city" class="jy-btn jy-btn--text ck-head-btn">شهر دیگر</label>
+            </div>
+            <p class="ck-sub">خراسان رضوی · پست پیشتاز <span class="num">137,750</span> تومان</p>
+            <div class="ck-form">
+              <div class="jy-field">
+                <label class="jy-label" for="addr">نشانی</label>
+                <textarea id="addr" class="jy-input" rows="3" autocomplete="street-address" placeholder="خیابان، کوچه، پلاک، واحد"></textarea>
+              </div>
+              <div class="jy-field">
+                <label class="jy-label" for="postal">کد پستی <span class="jy-optional">(اختیاری)</span></label>
+                <input id="postal" class="jy-input jy-input--ltr ck-short" inputmode="numeric" autocomplete="postal-code" aria-describedby="postal-hint">
+                <p id="postal-hint" class="jy-hint"><span class="num">10</span> رقم. اگر نمی‌دانی، خالی بگذار.</p>
+              </div>
+              <div class="jy-field">
+                <label class="jy-label" for="name">نام گیرنده</label>
+                <input id="name" class="jy-input" autocomplete="name" placeholder="نام و نام خانوادگی" aria-describedby="name-hint">
+                <p id="name-hint" class="jy-hint">روی بسته همین نام نوشته می‌شود.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ===== موبایل: هویت فقط همین‌جا، موقع پرداخت ===== -->
+        <div class="st st-mobile">
+          <section class="jy-card" aria-labelledby="t-mobile">
+            <h1 id="t-mobile" class="jy-card__title">تأیید با پیامک</h1>
+            <p class="ck-sub">یک کد به موبایلت پیامک می‌کنیم؛ رمز و ثبت‌نام لازم نیست.</p>
+            <div class="ck-form">
+              <div class="jy-field">
+                <label class="jy-label" for="tel">شمارهٔ موبایل</label>
+                <input id="tel" class="jy-input jy-input--ltr ck-short" type="tel" inputmode="numeric" autocomplete="tel-national" placeholder="09123456789" aria-describedby="tel-hint">
+                <p id="tel-hint" class="jy-hint">کد رهگیری پست هم به همین شماره پیامک می‌شود.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ===== کد پیامکی: عادی، اشتباه، منقضی، نرسیده ===== -->
+        <div class="st st-otp">
+          <section class="jy-card" aria-labelledby="t-code">
+            <h1 id="t-code" class="jy-card__title">کد تأیید</h1>
+            <p class="ck-sub">کد را به <span class="num">0912 345 6789</span> پیامک کردیم. <label for="m-mobile" class="jy-link">شماره را عوض کن</label></p>
+            <div class="st st-expired">
+              <p class="jy-note jy-note--warning ck-card-note" role="alert"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>این کد دیگر اعتبار ندارد؛ هر کد <span class="num">2</span> دقیقه اعتبار دارد. کد تازه بگیر.</span></p>
+            </div>
+            <div class="ck-form">
+              <div class="jy-field">
+                <label class="jy-label" for="otp">کد پیامک</label>
+                <div class="st st-code st-late"><input id="otp" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="5" aria-describedby="otp-hint"></div>
+                <div class="st st-expired"><input id="otp-expired" class="jy-input jy-input--code" inputmode="numeric" maxlength="5" disabled></div>
+                <div class="st st-wrong"><input id="otp-wrong" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="5" value="48213" aria-invalid="true" aria-describedby="otp-error"></div>
+                <div class="st st-wrong"><p id="otp-error" class="jy-error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>کد درست نیست. دوباره نگاه کن و بزن؛ <span class="num">2</span> بار دیگر فرصت هست.</span></p></div>
+                <div class="st st-code st-late"><p id="otp-hint" class="jy-hint">هر کد <span class="num">2</span> دقیقه اعتبار دارد.</p></div>
+              </div>
+            </div>
+            <div class="st st-code st-wrong"><p class="ck-resend">ارسال دوباره تا <span class="num">1:24</span></p></div>
+            <div class="st st-late">
+              <div class="ck-late">
+                <p class="ck-late__title">پیامک نرسید؟</p>
+                <p class="ck-late__text">گاهی پیامک تا یک دقیقه دیر می‌رسد. اگر هنوز نیامده:</p>
+                <div class="ck-late__actions">
+                  <button type="button" class="jy-btn jy-btn--secondary">ارسال دوباره</button>
+                  <button type="button" class="jy-btn jy-btn--secondary">کد را با تماس صوتی بگیر</button>
+                </div>
+                <p class="ck-late__text">شماره <span class="num">0912 345 6789</span> است؟ اگر نه، <label for="m-mobile" class="jy-link">عوضش کن</label>.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ===== پرداخت ناموفق: پیام روشن، و سفارش سر جایش ===== -->
+        <div class="st st-failed">
+          <p class="jy-note jy-note--error" role="alert"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span><b>پرداخت انجام نشد.</b> بانک پرداخت را تأیید نکرد، یا از درگاه برگشتی. اگر پولی از حسابت کم شده، تا <span class="num">72</span> ساعت خودکار برمی‌گردد.</span></p>
+        </div>
+
+        <!-- ===== مرور و پرداخت (و همان مرور پس از پرداخت ناموفق) ===== -->
+        <div class="st st-pay">
+          <section class="jy-card" aria-labelledby="t-review">
+            <div class="st st-review">
+              <h1 id="t-review" class="jy-card__title">مرور و پرداخت</h1>
+              <p class="ck-sub">یک بار دیگر نگاه کن؛ بعد از پرداخت، جزوه به صف چاپ می‌رود.</p>
+            </div>
+            <div class="st st-failed">
+              <div class="jy-card__head">
+                <h1 class="jy-card__title">سفارش <span class="num">1287</span></h1>
+                <span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>در انتظار پرداخت</span>
+              </div>
+              <p class="ck-sub">سفارشت با همین قیمت نگه داشته شده؛ هر وقت آماده بودی، دوباره پرداخت کن.</p>
+            </div>
+            <dl class="ck-recap">
+              <div>
+                <dt>جزوه</dt>
+                <dd>
+                  <div class="j-one">
+                    <div class="ck-file">
+                      <img src="../../../apps/web/public/img/page.svg" alt="" width="48" height="64">
+                      <div class="ck-file__body">
+                        <p class="ck-file__name" dir="auto">ریاضی عمومی ۲ - جلسه ۱ تا ۸.pdf</p>
+                        <p class="ck-file__meta"><span class="nw"><span class="num">120</span> صفحه</span>&nbsp;· <span class="nw">سیاه‌سفید، دورو</span>&nbsp;· <span class="nw">طلق و سیم</span>&nbsp;· <span class="nw"><span class="num">1</span> نسخه</span></p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="j-three">
+                    <p class="ck-file__name"><span class="num">3</span> فایل در یک جزوه</p>
+                    <ol class="ck-files">
+                      <li><span class="ck-files__n num">1</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۱.pdf</span><span class="ck-files__pages"><span class="num">48</span> صفحه</span></li>
+                      <li><span class="ck-files__n num">2</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۲.pdf</span><span class="ck-files__pages"><span class="num">54</span> صفحه</span></li>
+                      <li><span class="ck-files__n num">3</span><span class="ck-files__name" dir="auto">حل تمرین فصل ۱.docx</span><span class="ck-files__pages"><span class="num">18</span> صفحه</span></li>
+                    </ol>
+                    <p class="ck-file__meta"><span class="nw"><span class="num">120</span> صفحه، پشت‌سرهم با یک صحافی</span>&nbsp;· <span class="nw">سیاه‌سفید، دورو</span>&nbsp;· <span class="nw">طلق و سیم</span>&nbsp;· <span class="nw"><span class="num">1</span> نسخه</span></p>
+                  </div>
+                </dd>
+                <dd><a class="jy-link ck-edit" href="#">تغییر</a></dd>
+              </div>
+              <div>
+                <dt>ارسال به</dt>
+                <dd>
+                  <p>سارا احمدی</p>
+                  <p>مشهد، بلوار وکیل‌آباد، وکیل‌آباد 12، پلاک 24، واحد 3</p>
+                  <p class="ck-recap__meta">کد پستی <span class="num">9189914365</span></p>
+                </dd>
+                <dd><label for="m-address" class="jy-link ck-edit">ویرایش</label></dd>
+              </div>
+              <div>
+                <dt>موبایل</dt>
+                <dd><span class="num">0912 345 6789</span><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>تأیید شد</span></dd>
+                <dd><label for="m-mobile" class="jy-link ck-edit">عوض کن</label></dd>
+              </div>
+              <div>
+                <dt>تحویل</dt>
+                <dd>
+                  <p>پست پیشتاز</p>
+                  <p class="ck-recap__meta">تحویل به پست تا <span class="num">2</span> روز کاری بعد از پرداخت؛ کد رهگیری به همین موبایل پیامک می‌شود.</p>
+                </dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+
+        <!-- ===== تأیید ===== -->
+        <div class="st st-done">
+          <section class="jy-card" aria-labelledby="t-done">
+            <span class="jy-icon jy-icon-success ck-done__icon" aria-hidden="true"></span>
+            <h1 id="t-done" class="ck-done__title">سفارش ثبت شد</h1>
+            <p class="ck-sub">سفارش <span class="num">1287</span> · <span class="num">374,750</span> تومان پرداخت شد. شمارهٔ سفارش را به <span class="num">0912 345 6789</span> هم پیامک کردیم.</p>
+            <ol class="ck-steps">
+              <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>پرداخت</b><span class="ck-steps__t">کد پیگیری بانک <span class="num">803114</span></span></li>
+              <li class="is-now" aria-current="step"><span class="ck-steps__dot"></span><b>چاپ و صحافی</b><span class="ck-steps__t">جزوه‌ات در صف چاپ است.</span></li>
+              <li><span class="ck-steps__dot"></span><b>تحویل به پست تا دوشنبه <span class="num">6</span> مهر</b><span class="ck-steps__t">حداکثر <span class="num">2</span> روز کاری بعد از پرداخت.</span></li>
+              <li><span class="ck-steps__dot"></span><b>کد رهگیری پست</b><span class="ck-steps__t">با پیامک می‌آید؛ مسیر بسته را با آن می‌بینی.</span></li>
+            </ol>
+            <a class="jy-btn jy-btn--secondary" href="#">جزوهٔ دیگری داری؟ بینداز</a>
+          </section>
+        </div>
+      </div>
+
+      <!-- ===== خلاصهٔ سفارش: در هر صفحه، با جزوه در سرش ===== -->
+      <aside class="ck-side" aria-labelledby="sum-title">
+        <div class="jy-card home-sum">
+          <h2 id="sum-title" class="jy-card__title">خلاصهٔ سفارش</h2>
+          <div class="ck-sum-jozve">
+            <div class="j-one">
+              <div class="ck-file">
+                <img src="../../../apps/web/public/img/page.svg" alt="" width="48" height="64">
+                <div class="ck-file__body">
+                  <p class="ck-file__name" dir="auto">ریاضی عمومی ۲ - جلسه ۱ تا ۸.pdf</p>
+                  <p class="ck-file__meta"><span class="num">120</span> صفحه · A4</p>
+                </div>
+              </div>
+            </div>
+            <div class="j-three">
+              <div class="ck-file">
+                <img src="../../../apps/web/public/img/page.svg" alt="" width="48" height="64">
+                <div class="ck-file__body">
+                  <p class="ck-file__name"><span class="num">3</span> فایل در یک جزوه</p>
+                  <p class="ck-file__meta"><span class="num">120</span> صفحه · یک صحافی</p>
+                  <details class="ck-files-d">
+                    <summary>نام فایل‌ها<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
+                    <ol class="ck-files">
+                      <li><span class="ck-files__n num">1</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۱.pdf</span><span class="ck-files__pages"><span class="num">48</span> صفحه</span></li>
+                      <li><span class="ck-files__n num">2</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۲.pdf</span><span class="ck-files__pages"><span class="num">54</span> صفحه</span></li>
+                      <li><span class="ck-files__n num">3</span><span class="ck-files__name" dir="auto">حل تمرین فصل ۱.docx</span><span class="ck-files__pages"><span class="num">18</span> صفحه</span></li>
+                    </ol>
+                  </details>
+                </div>
+              </div>
+            </div>
+          </div>
+          <dl class="home-sum__lines">
+            <div><dt>چاپ سیاه‌سفید، دورو · <span class="num">120</span> صفحه</dt><dd class="num">192,000</dd></div>
+            <div><dt>صحافی طلق و سیم · <span class="num">60</span> برگ</dt><dd class="num">45,000</dd></div>
+            <div><dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd></div>
+            <div class="ck-ship-row"><dt>ارسال پست پیشتاز به مشهد</dt><dd class="num">137,750</dd></div>
+          </dl>
+          <div class="home-sum__total">
+            <span class="home-sum__label"><span class="st st-unset st-s3 st-address">جمع</span><span class="st st-done">پرداخت شد</span></span>
+            <span class="home-sum__value"><span class="st st-unset"><span class="num">237,000</span></span><span class="st st-set"><span class="num">374,750</span></span><small>تومان</small></span>
+          </div>
+          <div class="st st-unset"><p class="home-sum__ship"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span><span>+ ارسال از <span class="num">129,500</span> تومان. کرایهٔ دقیق با انتخاب شهر می‌آید.</span></p></div>
+          <div class="st st-address st-s3"><p class="home-sum__ship"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span><span>تحویل به پست تا <span class="num">2</span> روز کاری بعد از پرداخت.</span></p></div>
+          <div class="st st-done"><p class="home-sum__ship"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span><span>تحویل به پست تا دوشنبه <span class="num">6</span> مهر.</span></p></div>
+
+          <div class="st st-address"><label for="m-mobile" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go">ادامه — موبایل و پرداخت<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+          <div class="st st-mobile"><label for="m-code" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go">ارسال کد<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+          <div class="st st-code st-wrong st-late"><label for="m-review" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go">تأیید کد<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+          <div class="st st-expired"><label for="m-code" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go">ارسال کد تازه<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+          <div class="st st-review"><label for="m-gate" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go">پرداخت <span class="num">374,750</span> تومان<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+          <div class="st st-failed"><label for="m-gate" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go">دوباره پرداخت کن<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+
+          <div class="st st-s2 st-mobile st-otp"><p class="home-sum__secure"><span class="jy-icon jy-icon-lock" aria-hidden="true"></span><span class="st st-s2">ثبت‌نام لازم نیست؛ موبایل فقط موقع پرداخت.</span><span class="st st-mobile st-otp">رمز و ثبت‌نام لازم نیست.</span></p></div>
+          <div class="st st-pay">
+            <p class="home-sum__secure"><span class="jy-icon jy-icon-lock" aria-hidden="true"></span>پرداخت امن با همهٔ کارت‌های بانکی</p>
+            <p class="home-sum__terms">با پرداخت، <a href="#" target="_blank" rel="noopener">قوانین جزوه‌یار</a> را می‌پذیری.</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="site-foot">
+    <div class="site-wrap">
+      <div class="site-foot__top">
+        <div class="site-foot__brand">
+          <img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435" loading="lazy">
+          <p>چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
+        </div>
+        <div class="site-foot__seal">جای نشان اینماد</div>
+      </div>
+      <div class="site-foot__legal">
+        <p>مسئولیت محتوای فایل ارسالی بر عهدهٔ سفارش‌دهنده است.</p>
+        <p>© <span class="num">1405</span> جزوه‌یار</p>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ===== نوار قیمت موبایل و تبلت: جمع و کار بعدی، ثابت پایین ===== -->
+<div class="home-dock" role="region" aria-label="قیمت">
+  <div class="site-wrap home-dock__in">
+    <p class="home-dock__price">
+      <span class="home-dock__label"><span class="st st-unset">جمع</span><span class="st st-address st-s3">جمع با ارسال</span></span>
+      <span class="home-sum__value"><span class="st st-unset"><span class="num">237,000</span></span><span class="st st-address st-s3"><span class="num">374,750</span></span><small>تومان</small></span>
+      <span class="home-dock__ship"><span class="st st-unset">+ ارسال از <span class="num">129,500</span> تومان</span><span class="st st-address st-s3">پست پیشتاز به مشهد</span></span>
+    </p>
+    <div class="st st-address"><label for="m-mobile" class="jy-btn jy-btn--primary jy-btn--lg" aria-label="ادامه — موبایل و پرداخت">ادامه<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+    <div class="st st-mobile"><label for="m-code" class="jy-btn jy-btn--primary jy-btn--lg">ارسال کد<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+    <div class="st st-code st-wrong st-late"><label for="m-review" class="jy-btn jy-btn--primary jy-btn--lg">تأیید کد<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+    <div class="st st-expired"><label for="m-code" class="jy-btn jy-btn--primary jy-btn--lg">کد تازه<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+    <div class="st st-review"><label for="m-gate" class="jy-btn jy-btn--primary jy-btn--lg" aria-label="پرداخت 374,750 تومان">پرداخت<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+    <div class="st st-failed"><label for="m-gate" class="jy-btn jy-btn--primary jy-btn--lg" aria-label="دوباره پرداخت کن">دوباره پرداخت<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></label></div>
+  </div>
+</div>
+
+<!-- ===== درگاه نمونه (برش ۳): جای بانک، فقط برای آزمایش؛ در برش ۷ درگاه واقعی جایش می‌آید ===== -->
+<div class="ck-gate">
+  <div class="ck-gate__in">
+    <img class="ck-gate__logo" src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435">
+    <section class="jy-card" aria-labelledby="t-gate">
+      <h1 id="t-gate" class="jy-card__title">درگاه پرداخت نمونه</h1>
+      <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>فقط برای آزمایش است؛ پولی جابه‌جا نمی‌شود.</span></p>
+      <dl class="ck-gate__lines">
+        <div><dt>پذیرنده</dt><dd>جزوه‌یار</dd></div>
+        <div><dt>شمارهٔ سفارش</dt><dd class="num">1287</dd></div>
+        <div><dt>مبلغ</dt><dd><span class="num">374,750</span> تومان</dd></div>
+      </dl>
+      <div class="ck-gate__actions">
+        <label for="m-done" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block">پرداخت موفق</label>
+        <label for="m-failed" class="jy-btn jy-btn--secondary jy-btn--lg jy-btn--block">پرداخت ناموفق</label>
+        <label for="m-failed" class="jy-btn jy-btn--text jy-btn--block">انصراف و بازگشت</label>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>
