@@ -23,30 +23,54 @@ async function dropFile(page: Page) {
   await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
 }
 
+/** پیوندهای سربرگ و بخشی که هر کدام به آن می‌رود (۴الف). */
+const SECTIONS = [
+  { link: 'چطور کار می‌کند', id: 'how', heading: 'سه قدم تا جزوهٔ چاپ‌شده' },
+  { link: 'تعرفه', id: 'tariff', heading: 'تعرفه، بی هزینهٔ پنهان' },
+  { link: 'سؤال‌ها', id: 'faq', heading: 'سؤال‌های پرتکرار' },
+];
+
 test.describe('سربرگ', () => {
-  test('لوگو پیوند صفحهٔ اصلی است با متن جایگزین؛ ناوبری فقط «سؤال‌ها»', async ({ page }) => {
+  test('لوگو پیوند صفحهٔ اصلی است با متن جایگزین؛ ناوبری سه بخش صفحه، هر کدام با مقصد', async ({ page }) => {
     await page.goto('/');
     await expect(homeLink(page)).toHaveAttribute('href', '/');
     await expect(homeLink(page).getByRole('img', { name: 'جزوه‌یار' })).toBeVisible();
 
-    // پیوند فقط به جایی که وجود دارد: «چطور کار می‌کند» و «تعرفه» با بخش‌هایشان در قدم ۴.
+    // پیوند فقط به جایی که وجود دارد: هر مقصد یک بخش با تیتر خودش است.
     const links = nav(page).getByRole('link');
-    await expect(links).toHaveCount(1);
-    await expect(links).toHaveText('سؤال‌ها');
-    await expect(links).toHaveAttribute('href', '/#faq');
-    await expect(page.locator('#faq')).toHaveCount(1);
+    await expect(links).toHaveText(SECTIONS.map(({ link }) => link));
+    for (const { link, id, heading } of SECTIONS) {
+      await expect(nav(page).getByRole('link', { name: link })).toHaveAttribute('href', `/#${id}`);
+      await expect(page.locator(`section#${id}`)).toHaveCount(1);
+      await expect(page.locator(`section#${id}`).getByRole('heading', { level: 2 })).toHaveText(heading);
+    }
   });
 
-  test('«سؤال‌ها» صفحه را دوباره بار نمی‌کند و تا سؤال‌ها می‌رود', async ({ page }) => {
+  test('هر پیوند صفحه را دوباره بار نمی‌کند و تا بخش خودش می‌رود', async ({ page }) => {
     await page.goto('/');
     await page.evaluate(() => {
       Object.assign(window, { sameDocument: true });
     });
-    await nav(page).getByRole('link', { name: 'سؤال‌ها' }).click();
-
-    await expect(page).toHaveURL(/\/#faq$/);
-    await expect(page.getByRole('heading', { name: 'سؤال‌های پرتکرار' })).toBeInViewport();
+    for (const { link, id, heading } of SECTIONS) {
+      await nav(page).getByRole('link', { name: link }).click();
+      await expect(page).toHaveURL(new RegExp(`/#${id}$`));
+      await expect(page.getByRole('heading', { level: 2, name: heading })).toBeInViewport();
+    }
     expect(await page.evaluate(() => 'sameDocument' in window)).toBe(true);
+  });
+
+  test.describe('موبایل', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('فقط «تعرفه» و «سؤال‌ها»، هر کدام دست‌کم ۴۴ پیکسل', async ({ page }) => {
+      await page.goto('/');
+      await expect(nav(page).getByRole('link', { name: 'چطور کار می‌کند' })).toBeHidden();
+      for (const name of ['تعرفه', 'سؤال‌ها']) {
+        const box = (await nav(page).getByRole('link', { name }).boundingBox())!;
+        expect(box.height, name).toBeGreaterThanOrEqual(44);
+        expect(box.width, name).toBeGreaterThanOrEqual(44);
+      }
+    });
   });
 
   test('در حالت سفارش ناوبری پنهان است و لوگو پیوند نیست؛ جزوهٔ خالی برش می‌گرداند', async ({ page }) => {
@@ -175,7 +199,7 @@ test.describe('آیکون گوشی، manifest و تصویر اشتراک', () =>
       start_url: '/',
       display: 'browser',
     });
-    // همان رنگ نوار مرورگر صفحه (PAGE_COLOR)، که امروز green-50 است.
+    // همان رنگ نوار مرورگر صفحه (BAND_COLOR، نوار بالای صفحه)، که green-50 است.
     expect(manifest.theme_color).toBe(meta(html, 'theme-color'));
     expect(manifest.background_color).toBe(brandColor('green-50'));
 
@@ -238,34 +262,38 @@ test.describe('۴۰۴', () => {
   });
 });
 
-test.describe('بی منبع بیرونی و بی اسکرول افقی در ۳۹۰ پیکسل', () => {
-  test.use({ viewport: { width: 390, height: 844 } });
+for (const width of [320, 390, 1280]) {
+  test.describe(`بی منبع بیرونی و بی اسکرول افقی در ${width} پیکسل`, () => {
+    test.use({ viewport: { width, height: width < 1000 ? 844 : 800 } });
 
-  const pages = [
-    { name: 'صفحهٔ اصلی', path: '/', order: false },
-    { name: 'حالت سفارش', path: '/', order: true },
-    { name: '۴۰۴', path: '/no-such-page', order: false },
-  ];
+    const pages = [
+      { name: 'صفحهٔ اصلی', path: '/', order: false },
+      { name: 'حالت سفارش', path: '/', order: true },
+      { name: '۴۰۴', path: '/no-such-page', order: false },
+    ];
 
-  for (const { name, path, order } of pages) {
-    test(name, async ({ page, baseURL }) => {
-      const origin = new URL(baseURL!).origin;
-      const external: string[] = [];
-      page.on('request', (request) => {
-        const url = new URL(request.url());
-        if (url.protocol.startsWith('http') && url.origin !== origin) external.push(request.url());
+    for (const { name, path, order } of pages) {
+      test(name, async ({ page, baseURL }) => {
+        const origin = new URL(baseURL!).origin;
+        const external: string[] = [];
+        page.on('request', (request) => {
+          const url = new URL(request.url());
+          if (url.protocol.startsWith('http') && url.origin !== origin) external.push(request.url());
+        });
+
+        await page.goto(path);
+        if (order) await dropFile(page);
+        // ریز تعرفه و سؤال‌ها باز، تا جدول و متن‌شان هم سنجیده شوند
+        await page.evaluate(() => document.querySelectorAll('details').forEach((details) => (details.open = true)));
+        await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+        await page.waitForLoadState('networkidle');
+
+        expect(external).toEqual([]);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(1);
       });
-
-      await page.goto(path);
-      if (order) await dropFile(page);
-      await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
-      await page.waitForLoadState('networkidle');
-
-      expect(external).toEqual([]);
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow).toBeLessThanOrEqual(1);
-    });
-  }
-});
+    }
+  });
+}

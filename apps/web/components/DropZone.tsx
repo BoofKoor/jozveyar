@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { ACCEPTED_EXTENSIONS } from '../lib/analysis-protocol';
 
 /** فرمت‌هایی که می‌پذیریم. PDF مسیر مرورگر، بقیه مسیر سرور (تبدیل، ADR-028). */
@@ -9,12 +9,21 @@ export const ACCEPT = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 interface Props {
   /** یک یا چند فایل؛ چند فایل به ترتیب نام، بخش‌های یک جزوه می‌شوند (ADR-030). */
   onFiles: (files: File[]) => void;
-  busy: boolean;
+  /**
+   * محتوای ثابت کارت (تصویر، تیتر، نوع فایل‌ها، «انتخاب فایل» و راهنما): کامپوننت سرور
+   * `UploadCard`، تا متنش در باندل اولیه نیاید. نام ورودی از `upload-title` و `upload-action`
+   * آن است و توضیحش از `upload-formats` و `upload-hint`.
+   */
+  children: ReactNode;
 }
 
-export function DropZone({ onFiles, busy }: Props) {
+/**
+ * کارت بارگذاری (`jy-upload`، طرح ز): کل کارت برچسب ورودی فایل است، پس کلیک و کلید بی JS
+ * فایل‌گزین را باز می‌کنند و فوکوس ورودی روی خود کارت دیده می‌شود. اینجا فقط انداختن فایل
+ * است: `is-dragover` وقتی فایلی رویش کشیده شده.
+ */
+export function DropZone({ onFiles, children }: Props) {
   const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const take = useCallback(
     (files: FileList | null) => {
@@ -25,7 +34,7 @@ export function DropZone({ onFiles, busy }: Props) {
   );
 
   return (
-    <div
+    <label
       onDragOver={(event) => {
         event.preventDefault();
         setDragging(true);
@@ -36,19 +45,15 @@ export function DropZone({ onFiles, busy }: Props) {
         setDragging(false);
         take(event.dataTransfer.files);
       }}
-      className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors sm:p-14 ${
-        dragging ? 'border-solid border-accent bg-green-100' : 'border-control bg-card'
-      }`}
+      className={`jy-upload${dragging ? ' is-dragover' : ''}`}
     >
-      {/* ورودی فقط هدف دکمه و انداختن است؛ در ترتیب Tab نیست تا فوکوس روی چیزی نامرئی نیفتد. */}
       <input
-        ref={inputRef}
         id="jozve-file"
         type="file"
         multiple
         accept={ACCEPT}
-        tabIndex={-1}
-        aria-hidden="true"
+        aria-labelledby="upload-title upload-action"
+        aria-describedby="upload-formats upload-hint"
         className="sr-only"
         onChange={(event) => {
           take(event.target.files);
@@ -56,27 +61,7 @@ export function DropZone({ onFiles, busy }: Props) {
           event.target.value = '';
         }}
       />
-
-      <p className="text-xl font-semibold text-ink sm:text-2xl">جزوه‌ات را همین‌جا بینداز</p>
-      <p className="mt-3 text-muted">
-        قیمت را فوری می‌بینی. بدون ثبت‌نام، بدون پر کردن فرم.
-      </p>
-
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
-        className="jy-btn jy-btn--primary jy-btn--lg mt-6"
-      >
-        <span className="jy-icon jy-icon-upload" aria-hidden="true" />
-        {busy ? 'در حال بررسی…' : 'انتخاب فایل'}
-      </button>
-
-      {/* واژهٔ لاتین کنار ویرگول فارسی در bdi؛ بی آن «PDF، Word» برعکس دیده می‌شود. */}
-      <p className="mt-6 text-sm text-muted">
-        <bdi>PDF</bdi>، <bdi>Word</bdi>، پاورپوینت و عکس — PDF همین‌جا در مرورگر خوانده می‌شود، بقیه روی
-        سرور به PDF تبدیل می‌شوند. چند فایل هم می‌شود: پشت‌سرهم در یک جزوه صحافی می‌شوند.
-      </p>
-    </div>
+      {children}
+    </label>
   );
 }

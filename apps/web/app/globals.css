@@ -5,6 +5,8 @@
  * (تست نگهبان رنگ در packages/ui). پنل ادمین هم همین را وارد می‌کند.
  */
 @import '@jozveyar/ui/styles.css';
+/* صفحهٔ اصلی، از طرح ز (docs/UI.md، ۴الف). در همین ساخت Tailwind، تا متغیرهای توکنی که به کار می‌برد ساخته شوند. */
+@import './home.css';
 
 /*
  * وزیرمتن، فقط دو وزن، لوکال.
@@ -32,6 +34,13 @@
  * همان طرح ز است، و نقطهٔ شکست کوچک کیت (۵۲۰ پیکسل). رنگ فقط توکن. فقط logical properties.
  */
 @layer components {
+  /* پیوندهای سربرگ نرم تا بخش خودشان می‌روند، مثل طرح ز؛ با «حرکت کمتر» سیستم، یک‌باره. */
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
   /* پاورقی ته صفحه می‌نشیند، حتی وقتی صفحه کوتاه است (۴۰۴). */
   .site {
     display: flex;
@@ -50,9 +59,9 @@
     padding-inline: var(--jy-gutter);
   }
 
-  /* نوار بالا green-50 است؛ در قدم ۴ زمینهٔ صفحه سفید می‌شود و این نوار می‌ماند. */
+  /* نوار بالا green-50 است و زمینهٔ صفحه سفید (طرح ز، از قدم ۴)؛ در صفحهٔ اصلی قهرمان هم در همین نوار است. */
   .site-top {
-    background: var(--color-green-50);
+    background: var(--color-band);
   }
   .site-head {
     display: flex;
@@ -90,9 +99,13 @@
   }
 
   /*
-   * حالت سفارش: وقتی جزوه‌ای در کار است، جزیرهٔ سفارش نشانهٔ `[data-jozve]` را می‌گذارد. سربرگ
-   * بی ناوبری می‌شود و لوگو بی پیوند، تا جزوهٔ نیمه‌کاره با یک کلیک پاک نشود. بی JS.
+   * حالت سفارش: وقتی جزوه‌ای در کار است، جزیرهٔ سفارش نشانهٔ `[data-jozve]` را می‌گذارد. کل صفحه
+   * green-50 می‌شود و کارت‌ها رویش سفیدند؛ سربرگ بی ناوبری می‌شود و لوگو بی پیوند، تا جزوهٔ
+   * نیمه‌کاره با یک کلیک پاک نشود. بی JS. (چیدمان صفحهٔ اصلی در این حالت: home.css)
    */
+  body:has([data-jozve]) {
+    background: var(--color-band);
+  }
   .site-ordering {
     display: none;
   }
@@ -103,12 +116,18 @@
     display: block;
   }
 
-  /* پاورقی: ۹۶ پیکسل زیر آخرین بخش (تا ۵۲۰ پیکسل ۶۴)؛ ۶۴ تایش padding پایین خود صفحه است. */
+  /*
+   * پاورقی: ۹۶ پیکسل زیر آخرین بخش (تا ۵۲۰ پیکسل ۶۴)؛ ۶۴ تایش padding پایین خود صفحه است. در حالت
+   * سفارش همان ۶۴، مثل طرح ز.
+   */
   .site-foot {
     margin-block-start: 32px;
     padding-block: 48px 24px;
-    background: var(--color-green-50);
+    background: var(--color-band);
     border-block-start: 1px solid var(--color-line);
+  }
+  body:has([data-jozve]) .site-foot {
+    margin-block-start: 0;
   }
   .site-foot__brand img {
     height: 64px;
@@ -150,6 +169,10 @@
     }
     .site-logo img {
       height: 56px;
+    }
+    /* در موبایل فقط «تعرفه» و «سؤال‌ها»؛ «چطور کار می‌کند» جا ندارد */
+    .site-nav .site-nav__how {
+      display: none;
     }
     .site-nav a {
       padding-inline: 10px;

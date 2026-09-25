@@ -36,6 +36,10 @@ test.describe('سئو و بار اولیه', () => {
     const html = await response.text();
     // متن باید در HTML باشد، نه اینکه جاوااسکریپت بسازدش — وگرنه سئو نداریم.
     expect(html).toContain('جزوه‌ات را بینداز');
+    expect(html).toContain('<mark>همین حالا</mark>');
+    expect(html).toContain('سه قدم تا جزوهٔ چاپ‌شده');
+    expect(html).toContain('تعرفه، بی هزینهٔ پنهان');
+    expect(html).toContain('جزوه‌ات را همین‌جا بینداز');
     expect(html).toContain('سؤال‌های پرتکرار');
     expect(html).toContain('application/ld+json');
     expect(html).toContain('"@type":"FAQPage"');

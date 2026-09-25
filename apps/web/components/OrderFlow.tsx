@@ -51,10 +51,11 @@ function publishDockHeight(dock: HTMLDivElement | null) {
 /**
  * فلوی سفارش: یک جزوه از یک یا چند فایل (ADR-030).
  *
- * یک فایل همان کارت همیشگی را می‌گیرد؛ از دو فایل به بعد فهرست جزوه می‌آید. قیمت در هر
- * دو حالت یک قلم است — صفحه‌های همهٔ فایل‌ها جمع و یک صحافی — با همان `quote()`.
+ * پیش از فایل، کارت بارگذاری؛ محتوای ثابتش (`upload`) کامپوننت سرور است. یک فایل همان کارت
+ * همیشگی را می‌گیرد؛ از دو فایل به بعد فهرست جزوه می‌آید. قیمت در هر دو حالت یک قلم است —
+ * صفحه‌های همهٔ فایل‌ها جمع و یک صحافی — با همان `quote()`.
  */
-export function OrderFlow() {
+export function OrderFlow({ upload }: { upload: React.ReactNode }) {
   const jozve = useJozve();
   const [config, setConfig] = useState<OrderConfig>(INITIAL_CONFIG);
   const view = useMemo(() => jozveView(jozve.sections), [jozve.sections]);
@@ -65,7 +66,7 @@ export function OrderFlow() {
   }, [view, config]);
 
   if (view.sections.length === 0) {
-    return <DropZone onFiles={jozve.add} busy={false} />;
+    return <DropZone onFiles={jozve.add}>{upload}</DropZone>;
   }
 
   const pending = view.pending.filter((s) => s.serverPath).map((s) => s.name);
