@@ -4,7 +4,8 @@ import { join } from 'node:path';
 
 /**
  * کارت «جزوهٔ تو» (docs/UI.md): چیزهایی که تست‌های قیمت نمی‌بینند — جهت عددها کنار متن فارسی،
- * نمایش اندازهٔ کاغذ، راهنمای رنگ پیش از پایان بررسی، نام دکمه‌ها و اندازهٔ هدف لمس.
+ * نمایش اندازهٔ کاغذ، راهنمای رنگ پیش از پایان بررسی، نام دکمه‌ها، اندازهٔ هدف لمس، و رنگ نوار
+ * پیشرفت و خوانایی دکمهٔ «در حال بررسی…».
  *
  * مثل `flow.spec.ts` بدون استوریج؛ آپلود فقط در تست «در حال ارسال» ساختگی است.
  */
@@ -17,6 +18,25 @@ const renamed = (source: string, name: string) => ({
   mimeType: 'application/pdf',
   buffer: readFileSync(fixture(source)),
 });
+
+/** کانال‌های یک رنگ برند، از خود فایل برند؛ کد رنگ در تست نوشته نمی‌شود. */
+const BRAND = readFileSync(join(process.cwd(), '..', '..', 'docs', 'brand', 'jozveyar-colors.css'), 'utf8');
+function brandChannels(name: string): number[] {
+  const digits = new RegExp(`--jy-${name}:\\s*#([0-9a-fA-F]{6})`).exec(BRAND)?.[1];
+  if (!digits) throw new Error(`${name} در فایل برند نیست`);
+  return [0, 2, 4].map((i) => parseInt(digits.slice(i, i + 2), 16));
+}
+/** کانال‌های رنگی که مرورگر حساب کرده (`getComputedStyle`). */
+const channels = (computed: string) => computed.match(/\d+(?:\.\d+)?/g)!.slice(0, 3).map(Number);
+/** کنتراست WCAG دو رنگ. */
+function contrast(a: number[], b: number[]) {
+  const luminance = ([r, g, b]: number[]) =>
+    [r!, g!, b!]
+      .map((c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4))
+      .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0);
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+}
 
 const card = (page: Page) => page.getByRole('region', { name: 'جزوهٔ تو' });
 const colorHint = (page: Page) => page.getByTestId('color-hint');
@@ -187,6 +207,41 @@ test.describe('دکمه‌های کارت', () => {
     await expect(another.locator('.jy-icon-close')).toHaveCount(1);
     await another.click();
     await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+  });
+});
+
+test.describe('رنگ (قاعدهٔ رنگ در docs/UI.md)', () => {
+  test('نوار پیشرفت بررسی سبزآبی است و پُرش روی خط خودش و روی کارت دیده می‌شود', async ({ page }) => {
+    await page.addInitScript(holdAfter(60));
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('yellow-scan-147.pdf'));
+    await expect(card(page).getByText('60 / 147', { exact: true })).toBeVisible({ timeout: 30_000 });
+    const [fill, track, surface] = await card(page)
+      .locator('.jy-progress__bar')
+      .evaluate((bar) =>
+        [bar, bar.parentElement!, bar.closest('.jy-card')!].map((el) => getComputedStyle(el).backgroundColor),
+      );
+    // تنها جای tetrad در رابط (تصمیم ۱۴۰۵/۰۷/۰۳)؛ بقیهٔ رابط سبز برند است.
+    expect(channels(fill!)).toEqual(brandChannels('teal-500'));
+    expect(channels(track!)).toEqual(brandChannels('teal-100'));
+    // WCAG 1.4.11: پُر نوار دست‌کم ۳ به ۱، هم روی خط خودش و هم روی کارت.
+    expect(contrast(channels(fill!), channels(track!))).toBeGreaterThanOrEqual(3);
+    expect(contrast(channels(fill!), channels(surface!))).toBeGreaterThanOrEqual(3);
+  });
+
+  test('متن «در حال بررسی…» دکمهٔ بسته خوانده می‌شود: دست‌کم ۴٫۵ به ۱', async ({ page }) => {
+    await page.addInitScript(holdAfter(60));
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('yellow-scan-147.pdf'));
+    const busy = page.getByRole('button', { name: 'در حال بررسی…' });
+    // واقعاً همان دکمهٔ «ادامه» است، بسته و در حال کار؛ وگرنه تست چیز دیگری را می‌سنجید.
+    await expect(busy).toBeDisabled({ timeout: 30_000 });
+    await expect(busy).toHaveClass(/\bis-loading\b/);
+    const [text, background] = await busy.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return [style.color, style.backgroundColor];
+    });
+    expect(contrast(channels(text!), channels(background!))).toBeGreaterThanOrEqual(4.5);
   });
 });
 
