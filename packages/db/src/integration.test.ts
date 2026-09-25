@@ -588,6 +588,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await rejectedConstraint(placeOrder({ rules: [bw([[1, 149]])] }))).toBe('order_items_cover_pages');
       expect(await rejectedConstraint(placeOrder({ rules: [bw([[1, 100]]), bw([[100, 150]])] }))).toBe('order_items_cover_pages');
       expect(await rejectedConstraint(placeOrder({ rules: [bw([[1, 151]])] }))).toBe('order_items_cover_pages');
+      // جمع درست، ولی صفحهٔ ۱۰۰ دوبار و صفحهٔ ۱۵۰ هیچ بار: شمردن تنها کافی نیست.
+      expect(await rejectedConstraint(placeOrder({ rules: [bw([[1, 100]]), bw([[100, 149]])] }))).toBe('order_items_cover_pages');
       // جمع بخش‌ها با صفحه‌های قلم نمی‌خواند.
       expect(await rejectedConstraint(placeOrder({ pageCount: 149, rules: [bw([[1, 149]])] }))).toBe('order_items_cover_pages');
       // حالت ترکیبی (ADR-002): دو قاعده، بی همپوشانی، کل جزوه.
