@@ -138,6 +138,20 @@ test.describe('پاورقی', () => {
   });
 });
 
+/**
+ * تأیید مالکیت دامنه در اینماد (تصمیم صاحب پروژه، ۱۴۰۵/۰۷/۰۳): فایلی خالی با نام کد اینماد در ریشهٔ
+ * سایت (`public/77170883.txt`). اینماد ممکن است دوباره سرش بزند، پس فایل می‌ماند و این تست جلوی پاک
+ * شدنش را می‌گیرد.
+ */
+test.describe('اینماد', () => {
+  test('فایل خالی تأیید دامنه در ریشهٔ سایت است', async ({ request }) => {
+    const response = await request.get('/77170883.txt');
+    expect(response.status()).toBe(200);
+    expect(response.headers()['content-type']).toContain('text/plain');
+    expect((await response.body()).length).toBe(0);
+  });
+});
+
 test.describe('نشانک', () => {
   test('favicon.ico و icon.svg اعلام شده‌اند و با نوع درست می‌آیند', async ({ request }) => {
     const html = await (await request.get('/')).text();
