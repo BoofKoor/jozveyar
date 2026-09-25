@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { formatNumber } from '@jozveyar/text';
 import { ACCEPT } from './DropZone';
@@ -9,29 +9,33 @@ interface Props {
   onFiles: (files: File[]) => void;
   /** چند فایل دیگر جا دارد؛ صفر یعنی سقف جزوه پر است. */
   room: number;
-  /** جزوه الان چند فایل دارد. */
-  count: number;
+  /** «افزودن فایل به همین جزوه» در جزوهٔ تک‌فایلی، «افزودن فایل» زیر فهرست. */
+  label: string;
+  className?: string;
 }
 
 /**
- * «فایل دیگری به همین جزوه» — زیر کارت، هم دکمه و هم جای انداختن. فایل‌های تازه ته جزوه
- * می‌آیند؛ ترتیب را بعد با ↑↓ عوض می‌کنی.
+ * «افزودن فایل به همین جزوه»، داخل کارت «جزوهٔ تو»: برچسب خط‌چین ورودی فایل (`jy-add`). کلیک و
+ * کلید فایل‌گزین را بی JS باز می‌کنند و فوکوس ورودی روی خود برچسب دیده می‌شود. فایل را روی همین
+ * برچسب هم می‌شود انداخت. فایل‌های تازه ته جزوه می‌آیند؛ ترتیب را بعد با ↑↓ عوض می‌کنی.
  */
-export function AddFiles({ onFiles, room, count }: Props) {
+export function AddFiles({ onFiles, room, label, className = '' }: Props) {
   const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   if (room <= 0) {
     return (
-      <p className="rounded-lg border border-line bg-card px-4 py-3 text-sm text-muted">
-        جزوه به سقف {formatNumber(MAX_SECTIONS_PER_ITEM)} فایل رسید. اگر فایل دیگری هم هست، چند فایل را از برنامهٔ
-        خودشان یک PDF کن و همان را جای آنها بگذار.
+      <p className={`jy-note jy-note--info ${className}`}>
+        <span className="jy-icon jy-icon-info" aria-hidden="true" />
+        <span>
+          جزوه به سقف <span className="num">{formatNumber(MAX_SECTIONS_PER_ITEM)}</span> فایل رسید. اگر فایل دیگری هم
+          هست، چند فایل را از برنامهٔ خودشان یک PDF کن و همان را جای آنها بگذار.
+        </span>
       </p>
     );
   }
 
   return (
-    <div
+    <label
       onDragOver={(event) => {
         event.preventDefault();
         setDragging(true);
@@ -43,18 +47,13 @@ export function AddFiles({ onFiles, room, count }: Props) {
         const files = Array.from(event.dataTransfer.files);
         if (files.length > 0) onFiles(files);
       }}
-      className={`flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-dashed px-4 py-3 transition-colors ${
-        dragging ? 'border-solid border-accent bg-green-100' : 'border-control bg-card'
-      }`}
+      className={`jy-add ${dragging ? 'is-dragover ' : ''}${className}`}
     >
       <input
-        ref={inputRef}
         id="jozve-add"
         type="file"
         multiple
         accept={ACCEPT}
-        tabIndex={-1}
-        aria-hidden="true"
         className="sr-only"
         onChange={(event) => {
           const files = event.target.files ? Array.from(event.target.files) : [];
@@ -62,19 +61,8 @@ export function AddFiles({ onFiles, room, count }: Props) {
           if (files.length > 0) onFiles(files);
         }}
       />
-      <p className="text-sm text-muted">
-        {count === 1
-          ? 'جزوه چند فایل است؟ بقیه را هم بینداز؛ پشت‌سرهم صحافی می‌شوند.'
-          : 'فایل دیگری هم هست؟ بینداز؛ ته جزوه می‌آید.'}
-      </p>
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        className="jy-btn jy-btn--secondary shrink-0"
-      >
-        <span className="jy-icon jy-icon-plus" aria-hidden="true" />
-        افزودن فایل
-      </button>
-    </div>
+      <span className="jy-icon jy-icon-plus" aria-hidden="true" />
+      {label}
+    </label>
   );
 }

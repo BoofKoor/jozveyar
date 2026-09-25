@@ -120,7 +120,8 @@ test('بعد از رسیدن فایل، سرور همهٔ صفحات را برر
   // سرور همان ۶ صفحه را دید؛ قیمت عوض نشد و یادداشت اصلاح نیامد.
   await expect(page.getByTestId('price-total')).toContainText('54,600');
   await expect(page.getByTestId('server-corrected')).toHaveCount(0);
-  await expect(page.getByTestId('stat-color-pages')).toHaveText('0');
+  // حکم رنگ حالا کنار انتخاب «رنگ چاپ» است، نه در کارت: همان ادعای «صفر صفحهٔ رنگی».
+  await expect(page.getByTestId('color-hint')).toHaveText('فایل تماماً سیاه‌سفید است.');
 });
 
 test('PDF بزرگ‌تر از توان مرورگر: قیمت از سرور می‌آید، نه بن‌بست', async ({ page }) => {
@@ -168,7 +169,7 @@ test('عکس: روی سرور یک صفحه می‌شود و رنگش سنجید
   await page.setInputFiles('#jozve-file', join(FIXTURES, 'scan-photo.png'));
   await expect(page.getByTestId('price-total')).toContainText('46,600', { timeout: 15_000 });
   await expect(status(page)).toContainText('همهٔ صفحات بررسی شد', { timeout: 60_000 });
-  await expect(page.getByTestId('stat-color-pages')).toHaveText('0');
+  await expect(page.getByTestId('color-hint')).toHaveText('فایل تماماً سیاه‌سفید است.');
   await expect(page.getByTestId('price-total')).toContainText('46,600');
 });
 
@@ -224,7 +225,9 @@ test('جزوهٔ سه‌فایلی: آپلودها روی هم نمی‌افتن
   // سرور منبع حقیقت است: ۱۰ + ۶ + ۱۰ صفحه، یک صحافی — همان قیمت مرورگر.
   await expect(page.getByTestId('stat-page-count')).toHaveText('26');
   await expect(page.getByTestId('price-total')).toContainText('86,600');
-  await expect(page.getByTestId('stat-color-pages')).toHaveText('3');
+  await expect(page.getByTestId('color-hint')).toHaveText(
+    '3 صفحهٔ رنگی در فایل‌های این جزوه پیدا شد. اگر سیاه‌سفید انتخاب کنی، این صفحه‌ها هم سیاه‌سفید چاپ می‌شوند.',
+  );
 });
 
 test('شش فایل — بیشتر از سقف پنج آپلود باز هر نشست — همه می‌رسند', async ({ page }) => {

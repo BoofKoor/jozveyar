@@ -35,8 +35,11 @@ test.describe('چند فایل در یک جزوه', () => {
     // ۲۶ صفحه سیاه‌سفید: ۴۱,۶۰۰ + یک صحافی ۴۵,۰۰۰. سه سفارش جدا سه صحافی می‌خورد.
     await expect(page.getByTestId('stat-page-count')).toHaveText('26', { timeout: 20_000 });
     await expect(price(page)).toContainText('86,600');
-    // رنگ هر فایل جدا بررسی شده و جمع می‌شود: سه صفحهٔ هایلایت‌دار mixed-color.
-    await expect(page.getByTestId('stat-color-pages')).toHaveText('3', { timeout: 20_000 });
+    // رنگ هر فایل جدا بررسی شده و جمع می‌شود: سه صفحهٔ هایلایت‌دار mixed-color، در راهنمای «رنگ چاپ».
+    await expect(page.getByTestId('color-hint')).toHaveText(
+      '3 صفحهٔ رنگی در فایل‌های این جزوه پیدا شد. اگر سیاه‌سفید انتخاب کنی، این صفحه‌ها هم سیاه‌سفید چاپ می‌شوند.',
+      { timeout: 20_000 },
+    );
     await expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled();
   });
 
@@ -219,7 +222,7 @@ test.describe('چند فایل روی موبایل', () => {
 
     // و بررسی تا آخر تمام می‌شود بی اینکه عدد عوض شود؛ اسکن زرد رنگی نیست.
     await expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled({ timeout: 60_000 });
-    await expect(page.getByTestId('stat-color-pages')).toHaveText('0');
+    await expect(page.getByTestId('color-hint')).toHaveText('همهٔ فایل‌ها تماماً سیاه‌سفیدند.');
     await expect(price(page)).toContainText('305,800');
   });
 });

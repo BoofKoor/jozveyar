@@ -48,6 +48,19 @@ function resolve(value: string, ...maps: Map<string, string>[]): string {
   throw new Error(`ارجاع حلقوی: ${value}`);
 }
 
+/** کنتراست WCAG دو رنگ `#RRGGBB`. */
+function contrast(a: string, b: string): number {
+  const luminance = (hex: string) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+  };
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+}
+
 const brand = declarations(read('docs/brand/jozveyar-colors.css'));
 const kit = declarations(rootBlock(read('docs/brand/jozveyar-ui.css')));
 const theme = declarations(read('packages/ui/src/theme.css'));
@@ -101,6 +114,25 @@ describe('رنگ‌ها: theme.css آینهٔ docs/brand/jozveyar-colors.css', (
     expect(role('--color-control')).toBe(resolve(kit.get('--jy-border-control')!, brand));
     expect(role('--color-accent')).toBe(brand.get('--jy-green-600'));
     expect(role('--color-muted')).toBe(brand.get('--jy-green-700'));
+    // تنها جای tetrad در رابط (تصمیم ۱۴۰۵/۰۷/۰۳، docs/UI.md)
+    expect(role('--color-progress')).toBe(brand.get('--jy-teal-500'));
+    expect(role('--color-progress-track')).toBe(brand.get('--jy-teal-100'));
+  });
+
+  it('کنتراست نقش‌ها: نوار پیشرفت و متن دکمهٔ در حال کار', () => {
+    const role = (token: string) => resolve(theme.get(token)!, theme);
+    // WCAG 1.4.11: پُر نوار روی خط خودش و روی کارت دست‌کم ۳ به ۱.
+    expect(contrast(role('--color-progress'), role('--color-progress-track'))).toBeGreaterThanOrEqual(3);
+    expect(contrast(role('--color-progress'), role('--color-card'))).toBeGreaterThanOrEqual(3);
+    // متن «در حال بررسی…» روی زمینهٔ دکمهٔ بسته (green-50) خوانده می‌شود: دست‌کم ۴٫۵ به ۱.
+    expect(contrast(role('--color-muted'), role('--color-green-50'))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('شاهد کنتراست: عددهای راهنمای برند، و پلهٔ کم‌رنگ‌تر که کم می‌آورد', () => {
+    expect(contrast('#688484', '#E1EEEE')).toBeCloseTo(3.38, 2);
+    expect(contrast('#FFFFFF', '#768468')).toBeCloseTo(3.98, 2);
+    expect(contrast('#768468', '#F2F7EE')).toBeLessThan(4.5); // رنگ بستهٔ کیت برای متن دکمه
+    expect(contrast('#8BA8A8', '#E1EEEE')).toBeLessThan(3); // teal-400 روی teal-100
   });
 
   it('themeColor همان زمینهٔ صفحه است', () => {

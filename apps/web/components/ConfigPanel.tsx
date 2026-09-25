@@ -1,7 +1,9 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { ColorMode, PriceList, SidesMode } from '@jozveyar/contracts';
+import type { Sentence } from '../lib/fileCard';
 
 export interface OrderConfig {
   colorMode: ColorMode;
@@ -15,26 +17,33 @@ interface Props {
   config: OrderConfig;
   onChange: (next: OrderConfig) => void;
   priceList: PriceList;
-  /** برای نشان دادن اثر انتخاب رنگ روی قیمت، قبل از انتخاب. */
-  colorPageCount: number;
-  /** فایل‌های جزوه؛ رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030). */
-  fileCount?: number;
+  /**
+   * صفحه‌های رنگی جزوه، کنار انتخاب رنگ (`colorHint` در lib/fileCard.ts): حکم قطعی فقط بعد از
+   * بررسی همهٔ صفحه‌ها. رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030).
+   */
+  colorHint: Sentence;
 }
 
 function Field({
   label,
   hint,
+  hintTestId,
   children,
 }: {
   label: string;
-  hint?: string;
-  children: React.ReactNode;
+  hint?: ReactNode;
+  hintTestId?: string;
+  children: ReactNode;
 }) {
   return (
     <div className="border-t border-line py-5 first:border-t-0 first:pt-0">
       <div className="mb-3">
         <h3 className="font-semibold text-ink">{label}</h3>
-        {hint ? <p className="mt-1 text-sm text-muted">{hint}</p> : null}
+        {hint ? (
+          <p data-testid={hintTestId} className="mt-1 text-sm text-muted">
+            {hint}
+          </p>
+        ) : null}
       </div>
       {children}
     </div>
@@ -47,7 +56,7 @@ function Choice<T extends string>({
   onSelect,
   name,
 }: {
-  options: { value: T; label: string; note?: string; disabled?: boolean }[];
+  options: { value: T; label: string; note?: ReactNode; disabled?: boolean }[];
   value: T;
   onSelect: (value: T) => void;
   name: string;
@@ -71,7 +80,7 @@ function Choice<T extends string>({
             }`}
           >
             <span>{option.label}</span>
-            {option.note ? <span className="num text-xs text-muted">{option.note}</span> : null}
+            {option.note ? <span className="text-xs text-muted">{option.note}</span> : null}
           </button>
         );
       })}
@@ -79,8 +88,16 @@ function Choice<T extends string>({
   );
 }
 
-export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileCount = 1 }: Props) {
-  const where = fileCount > 1 ? 'در فایل‌های این جزوه' : 'در فایل';
+/** «1,600 هر صفحه»: فقط عدد در span خودش. */
+function perPage(rials: number) {
+  return (
+    <>
+      <span className="num">{formatTomans(rials, false)}</span> هر صفحه
+    </>
+  );
+}
+
+export function ConfigPanel({ config, onChange, priceList, colorHint }: Props) {
   const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) =>
     onChange({ ...config, [key]: value });
 
@@ -101,12 +118,13 @@ export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileC
     <section className="jy-card">
       <Field
         label="رنگ چاپ"
+        hintTestId="color-hint"
         hint={
-          colorPageCount > 0
-            ? `${formatNumber(colorPageCount)} صفحهٔ رنگی ${where} پیدا شد.`
-            : fileCount > 1
-              ? 'تا اینجا صفحهٔ رنگی‌ای پیدا نشد.'
-              : 'فایل تماماً سیاه‌سفید است.'
+          <>
+            {colorHint.lead}
+            {colorHint.count === null ? null : <span className="num">{formatNumber(colorHint.count)}</span>}
+            {colorHint.rest}
+          </>
         }
       >
         <Choice
@@ -114,16 +132,8 @@ export function ConfigPanel({ config, onChange, priceList, colorPageCount, fileC
           value={config.colorMode}
           onSelect={(value) => set('colorMode', value)}
           options={[
-            {
-              value: 'bw',
-              label: 'سیاه‌سفید',
-              note: `${formatTomans(priceList.clickRates.bw ?? 0, false)} هر صفحه`,
-            },
-            {
-              value: 'color',
-              label: 'رنگی',
-              note: `${formatTomans(priceList.clickRates.color ?? 0, false)} هر صفحه`,
-            },
+            { value: 'bw', label: 'سیاه‌سفید', note: perPage(priceList.clickRates.bw ?? 0) },
+            { value: 'color', label: 'رنگی', note: perPage(priceList.clickRates.color ?? 0) },
           ]}
         />
       </Field>

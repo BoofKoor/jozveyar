@@ -26,8 +26,8 @@ const rg = (r, g, b) => `${r} ${g} ${b} rg`;
  * از نوار مستطیلی استفاده می‌شود نه قلم واقعی، چون نسبت پیکسل مرکب باید
  * قابل پیش‌بینی باشد — با قلم، رندر هر مرورگر کمی فرق می‌کند.
  */
-function pageContent({ paper, ink, inkLines = 28, accent = null }) {
-  const [w, h] = A4;
+function pageContent({ paper, ink, inkLines = 28, accent = null, size = A4 }) {
+  const [w, h] = size;
   const parts = [`${rg(...paper)} 0 0 ${w} ${h} re f`];
 
   const lineHeight = 4;
@@ -93,7 +93,11 @@ function buildPdf(pageContents) {
     let content = page;
     let resources = '<< >>';
     let annots = '';
-    if (typeof page === 'object') {
+    // اندازهٔ کاغذ: پیش‌فرض A4؛ صفحهٔ برداری با اندازهٔ دیگر `{ size, vector }` است.
+    const [pageW, pageH] = (typeof page === 'object' && page.size) || A4;
+    if (typeof page === 'object' && !page.image) {
+      content = page.vector ?? '';
+    } else if (typeof page === 'object') {
       const { w, h, data } = page.image;
       objects[imageObjIds[i]] =
         `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB ` +
@@ -126,7 +130,7 @@ function buildPdf(pageContents) {
       }
     }
     objects[pageObjIds[i]] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${A4[0]} ${A4[1]}] ` +
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] ` +
       `/Resources ${resources} /Contents ${contentObjIds[i]} 0 R${annots} >>`;
     objects[contentObjIds[i]] =
       `<< /Length ${Buffer.byteLength(content, 'latin1')} >>\nstream\n${content}\nendstream`;
@@ -206,6 +210,21 @@ const fixtures = {
     { image: scanImage({ paper: WHITE, ink: GRAPHITE }), stampRect: [0, 0, A4[0], A4[1]],
       vector: pageContent({ paper: WHITE, ink: GRAPHITE, inkLines: 4 }) },
   ],
+
+  /**
+   * چند اندازهٔ کاغذ در یک فایل: ۴ صفحهٔ A4، ۲ صفحهٔ A3 و یک Letter، درهم. کارت فایل اندازه‌ها را
+   * به ترتیب تعداد نام می‌برد: «A4، A3 و Letter».
+   */
+  'sizes-7.pdf': [A4, [842, 1191], A4, [612, 792], A4, [842, 1191], A4].map((size) => ({
+    size,
+    vector: pageContent({ paper: WHITE, ink: GRAPHITE, size }),
+  })),
+
+  /** اندازهٔ نامعمول، ۴۸۲×۶۸۰ پوینت (۱۷۰×۲۴۰ میلی‌متر): کارت به میلی‌متر نشانش می‌دهد، نه به پوینت. */
+  'odd-size-2.pdf': Array.from({ length: 2 }, () => ({
+    size: [482, 680],
+    vector: pageContent({ paper: WHITE, ink: GRAPHITE, size: [482, 680] }),
+  })),
 
   /** ۱۰ صفحه که ۳ صفحه‌اش هایلایت رنگی واقعی دارد. */
   'mixed-color-10.pdf': Array.from({ length: 10 }, (_, i) =>

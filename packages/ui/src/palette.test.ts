@@ -157,3 +157,74 @@ describe('نگهبان رنگ', () => {
     expect(outside('.a { background: var(--color-green-50); border: 1px solid transparent; color: currentColor; }')).toEqual([]);
   });
 });
+
+/*
+ * قاعدهٔ رنگ (docs/UI.md، تصمیم ۱۴۰۵/۰۷/۰۳): سبزآبی، بنفش و رز در رابط فقط جایی می‌آیند که قاعدهٔ
+ * رابط رنگ جدا می‌خواهد، نه برای تنوع؛ امروز فقط نوار پیشرفت. پس نامشان (کلاس Tailwind، متغیر CSS)
+ * و کدشان فقط در theme.css است: در تعریف خودشان، و در نقش‌های پایین. جای تازه یعنی اول تصمیم صاحب
+ * پروژه، بعد همین فهرست. تست‌ها حساب نیستند؛ رنگ را می‌سنجند، نه به کار می‌برند.
+ */
+const TETRAD_HOME = 'packages/ui/src/theme.css';
+const TETRAD_ROLES = ['--color-progress', '--color-progress-track'];
+const TETRAD_NAME = /\b(?:teal|purple|rose)-\d{2,3}\b|\bbrand-(?:teal|purple|rose)\b/g;
+
+/** کد رنگ‌های سبزآبی، بنفش و رز (پایه و طیف)، از فایل برند. */
+function tetradColors(): Set<string> {
+  const css = readFileSync(join(REPO, 'docs/brand/jozveyar-colors.css'), 'utf8');
+  return new Set(
+    [...css.matchAll(/--jy-(?:brand-)?(?:teal|purple|rose)[\w-]*\s*:\s*#([0-9a-fA-F]{3,8})/g)].map(([, digits]) =>
+      normalizeHex(digits!),
+    ),
+  );
+}
+
+/** نام و کد tetrad در یک متن؛ توضیح CSS حساب نیست. */
+function tetradIn(text: string, isCss: boolean, tetrad: Set<string>): string[] {
+  const code = isCss ? text.replace(/\/\*[\s\S]*?\*\//g, '') : text;
+  return [...(code.match(TETRAD_NAME) ?? []), ...colorsIn(code, isCss).filter((color) => tetrad.has(color))];
+}
+
+/** نقش‌هایی از theme.css که به رنگ tetrad ارجاع می‌دهند. */
+function tetradRoles(themeCss: string): string[] {
+  const code = themeCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  return [...code.matchAll(/(--[\w-]+)\s*:\s*var\(--color-(?:brand-)?(?:teal|purple|rose)\b[\w-]*\)/g)]
+    .map(([, name]) => name!)
+    .sort();
+}
+
+describe('قاعدهٔ رنگ: tetrad فقط جایی که قاعدهٔ رابط لازم دارد', () => {
+  const tetrad = tetradColors();
+
+  it('فایل برند را واقعاً می‌خواند: ۳۰ پله و دو رنگ پایهٔ جدا (سبزآبی پایه همان teal-500 است)', () => {
+    expect(tetrad.size).toBe(32);
+    expect(tetrad.has('#688484')).toBe(true);
+    expect(tetrad.has('#766884')).toBe(true);
+  });
+
+  it('در کد رابط، بیرون از theme.css، نه نام سبزآبی و بنفش و رز هست، نه کدشان', () => {
+    const offenders = sourceFiles()
+      .filter((file) => file !== TETRAD_HOME && !/\.(?:test|spec)\.tsx?$/.test(file))
+      .flatMap((file) =>
+        tetradIn(readFileSync(join(REPO, file), 'utf8'), file.endsWith('.css'), tetrad).map((hit) => `${file}: ${hit}`),
+      );
+    expect(offenders).toEqual([]);
+  });
+
+  it('در theme.css، tetrad فقط در نقش نوار پیشرفت', () => {
+    expect(tetradRoles(readFileSync(join(REPO, TETRAD_HOME), 'utf8'))).toEqual(TETRAD_ROLES);
+  });
+
+  it('شاهد: کلاس، متغیر، کد و نقش تازهٔ tetrad گرفته می‌شوند؛ سبز، نقش progress و توضیح نه', () => {
+    expect(tetradIn('<b className="border-purple-600 bg-purple-50">', false, tetrad)).toEqual(['purple-600', 'purple-50']);
+    expect(tetradIn('.a { background: var(--color-teal-100); }', true, tetrad)).toEqual(['teal-100']);
+    expect(tetradIn('.a { color: var(--color-brand-rose); }', true, tetrad)).toEqual(['brand-rose']);
+    expect(tetradIn('.a { color: #846868; }', true, tetrad)).toEqual(['#846868']);
+    expect(tetradIn('<path stroke="#688484"/>', false, tetrad)).toEqual(['#688484']);
+    expect(tetradIn('.a { background: var(--color-progress); color: var(--color-green-600); }', true, tetrad)).toEqual([]);
+    expect(tetradIn('/* نوار پیشرفت teal-500 است */ .a { color: var(--color-muted); }', true, tetrad)).toEqual([]);
+    expect(tetradRoles('--color-accent: var(--color-purple-600); --color-progress: var(--color-teal-500);')).toEqual([
+      '--color-accent',
+      '--color-progress',
+    ]);
+  });
+});
