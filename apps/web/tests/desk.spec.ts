@@ -22,6 +22,15 @@ const summaryTotal = (page: Page) => page.getByTestId('summary-total');
 const colorHint = (page: Page) => page.getByTestId('color-hint');
 const ALL_BW = 'فایل تماماً سیاه‌سفید است.';
 const toman = (rials: number) => formatTomans(rials, false);
+/** کانال‌های یک رنگ برند، از خود فایل برند؛ کد رنگ در تست نوشته نمی‌شود (نگهبان رنگ). */
+const BRAND = readFileSync(join(process.cwd(), '..', '..', 'docs', 'brand', 'jozveyar-colors.css'), 'utf8');
+function brandChannels(name: string): number[] {
+  const digits = new RegExp(`--jy-${name}:\\s*#([0-9a-fA-F]{6})`).exec(BRAND)?.[1];
+  if (!digits) throw new Error(`${name} در فایل برند نیست`);
+  return [0, 2, 4].map((i) => parseInt(digits.slice(i, i + 2), 16));
+}
+/** کانال‌های رنگی که مرورگر حساب کرده (`getComputedStyle`). */
+const channels = (computed: string) => computed.match(/\d+(?:\.\d+)?/g)!.slice(0, 3).map(Number);
 const tile = (page: Page, title: string) => page.locator('label.jy-tile').filter({ has: page.getByText(title, { exact: true }) });
 
 /** قیمت یک جزوهٔ `pages` صفحه‌ای با همان `quote()` فلوی سفارش؛ بی ارسال. */
@@ -272,6 +281,18 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
         'ادامه — آدرس و تحویل',
         ...questions.map((q) => q.trim()),
       ]);
+
+      // فوکوس دیدنی با صفحه‌کلید: حلقهٔ دولایهٔ کیت روی کل کاشی می‌نشیند، نه روی دایرهٔ کوچک رادیو
+      await page.getByRole('radio', { name: 'دورو' }).focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      const ring = await tile(page, 'دورو').evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: s.outlineWidth, color: s.outlineColor };
+      });
+      expect(ring.style).toBe('solid');
+      expect(ring.width).toBe('2px');
+      expect(channels(ring.color)).toEqual(brandChannels('green-700'));
     });
 
     test(`هدف لمسی دست‌کم ۴۴ پیکسل در ${viewport.width}: کارت، کاشی‌ها، شمارنده، «ادامه» و سؤال‌ها`, async ({ page }) => {
