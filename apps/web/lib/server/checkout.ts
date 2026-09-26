@@ -24,7 +24,14 @@ import {
   type Recipient,
 } from '@jozveyar/contracts/checkout';
 import type { Breakdown, OrderSpec, PriceList } from '@jozveyar/contracts';
-import type { CheckoutDocument, OrderDetails, OrderRow, OrderStore } from '@jozveyar/db';
+import {
+  FILE_MARGIN_MS,
+  PAYMENT_ATTEMPT_TTL_MS,
+  type CheckoutDocument,
+  type OrderDetails,
+  type OrderRow,
+  type OrderStore,
+} from '@jozveyar/db';
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
@@ -37,13 +44,11 @@ import { fail, ok, type Result } from './result';
 import { readSetting } from './settings';
 import { orderPaidText, type SmsProvider } from './sms';
 
-/** پرداخت شروع نمی‌شود اگر کمتر از این تا پاک شدن فایلی مانده باشد (ADR-034). */
-export const FILE_MARGIN_MS = 60 * 60_000;
 /**
- * یک تلاش پرداخت تا این مدت سنجیده می‌شود؛ دیرتر یعنی «ناموفق» بی سنجش درگاه، و درگاه واقعی پول
- * سنجیده‌نشده را خودش برمی‌گرداند. کمتر از حاشیهٔ فایل است: پرداختی که پذیرفته شود فایل زنده دارد.
+ * حاشیهٔ فایل (یک ساعت) و مهلت هر تلاش پرداخت (نیم ساعت) در `@jozveyar/db`اند، چون پنل ادمین هم با همان‌ها
+ * سفارش «رهاشده» و پرداخت «بی برگشت» را می‌شناسد (برش ۴٫۲).
  */
-export const PAYMENT_ATTEMPT_TTL_MS = 30 * 60_000;
+export { FILE_MARGIN_MS, PAYMENT_ATTEMPT_TTL_MS };
 /** ریز قیمت مرورگر فقط برای سنجیدن اختلاف است؛ بزرگ‌تر از این نمی‌پذیریم. */
 export const MAX_QUOTE_SNAPSHOT_BYTES = 64 * 1024;
 

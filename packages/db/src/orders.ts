@@ -32,6 +32,19 @@ import { loadActivePriceList, loadPriceList } from './seed.js';
 /** کار کارگر اسناد بعد از پرداخت: PDF جزوه زیر `orders/` (ADR-030). همین رشته در services/docworker. */
 export const PREPARE_ORDER_JOB = 'prepare_order';
 
+/**
+ * پرداخت شروع نمی‌شود اگر کمتر از این تا پاک شدن فایلی مانده باشد (ADR-034). مسیر خرید سایت با همین
+ * «دوباره پرداخت کن» را می‌بندد، و پنل با همین سفارش در انتظار را «رهاشده» می‌خواند (برش ۴٫۲).
+ */
+export const FILE_MARGIN_MS = 60 * 60_000;
+
+/**
+ * یک تلاش پرداخت تا این مدت سنجیده می‌شود؛ دیرتر یعنی «ناموفق» بی سنجش درگاه، و درگاه واقعی پول
+ * سنجیده‌نشده را خودش برمی‌گرداند. کمتر از حاشیهٔ فایل است: پرداختی که پذیرفته شود فایل زنده دارد. پنل
+ * تلاشی را که از این گذشته و هنوز در انتظار است «بی برگشت» می‌خواند (برش ۴٫۲، سؤال ۲۲).
+ */
+export const PAYMENT_ATTEMPT_TTL_MS = 30 * 60_000;
+
 export type OrderRow = typeof orders.$inferSelect;
 export type OrderItemRow = typeof orderItems.$inferSelect;
 export type PrintRuleRow = typeof printRules.$inferSelect;

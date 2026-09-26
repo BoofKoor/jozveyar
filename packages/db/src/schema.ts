@@ -947,5 +947,10 @@ export const adminEvents = pgTable(
     ipHash: text('ip_hash'),
     detail: jsonb('detail'),
   },
-  (t) => [index('admin_events_at').on(t.at), index('admin_events_actor').on(t.adminUserId, t.at)],
+  (t) => [
+    index('admin_events_at').on(t.at),
+    index('admin_events_actor').on(t.adminUserId, t.at),
+    /** رویدادهای یک هدف، مثل سفارشی که صفحهٔ جزئیاتش در پنل باز است (برش ۴٫۲). */
+    index('admin_events_target').on(t.targetType, t.targetId, t.at),
+  ],
 );

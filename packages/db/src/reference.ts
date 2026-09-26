@@ -17,7 +17,7 @@
 
 import { count, sql } from 'drizzle-orm';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
-import type { PriceList, SettingKey, SettingValue } from '@jozveyar/contracts';
+import { SETTING_SCHEMAS, type PriceList, type SettingKey, type SettingValue } from '@jozveyar/contracts';
 
 import { seedAdminRoles } from './admin.js';
 import { OFFICIAL_HOLIDAYS } from './holidays.js';
@@ -48,6 +48,25 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [HOLIDAYS_SETTING]: OFFICIAL_HOLIDAYS,
   [OTP_SITE_LIMIT_SETTING]: 300,
 };
+
+/**
+ * خواندن یک تنظیم با شکل قرارداد (`SETTING_SCHEMAS`). نبودنش یعنی پیش‌فرض (`DEFAULT_SETTINGS`)؛ مقدار خراب هم
+ * پیش‌فرض است، ولی بلند لاگ می‌شود: تعطیلی‌های خراب نباید پرداخت یک سفارش واقعی، یا پیشخوان پنل، را بشکند.
+ * سایت و پنل هر دو همین را می‌خوانند.
+ */
+export async function readSetting<K extends SettingKey>(
+  read: (key: string) => Promise<unknown>,
+  key: K,
+  log: (message: string, error?: unknown) => void = console.error,
+): Promise<SettingValue<K>> {
+  const fallback = DEFAULT_SETTINGS[key] as SettingValue<K>;
+  const raw = await read(key);
+  if (raw === undefined || raw === null) return fallback;
+  const parsed = SETTING_SCHEMAS[key].safeParse(raw);
+  if (parsed.success) return parsed.data as SettingValue<K>;
+  log(`✗ تنظیم ${key} شکل درستی ندارد؛ پیش‌فرض به کار رفت.`, parsed.error);
+  return fallback;
+}
 
 export interface ReferenceSeedResult {
   provinces: number;
