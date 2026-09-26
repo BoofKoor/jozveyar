@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+/*
+ * سیستم طراحی سایت (packages/ui، ADR-031): توکن‌های برند، پایه، اجزا و آیکون‌ها؛ همان که سایت وارد می‌کند.
+ * رنگ خارج از برند نه اینجا مجاز است، نه در کد (تست نگهبان رنگ در packages/ui).
+ */
+@import '@jozveyar/ui/styles.css';
+/* پوستهٔ پنل و صفحه‌هایش، از طرح نمونهٔ تأییدشده (docs/ui/mockups/admin.html، ۱۴۰۵/۰۷/۰۴). */
+@import './admin.css';
+
+/* وزیرمتن، فقط دو وزن، لوکال؛ همان فایل‌های سایت (lib/assets.test.ts برابری‌شان را قفل کرده). */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
