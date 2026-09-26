@@ -153,7 +153,9 @@
   .home-restoring {
     display: none;
   }
-  [data-restoring] .jy-upload > :not(.home-restoring) {
+  [data-restoring] #jozve-file,
+  [data-restoring] .jy-drop,
+  [data-restoring] .jy-upload__foot {
     display: none;
   }
   [data-restoring] .jy-upload {
@@ -453,19 +455,24 @@
    * می‌چسبد؛ سؤال‌ها در همان شبکه‌اند تا خلاصه تا ته صفحه روی صفحه بماند. تا ۸۶۰ پیکسل یک ستون است:
    * کارت‌ها، خلاصه، سؤال‌ها؛ و جمع و «ادامه» در نوار ثابت پایین (`home-dock`).
    */
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-hero {
+  :where(body:has([data-jozve])) .home-hero,
+  :where([data-restoring] > body) .home-hero {
     padding: 0;
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-hero__grid {
+  :where(body:has([data-jozve])) .home-hero__grid,
+  :where([data-restoring] > body) .home-hero__grid {
     display: block;
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-hero__text {
+  :where(body:has([data-jozve])) .home-hero__text,
+  :where([data-restoring] > body) .home-hero__text {
     padding: 0;
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff) {
+  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff),
+  :where([data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff) {
     display: none;
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-title {
+  :where(body:has([data-jozve])) .home-title,
+  :where([data-restoring] > body) .home-title {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -474,7 +481,8 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-more {
+  :where(body:has([data-jozve])) .home-more,
+  :where([data-restoring] > body) .home-more {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 360px;
     grid-template-areas:
@@ -505,7 +513,8 @@
       inset-block-start: 24px;
     }
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-faq {
+  :where(body:has([data-jozve])) .home-faq,
+  :where([data-restoring] > body) .home-faq {
     grid-area: faq;
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -515,14 +524,17 @@
     border: 1px solid var(--color-line);
     border-radius: var(--radius-lg);
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-faq .home-sec__title {
+  :where(body:has([data-jozve])) .home-faq .home-sec__title,
+  :where([data-restoring] > body) .home-faq .home-sec__title {
     font-size: var(--text-h4);
   }
-  :where(body:has([data-jozve]), [data-restoring] > body) .home-faq .home-sec__sub {
+  :where(body:has([data-jozve])) .home-faq .home-sec__sub,
+  :where([data-restoring] > body) .home-faq .home-sec__sub {
     display: none;
   }
   @media (width <= 860px) {
-    :where(body:has([data-jozve]), [data-restoring] > body) .home-more {
+    :where(body:has([data-jozve])) .home-more,
+    :where([data-restoring] > body) .home-more {
       grid-template-columns: minmax(0, 1fr);
       grid-template-areas: 'flow' 'desk' 'side' 'faq';
     }
@@ -534,7 +546,8 @@
     .home-flow {
       padding-block: 4px 16px;
     }
-    :where(body:has([data-jozve]), [data-restoring] > body) .home-faq {
+    :where(body:has([data-jozve])) .home-faq,
+    :where([data-restoring] > body) .home-faq {
       padding: 16px;
     }
   }

@@ -106,16 +106,19 @@
    * نیمه‌کاره با یک کلیک پاک نشود. بی JS. (چیدمان صفحهٔ اصلی در این حالت: home.css)
    * `data-restoring` روی ریشه همین حالت است، پیش از رسیدن جزوه‌ای که بعد از رفرش برمی‌گردد (۳د).
    */
-  body:is(:has([data-jozve]), [data-restoring] > *) {
+  body:has([data-jozve]),
+  [data-restoring] > body {
     background: var(--color-band);
   }
   .site-ordering {
     display: none;
   }
-  body:is(:has([data-jozve]), [data-restoring] > *) .site-idle {
+  body:has([data-jozve]) .site-idle,
+  [data-restoring] > body .site-idle {
     display: none;
   }
-  body:is(:has([data-jozve]), [data-restoring] > *) .site-ordering {
+  body:has([data-jozve]) .site-ordering,
+  [data-restoring] > body .site-ordering {
     display: block;
   }
 
@@ -129,7 +132,8 @@
     background: var(--color-band);
     border-block-start: 1px solid var(--color-line);
   }
-  body:is(:has([data-jozve]), [data-restoring] > *) .site-foot {
+  body:has([data-jozve]) .site-foot,
+  [data-restoring] > body .site-foot {
     margin-block-start: 0;
   }
   .site-foot__brand img {
