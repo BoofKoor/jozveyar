@@ -29,6 +29,9 @@ importers:
       '@jozveyar/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@jozveyar/geo':
+        specifier: workspace:*
+        version: link:../../packages/geo
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing

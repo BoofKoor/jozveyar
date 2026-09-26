@@ -319,3 +319,7 @@ export interface Breakdown {
   totalRials: number;
   warnings: QuoteWarning[];
 }
+
+/* ──────────────────────────── تنظیم‌ها ──────────────────────────── */
+
+export * from './settings.js';

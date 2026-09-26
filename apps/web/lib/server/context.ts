@@ -92,7 +92,10 @@ export const unavailable = () =>
 
 export const noStore = { 'cache-control': 'no-store' };
 
-export function respond<T>(result: Result<T>): NextResponse {
+/** نتیجهٔ سرویس (آپلود یا مسیر خرید) به پاسخ: مقدار، یا کد شکست با جزئیاتش و وضعیت HTTP. */
+export function respond<T>(
+  result: Result<T> | { ok: true; value: T } | ({ ok: false; status: number; error: string } & Record<string, unknown>),
+): NextResponse {
   if (result.ok) return NextResponse.json(result.value, { headers: noStore });
   const { status, ok: _ok, ...body } = result;
   return NextResponse.json(body, { status, headers: noStore });

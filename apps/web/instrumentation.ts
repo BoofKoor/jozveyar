@@ -9,12 +9,18 @@
  * دادهٔ پایه (استان‌ها و شهرها، تعرفهٔ پایه اگر هیچ تعرفه‌ای نیست، پیش‌فرض‌های `settings`) در کد
  * تعریف شده و اینجا به پایگاه داده می‌رسد؛ idempotent است (`seedReferenceData`، برش ۳).
  *
+ * پیش از همه، یک خط حالت مسیر خرید (`CHECKOUT_MODE`، ADR-035)، حتی بی پایگاه داده.
+ *
  * شکست هیچ‌کدام سرور را نمی‌کشد: قیمت مرورگر بدون پایگاه داده هم کار می‌کند و
  * آپلود فقط ۵۰۳ می‌دهد (بی‌صدا). ولی بلند لاگ می‌شود.
  */
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+  // حالت مسیر خرید (ADR-035)، یک خط: صاحب پروژه بعد از استقرار «مسیر خرید: off» را می‌بیند.
+  const { configuredMode, describeMode, sessionSecretOf } = await import('./lib/server/checkoutMode');
+  console.log(describeMode(configuredMode(process.env.CHECKOUT_MODE), sessionSecretOf(process.env.SESSION_SECRET) !== null));
+
   const url = process.env.DATABASE_URL;
   if (!url) return;
 

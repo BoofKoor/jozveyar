@@ -203,6 +203,17 @@ describe('سرویس آپلود', () => {
     expect(row.fileDeletedAt).not.toBeNull();
   });
 
+  it('فایلی که در سفارش است با «انصراف» پاک نمی‌شود (برش ۳ب)', async () => {
+    const upload = await created(MiB);
+    sendParts(upload.documentId);
+    await service.complete(ME, upload.documentId);
+    store.ordered.add(upload.documentId);
+    expect(await service.abort(ME, upload.documentId)).toMatchObject({ status: 409, error: 'in_order' });
+    const row = store.rows.get(upload.documentId)!;
+    expect(storage.objects.has(row.storageKey!)).toBe(true);
+    expect(row).toMatchObject({ status: 'uploaded', fileDeletedAt: null });
+  });
+
   it('استوریج از دسترس خارج: ۵۰۳، تا مرورگر بی‌صدا ادامه دهد', async () => {
     storage.createMultipartUpload = async () => {
       throw new Error('ECONNREFUSED');

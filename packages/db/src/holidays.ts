@@ -7,11 +7,10 @@
  * `settings` تطبیق داده شود. شکل تاریخ همان `formatJalaliNumeric` است.
  */
 
-export interface Holiday {
-  /** `1405/10/02` */
-  date: string;
-  title: string;
-}
+import type { Holiday } from '@jozveyar/contracts';
+
+/** شکل هر تعطیلی (`{ date: '1405/10/02', title }`) در قرارداد است، کنار اسکیمای `calendar.holidays`. */
+export type { Holiday };
 
 export const OFFICIAL_HOLIDAYS: readonly Holiday[] = [
   { date: '1405/01/01', title: 'عید سعید فطر / عید نوروز' },

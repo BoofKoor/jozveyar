@@ -16,7 +16,7 @@
 
 import { count, sql } from 'drizzle-orm';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
-import type { PriceList } from '@jozveyar/contracts';
+import type { PriceList, SettingKey, SettingValue } from '@jozveyar/contracts';
 
 import { OFFICIAL_HOLIDAYS } from './holidays.js';
 import type { Database } from './index.js';
@@ -30,10 +30,21 @@ const REFERENCE_LOCK = 0x6a6f7a76;
 export const SLA_DAYS_SETTING = 'order.sla_days';
 /** تعطیلی‌های رسمی، `[{ date: '1405/10/02', title }]`؛ روز کاری آنها را نمی‌شمارد. */
 export const HOLIDAYS_SETTING = 'calendar.holidays';
+/** سقف کد پیامکی کل سایت در ساعت (ADR-033). */
+export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
 
-export const DEFAULT_SETTINGS: Readonly<Record<string, unknown>> = {
+/**
+ * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
+ * سرور، اگر نباشند، در `settings` می‌نشینند، و کد هم اگر مقدار نبود یا خراب بود به همین‌ها برمی‌گردد.
+ *
+ * سقف کد پیامکی کل سایت ۳۰۰ در ساعت است (۳ب): دو برابر اوج خوش‌بینانهٔ سفارش (حدود ۱۰۰ سفارش در ساعت
+ * شب امتحان، هر کدام کمی بیش از یک کد)، و بدترین هزینهٔ حملهٔ «پیامک‌سازی» با هزار IP و هزار شماره را
+ * به ۳۰۰ پیامک در ساعت می‌بندد. در `settings` است تا در حمله یا رشد، بی استقرار عوض شود.
+ */
+export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
   [HOLIDAYS_SETTING]: OFFICIAL_HOLIDAYS,
+  [OTP_SITE_LIMIT_SETTING]: 300,
 };
 
 export interface ReferenceSeedResult {

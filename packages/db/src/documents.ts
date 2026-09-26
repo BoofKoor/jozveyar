@@ -10,7 +10,7 @@ import { and, desc, eq, gt, inArray, isNull, or, sql, type SQL } from 'drizzle-o
 import type { DocumentAnalysis } from '@jozveyar/contracts';
 
 import type { Database } from './index.js';
-import { documentAnalyses, documentPages, documents, jobs, settings } from './schema.js';
+import { documentAnalyses, documentPages, documents, jobs, orderItemSections, settings } from './schema.js';
 
 export type DocumentRow = typeof documents.$inferSelect;
 
@@ -79,6 +79,11 @@ export interface DocumentStore {
   saveBrowserAnalysis(documentId: string, analysis: DocumentAnalysis): Promise<boolean>;
   /** آخرین تحلیل سرور، یا null اگر هنوز نیست. */
   serverAnalysis(documentId: string): Promise<StoredAnalysis | null>;
+  /**
+   * سند در سفارشی هست (برش ۳ب)؟ فایلش را «انصراف» پاک نمی‌کند: کار `prepare_order` بعد از پرداخت از
+   * همین فایل PDF جزوه را می‌سازد.
+   */
+  inOrder(documentId: string): Promise<boolean>;
 }
 
 export function createDocumentStore({ db }: Database): DocumentStore {
@@ -215,6 +220,15 @@ export function createDocumentStore({ db }: Database): DocumentStore {
         .where(eq(documentPages.analysisId, head.id))
         .orderBy(documentPages.n);
       return { engine: head.engine, pageCount: head.pageCount, elapsedMs: head.elapsedMs, pages };
+    },
+
+    async inOrder(documentId) {
+      const [row] = await db
+        .select({ one: sql<number>`1` })
+        .from(orderItemSections)
+        .where(eq(orderItemSections.documentId, documentId))
+        .limit(1);
+      return row !== undefined;
     },
   };
 }
