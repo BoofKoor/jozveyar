@@ -259,6 +259,109 @@ test('روی سایت زنده (خرید خاموش): جزوه و تنظیمات
   await context.close();
 });
 
+/** کارت «جزوهٔ تو»، یعنی قدم «جزوه و قیمت». */
+const deskCard = (page: Page) => page.locator('#jozve-title');
+
+test('قدم خریدی که سرور جوابش را نمی‌دهد: بعد از ۶ ثانیه «جزوه و قیمت»، نه «در حال برگرداندن» بی‌پایان', async ({ browser }) => {
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  await dropReady(page);
+  await visibleButton(page, 'ادامه — آدرس و تحویل').click();
+  await expect(heading(page, 'به کدام شهر بفرستیم؟')).toBeVisible();
+  // حالت خرید هرگز جواب نمی‌دهد (شبکهٔ گیرکرده)
+  await page.route('**/api/checkout', () => undefined);
+  const startedAt = Date.now();
+  await page.reload();
+  await expect(deskCard(page)).toBeVisible({ timeout: 15_000 });
+  const waitedMs = Date.now() - startedAt;
+  expect(waitedMs).toBeGreaterThanOrEqual(6_000);
+  expect(waitedMs).toBeLessThan(12_000);
+  await expect(heading(page, 'به کدام شهر بفرستیم؟')).toHaveCount(0);
+  await expect(page.locator('html')).not.toHaveAttribute('data-restoring');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await context.close();
+});
+
+test('«ادامه» که جوابش بعد از «فایل دیگری بینداز» رسید: نه خانهٔ قدم خرید در تاریخچه، نه پیش‌نویس جزوهٔ رفته', async ({ browser }) => {
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  await dropReady(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  // سرور همین حالا جواب می‌دهد (سندها هنوز هستند)؛ فقط رسیدن جواب به صفحه تا بعد از «فایل دیگری بینداز» می‌ماند
+  await page.route('**/api/checkout/quote', async (route) => {
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  await visibleButton(page, 'ادامه — آدرس و تحویل').click();
+  await page.getByRole('button', { name: 'فایل دیگری بینداز' }).click();
+  await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+  const entries = await page.evaluate(() => history.length);
+  const quoted = page.waitForResponse('**/api/checkout/quote');
+  release();
+  await quoted;
+  // کار «ادامه» حالا تمام شده است
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => history.length)).toBe(entries);
+  expect(await page.evaluate(() => sessionStorage.getItem('jy.draft'))).toBeNull();
+  await expect(heading(page, 'به کدام شهر بفرستیم؟')).toHaveCount(0);
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+  await expect(page.getByTestId('jozve-lost')).toHaveCount(0);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await context.close();
+});
+
+test('خانهٔ تاریخچهٔ جزوهٔ قبلی: «جلو» به آن «جزوه و قیمت» است، و رفرش هم قدم آن جزوه را نمی‌آورد', async ({ browser }) => {
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  await dropReady(page);
+  await visibleButton(page, 'ادامه — آدرس و تحویل').click();
+  await expect(heading(page, 'به کدام شهر بفرستیم؟')).toBeVisible();
+  await page.goBack();
+  await expect(deskCard(page)).toBeVisible();
+  // جزوهٔ تازه، ولی خانهٔ «شهر» جزوهٔ قبلی هنوز جلوی تاریخچه است
+  await page.getByRole('button', { name: 'فایل دیگری بینداز' }).click();
+  await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+  await expect(visibleButton(page, 'ادامه — آدرس و تحویل')).toBeEnabled({ timeout: 90_000 });
+  await page.goForward();
+  await expect(deskCard(page)).toBeVisible();
+  await expect(heading(page, 'به کدام شهر بفرستیم؟')).toHaveCount(0);
+  await page.reload();
+  await expect(deskCard(page)).toBeVisible({ timeout: 15_000 });
+  await expect(heading(page, 'به کدام شهر بفرستیم؟')).toHaveCount(0);
+  await context.close();
+});
+
+test('آپلودگر که بار اول نیامد: دوباره، و سند برگشته هنوز با «فایل دیگری بینداز» پاک می‌شود', async ({ browser }) => {
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  const name = `دوباره-${randomInt(1_000_000)}.pdf`;
+  await dropReady(page, { name, mimeType: 'application/pdf', buffer: readFileSync(fixture('plain-bw-10.pdf')) });
+  const [doc] = await sql()`select id from documents where original_name = ${name}`;
+  // تکهٔ آپلودگر (تنها تکه با کلید ادامهٔ آپلود) بار اول نمی‌رسد
+  let aborted = 0;
+  await page.route('**/_next/static/chunks/**', async (route) => {
+    const response = await route.fetch();
+    if (aborted === 0 && (await response.text()).includes('jy.upload.')) {
+      aborted += 1;
+      await route.abort();
+      return;
+    }
+    await route.fulfill({ response });
+  });
+  await page.reload();
+  await expect(deskCard(page)).toBeVisible({ timeout: 15_000 });
+  const deleted = page.waitForRequest((request) => request.method() === 'DELETE' && request.url().endsWith(`/api/uploads/${doc!.id}`));
+  await page.getByRole('button', { name: 'فایل دیگری بینداز' }).click();
+  expect((await (await deleted).response())?.status()).toBe(200);
+  expect(aborted).toBe(1);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await context.close();
+});
+
 test('از رفرش تا قیمت روی صفحه، با پردازندهٔ ۴ برابر کند: زیر ۲ ثانیه', async ({ browser }) => {
   const context = await newContext(browser);
   const page = await context.newPage();

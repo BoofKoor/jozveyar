@@ -328,6 +328,27 @@ test.describe('برگشت بعد از رفرش (۳د)، بی سرور', () => {
     await expect(page.getByTestId('file-waiting')).toHaveCount(0);
   });
 
+  test('پیش‌نویس دستکاری‌شده: صحافی و کاغذی که تعرفه ندارد (حتی «constructor») یعنی پیش‌فرض‌ها، نه صفحهٔ شکسته', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    // پیش‌نویسی که صفحه با رفرش می‌نویسد، پیش از هر اسکریپت صفحه دستکاری می‌شود
+    await page.addInitScript(() => {
+      const raw = sessionStorage.getItem('jy.draft');
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      draft.config = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'constructor', paperTypeId: 'constructor', copies: 1 };
+      sessionStorage.setItem('jy.draft', JSON.stringify(draft));
+    });
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    await page.reload();
+    await expect(page.getByTestId('file-waiting')).toBeVisible();
+    await page.setInputFiles('#jozve-replace', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    expect(errors).toEqual([]);
+  });
+
   test('حافظهٔ بستهٔ سایت: صفحهٔ معمول، بی خطا', async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(window, 'sessionStorage', {

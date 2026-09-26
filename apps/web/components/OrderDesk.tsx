@@ -128,7 +128,9 @@ export function primeStep(mark: HistoryMark | null) {
  * سرور و شمرده‌اند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین تکه بمانند.
  */
 export function restoredOrder(sections: readonly RestoredSection[], config: OrderConfig | null) {
-  const known = config && SEED_PRICE_LIST.bindingTypes[config.bindingTypeId] && SEED_PRICE_LIST.paperTypes[config.paperTypeId] ? config : null;
+  const has = (table: object, id: string) => Object.prototype.hasOwnProperty.call(table, id);
+  // خود جدول، نه نام‌های ارث‌رسیده («constructor» پیش‌نویس دستکاری‌شده)
+  const known = config && has(SEED_PRICE_LIST.bindingTypes, config.bindingTypeId) && has(SEED_PRICE_LIST.paperTypes, config.paperTypeId) ? config : null;
   const gate = orderGate(jozveView(sections.map((section, i) => ({ ...section, key: `r${i}` }))), known ?? INITIAL_CONFIG);
   return { config: known, items: gate.kind === 'ready' ? gate.items : null };
 }
@@ -250,7 +252,13 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     const onPop = (event: PopStateEvent) => {
       const mark = markOf(event.state);
       moved.current = true;
-      setStep(mark?.desk === mount ? mark.step : 'desk');
+      if (mark?.desk === mount) {
+        setStep(mark.step);
+        return;
+      }
+      // خانه‌ای از بار قبل یا جزوهٔ قبلی: «جزوه و قیمت»، و همین خانه مال این جزوه می‌شود تا رفرش قدم آن را نیاورد (۳د).
+      history.replaceState({ ...event.state, jy: { step: 'desk', desk: mount } satisfies HistoryMark }, '');
+      setStep('desk');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -295,8 +303,18 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     if (rest.length > 0) jozve.add(rest);
   };
 
+  // کاری که در راه بود (قیمت سرور پس از «ادامه») بعد از «از اول» می‌رسد: رابطی که رفت، نه قدم می‌رود و نه پیش‌نویس جزوهٔ رفته را
+  // دوباره می‌نویسد.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const go = useCallback(
     (next: Step, { replace = false }: { replace?: boolean } = {}) => {
+      if (!alive.current) return;
       const state = { ...history.state, jy: { step: next, desk: mount } satisfies HistoryMark };
       if (replace) history.replaceState(state, '');
       else history.pushState(state, '');

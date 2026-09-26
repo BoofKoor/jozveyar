@@ -25,15 +25,33 @@ import {
  */
 
 /**
+ * قدم مسیر خرید حداکثر این‌قدر منتظر سرور و تکهٔ مسیر خرید؛ دیرتر «جزوه و قیمت»، تا صفحه روی «در حال برگرداندن
+ * جزوه…» نماند (شبکهٔ گیرکرده). مثل هر تلاش وضعیت سند (`documentStatus`).
+ */
+const STEP_WAIT_MS = 6000;
+
+/**
  * قدم مسیر خریدی که صفحه در آن از نو بار شد (`history.state`، که با رفرش می‌ماند)، اگر هنوز رسیدنی است: همهٔ
  * فایل‌ها روی سرور و شمرده، و ثبت سفارش باز. تکهٔ مسیر خرید و قیمت سرور همین حالا می‌آیند، تا قدم یک‌راست همان‌جا
- * سوار شود، نه اول «جزوه و قیمت». نشد، همان خانهٔ تاریخچه با «جزوه و قیمت».
+ * سوار شود، نه اول «جزوه و قیمت». نشد، یا دیر شد، همان خانهٔ تاریخچه با «جزوه و قیمت».
  */
 async function restoredStep(items: CheckoutItem[] | null): Promise<HistoryMark | null> {
   const mark = markOf(history.state);
   if (!mark || mark.step === 'desk') return mark;
   const desk: HistoryMark = { step: 'desk', desk: mark.desk };
   if (!items) return desk;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<HistoryMark>((resolve) => {
+    timer = setTimeout(() => resolve(desk), STEP_WAIT_MS);
+  });
+  try {
+    return await Promise.race([openStep(mark, desk, items), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function openStep(mark: HistoryMark, desk: HistoryMark, items: CheckoutItem[]): Promise<HistoryMark> {
   try {
     const status = await fetchStatus();
     if (!status || status.mode === 'off') return desk;
@@ -72,12 +90,24 @@ async function restoreDraft(): Promise<Restored> {
 
 let restoring: Promise<Restored> | null = null;
 
-/** سند فایل برگشته: پیگیری و پاک کردن با آپلودگر، که تکهٔ خودش است. ماژولش نیامد (شبکه): قاعدهٔ نگهداری باکت پاکش می‌کند. */
+/**
+ * آپلودگر، که تکهٔ خودش است، با سه تلاش: شبکهٔ لحظه‌ای نباید سند برگشته را بی پیگیری بررسی سرور و بی پاک شدن
+ * بگذارد. هر سه نشد: قاعدهٔ نگهداری باکت پاکش می‌کند، و رفرش بعدی دوباره می‌پرسد.
+ */
+async function uploader() {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await import('../lib/upload/client');
+    } catch {
+      if (attempt === 3) return null;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+}
+
+/** سند فایل برگشته: پیگیری بررسی سرور و پاک کردن، با آپلودگر. */
 const followDocument: FollowDocument = (documentId, upload, onChange) => {
-  const handle = import('../lib/upload/client').then(
-    ({ followUpload, browserDeps }) => followUpload(documentId, upload, onChange, browserDeps()),
-    () => null,
-  );
+  const handle = uploader().then((client) => client && client.followUpload(documentId, upload, onChange, client.browserDeps()));
   return { cancel: async (options) => (await handle)?.cancel(options) };
 };
 
