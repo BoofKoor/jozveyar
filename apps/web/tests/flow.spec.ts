@@ -361,4 +361,27 @@ test.describe('کارایی روی موبایل ضعیف', () => {
     await expect(colorHint(page)).toHaveText(ALL_BW, { timeout: 30_000 });
     await expect(price(page)).toContainText('280,200');
   });
+
+  /**
+   * ساختن اولین `Intl.NumberFormat` صفحه (بار دادهٔ ICU) با پردازندهٔ ۴× کند ۲۶ تا ۴۳ میلی‌ثانیه است و بعدی‌ها تقریباً
+   * هیچ؛ بی گرم کردن، همان در راه اولین قیمت می‌افتاد (`formatNumber` رابط پس از فایل؛ docs/UI.md، «۳ج»). پوسته یکی را
+   * در زمان بیکاری پیش از هر فایلی می‌سازد، نه در بار شدن ماژول.
+   */
+  test('اولین Intl.NumberFormat صفحه پیش از فایل ساخته می‌شود، نه در راه اولین قیمت', async ({ page }) => {
+    await page.addInitScript(() => {
+      const made: number[] = [];
+      (window as unknown as { numberFormats: number[] }).numberFormats = made;
+      Intl.NumberFormat = new Proxy(Intl.NumberFormat, {
+        construct(target, args) {
+          made.push(performance.now());
+          return Reflect.construct(target, args);
+        },
+      });
+    });
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { numberFormats: number[] }).numberFormats.length))
+      .toBeGreaterThanOrEqual(1);
+  });
 });
