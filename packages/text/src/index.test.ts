@@ -13,16 +13,15 @@ import {
   isWorkingDay,
   jalaliYear,
   normalizeFa,
-  normalizeIranMobile,
   postHandoffDue,
   recipientSurname,
   rialsToTomans,
-  tidyInputFa,
   toLatinDigits,
   tomansToRials,
   unifyLetters,
   weightParts,
 } from './index.js';
+import { normalizeIranMobile, tidyInputFa } from './input.js';
 
 describe('toLatinDigits', () => {
   it('ارقام فارسی را تبدیل می‌کند', () => {

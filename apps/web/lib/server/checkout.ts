@@ -28,7 +28,8 @@ import type { CheckoutDocument, OrderDetails, OrderRow, OrderStore } from '@jozv
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { formatDeadlineDay, postHandoffDue, tidyInputFa, toLatinDigits } from '@jozveyar/text';
+import { formatDeadlineDay, postHandoffDue, toLatinDigits } from '@jozveyar/text';
+import { tidyInputFa } from '@jozveyar/text/input';
 
 import type { AuthUser } from './auth';
 import type { PaymentGateway } from './payments';
