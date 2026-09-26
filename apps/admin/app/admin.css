@@ -2,7 +2,7 @@
  * ===== پنل ادمین، از طرح نمونهٔ تأییدشده (docs/ui/mockups/admin.html) =====
  * سربرگ سفید با ناوبری زبانه‌ای، صفحه green-50 با کارت‌های سفید (تصمیم ۲۴). چیدمان پنل است، نه جزء کیت؛
  * پس پیشوندش `ad-` است، نه `jy-`. رنگ فقط توکن، فقط logical properties. هر قدم بخش صفحه‌های خودش را
- * می‌آورد؛ ۴٫۱: پوسته، ورود و ثبت، ادمین‌ها و رویدادها.
+ * می‌آورد؛ ۴٫۱: پوسته، ورود و ثبت، ادمین‌ها و رویدادها؛ ۴٫۲: پیشخوان، سفارش‌ها و جزئیات سفارش.
  */
 @layer components {
   body {
@@ -313,6 +313,409 @@
     display: flex;
     justify-content: flex-end;
     margin-block-start: 12px;
+  }
+  .ad-log__who {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+
+  /* ===== پیشخوان: چهار کاشی مهلت تحویل به پست، هشدارها (۴٫۲) ===== */
+  .ad-h2 {
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ad-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-block-start: 12px;
+  }
+  .ad-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    height: 100%;
+    padding: 16px;
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    color: inherit;
+    text-decoration: none;
+  }
+  .ad-tile:hover {
+    border-color: var(--color-green-400);
+  }
+  .ad-tile__n {
+    margin-block-start: 6px;
+    font-size: var(--text-h1);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .ad-tile__t {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-alerts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block: 16px;
+  }
+  .ad-alerts .jy-note a {
+    color: inherit;
+    font-weight: 600;
+  }
+  .ad-due + .ad-list {
+    margin-block-start: 16px;
+  }
+  @media (width <= 860px) {
+    .ad-tiles {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* ===== ردیف سفارش: جدول در دسکتاپ، کارت فشرده در گوشی (۴٫۲) ===== */
+  .ad-list {
+    padding: 0;
+  }
+  .ad-list > .jy-card__head {
+    padding: 20px 24px 8px;
+  }
+  .ad-card-head-btn {
+    margin-block: -10px;
+    margin-inline-end: -12px;
+  }
+  .ad-cols,
+  .ad-row {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1.2fr) minmax(0, 1.4fr) 104px 112px 156px;
+    grid-template-areas: 'id who what sum state due';
+    align-items: center;
+    column-gap: 16px;
+    padding-inline: 24px;
+  }
+  .ad-cols {
+    padding-block: 8px;
+    border-block-end: 1px solid var(--color-line);
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+  .ad-rows > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-row {
+    row-gap: 2px;
+    min-height: 60px;
+    padding-block: 10px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .ad-row:hover {
+    background: var(--color-green-50);
+  }
+  .ad-row__id {
+    grid-area: id;
+    font-weight: 600;
+  }
+  .ad-row__who {
+    grid-area: who;
+    min-width: 0;
+  }
+  .ad-row__who b {
+    overflow-wrap: anywhere;
+  }
+  .ad-row__what {
+    grid-area: what;
+    min-width: 0;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-row__sum {
+    grid-area: sum;
+  }
+  .ad-row__state {
+    grid-area: state;
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  .ad-row__due {
+    grid-area: due;
+    justify-self: start;
+  }
+  .ad-row__city,
+  .ad-row__none {
+    color: var(--color-muted);
+    font-size: var(--text-small);
+  }
+  .ad-row__unit {
+    display: none;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-row__state .jy-icon {
+    width: 16px;
+    height: 16px;
+    vertical-align: -3px;
+    color: var(--color-error-text);
+  }
+  .ad-row__state--info .jy-icon {
+    color: var(--color-info-text);
+  }
+  .ad-list .ad-pager {
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin-block-start: 0;
+    padding: 8px 24px;
+    border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-list .ad-pager > .jy-btn,
+  .ad-list .ad-pager__nav {
+    margin-inline-end: -12px;
+  }
+  .ad-list .ad-pager__nav {
+    display: flex;
+    gap: 4px;
+  }
+  .ad-empty {
+    padding: 20px 24px;
+    color: var(--color-muted);
+  }
+  @media (width <= 860px) {
+    .ad-cols {
+      display: none;
+    }
+    .ad-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: 'id who due' 'what what what' 'sum state state';
+      column-gap: 10px;
+      padding-inline: 16px;
+    }
+    .ad-row__state {
+      justify-self: end;
+      text-align: end;
+    }
+    .ad-row__unit {
+      display: inline;
+    }
+    .ad-list > .jy-card__head {
+      padding: 16px 16px 4px;
+    }
+    .ad-list .ad-pager {
+      padding-inline: 16px;
+    }
+    .ad-empty {
+      padding: 16px;
+    }
+  }
+
+  /* ===== جست‌وجو ===== */
+  .ad-search {
+    position: relative;
+    max-width: 28rem;
+  }
+  .ad-search > .jy-icon {
+    position: absolute;
+    inset-block-start: 12px;
+    inset-inline-start: 12px;
+    color: var(--color-muted);
+    pointer-events: none;
+  }
+  .ad-search .jy-input {
+    padding-inline-start: 42px;
+  }
+  .ad-search + .ad-chips {
+    margin-block-start: 12px;
+  }
+  .ad-chip .num {
+    font-weight: 400;
+  }
+
+  /* ===== جزئیات سفارش: وضعیت در ستون کنار (در گوشی بالای همه) ===== */
+  .ad-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+  }
+  .ad-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-areas: 'main side';
+    gap: 16px 24px;
+    align-items: start;
+  }
+  .ad-main {
+    grid-area: main;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .ad-side {
+    grid-area: side;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  @media (width > 860px) {
+    .ad-side {
+      position: sticky;
+      inset-block-start: 16px;
+    }
+  }
+  @media (width <= 860px) {
+    .ad-grid {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'side' 'main';
+    }
+  }
+  .ad-status__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-block-start: 8px;
+  }
+  .ad-facts > div {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 2px;
+    align-items: baseline;
+    padding-block: 10px;
+  }
+  .ad-facts > div + div {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-facts dt {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-facts dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 520px) {
+    .ad-facts > div {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .ad-files {
+    display: flex;
+    flex-direction: column;
+    margin-block-start: 8px;
+  }
+  .ad-files li {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    line-height: 1.9;
+  }
+  .ad-files__n {
+    flex: none;
+    min-width: 1.2em;
+    color: var(--color-muted);
+  }
+  .ad-files__name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .ad-files__pages {
+    flex: none;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-spec {
+    margin-block-start: 8px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-pdf {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin-block-start: 16px;
+    padding: 12px 16px;
+    background: var(--color-green-50);
+    border-radius: var(--radius-md);
+  }
+  .ad-pdf__icon {
+    width: 24px;
+    height: 24px;
+    color: var(--color-green-600);
+  }
+  .ad-pdf__body {
+    flex: 1;
+    min-width: 12rem;
+  }
+  .ad-pdf__name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .ad-pdf__meta {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-pdf form {
+    display: contents;
+  }
+  .ad-pdf .jy-note {
+    flex-basis: 100%;
+    margin-block-start: 0;
+  }
+  .ad-sum {
+    margin-block-start: 8px;
+  }
+  .ad-sum > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding-block: 6px;
+  }
+  .ad-sum dt {
+    color: var(--color-muted);
+  }
+  .ad-sum__total {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+    margin-block-start: 8px;
+    padding-block-start: 12px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .ad-sum__total b {
+    font-size: var(--text-h4);
+  }
+  .ad-pay > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    padding-block: 10px;
+  }
+  .ad-pay > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-pay__meta {
+    flex-basis: 100%;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
   }
 
   /* ===== ادمین‌ها و پیوند یک‌باره ===== */

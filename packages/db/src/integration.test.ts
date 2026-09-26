@@ -58,6 +58,7 @@ import { createAuthStore } from './auth.js';
 import { PREPARE_ORDER_JOB, createOrderStore, type NewOrder } from './orders.js';
 import { createSmsLog } from './sms.js';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
+import { createPanelOrderStore, pdfErrorCode, type PanelBucket, type PanelClock, type PanelSearch } from './panel.js';
 import {
   adminEvents,
   adminInvites,
@@ -1280,6 +1281,379 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       await store.touchSession((await store.findSession(sessionHash))!.sessionId, later(60_000));
       const [row] = await conn.db.select().from(adminSessions).where(eq(adminSessions.tokenHash, sessionHash));
       expect(row!.lastSeenAt).toEqual(later(60_000));
+    });
+  });
+
+  describe('پنل: سفارش‌ها روی پستگرس (برش ۴٫۲)', () => {
+    /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
+    const NOW = new Date('2026-10-05T07:50:00Z');
+    const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
+    // مهلت پایان انحصاری روز است (`postHandoffDue`): «تا پایان دوشنبه» یعنی نیمه‌شب آغاز سه‌شنبه. صریح، نه از کد.
+    const END_SUNDAY = tehran('2026-10-05 00:00');
+    const END_MONDAY = tehran('2026-10-06 00:00');
+    const END_TUESDAY = tehran('2026-10-07 00:00');
+    const END_WEDNESDAY = tehran('2026-10-08 00:00');
+    const END_SATURDAY = tehran('2026-10-11 00:00');
+    const MINUTE = 60_000;
+    /** حاشیهٔ پرداخت یک ساعت و مهلت هر تلاش نیم ساعت (ADR-034)؛ صریح. */
+    const clock: PanelClock = {
+      at: NOW,
+      staleBefore: new Date(NOW.getTime() + 60 * MINUTE),
+      unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE),
+    };
+    const bounds = { at: NOW, tomorrowStart: END_MONDAY, dayAfterStart: END_TUESDAY };
+
+    type DocKey = 'a' | 'b' | 'soon' | 'gone';
+    const docs = {} as Record<DocKey, { id: string; pages: number }>;
+    const num: Record<string, number> = {};
+    const ids: Record<string, string> = {};
+    const totals: Record<string, number> = {};
+    let adminId = '';
+
+    async function place(
+      key: string,
+      over: { docs?: DocKey[]; name?: string; phone?: string; provinceId?: number; cityId?: number | null; zoneId?: 'tehran' | 'other' } = {},
+    ) {
+      const chosen = (over.docs ?? ['a', 'b']).map((k) => docs[k]);
+      const sections = chosen.map((d) => ({ documentId: d.id, pageCount: d.pages }));
+      const pageCount = sections.reduce((sum, s) => sum + s.pageCount, 0);
+      const rules = [{ pageRanges: [[1, pageCount]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
+      const zoneId = over.zoneId ?? 'tehran';
+      const breakdown = quote(
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
+        SEED_PRICE_LIST,
+      );
+      const phone = over.phone ?? '09121234567';
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: phone })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+        .returning();
+      const { order } = await createOrderStore(conn).createOrder({
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        breakdown,
+        quoteSnapshot: null,
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: zoneId,
+        provinceId: over.provinceId ?? 8,
+        cityId: over.cityId === undefined ? 394 : over.cityId,
+        recipientName: over.name ?? 'سارا احمدی',
+        recipientPhone: phone,
+        addressText: 'خیابان ولیعصر، پلاک 12',
+        postalCode: null,
+        items: [{ pageCount, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+      });
+      num[key] = order.orderNumber;
+      ids[key] = order.id;
+      totals[key] = order.totalRials;
+    }
+
+    /** یک تلاش پرداخت با زمان ساختن دلخواه (پرداخت‌ها محافظ تغییر ندارند). */
+    async function attempt(key: string, createdAt: Date): Promise<string> {
+      const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+      const payment = await createOrderStore(conn).insertPayment({
+        orderId: ids[key]!,
+        provider: 'mock',
+        amountRials: totals[key]!,
+        authority,
+        raw: null,
+      });
+      await conn.db.update(payments).set({ createdAt }).where(eq(payments.id, payment.id));
+      return authority;
+    }
+
+    /** پرداخت موفق از همان راه برگشت درگاه: سفارش `paid` با مهلت، رویداد، و کار `prepare_order` در صف. */
+    async function pay(key: string, paidAt: Date, due: Date) {
+      const authority = await attempt(key, new Date(paidAt.getTime() - MINUTE));
+      await createOrderStore(conn).settlePayment('mock', authority, async () => ({
+        kind: 'succeeded',
+        refId: '803114',
+        cardMask: null,
+        raw: null,
+        paidAt,
+        postHandoffDueAt: due,
+      }));
+    }
+
+    beforeAll(async () => {
+      await clearOrders(conn);
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const admins = createAdminStore(conn);
+      const created = await admins.createInvite({
+        inviteId: randomUUID(),
+        newUserId: randomUUID(),
+        username: 'ali',
+        displayName: 'علی محمدی',
+        role: 'operator',
+        tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+        totpSealed: 'v1.sealed',
+        at: NOW,
+        expiresAt: new Date(NOW.getTime() + 15 * MINUTE),
+        createdBy: null,
+        allowExisting: false,
+        event: { adminUserId: null, action: 'admins.invite', targetType: 'admin' },
+      });
+      adminId = created.ok ? created.userId : '';
+
+      const store = createDocumentStore(conn);
+      const make = async (key: DocKey, pages: number, expiresAt: Date, deleted = false) => {
+        const id = randomUUID();
+        await store.insertUpload({
+          id,
+          sessionHash: 'f'.repeat(64),
+          originalName: `ریاضی ۲ - جلسه ${pages}.pdf`,
+          sourceKind: 'pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1_000,
+          storageKey: `uploads/${id}.pdf`,
+          uploadId: 'u',
+          partSizeBytes: 8 * 1024 * 1024,
+        });
+        await store.markUploaded(id, NOW, expiresAt, null);
+        await conn.db
+          .update(documents)
+          .set({ status: 'ready', pageCount: pages, ...(deleted ? { fileDeletedAt: NOW } : {}) })
+          .where(eq(documents.id, id));
+        docs[key] = { id, pages };
+      };
+      await make('a', 48, new Date(NOW.getTime() + 2 * 86_400_000));
+      await make('b', 54, new Date(NOW.getTime() + 2 * 86_400_000));
+      // ۵۹ دقیقه: زیر حاشیهٔ یک ساعتهٔ پرداخت، پس سفارشش دیگر پرداختنی نیست.
+      await make('soon', 10, new Date(NOW.getTime() + 59 * MINUTE));
+      await make('gone', 12, new Date(NOW.getTime() - 86_400_000), true);
+
+      // شش سفارش پرداخت‌شده، از دیر شده تا بعدتر؛ دو تا با یک مهلت و ترتیب پرداخت برعکس ترتیب شماره.
+      await place('late', { name: 'زهرا محمدی', phone: '09121110019' });
+      await place('today2', { name: 'مریم کاظمی', phone: '09152345678', provinceId: 11, cityId: 1326, zoneId: 'other' });
+      await place('today1', { name: 'امیر حسینی', phone: '09131110024' });
+      await place('tomorrow', { name: 'حسین رحیمی', phone: '09171110031' });
+      await place('wed', { name: 'پارسا امینی', phone: '09121110035' });
+      await place('sat', { name: 'سمانه_قربانی%', phone: '09161110036', cityId: null });
+      await pay('late', tehran('2026-10-01 09:00'), END_SUNDAY);
+      await pay('today2', tehran('2026-10-03 14:05'), END_MONDAY);
+      await pay('today1', tehran('2026-10-03 10:00'), END_MONDAY);
+      await pay('tomorrow', tehran('2026-10-04 12:00'), END_TUESDAY);
+      await pay('wed', tehran('2026-10-05 09:00'), END_WEDNESDAY);
+      await pay('sat', tehran('2026-10-07 18:00'), END_SATURDAY);
+      // PDF جزوهٔ «فردا» ساخته نشد: شکست قطعی کارگر، با همان شکل `last_error`.
+      await conn.db
+        .update(jobs)
+        .set({ status: 'failed', attempts: 1, lastError: 'file_missing: file_missing', finishedAt: NOW })
+        .where(eq(jobs.orderId, ids.tomorrow!));
+
+      // در انتظار پرداخت: یک تلاش بی برگشت (۴۰ دقیقه)، یکی هنوز در درگاه (۱۰ دقیقه)، یکی ناموفق.
+      await place('waiting', { name: 'کیان رستمی', phone: '09141110030' });
+      await attempt('waiting', new Date(NOW.getTime() - 40 * MINUTE));
+      await attempt('waiting', new Date(NOW.getTime() - 10 * MINUTE));
+      const failed = await attempt('waiting', new Date(NOW.getTime() - 50 * MINUTE));
+      await createOrderStore(conn).settlePayment('mock', failed, async () => ({ kind: 'failed', code: 'declined', raw: null }));
+      // رهاشده: فایلی که تا حاشیه پاک می‌شود (با تلاش بی برگشت، که هشدار نمی‌شود)، فایل پاک‌شده، و منقضی.
+      await place('soon', { docs: ['a', 'soon'], name: 'نگار صادقی', phone: '09121110040' });
+      await attempt('soon', new Date(NOW.getTime() - 45 * MINUTE));
+      await place('gone', { docs: ['gone'], name: 'فاطمه نوری', phone: '09121110041' });
+      await place('expired', { name: 'محمد جعفری', phone: '09121110042' });
+      await createOrderStore(conn).expireOrder(ids.expired!, NOW);
+    });
+
+    afterAll(async () => {
+      await clearOrders(conn);
+    });
+
+    it('کاشی‌های مهلت با مرز روز تهران: دیر شده، امروز، فردا، بعدتر', async () => {
+      const panel = createPanelOrderStore(conn);
+      expect(await panel.dueSummary(bounds)).toEqual({
+        overdue: 1,
+        today: 2,
+        tomorrow: 1,
+        later: 2,
+        overdueRange: { earliest: END_SUNDAY, latest: END_SUNDAY },
+        laterRange: { earliest: END_WEDNESDAY, latest: END_SATURDAY },
+      });
+      // مهلت خودِ «حالا» گذشته است؛ یک میلی‌ثانیه پیش از پایان روز هنوز «امروز» (شاهد `<=` و `<`).
+      expect(await panel.dueSummary({ ...bounds, at: new Date(END_MONDAY.getTime() - 1) })).toMatchObject({ overdue: 1, today: 2 });
+      expect(await panel.dueSummary({ ...bounds, at: END_MONDAY })).toMatchObject({ overdue: 3, today: 0 });
+      // فردا تا خود آغاز پس‌فردا؛ یک روز جلوتر «فردا» مال چهارشنبه است.
+      expect(
+        await panel.dueSummary({ at: NOW, tomorrowStart: END_TUESDAY, dayAfterStart: END_WEDNESDAY }),
+      ).toMatchObject({ today: 3, tomorrow: 1, later: 1, laterRange: { earliest: END_SATURDAY, latest: END_SATURDAY } });
+      // فقط پرداخت‌شده‌ها: سفارش در انتظار و رهاشده مهلت ندارند.
+      const all = await panel.dueSummary(bounds);
+      expect(all.overdue + all.today + all.tomorrow + all.later).toBe(6);
+    });
+
+    it('چیپ‌ها: باز، در انتظار پرداخت، رهاشده و همه، با همان جست‌وجو', async () => {
+      const panel = createPanelOrderStore(conn);
+      expect(await panel.counts({ search: null, clock })).toEqual({ open: 6, awaiting: 1, abandoned: 3, all: 10 });
+      // شاهد حاشیه: یک ساعت دیرتر نه، همین حالا فایل ۵۹ دقیقه‌ای هنوز پرداختنی بود.
+      expect(await panel.counts({ search: null, clock: { ...clock, staleBefore: NOW } })).toMatchObject({ awaiting: 2, abandoned: 2 });
+      expect(await panel.counts({ search: { kind: 'name', text: 'محمد' }, clock })).toEqual({ open: 1, awaiting: 0, abandoned: 1, all: 2 });
+    });
+
+    it('فهرست باز به ترتیب مهلت؛ هم‌مهلت‌ها به ترتیب پرداخت؛ بقیه تازه‌ترین اول', async () => {
+      const panel = createPanelOrderStore(conn);
+      const numbers = async (bucket: PanelBucket, limit = 50, offset = 0) =>
+        (await panel.list({ bucket, search: null, clock, limit, offset })).map((row) => row.orderNumber);
+      expect(await numbers('open')).toEqual([num.late, num.today1, num.today2, num.tomorrow, num.wed, num.sat]);
+      expect(await numbers('open', 2, 2)).toEqual([num.today2, num.tomorrow]);
+      expect(await numbers('awaiting')).toEqual([num.waiting]);
+      expect(await numbers('abandoned')).toEqual([num.expired, num.gone, num.soon]);
+      expect(await numbers('all')).toEqual(
+        ['expired', 'gone', 'soon', 'waiting', 'sat', 'wed', 'tomorrow', 'today1', 'today2', 'late'].map((k) => num[k]),
+      );
+    });
+
+    it('ردیف فهرست: جزوه، گیرنده، شهر، PDF، پرداخت بی برگشت و فایل‌ها', async () => {
+      const panel = createPanelOrderStore(conn);
+      const rows = await panel.list({ bucket: 'all', search: null, clock, limit: 50, offset: 0 });
+      const row = (key: string) => rows.find((r) => r.orderNumber === num[key])!;
+      expect(row('today2')).toMatchObject({
+        status: 'paid',
+        recipientName: 'مریم کاظمی',
+        recipientPhone: '09152345678',
+        provinceName: 'خراسان رضوی',
+        cityName: 'مشهد',
+        postHandoffDueAt: END_MONDAY,
+        pageCount: 102,
+        itemCount: 1,
+        fileCount: 2,
+        copies: 1,
+        colorModes: ['bw'],
+        sidesModes: ['double'],
+        pdfJob: 'queued',
+        unreturnedPayments: 0,
+        stale: false,
+      });
+      expect(row('today2').totalRials).toBe(totals.today2);
+      expect(row('today2').filesExpireAt).toEqual(new Date(NOW.getTime() + 2 * 86_400_000));
+      expect(row('tomorrow').pdfJob).toBe('failed');
+      expect(row('sat')).toMatchObject({ cityName: null, provinceName: 'تهران' });
+      // فقط تلاش ۴۰ دقیقه‌ای بی برگشت است: ۱۰ دقیقه‌ای هنوز در درگاه، و ناموفق در انتظار نیست.
+      expect(row('waiting')).toMatchObject({ status: 'awaiting_payment', pdfJob: null, unreturnedPayments: 1, stale: false });
+      expect(row('soon')).toMatchObject({ stale: true, fileCount: 2, pageCount: 58, filesExpireAt: new Date(NOW.getTime() + 59 * MINUTE) });
+      expect(row('gone')).toMatchObject({ stale: true, fileCount: 1 });
+      expect(row('expired')).toMatchObject({ status: 'expired', stale: false });
+    });
+
+    it('جست‌وجو: شماره، ته موبایل، موبایل کامل و نام؛ نویسهٔ عام LIKE حرف است', async () => {
+      const panel = createPanelOrderStore(conn);
+      const find = async (search: PanelSearch) =>
+        (await panel.list({ bucket: 'all', search, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber).sort();
+      expect(await find({ kind: 'digits', orderNumber: num.wed!, phoneSuffix: null })).toEqual([num.wed]);
+      expect(await find({ kind: 'digits', orderNumber: null, phoneSuffix: '5678' })).toEqual([num.today2]);
+      // یک عدد: یا شمارهٔ سفارش، یا ته موبایل.
+      expect(await find({ kind: 'digits', orderNumber: num.late!, phoneSuffix: '110036' })).toEqual([num.late, num.sat].sort());
+      expect(await find({ kind: 'mobile', mobile: '09141110030' })).toEqual([num.waiting]);
+      expect(await find({ kind: 'name', text: 'محمد' })).toEqual([num.late, num.expired].sort());
+      expect(await find({ kind: 'name', text: 'سمانه_قربانی%' })).toEqual([num.sat]);
+      expect(await find({ kind: 'name', text: 'زهرا%' })).toEqual([]);
+      expect(await find({ kind: 'name', text: '_' })).toEqual([num.sat]);
+      expect(await find({ kind: 'digits', orderNumber: null, phoneSuffix: null })).toEqual([]);
+    });
+
+    it('هشدارها: PDF ساخته‌نشده، و تلاش بی برگشت فقط برای سفارشی که هنوز پرداختنی است', async () => {
+      const panel = createPanelOrderStore(conn);
+      expect(await panel.alerts(clock)).toEqual({ failedPdf: [num.tomorrow], unreturned: [{ orderNumber: num.waiting, attempts: 1 }] });
+      // نیم ساعت بعد، تلاش ۱۰ دقیقه‌ای هم بی برگشت است (شاهد مهلت تلاش).
+      expect(
+        (await panel.alerts({ ...clock, unreturnedBefore: new Date(NOW.getTime() - 5 * MINUTE) })).unreturned,
+      ).toEqual([{ orderNumber: num.waiting, attempts: 2 }]);
+      // بی حاشیه، سفارشی که فایلش ۵۹ دقیقهٔ دیگر پاک می‌شود هنوز پرداختنی است و تلاشش هشدار (شاهد حاشیه).
+      expect((await panel.alerts({ ...clock, staleBefore: NOW })).unreturned.map((u) => u.orderNumber).sort()).toEqual(
+        [num.waiting, num.soon].sort(),
+      );
+    });
+
+    it('جزئیات: جزوه با نام فایل‌ها، کاغذ و صحافی همان نسخهٔ تعرفه، گیرنده، پرداخت‌ها، رویدادها و کار PDF', async () => {
+      const panel = createPanelOrderStore(conn);
+      const details = await panel.details(num.today2!);
+      expect(details).toMatchObject({
+        provinceName: 'خراسان رضوی',
+        cityName: 'مشهد',
+        zoneName: 'بقیهٔ کشور',
+        shippingMethodName: 'پست پیشتاز',
+        order: { orderNumber: num.today2, status: 'paid', postHandoffDueAt: END_MONDAY, priceListVersion: 1 },
+        pdfJob: { status: 'queued', attempts: 0, maxAttempts: 3, lastError: null, finishedAt: null },
+      });
+      expect(details!.items).toEqual([
+        expect.objectContaining({
+          seq: 1,
+          pageCount: 102,
+          bindingName: 'طلق و سیم',
+          printPdfKey: null,
+          sections: [
+            expect.objectContaining({ seq: 1, documentId: docs.a.id, pageCount: 48, originalName: 'ریاضی ۲ - جلسه 48.pdf', sourceKind: 'pdf' }),
+            expect.objectContaining({ seq: 2, documentId: docs.b.id, pageCount: 54, originalName: 'ریاضی ۲ - جلسه 54.pdf' }),
+          ],
+          rules: [{ seq: 1, pageRanges: [[1, 102]], colorMode: 'bw', paperTypeId: 'tahrir80', paperName: 'تحریر ۸۰ گرم' }],
+        }),
+      ]);
+      expect(details!.payments.map((p) => p.status)).toEqual(['succeeded']);
+      expect(details!.statusEvents.map((e) => [e.fromStatus, e.toStatus, e.actor])).toEqual([
+        [null, 'awaiting_payment', 'user'],
+        ['awaiting_payment', 'paid', 'gateway'],
+      ]);
+      expect(details!.events).toEqual([]);
+      expect(await panel.details(1)).toBeNull();
+
+      const waiting = await panel.details(num.waiting!);
+      expect(waiting!.pdfJob).toBeNull();
+      // تازه‌ترین تلاش اول.
+      expect(waiting!.payments.map((p) => p.status)).toEqual(['pending', 'pending', 'failed']);
+    });
+
+    it('دوباره بساز: فقط کار شکست‌خورده، با رویداد و شکست قبلی در یک تراکنش؛ دو کلیک هم‌زمان یک بار', async () => {
+      const panel = createPanelOrderStore(conn);
+      const event = (at: Date): AdminEventInput => ({
+        adminUserId: adminId,
+        action: 'orders.pdf_rebuild',
+        targetType: 'order',
+        targetId: ids.tomorrow!,
+        ipHash: 'ip',
+        detail: { orderNumber: num.tomorrow },
+        at,
+      });
+      expect(await panel.rebuildPdf(ids.today2!, { ...event(NOW), targetId: ids.today2! })).toBe('not_failed');
+      const results = await Promise.all([panel.rebuildPdf(ids.tomorrow!, event(NOW)), panel.rebuildPdf(ids.tomorrow!, event(NOW))]);
+      expect(results.sort()).toEqual(['not_failed', 'ok']);
+      const [job] = await conn.db.select().from(jobs).where(eq(jobs.orderId, ids.tomorrow!));
+      expect(job).toMatchObject({ status: 'queued', attempts: 0, lastError: null, finishedAt: null, lockedBy: null });
+      expect(job!.runAfter.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
+      const details = await panel.details(num.tomorrow!);
+      expect(details!.events).toEqual([
+        expect.objectContaining({
+          action: 'orders.pdf_rebuild',
+          adminName: 'علی محمدی',
+          detail: { orderNumber: num.tomorrow, previous: { attempts: 1, error: 'file_missing' } },
+        }),
+      ]);
+      // دانلود با همان راه رویداد، در صفحهٔ همان سفارش؛ سفارش دیگر رویدادی ندارد.
+      await panel.logEvent({ ...event(new Date(NOW.getTime() + MINUTE)), action: 'orders.pdf_download', detail: { orderNumber: num.tomorrow, item: 1 } });
+      expect((await panel.details(num.tomorrow!))!.events.map((e) => e.action)).toEqual(['orders.pdf_rebuild', 'orders.pdf_download']);
+      expect((await panel.details(num.late!))!.events).toEqual([]);
+    });
+
+    it('PDF جزوه برای دانلود: کلید و حجم فقط وقتی کارگر ساخته', async () => {
+      const panel = createPanelOrderStore(conn);
+      expect(await panel.printFile(num.late!, 1)).toMatchObject({ orderId: ids.late, status: 'paid', itemSeq: 1, key: null, readyAt: null });
+      expect(await panel.printFile(num.late!, 2)).toBeNull();
+      const [item] = await conn.db.select().from(orderItems).where(eq(orderItems.orderId, ids.late!));
+      await conn.db
+        .update(orderItems)
+        .set({ printPdfKey: `orders/${num.late}/jozve-1.pdf`, printPdfBytes: 40_265_318, printPdfSha256: 'a'.repeat(64), printPdfReadyAt: NOW })
+        .where(eq(orderItems.id, item!.id));
+      expect(await panel.printFile(num.late!, 1)).toMatchObject({ key: `orders/${num.late}/jozve-1.pdf`, bytes: 40_265_318, readyAt: NOW });
+    });
+
+    it('کد خطای کار از last_error کارگر: شکست قطعی با کد، بقیه گذرا', () => {
+      expect(pdfErrorCode('file_missing: file_missing')).toBe('file_missing');
+      expect(pdfErrorCode('page_count_mismatch: بخش 1: 47 صفحه، سرور 48 شمرده بود')).toBe('page_count_mismatch');
+      expect(pdfErrorCode("StorageError('GET … → 503')")).toBe('transient');
+      expect(pdfErrorCode(null)).toBeNull();
     });
   });
 });

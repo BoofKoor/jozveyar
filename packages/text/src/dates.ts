@@ -145,6 +145,14 @@ export function postHandoffDue(paidAt: Date, workingDays: number, holidays: Read
   return fromTehranWall(day + DAY_MS);
 }
 
+/**
+ * آغاز روز تهران (نیمه‌شب) برای یک لحظه، یا `days` روز بعدش: `tehranDayStart(now, 1)` آغاز فرداست. مهلت تحویل
+ * به پست پایان انحصاری روز است، پس مهلتِ «تا پایان امروز» همان آغاز فرداست (پیشخوان پنل، برش ۴٫۲).
+ */
+export function tehranDayStart(date: Date, days = 0): Date {
+  return fromTehranWall((Math.floor(tehranWall(date) / DAY_MS) + days) * DAY_MS);
+}
+
 /** روزی که یک مهلت انحصاری (مثل `postHandoffDue`) در آن تمام می‌شود: «دوشنبه 6 مهر». */
 export function formatDeadlineDay(deadline: Date): string {
   return formatJalaliWeekday(new Date(deadline.getTime() - 1));

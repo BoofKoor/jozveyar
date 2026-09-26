@@ -7,18 +7,26 @@ import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
-import { createAdminStore, getDb } from '@jozveyar/db';
+import { createAdminStore, createPanelOrderStore, getDb } from '@jozveyar/db';
+import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
 import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
 import { adminConfig, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
+import { createPanelOrders, type PanelOrders } from './orders';
 import { argon2Passwords } from './password';
 
-let cached: { config: AdminConfig; auth: AdminAuth } | null | undefined;
+interface Panel {
+  config: AdminConfig;
+  auth: AdminAuth;
+  orders: PanelOrders;
+}
 
-/** سرویس، یا null اگر پیکربندی کامل نیست (پنل بسته؛ لاگ بالا آمدن گفته چرا). */
-export function panel(): { config: AdminConfig; auth: AdminAuth } | null {
+let cached: Panel | null | undefined;
+
+/** سرویس‌ها، یا null اگر پیکربندی کامل نیست (پنل بسته؛ لاگ بالا آمدن گفته چرا). */
+export function panel(): Panel | null {
   if (cached !== undefined) return cached;
   const config = adminConfig(process.env);
   cached = config
@@ -28,6 +36,12 @@ export function panel(): { config: AdminConfig; auth: AdminAuth } | null {
           store: createAdminStore(getDb()),
           passwords: argon2Passwords(),
           secretsKey: config.secretsKey,
+          secret: config.secret,
+        }),
+        // بی استوریج (`S3_*` در `.env` نیست) فقط دانلود PDF جزوه بسته است؛ لاگ بالا آمدن همین را می‌گوید.
+        orders: createPanelOrders({
+          store: createPanelOrderStore(getDb()),
+          storage: storageFromEnv(process.env)?.driver ?? null,
           secret: config.secret,
         }),
       }

@@ -15,6 +15,10 @@ export default async function PanelLayout({ children, params }: { children: Reac
   const { gate } = await params;
   const session = await requireSession(gate);
   const home = panelPath(gate);
+  const primary = [
+    { href: home, label: 'پیشخوان' },
+    ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
+  ];
   const owner = [
     ...(can(session, 'admins.manage') ? [{ href: panelPath(gate, '/admins'), label: 'ادمین‌ها' }] : []),
     ...(can(session, 'events.read') ? [{ href: panelPath(gate, '/events'), label: 'رویدادها' }] : []),
@@ -40,7 +44,7 @@ export default async function PanelLayout({ children, params }: { children: Reac
             </form>
           </div>
         </div>
-        <PanelNav home={home} primary={[{ href: home, label: 'پیشخوان' }]} owner={owner} />
+        <PanelNav home={home} primary={primary} owner={owner} />
       </header>
       <main className="ad-wrap ad-page">{children}</main>
     </>

@@ -79,6 +79,25 @@ describe.skipIf(!ENABLED)('استوریج واقعی', () => {
     expect(await s3.headObject(k)).toBeNull();
   });
 
+  it('خواندن جریانی از آدرس داخلی: همان بایت‌ها و همان حجم؛ فایل ناموجود null', async () => {
+    const k = key();
+    const data = randomBytes(MIN_PART_SIZE_BYTES + 777);
+    const plan = planParts(data.length, MIN_PART_SIZE_BYTES);
+    const uploadId = await s3.createMultipartUpload(k, { contentType: 'application/pdf' });
+    for (let n = 1; n <= plan.partCount; n += 1) {
+      const { start, end } = partRange(plan, n);
+      expect(await put(await s3.presignUploadPart(k, uploadId, n, end - start, 600), data.subarray(start, end))).toBe(200);
+    }
+    await s3.completeMultipartUpload(k, uploadId, await s3.listUploadedParts(k, uploadId));
+
+    const found = await s3.getObject(k);
+    expect(found?.sizeBytes).toBe(data.length);
+    expect(found?.etag).toMatch(/^".+"$/);
+    expect(Buffer.from(await new Response(found!.body).arrayBuffer()).equals(data)).toBe(true);
+    expect(await s3.getObject(`test/${randomUUID()}.pdf`)).toBeNull();
+    await s3.deleteObject(k);
+  });
+
   it('URL تکه بدنه‌ای با اندازهٔ دیگر را نمی‌پذیرد', async () => {
     const k = key();
     const uploadId = await s3.createMultipartUpload(k, { contentType: 'application/pdf' });

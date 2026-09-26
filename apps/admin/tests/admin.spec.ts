@@ -1,10 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
-import { join } from 'node:path';
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
-import { base32Decode, hotp, totpStep } from '../lib/server/totp';
+import { alertOf, at, BASE, codeFor, enroll, GATE, layoutProblems, login, newContext, serverInvite, watch, WRONG } from './helpers';
 
 /**
  * پنل ادمین، سرتاسری (برش ۴٫۱؛ طرح `docs/ui/mockups/admin.html`، ADR-037 و ADR-038): دروازهٔ مسیر محرمانه،
@@ -21,102 +19,13 @@ import { base32Decode, hotp, totpStep } from '../lib/server/totp';
  * دوباره اجرا شدن روی همان پایگاه داده هم درست است.
  */
 
-const BASE = process.env.E2E_ADMIN_BASE_URL;
-const GATE = process.env.ADMIN_BASE_PATH?.trim();
-
 test.skip(!BASE || !GATE || !process.env.DATABASE_URL, 'بدون E2E_ADMIN_BASE_URL، ADMIN_BASE_PATH و DATABASE_URL — پنل و پایگاه داده لازم است');
 test.use({ baseURL: BASE });
 
-const at = (path = '') => `${GATE}${path}`;
 const RUN = randomInt(1000, 9999);
-const PASSWORD = 'یک جملهٔ کوتاه و امن';
 
 /** عددهای تصمیم (ADR-037)، صریح. */
 const MAX_FAILURES = 5;
-
-/** دستور سرور، همان که `infra/admin-invite.sh` درون کانتینر می‌زند. */
-function serverInvite(username: string, ...args: string[]): string {
-  const out = execFileSync(process.execPath, [join(process.cwd(), 'dist', 'cli.mjs'), 'invite', username, ...args], {
-    env: process.env,
-    encoding: 'utf8',
-  });
-  const link = /https?:\/\/\S+\/invite\/[A-Za-z0-9_-]{43}/.exec(out)?.[0];
-  if (!link) throw new Error(`پیوندی در خروجی دستور نیست:\n${out}`);
-  return link;
-}
-
-/**
- * کد تازهٔ برنامهٔ تأیید، مثل گوشی. هر کد یک بار (سرور گام را مصرف می‌کند)، پس گام جاری یا بعدی که هنوز
- * به کار نرفته؛ اگر هر دو رفته‌اند، تا گام بعد صبر.
- */
-const usedSteps = new Map<string, number>();
-async function codeFor(secret: string): Promise<string> {
-  const key = base32Decode(secret);
-  for (;;) {
-    const now = totpStep(new Date());
-    const last = usedSteps.get(secret) ?? -1;
-    const step = [now, now + 1].find((s) => s > last);
-    if (step !== undefined) {
-      usedSteps.set(secret, step);
-      return hotp(key, step);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-}
-
-/** هر مرورگر IP خودش را دارد، تا سقف ۳۰ تلاش ورود در ساعت هر IP بین تست‌ها و اجراها پر نشود. */
-async function newContext(browser: Browser, viewport = { width: 1280, height: 800 }): Promise<BrowserContext> {
-  return browser.newContext({
-    baseURL: BASE,
-    viewport,
-    extraHTTPHeaders: { 'x-real-ip': `10.${randomInt(256)}.${randomInt(256)}.${randomInt(1, 255)}` },
-  });
-}
-
-/** نقض CSP، خطای صفحه و هر درخواست بیرون از خود پنل. */
-function watch(page: Page) {
-  const problems: string[] = [];
-  const origin = new URL(BASE!).origin;
-  page.on('console', (message) => {
-    if (/Content Security Policy|Refused to (load|execute|apply)/i.test(message.text())) problems.push(message.text());
-  });
-  page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`));
-  page.on('request', (request) => {
-    const url = new URL(request.url());
-    if (url.protocol !== 'data:' && url.origin !== origin) problems.push(`بیرونی: ${request.url()}`);
-  });
-  return problems;
-}
-
-/** ثبت با پیوند: کلید از صفحه، رمز، و کد؛ برمی‌گرداند کلید برنامهٔ تأیید را. */
-async function enroll(page: Page, link: string): Promise<string> {
-  await page.goto(link);
-  await expect(page.getByRole('img', { name: 'کد QR برنامهٔ تأیید' })).toBeVisible();
-  const secret = (await page.locator('.ad-qr__key').innerText()).replace(/\s/g, '');
-  expect(secret).toMatch(/^[A-Z2-7]{32}$/);
-  await page.getByLabel('رمز', { exact: true }).fill(PASSWORD);
-  await page.getByLabel('تکرار رمز').fill(PASSWORD);
-  await page.getByLabel('کدی که برنامه نشان می‌دهد').fill(await codeFor(secret));
-  await page.getByRole('button', { name: 'فعال کن و وارد شو' }).click();
-  await expect(page.getByRole('heading', { name: 'پیشخوان' })).toBeVisible();
-  return secret;
-}
-
-/** پیام خطا یا هشدار صفحه؛ اعلان‌گر مسیر نکست هم `role=alert` دارد ولی بیرون `main` است. */
-const alertOf = (page: Page) => page.locator('main').getByRole('alert');
-
-/**
- * ورود. تلاشی که رمزش نادرست است یا حسابش بسته، کد را نمی‌سنجد و گامی مصرف نمی‌کند؛ پس کد ساختگی
- * می‌گیرد (`WRONG`) تا کدهای درست برای تلاش‌های بعدی بمانند.
- */
-const WRONG = { password: 'رمز نادرست است اینجا', code: '000000' };
-async function login(page: Page, username: string, secret: string, over: { password?: string; code?: string } = {}) {
-  await page.goto(at('/login'));
-  await page.getByLabel('نام کاربری').fill(username);
-  await page.getByLabel('رمز').fill(over.password ?? PASSWORD);
-  await page.getByLabel('کد برنامهٔ تأیید').fill(over.code ?? (await codeFor(secret)));
-  await page.getByRole('button', { name: 'ورود' }).click();
-}
 
 test.describe.serial('پنل ادمین', () => {
   const owner = `sara${RUN}`;
@@ -216,7 +125,7 @@ test.describe.serial('پنل ادمین', () => {
     await context.close();
   });
 
-  test('افزودن متصدی با کد تازه؛ متصدی فقط پیشخوان را دارد', async ({ browser }) => {
+  test('افزودن متصدی با کد تازه؛ متصدی پیشخوان و سفارش‌ها را دارد، نه بخش‌های مالک', async ({ browser }) => {
     await ownerPage.goto(at('/admins'));
     await ownerPage.getByRole('link', { name: 'افزودن متصدی' }).click();
     await ownerPage.getByLabel('نام', { exact: true }).fill('علی محمدی');
@@ -234,7 +143,7 @@ test.describe.serial('پنل ادمین', () => {
     await expect(page.getByText('سارا رضایی تو را متصدی پنل جزوه‌یار کرده است.')).toBeVisible();
     await enroll(page, link);
     await expect(page.locator('.ad-user')).toContainText('علی محمدی · متصدی');
-    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان']);
+    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها']);
     for (const path of ['/admins', '/events', '/admins/new']) {
       await page.goto(at(path));
       await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
@@ -311,22 +220,10 @@ test.describe.serial('پنل ادمین', () => {
       const problems = watch(page);
       for (const path of [at(), at('/admins'), at('/admins/new'), at('/events'), spare]) {
         await page.goto(path);
-        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        const { overflow, small, blank } = await layoutProblems(page);
         expect(overflow, `${width} ${path}`).toBeLessThanOrEqual(0);
-        const small = await page.evaluate(() =>
-          [...document.querySelectorAll('main a, main button, main input:not([type=hidden]), nav a, nav summary, header button')]
-            .map((el) => ({ el, box: el.getBoundingClientRect() }))
-            .filter(({ el, box }) => box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden')
-            .filter(({ el, box }) => box.height < 44 && !el.closest('.jy-tile') && el.getAttribute('type') !== 'radio')
-            .map(({ el, box }) => `${el.tagName} «${(el.textContent ?? '').trim().slice(0, 20)}» ${Math.round(box.height)}`),
-        );
         expect(small, `${width} ${path}`).toEqual([]);
         // هر آیکون شکل دارد: Tailwind فقط آیکونی را می‌سازد که نامش عیناً در کد آمده، و بی آن آیکون بی‌صدا شفاف است.
-        const blank = await page.evaluate(() =>
-          [...document.querySelectorAll('.jy-icon')]
-            .filter((el) => !getComputedStyle(el).getPropertyValue('mask-image').startsWith('url('))
-            .map((el) => el.className),
-        );
         expect(blank, `${width} ${path}`).toEqual([]);
       }
       const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });

@@ -24,6 +24,12 @@ export type AdminErrorCode =
   | 'not_found'
   | 'self'
   | 'last_owner'
+  /** سفارش‌ها (۴٫۲). */
+  | 'order_not_found'
+  | 'pdf_not_ready'
+  | 'pdf_not_failed'
+  | 'files_gone'
+  | 'storage_unavailable'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

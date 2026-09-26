@@ -86,6 +86,10 @@ export interface AdminAuthDeps {
   newId?: () => string;
 }
 
+/** IP فقط HMAC با `SESSION_SECRET`، همان HMAC مسیر خرید، تا یک IP در دو جدول یکی دیده شود. */
+export const ipHashOf = (secret: string, ip: string) =>
+  createHmac('sha256', secret).update(`ip\0${ip || 'unknown'}`).digest('hex');
+
 /** هش توکن کوکی و پیوند. توکن ۲۵۶ بیت تصادفی است، پس SHA-256 بی‌کلید کافی است (مثل `jy_auth`). */
 export const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -135,7 +139,7 @@ export function createAdminAuth(deps: AdminAuthDeps) {
   const newId = deps.newId ?? randomUUID;
   const { store } = deps;
 
-  const ipHash = (ip: string) => createHmac('sha256', deps.secret).update(`ip\0${ip || 'unknown'}`).digest('hex');
+  const ipHash = (ip: string) => ipHashOf(deps.secret, ip);
 
   /** رمز برنامهٔ تأیید؛ null یعنی باز نشد (`SECRETS_KEY` عوض شده) و در لاگ آمده است. */
   function open(sealed: string, context: string): Buffer | null {

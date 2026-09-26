@@ -22,6 +22,7 @@ import {
   StorageError,
   type LifecycleRule,
   type ObjectInfo,
+  type ObjectStream,
   type StorageDriver,
   type StorageErrorCode,
   type UploadedPart,
@@ -232,6 +233,40 @@ export class S3Driver implements StorageDriver {
       if (error instanceof StorageError && error.status === 404) return null;
       throw error;
     }
+  }
+
+  async getObject(key: string): Promise<ObjectStream | null> {
+    const url = this.url(this.endpoint, key);
+    const headers = signRequest({ method: 'GET', url, payloadHash: sha256Hex(''), credentials: this.credentials });
+    // سقف فقط تا سرآیندها؛ `AbortSignal.timeout` خود بدنه را هم وسط راه می‌برید.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('timeout')), this.config.timeoutMs ?? 30_000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { method: 'GET', headers, signal: controller.signal });
+    } catch (error) {
+      throw new StorageError('unavailable', `استوریج در دسترس نیست (GET ${url.pathname}): ${(error as Error).message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (response.status === 404) {
+      await response.body?.cancel();
+      return null;
+    }
+    if (!response.ok || !response.body) {
+      const parsed = parseS3Error(await response.text());
+      throw new StorageError(
+        classify(parsed?.code, response.status),
+        `GET ${url.pathname} → ${response.status} ${parsed?.code ?? ''} ${parsed?.message ?? ''}`.trim(),
+        parsed?.code,
+        response.status,
+      );
+    }
+    return {
+      body: response.body,
+      sizeBytes: Number(response.headers.get('content-length') ?? 0),
+      etag: response.headers.get('etag') ?? '',
+    };
   }
 
   async deleteObject(key: string) {

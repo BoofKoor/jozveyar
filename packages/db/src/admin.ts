@@ -200,7 +200,8 @@ export interface AdminStore {
   listEvents(query: { limit: number; beforeId?: number; actionPrefix?: string }): Promise<AdminEventView[]>;
 }
 
-const eventRow = (event: AdminEventInput) => ({
+/** ردیف `admin_events` از یک رویداد؛ سفارش‌های پنل (`panel.ts`) هم رویدادشان را با همین می‌نویسند. */
+export const adminEventRow = (event: AdminEventInput) => ({
   adminUserId: event.adminUserId,
   action: event.action,
   targetType: event.targetType ?? null,
@@ -328,7 +329,7 @@ export function createAdminStore({ db }: Database): AdminStore {
           .update(adminLoginAttempts)
           .set({ ok: true, adminUserId: input.userId })
           .where(eq(adminLoginAttempts.id, input.attemptId));
-        await tx.insert(adminEvents).values(eventRow(input.event));
+        await tx.insert(adminEvents).values(adminEventRow(input.event));
       });
     },
 
@@ -428,7 +429,7 @@ export function createAdminStore({ db }: Database): AdminStore {
           createdBy: input.createdBy,
         });
         await tx.insert(adminEvents).values(
-          eventRow({ ...input.event, targetId: userId, at: input.at, detail: { ...(input.event.detail as object), reset: Boolean(existing) } }),
+          adminEventRow({ ...input.event, targetId: userId, at: input.at, detail: { ...(input.event.detail as object), reset: Boolean(existing) } }),
         );
         return { ok: true, userId, reset: Boolean(existing) } as const;
       });
@@ -479,8 +480,8 @@ export function createAdminStore({ db }: Database): AdminStore {
           lastSeenAt: input.at,
         });
         await tx.insert(adminEvents).values([
-          eventRow({ adminUserId: input.userId, action: 'admins.enroll', targetType: 'admin', targetId: input.userId, ipHash: input.ipHash, at: input.at }),
-          eventRow({ adminUserId: input.userId, action: 'auth.login', ipHash: input.ipHash, at: input.at }),
+          adminEventRow({ adminUserId: input.userId, action: 'admins.enroll', targetType: 'admin', targetId: input.userId, ipHash: input.ipHash, at: input.at }),
+          adminEventRow({ adminUserId: input.userId, action: 'auth.login', ipHash: input.ipHash, at: input.at }),
         ]);
         return true;
       });
@@ -516,7 +517,7 @@ export function createAdminStore({ db }: Database): AdminStore {
           .set({ revokedAt: at })
           .where(and(eq(adminSessions.adminUserId, userId), isNull(adminSessions.revokedAt)));
         await revokeOpenInvites(tx, userId, at);
-        await tx.insert(adminEvents).values(eventRow(event));
+        await tx.insert(adminEvents).values(adminEventRow(event));
         return 'ok' as const;
       });
     },
@@ -539,13 +540,13 @@ export function createAdminStore({ db }: Database): AdminStore {
               isNull(adminUsers.disabledAt),
             ),
           );
-        await tx.insert(adminEvents).values(eventRow(event));
+        await tx.insert(adminEvents).values(adminEventRow(event));
         return n;
       });
     },
 
     async logEvent(event) {
-      await db.insert(adminEvents).values(eventRow(event));
+      await db.insert(adminEvents).values(adminEventRow(event));
     },
 
     async listEvents(query) {

@@ -17,6 +17,7 @@ import {
   postHandoffDue,
   recipientSurname,
   rialsToTomans,
+  tehranDayStart,
   toLatinDigits,
   tomansToRials,
   unifyLetters,
@@ -344,5 +345,21 @@ describe('روز کاری و مهلت تحویل به پست (ADR-013)', () => {
   it('روز کاری صفر، منفی یا کسری پذیرفته نمی‌شود', () => {
     expect(() => postHandoffDue(new Date(), 0, none)).toThrow(RangeError);
     expect(() => postHandoffDue(new Date(), 1.5, none)).toThrow(RangeError);
+  });
+
+  it('آغاز روز تهران: نیمه‌شب تهران، نه UTC؛ و چند روز بعدش', () => {
+    const now = new Date('2026-10-05T07:50:00Z'); // دوشنبه 13 مهر، 11:20 تهران
+    expect(tehranDayStart(now).toISOString()).toBe('2026-10-04T20:30:00.000Z');
+    expect(tehranDayStart(now, 1).toISOString()).toBe('2026-10-05T20:30:00.000Z');
+    expect(tehranDayStart(now, 2).toISOString()).toBe('2026-10-06T20:30:00.000Z');
+    expect(tehranDayStart(now, -1).toISOString()).toBe('2026-10-03T20:30:00.000Z');
+    // خود نیمه‌شب روز تازه است؛ یک میلی‌ثانیه پیشش هنوز دیروز.
+    expect(tehranDayStart(tehran('2026-10-06 00:00')).toISOString()).toBe('2026-10-05T20:30:00.000Z');
+    expect(tehranDayStart(new Date(tehran('2026-10-06 00:00').getTime() - 1)).toISOString()).toBe('2026-10-04T20:30:00.000Z');
+    // ۰۰:۱۰ سه‌شنبه به وقت تهران هنوز دوشنبه است به وقت UTC.
+    expect(tehranDayStart(tehran('2026-10-06 00:10')).toISOString()).toBe('2026-10-05T20:30:00.000Z');
+    // مهلتی که `postHandoffDue` می‌دهد خودش آغاز یک روز تهران است.
+    const due = postHandoffDue(tehran('2026-09-26 10:00'), 2, none);
+    expect(tehranDayStart(due)).toEqual(due);
   });
 });

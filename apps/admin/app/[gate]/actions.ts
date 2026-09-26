@@ -133,3 +133,17 @@ export async function revokeInviteAction(form: FormData): Promise<void> {
   await auth.revokeInvite(session, { userId: field(form, 'userId') }, await requestIp());
   redirect(panelPath(gate, '/admins'));
 }
+
+/**
+ * «دوباره بساز» PDF جزوه (۴٫۲): برگشت به همان سفارش، که حالا «در حال ساختن» است؛ شکست با پیامش (`?e=`). کار
+ * حساس نیست (چیزی را برنمی‌گرداند و پولی جابه‌جا نمی‌کند)، پس کد تازه نمی‌خواهد؛ مجوز و رویدادش در سرویس.
+ */
+export async function rebuildPdfAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const result = await orders.rebuild(session, number, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
+  redirect(result.ok ? back : `${back}?e=${result.error}`);
+}
