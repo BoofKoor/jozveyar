@@ -108,10 +108,19 @@ const checkoutDraft = (): CheckoutDraft | null => (checkoutModule ? checkoutModu
 /** قدمی که جزوهٔ برگشته با آن سوار می‌شود؛ `Restore` می‌گذارد و `OrderDesk` یک بار برمی‌دارد. */
 let restoredMark: HistoryMark | null = null;
 
-/** برگشت بعد از رفرش (`Restore.tsx`، تکهٔ خودش) پیش از سوار شدن رابط: قدم، و مسیر خریدی که برگشت. */
-export function primeRestore(mark: HistoryMark | null, checkout: CheckoutDraft | null) {
+/**
+ * مسیر خریدی که بعد از رفرش برگشت (`Restore.tsx`، تکهٔ خودش): با آمدن تکه‌اش در حالتش می‌نشیند (`loadCheckout`)،
+ * یا همین حالا اگر آمده است. پیش از قدم (`primeStep`)، چون قدم خرید همان تکه را می‌آورد و قیمت سرور را با همین جا
+ * می‌گیرد.
+ */
+export function primeCheckout(checkout: CheckoutDraft | null) {
+  if (checkout && checkoutModule) checkoutModule.restoreCheckout(checkout);
+  else pendingCheckout = checkout;
+}
+
+/** قدمی که جزوهٔ برگشته با آن سوار می‌شود (`Restore.tsx`)، پیش از سوار شدن رابط. */
+export function primeStep(mark: HistoryMark | null) {
   restoredMark = mark;
-  pendingCheckout = checkout;
 }
 
 /**

@@ -7,12 +7,21 @@ import { RESTORING_ATTR } from '../lib/draftKey';
 import type { FollowDocument, RestoredSection } from '../lib/jozveController';
 import type { OrderConfig } from '../lib/orderConfig';
 import { documentStatus, readDraft, restoredSections } from '../lib/restore';
-import { fetchStatus, loadCheckout, markOf, primeRestore, restoredOrder, type HistoryMark, type RestoreProps } from './OrderDesk';
+import {
+  fetchStatus,
+  loadCheckout,
+  markOf,
+  primeCheckout,
+  primeStep,
+  restoredOrder,
+  type HistoryMark,
+  type RestoreProps,
+} from './OrderDesk';
 
 /*
  * برگشت بعد از رفرش (برش ۳د، ADR-036): تکهٔ جدای JS، فقط وقتی پیش‌نویسی در این زبانه هست (اسکریپت درون HTML
  * `data-restoring` را گذاشته است)؛ نه با رابط پس از فایل، تا راه اولین قیمت سبک بماند. رابط پس از فایل همین را با
- * `Restore` خودش بار می‌کند و وضعش را نگه می‌دارد (`primeRestore`).
+ * `Restore` خودش بار می‌کند و وضعش را نگه می‌دارد (`primeCheckout`، `primeStep`).
  */
 
 /**
@@ -55,7 +64,9 @@ async function restoreDraft(): Promise<Restored> {
     return 'lost';
   }
   const { config, items } = restoredOrder(sections, draft.config);
-  primeRestore(await restoredStep(items), draft.checkout);
+  // مسیر خرید پیش از قدم: قدم خرید تکهٔ مسیر خرید را می‌آورد و قیمت سرور را با همان جای برگشته می‌گیرد.
+  primeCheckout(draft.checkout);
+  primeStep(await restoredStep(items));
   return { sections, config };
 }
 
