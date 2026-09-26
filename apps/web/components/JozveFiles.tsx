@@ -5,7 +5,7 @@ import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { formatNumber } from '@jozveyar/text';
 import type { JozveView, SectionView } from '../lib/jozveView';
 import { AddFiles } from './AddFiles';
-import { CardHead, DoneBadge, FileInfo, FileName, Note, Warnings, uploadLine } from './AnalysisCard';
+import { CardHead, DoneBadge, FileInfo, FileName, Names, Note, WaitingNote, Warnings, uploadLine } from './AnalysisCard';
 import { ACCEPT } from './DropZone';
 import { Inline } from './Inline';
 
@@ -41,6 +41,13 @@ export function JozveFiles({ view, overflow, onAdd, onMove, onRemove, onReplace,
     <section data-testid="jozve" className="jy-card" aria-labelledby="jozve-title">
       <CardHead files={count} pages={view.pageCount} />
       <p className="mt-1 text-small text-muted">به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند.</p>
+
+      {/* جزوهٔ برگشته بعد از رفرش (۳د): چرا و چه کنی، یک بار برای همه؛ هر ردیف فقط دکمهٔ خودش را دارد */}
+      {view.waiting.length > 0 ? (
+        <div className="mt-3">
+          <WaitingNote names={view.waiting.map((s) => s.name)} />
+        </div>
+      ) : null}
 
       <ol className="mt-3">
         {view.sections.map((section, index) => (
@@ -110,9 +117,9 @@ function SectionRow({
   onRemove: (key: string) => void;
   onReplace: (key: string) => void;
 }) {
-  const { key, name, blocked, summary, state } = section;
+  const { key, name, blocked, waiting, summary, state } = section;
   const program = section.kind === 'slides' ? 'پاورپوینت' : 'Word';
-  const upload = blocked ? null : uploadLine(section.upload);
+  const upload = blocked || waiting ? null : uploadLine(section.upload);
   const now = sectionState(section);
 
   return (
@@ -167,6 +174,14 @@ function SectionRow({
           </Note>
         ) : null}
 
+        {waiting ? (
+          <div>
+            <button type="button" onClick={() => onReplace(key)} className="jy-btn jy-btn--secondary" data-testid="section-waiting">
+              همان فایل را انتخاب کن
+            </button>
+          </div>
+        ) : null}
+
         {!blocked && section.estimate && !section.serverReady && section.uploadRefused ? (
           <Note tone="warning" testId="section-unconfirmed">
             الان نمی‌توانیم این فایل را بگیریم، پس عددش تقریبی می‌ماند. چند دقیقهٔ دیگر با «جایگزین کن» دوباره
@@ -191,7 +206,7 @@ function SectionRow({
           </Note>
         ) : null}
 
-        {blocked ? null : (
+        {blocked || waiting ? null : (
           <Warnings
             summary={summary}
             program={program}
@@ -218,6 +233,7 @@ function SectionRow({
 function sectionState(section: SectionView): ReactNode {
   const { state, pageCount } = section;
   if (section.blocked) return 'در قیمت نیست';
+  if (section.waiting) return 'منتظر همان فایل';
   if (section.serverReady) return null;
   if (section.serverPath) {
     if (section.estimate) {
@@ -271,34 +287,5 @@ function RowButton({
     >
       {children}
     </button>
-  );
-}
-
-/** «a.pdf»، «b.pdf» و 3 فایل دیگر — نام لاتین جدا، تا جهت متن فارسی به هم نریزد. */
-export function Names({ names, max = 3 }: { names: readonly string[]; max?: number }) {
-  const shown = names.slice(0, max);
-  const rest = names.length - shown.length;
-  // گیومه بیرون از نام: جهتش مال متن فارسی است، و نام لاتین داخل bdi جدا می‌ماند.
-  const parts: ReactNode[] = shown.map((name) => (
-    <span key={name} className="font-semibold text-ink">
-      «<bdi>{name}</bdi>»
-    </span>
-  ));
-  if (rest > 0) {
-    parts.push(
-      <>
-        <span className="num">{formatNumber(rest)}</span> فایل دیگر
-      </>,
-    );
-  }
-  return (
-    <>
-      {parts.map((part, i) => (
-        <span key={i}>
-          {i === 0 ? null : i === parts.length - 1 ? ' و ' : '، '}
-          {part}
-        </span>
-      ))}
-    </>
   );
 }

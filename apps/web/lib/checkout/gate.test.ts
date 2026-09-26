@@ -19,7 +19,7 @@ function section(key: string, over: Partial<SectionView> = {}): SectionView {
     ...over,
   } as SectionView;
 }
-const view = (...included: SectionView[]) => ({ included }) as unknown as JozveView;
+const view = (...included: SectionView[]) => ({ included, pending: [], blocked: [], waiting: [] }) as unknown as JozveView;
 
 describe('orderGate', () => {
   it('همه روی سرور و شمرده: یک قلم با سندها به همان ترتیب جزوه و انتخاب‌های چاپ', () => {
@@ -35,6 +35,13 @@ describe('orderGate', () => {
     expect(orderGate(view(section('a'), section('b', { serverReady: false })), config)).toEqual({ kind: 'sending' });
     expect(orderGate(view(section('a', { documentId: null, serverReady: false })), config)).toEqual({ kind: 'sending' });
     expect(orderGate(view(), config)).toEqual({ kind: 'sending' });
+  });
+
+  it('فایلی که در قیمت نیست هم جزو جزوه است: هنوز شمرده‌نشده، خوانده‌نشده، یا منتظر انتخاب دوباره (۳د)', () => {
+    const ready = view(section('a'));
+    expect(orderGate({ ...ready, pending: [section('b', { serverReady: false, documentId: null })] }, config)).toEqual({ kind: 'sending' });
+    expect(orderGate({ ...ready, blocked: [section('b', { serverReady: false })] }, config)).toEqual({ kind: 'blocked' });
+    expect(orderGate({ ...ready, waiting: [section('b', { serverReady: false, documentId: null })] }, config)).toEqual({ kind: 'waiting' });
   });
 
   it('فایلی که نرسید یا سرور نخواندش: همان فایل‌ها، برای پیام و راه جلو', () => {

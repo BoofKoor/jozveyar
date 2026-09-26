@@ -68,6 +68,10 @@ test('قطع شبکه وسط آپلود، و ادامه از همان‌جا', a
   expect(new Set(puts)).toEqual(new Set(['1', '2', '3']));
 });
 
+/**
+ * از ۳د (ADR-036) جزوه بعد از رفرش برمی‌گردد: همان فایل سر جای خودش منتظر است («همان فایل را دوباره انتخاب کن»)،
+ * نه کارت بارگذاری. انتخاب دوبارهٔ همان فایل همان سند را ادامه می‌دهد.
+ */
 test('رفرش وسط آپلود: همان فایل فقط تکه‌های باقی‌مانده را می‌فرستد', async ({ page }) => {
   // فایل واقعی روی دیسک، نه بافر: بافر هر بار تاریخ تغییر تازه می‌گیرد و
   // «همان فایل» شناخته نمی‌شود. کاربر واقعی همان فایل دیسکش را دوباره می‌اندازد.
@@ -86,12 +90,13 @@ test('رفرش وسط آپلود: همان فایل فقط تکه‌های با�
 
   await page.unroute(/partNumber=[23]&/);
   await page.reload();
+  await expect(page.getByTestId('file-waiting')).toContainText('jozve-big.pdf');
 
   const putsAfter: string[] = [];
   page.on('response', (r) => {
     if (r.request().method() === 'PUT' && r.ok()) putsAfter.push(partOf(r.url()));
   });
-  await page.setInputFiles('#jozve-file', file);
+  await page.setInputFiles('#jozve-replace', file);
   await expect(status(page)).toContainText('فایل رسید', { timeout: 60_000 });
   expect(putsAfter.sort()).toEqual(['2', '3']);
 });

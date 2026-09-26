@@ -1,20 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
 import { quote } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import type { ApiFailure } from '../lib/checkout/api';
 import { orderGate, retryable } from '../lib/checkout/gate';
 import { isStep, type Step } from '../lib/checkout/steps';
+import type { CheckoutDraft } from '../lib/checkout/store';
+import { draftOf, tabStorage, writeDraft } from '../lib/draft';
+import type { RestoredSection } from '../lib/jozveController';
+import { RESTORING_ATTR } from '../lib/draftKey';
 import { colorHint } from '../lib/fileCard';
-import { jozveSpec, jozveView } from '../lib/jozveView';
+import { jozveSpec, jozveView, matchAwaited } from '../lib/jozveView';
 import type { OrderConfig } from '../lib/orderConfig';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import type { JozveHandle } from '../lib/useJozve';
-import { Note, SingleFileCard } from './AnalysisCard';
+import { Names, Note, SingleFileCard } from './AnalysisCard';
 import { ConfigPanel } from './ConfigPanel';
-import { JozveFiles, Names } from './JozveFiles';
+import { JozveFiles } from './JozveFiles';
 import { OrderSummary, PriceDock, type DeskAction } from './OrderSummary';
 import { FlowNav } from './checkout/parts';
 
@@ -32,9 +36,19 @@ type CheckoutModule = typeof import('./checkout/Checkout');
 let checkoutModule: CheckoutModule | null = null;
 let checkoutLoading: Promise<CheckoutModule> | null = null;
 
+/**
+ * مسیر خریدی که بعد از رفرش برگشت ولی تکه‌اش هنوز نیامده (۳د): جزوه در «جزوه و قیمت» برگشت، و «ادامه» همان
+ * جا و نشانی و کلید «پرداخت» را می‌آورد. با آمدن تکه به حالت مسیر خرید می‌نشیند.
+ */
+let pendingCheckout: CheckoutDraft | null = null;
+
 function loadCheckout(): Promise<CheckoutModule> {
   checkoutLoading ??= import('./checkout/Checkout').then(
-    (module) => (checkoutModule = module),
+    (module) => {
+      if (pendingCheckout) module.restoreCheckout(pendingCheckout);
+      pendingCheckout = null;
+      return (checkoutModule = module);
+    },
     (error: unknown) => {
       checkoutLoading = null;
       throw error;
@@ -85,6 +99,73 @@ const markOf = (state: unknown): HistoryMark | null => {
   const mark = (state as { jy?: HistoryMark } | null)?.jy;
   return mark && isStep(mark.step) && typeof mark.desk === 'string' ? mark : null;
 };
+
+/* ─────────────── برگشت بعد از رفرش (۳د، ADR-036؛ پیش‌نویس در lib/draft.ts) ─────────────── */
+
+/** پیش‌نویس مسیر خرید همین حالا: از حالت خودش، یا همانی که برگشت و هنوز تکه‌اش نیامده. */
+const checkoutDraft = (): CheckoutDraft | null => (checkoutModule ? checkoutModule.checkoutStore().draft() : pendingCheckout);
+
+/** قدمی که جزوهٔ برگشته با آن سوار می‌شود؛ `Restore` می‌گذارد و `OrderDesk` یک بار برمی‌دارد. */
+let restoredMark: HistoryMark | null = null;
+
+/** برگشت بعد از رفرش (`Restore.tsx`، تکهٔ خودش) پیش از سوار شدن رابط: قدم، و مسیر خریدی که برگشت. */
+export function primeRestore(mark: HistoryMark | null, checkout: CheckoutDraft | null) {
+  restoredMark = mark;
+  pendingCheckout = checkout;
+}
+
+/**
+ * برای برگشت بعد از رفرش: تنظیمی که تعرفهٔ امروز دارد (تعرفهٔ تازه یعنی پیش‌فرض)، و قلم جزوهٔ برگشته اگر همه روی
+ * سرور و شمرده‌اند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین تکه بمانند.
+ */
+export function restoredOrder(sections: readonly RestoredSection[], config: OrderConfig | null) {
+  const known = config && SEED_PRICE_LIST.bindingTypes[config.bindingTypeId] && SEED_PRICE_LIST.paperTypes[config.paperTypeId] ? config : null;
+  const gate = orderGate(jozveView(sections.map((section, i) => ({ ...section, key: `r${i}` }))), known ?? INITIAL_CONFIG);
+  return { config: known, items: gate.kind === 'ready' ? gate.items : null };
+}
+
+export { fetchStatus, loadCheckout, markOf, type HistoryMark };
+
+export interface RestoreProps {
+  state: 'restoring' | 'lost';
+  jozve: JozveHandle;
+  onConfig: (next: OrderConfig) => void;
+  onDone: (state: 'lost' | null) => void;
+}
+
+/**
+ * تکهٔ برگرداندن (`Restore.tsx`) فقط وقتی پیش‌نویسی هست، و از همان لحظه‌ای که این تکه بار شد در راه است؛ نه جزو این
+ * تکه، تا راه اولین قیمت سنگین‌تر نشود.
+ */
+type RestoreModule = typeof import('./Restore');
+let restoreModule: Promise<RestoreModule> | null =
+  typeof document !== 'undefined' && document.documentElement.hasAttribute(RESTORING_ATTR) ? import('./Restore') : null;
+
+/**
+ * جزوه‌ای که بعد از رفرش برمی‌گردد (۳د): پوستهٔ فلوی سفارش این را بالای کارت بارگذاری سوار می‌کند، وقتی اسکریپت
+ * درون HTML پیش‌نویس همین زبانه را دیده است. تکه‌اش نیامد (شبکه): صفحهٔ معمول؛ پیش‌نویس برای بار بعد می‌ماند.
+ */
+export function Restore(props: RestoreProps) {
+  const [module, setModule] = useState<RestoreModule | null>(null);
+  useEffect(() => {
+    let live = true;
+    restoreModule ??= import('./Restore');
+    restoreModule.then(
+      (loaded) => live && setModule(loaded),
+      () => {
+        restoreModule = null;
+        if (!live) return;
+        document.documentElement.removeAttribute(RESTORING_ATTR);
+        props.onDone(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- یک بار
+  }, []);
+  return module ? <module.Restore {...props} /> : null;
+}
 
 interface Props {
   jozve: JozveHandle;
@@ -143,13 +224,20 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     };
   }, [settled, status]);
 
-  /* ── قدم‌ها و تاریخچهٔ مرورگر ── */
-  const [mount] = useState(() => Math.random().toString(36).slice(2));
-  const [step, setStep] = useState<Step>('desk');
-  const moved = useRef(false);
+  /*
+   * ── قدم‌ها و تاریخچهٔ مرورگر ──
+   * هر بار سوار شدن از «جزوه و قیمت» شروع می‌شود و خانه‌های تاریخچهٔ بار قبل کنار می‌روند؛ جز جزوه‌ای که بعد از
+   * رفرش برگشت (۳د): همان قدم، و همان نشان بار قبل، تا «برگشت» و «جلو»ی گوشی خانه‌های پیش از رفرش را هم بشناسند.
+   */
+  const [restored] = useState(() => restoredMark);
+  const [mount] = useState(() => restored?.desk ?? Math.random().toString(36).slice(2));
+  const [step, setStep] = useState<Step>(restored?.step ?? 'desk');
+  const moved = useRef(restored !== null);
+  // جزوهٔ برگشته روی صفحه آمد: حالت «برگرداندن» در همان رسم می‌رود، پیش از نقاشی؛ نه لحظه‌ای صفحهٔ اول، نه دو کارت.
+  useLayoutEffect(() => document.documentElement.removeAttribute(RESTORING_ATTR), []);
   useEffect(() => {
-    // این بار سوار شدن از «جزوه و قیمت» شروع می‌شود؛ خانه‌های تاریخچهٔ بار قبل کنار می‌روند.
-    history.replaceState({ ...history.state, jy: { step: 'desk', desk: mount } satisfies HistoryMark }, '');
+    restoredMark = null;
+    history.replaceState({ ...history.state, jy: { step: restored?.step ?? 'desk', desk: mount } satisfies HistoryMark }, '');
     const onPop = (event: PopStateEvent) => {
       const mark = markOf(event.state);
       moved.current = true;
@@ -157,7 +245,46 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [mount]);
+  }, [mount, restored]);
+
+  /*
+   * ── پیش‌نویس همین زبانه (۳د، ADR-036) ──
+   * وقتی صفحه پنهان می‌شود یا می‌رود (رفرش، رفتن به برنامهٔ پیامک، درگاه) و با هر قدم؛ هرگز در راه اولین قیمت.
+   */
+  const latest = useRef({ sections: jozve.sections, config });
+  useEffect(() => {
+    latest.current = { sections: jozve.sections, config };
+  });
+  const saveDraft = useCallback(() => {
+    writeDraft(tabStorage(), draftOf(latest.current.sections, latest.current.config, checkoutDraft()));
+  }, []);
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') saveDraft();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', saveDraft);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', saveDraft);
+    };
+  }, [saveDraft]);
+  /** «از اول» و «فایل دیگری بینداز»: جزوه و پیش‌نویسش با هم می‌روند. */
+  const reset = () => {
+    writeDraft(tabStorage(), null);
+    jozve.reset();
+  };
+  /**
+   * جزوه‌ای که بعد از رفرش برگشت (۳د): همان فایلی که بخشی منتظرش است سر جای خودش می‌نشیند و آپلودش از همان تکه
+   * ادامه می‌دهد (`matchAwaited`)؛ فایل دیگر جایگزینی است، یا فایل تازه ته جزوه.
+   */
+  const replace = (key: string, file: File) =>
+    jozve.replace(key, file, matchAwaited(jozve.sections, [file]).resumed[0]?.key === key);
+  const add = (files: File[]) => {
+    const { resumed, rest } = matchAwaited(jozve.sections, files);
+    for (const { key, file } of resumed) jozve.replace(key, file, true);
+    if (rest.length > 0) jozve.add(rest);
+  };
 
   const go = useCallback(
     (next: Step, { replace = false }: { replace?: boolean } = {}) => {
@@ -166,8 +293,9 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       else history.pushState(state, '');
       moved.current = true;
       setStep(next);
+      saveDraft();
     },
-    [mount],
+    [mount, saveDraft],
   );
 
   // هر قدم از بالای صفحه؛ برگشت به «جزوه و قیمت» فوکوس را به کارت «جزوهٔ تو» می‌آورد.
@@ -190,7 +318,9 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   }, [open, gate.kind]);
 
   const action: DeskAction =
-    view.provisional || status === null
+    gate.kind === 'waiting'
+      ? 'waiting'
+      : view.provisional || status === null
       ? 'checking'
       : blocked.length > 0
         ? 'blocked'
@@ -254,7 +384,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
         }}
         onRestart={() => {
           go('desk', { replace: true });
-          jozve.reset();
+          reset();
         }}
       />
     );
@@ -282,7 +412,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
                 onClick={() => {
                   for (const section of gate.sections.filter(retryable)) {
                     const original = jozve.sections.find((s) => s.key === section.key)?.file;
-                    if (original) jozve.replace(section.key, original);
+                    if (original instanceof File) jozve.replace(section.key, original);
                   }
                 }}
               >
@@ -303,7 +433,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
             <>
               فایل‌های این جزوه دیگر روی سرور نمی‌مانند. جزوه را دوباره بینداز تا با فایل تازه سفارش بدهی.
               <div className="mt-3">
-                <button type="button" className="jy-btn jy-btn--secondary" onClick={jozve.reset}>
+                <button type="button" className="jy-btn jy-btn--secondary" onClick={reset}>
                   دوباره بینداز
                 </button>
               </div>
@@ -324,16 +454,16 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
 
       <div className="home-desk">
         {view.sections.length === 1 ? (
-          <SingleFileCard section={view.sections[0]!} onAdd={jozve.add} onReset={jozve.reset} />
+          <SingleFileCard section={view.sections[0]!} onAdd={add} onReplace={replace} onReset={reset} />
         ) : (
           <JozveFiles
             view={view}
             overflow={jozve.overflow}
-            onAdd={jozve.add}
+            onAdd={add}
             onMove={jozve.move}
             onRemove={jozve.remove}
-            onReplace={jozve.replace}
-            onReset={jozve.reset}
+            onReplace={replace}
+            onReset={reset}
           />
         )}
         {breakdown ? (
@@ -364,6 +494,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
               provisional={view.provisional}
               pending={pending}
               blocked={blocked}
+              waiting={view.waiting.map((s) => s.name)}
               notes={notes}
               action={action}
               onContinue={onContinue}

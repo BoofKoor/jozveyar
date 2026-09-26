@@ -144,6 +144,53 @@
     margin-block-start: 10px;
   }
 
+  /*
+   * جزوه‌ای که بعد از رفرش برمی‌گردد (۳د، ADR-036): اسکریپت درون HTML (app/page.tsx) پیش از رسم `data-restoring`
+   * را روی ریشه می‌گذارد. صفحه همان لحظه حالت سفارش است (قاعده‌های پس از فایل، پایین، و globals.css)، و کارت
+   * بارگذاری، در ستون کارت «جزوهٔ تو»، فقط «در حال برگرداندن جزوه…» می‌گوید تا جزوه برسد (`OrderFlow`). بسته است:
+   * نه کلیک، نه فوکوس.
+   */
+  .home-restoring {
+    display: none;
+  }
+  [data-restoring] .jy-upload > :not(.home-restoring) {
+    display: none;
+  }
+  [data-restoring] .jy-upload {
+    padding: 24px;
+    border: 1px solid var(--color-line);
+    box-shadow: none;
+    pointer-events: none;
+  }
+  [data-restoring] .home-restoring {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 96px;
+    color: var(--color-muted);
+  }
+  /* همان چرخندهٔ دکمهٔ در حال کار کیت (`jy-btn.is-loading`)؛ با «حرکت کمتر» می‌ایستد (base.css) */
+  [data-restoring] .home-restoring::before {
+    content: '';
+    width: 1em;
+    height: 1em;
+    flex: none;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: jy-spin 0.8s linear infinite;
+  }
+  @media (width > 860px) {
+    [data-restoring] .home-hero__order {
+      max-width: calc(100% - 360px - 32px);
+    }
+  }
+  /* «جزوهٔ قبلی دیگر روی سرور نیست» بالای کارت بارگذاری */
+  .home-lost {
+    margin-block-end: 16px;
+  }
+
   /* سه نکتهٔ اطمینان */
   .home-trust {
     display: grid;
@@ -406,19 +453,19 @@
    * می‌چسبد؛ سؤال‌ها در همان شبکه‌اند تا خلاصه تا ته صفحه روی صفحه بماند. تا ۸۶۰ پیکسل یک ستون است:
    * کارت‌ها، خلاصه، سؤال‌ها؛ و جمع و «ادامه» در نوار ثابت پایین (`home-dock`).
    */
-  :where(body:has([data-jozve])) .home-hero {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-hero {
     padding: 0;
   }
-  :where(body:has([data-jozve])) .home-hero__grid {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-hero__grid {
     display: block;
   }
-  :where(body:has([data-jozve])) .home-hero__text {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-hero__text {
     padding: 0;
   }
-  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff) {
+  :where(body:has([data-jozve]), [data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff) {
     display: none;
   }
-  :where(body:has([data-jozve])) .home-title {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-title {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -427,7 +474,7 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  :where(body:has([data-jozve])) .home-more {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-more {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 360px;
     grid-template-areas:
@@ -458,7 +505,7 @@
       inset-block-start: 24px;
     }
   }
-  :where(body:has([data-jozve])) .home-faq {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-faq {
     grid-area: faq;
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -468,14 +515,14 @@
     border: 1px solid var(--color-line);
     border-radius: var(--radius-lg);
   }
-  :where(body:has([data-jozve])) .home-faq .home-sec__title {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-faq .home-sec__title {
     font-size: var(--text-h4);
   }
-  :where(body:has([data-jozve])) .home-faq .home-sec__sub {
+  :where(body:has([data-jozve]), [data-restoring] > body) .home-faq .home-sec__sub {
     display: none;
   }
   @media (width <= 860px) {
-    :where(body:has([data-jozve])) .home-more {
+    :where(body:has([data-jozve]), [data-restoring] > body) .home-more {
       grid-template-columns: minmax(0, 1fr);
       grid-template-areas: 'flow' 'desk' 'side' 'faq';
     }
@@ -487,7 +534,7 @@
     .home-flow {
       padding-block: 4px 16px;
     }
-    :where(body:has([data-jozve])) .home-faq {
+    :where(body:has([data-jozve]), [data-restoring] > body) .home-faq {
       padding: 16px;
     }
   }

@@ -289,6 +289,28 @@ describe('مسیر خرید در مرورگر', () => {
       expect(net.count('quote')).toBe(quotes + 1);
     });
 
+    it('بعد از رفرش (۳د): همان کد زنده با همان شمارش معکوس (ساعت مطلق)؛ خود کد برنمی‌گردد', async () => {
+      store.editMobile('09121234567');
+      await store.sendCode();
+      store.editCode('123');
+      const sentAt = clock;
+      clock += 30_000;
+      // صفحهٔ تازه: حالت تازه، با پیش‌نویسی که از JSON (sessionStorage) گذشته
+      const fresh = createCheckoutStore({ api: net.api, now: () => clock, navigate: () => undefined });
+      fresh.hydrate(JSON.parse(JSON.stringify(store.draft())));
+      fresh.enterPay();
+      expect(fresh.getState()).toMatchObject({
+        stage: 'code',
+        code: '',
+        mobile: '09121234567',
+        otp: { mobile: '09121234567', resendAt: sentAt + 90_000, expiresAt: sentAt + 120_000, closed: null },
+      });
+      // دو دقیقه گذشت: کد دیگر زنده نیست، پس قدم موبایل با همان شماره
+      clock = sentAt + 120_000;
+      fresh.enterPay();
+      expect(fresh.getState()).toMatchObject({ stage: 'mobile', mobile: '09121234567' });
+    });
+
     it('«عوض کن» در مرور نشست را باطل می‌کند و شماره در فیلد می‌ماند', async () => {
       store.setAuth({ mobile: '09121234567' });
       store.enterPay();
@@ -341,6 +363,26 @@ describe('مسیر خرید در مرورگر', () => {
       store.resume();
       await store.pay();
       expect(sent.at(-1)!.checkoutKey).toBe('key-2');
+    });
+
+    it('بعد از رفرش (۳د): پیش‌نویس همان کلید را برمی‌گرداند، پس «پرداخت» دوباره همان سفارش است', async () => {
+      await store.pay();
+      const draft = store.draft();
+      expect(draft).toMatchObject({ place: MASHHAD, recipient: RECIPIENT, pay: { key: 'key-1' }, order: 'tok' });
+
+      const fresh = createCheckoutStore({
+        api: net.api,
+        now: () => clock,
+        navigate: (url) => visited.push(url),
+        newKey: () => `key-${++keys}`,
+      });
+      fresh.hydrate(JSON.parse(JSON.stringify(draft)));
+      fresh.setAuth({ mobile: '09121234567' });
+      expect((await fresh.start([ITEM])).ok).toBe(true);
+      fresh.enterPay();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await fresh.pay();
+      expect(sent.map((body) => body.checkoutKey)).toEqual(['key-1', 'key-1']);
     });
 
     it('عدد دیگر (۴۰۹): عدد تازه روی دکمه و دلیلش، و پرداخت دوم با همان عدد تازه', async () => {

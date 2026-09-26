@@ -14,13 +14,42 @@ import { itemPageCount, wholeDocumentRule } from '@jozveyar/pricing';
 import type { FileKind } from './analysis-protocol';
 import { isFileError, isServerPath, type AnalysisState } from './fileAnalysis';
 import { summarize, type AnalysisSummaryView } from './fileSummary';
-import type { Section } from './jozve';
+import type { RestoredFile, Section } from './jozve';
 import type { OrderConfig } from './orderConfig';
 import type { ServerAnalysisView } from './server/uploads';
 import { serverFailureMessage, uploadRefusal } from './serverMessages';
 import type { UploadSnapshot } from './upload/client';
 
 /* ─────────────────────────── یک فایل ─────────────────────────── */
+
+/**
+ * بخش جزوهٔ برگشته بعد از رفرش (۳د) که فایلش روی سرور نرسیده بود: تا همان فایل دوباره انتخاب نشود، در قیمت و
+ * سفارش نیست. اینجاست نه در صف (`jozve.ts`)، چون فقط رابط پس از فایل لازمش دارد و صف در باندل اولیه است.
+ */
+export function awaitsFile(section: Section): boolean {
+  return !(section.file instanceof File) && section.upload === null;
+}
+
+/** همان فایل: نام، حجم و تاریخ تغییر — اثر انگشت ادامهٔ آپلود (ADR-024). */
+export function sameFile(a: RestoredFile | File, b: RestoredFile | File): boolean {
+  return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+}
+
+/**
+ * فایل‌های تازه در جزوه‌ای که بعد از رفرش برگشت: هر فایلی که بخشی منتظرش است، به همان بخش (`resumed`؛ سند
+ * نیمه‌کاره‌اش روی سرور می‌ماند تا آپلود از همان تکه ادامه دهد)، و بقیه فایل تازه (`rest`). پس همهٔ فایل‌ها را
+ * یک‌جا هم می‌شود داد و هر کدام سر جای خودش می‌نشیند.
+ */
+export function matchAwaited(sections: readonly Section[], files: readonly File[]) {
+  const resumed: { key: string; file: File }[] = [];
+  const rest: File[] = [];
+  for (const file of files) {
+    const section = sections.find((s) => awaitsFile(s) && sameFile(s.file, file) && !resumed.some((r) => r.key === s.key));
+    if (section) resumed.push({ key: section.key, file });
+    else rest.push(file);
+  }
+  return { resumed, rest };
+}
 
 export interface SectionView {
   key: string;
@@ -44,6 +73,11 @@ export interface SectionView {
   correctedFrom: number | null;
   /** فایلی که در قیمت نمی‌آید، با پیام و راه جلو — نه بن‌بست. */
   blocked: { title: string; hint: string } | null;
+  /**
+   * جزوه بعد از رفرش برگشت و این فایل روی سرور نرسیده بود (۳د): تا همان فایل دوباره انتخاب نشود، در قیمت و
+   * سفارش نیست.
+   */
+  waiting: boolean;
   /** هنوز شمرده نشده: در صف کارگر، یا مسیر سروری که پیش‌فاکتور ندارد. */
   pending: boolean;
   /** عدد این فایل قطعی است: بررسی کامل مرورگر، یا عدد سرور. */
@@ -77,6 +111,7 @@ function serverSummary(server: ServerAnalysisView): AnalysisSummaryView {
  */
 export function sectionView(section: Section): SectionView {
   const { analysis, upload } = section;
+  const waiting = awaitsFile(section);
   const server = upload?.analysis;
   const serverPath = isServerPath(analysis);
   const serverReady = server?.state === 'ready' && (server.pageCount ?? 0) > 0;
@@ -125,7 +160,8 @@ export function sectionView(section: Section): SectionView {
         ? analysis.pageCount
         : null,
     blocked,
-    pending: blocked === null && pageCount === 0,
+    waiting,
+    pending: blocked === null && !waiting && pageCount === 0,
     settled: serverReady || (!serverPath && analysis.phase === 'ready'),
     summary: serverReady ? serverSummary(server!) : summarize(analysis),
   };
@@ -143,6 +179,8 @@ export interface JozveView {
   pending: SectionView[];
   /** فایل‌هایی که خوانده نشدند؛ قیمت بی آنهاست و «ادامه» تا روشن شدن تکلیفشان بسته. */
   blocked: SectionView[];
+  /** فایل‌های جزوهٔ برگشته که منتظر همان فایل‌اند (۳د)؛ قیمت بی آنهاست و «ادامه» تا رسیدنشان بسته. */
+  waiting: SectionView[];
   /** قیمت هنوز ممکن است عوض شود. */
   provisional: boolean;
   summary: AnalysisSummaryView & {
@@ -161,6 +199,7 @@ export function jozveView(sections: readonly Section[]): JozveView {
   const sum = (pick: (s: AnalysisSummaryView) => number) =>
     included.reduce((total, v) => total + pick(v.summary), 0);
   const pending = views.filter((v) => v.pending);
+  const waiting = views.filter((v) => v.waiting);
 
   return {
     sections: views,
@@ -168,7 +207,8 @@ export function jozveView(sections: readonly Section[]): JozveView {
     pageCount: itemPageCount(included),
     pending,
     blocked: views.filter((v) => v.blocked !== null),
-    provisional: pending.length > 0 || included.some((v) => !v.settled),
+    waiting,
+    provisional: pending.length > 0 || waiting.length > 0 || included.some((v) => !v.settled),
     summary: {
       pageCount: itemPageCount(included),
       colorPageCount: sum((s) => s.colorPageCount),

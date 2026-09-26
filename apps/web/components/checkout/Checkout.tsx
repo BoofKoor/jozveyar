@@ -3,14 +3,20 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/checkout';
-import { PROVINCES, findCity, findProvince, popularCities, searchCities, type City } from '@jozveyar/geo';
+import { PROVINCES, findCity, findProvince, placeIsValid, popularCities, searchCities, type City } from '@jozveyar/geo';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
 import { formatClock, formatMobile, minutesFrom } from '../../lib/checkout/format';
 import type { Step } from '../../lib/checkout/steps';
-import { createCheckoutStore, quoteOf, type CheckoutState, type CheckoutStore } from '../../lib/checkout/store';
+import {
+  createCheckoutStore,
+  quoteOf,
+  type CheckoutDraft,
+  type CheckoutState,
+  type CheckoutStore,
+} from '../../lib/checkout/store';
 import { publishDockHeight } from '../../lib/dock';
 import type { JozveView } from '../../lib/jozveView';
 import type { OrderConfig } from '../../lib/orderConfig';
@@ -39,6 +45,15 @@ export function checkoutStore(): CheckoutStore {
     navigate: (url) => window.location.assign(url),
   });
   return store;
+}
+
+/**
+ * مسیر خریدی که بعد از رفرش برگشت (۳د، ADR-036). جایی که در فهرست شهرها نیست، یا شهرش مال استان دیگری است،
+ * کنار می‌رود و قدم شهر دوباره می‌آید؛ بقیه همان.
+ */
+export function restoreCheckout(draft: CheckoutDraft) {
+  const { place } = draft;
+  checkoutStore().hydrate({ ...draft, place: place && placeIsValid(place.provinceId, place.cityId) ? place : null });
 }
 
 /** «تحویل به پست تا 2 روز کاری» (ADR-013)؛ عدد سفارش واقعی را صفحهٔ سفارش از خود سفارش می‌گیرد. */

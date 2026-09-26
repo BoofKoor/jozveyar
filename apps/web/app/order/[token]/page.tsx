@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import type { OrderView, OrderViewDetails } from '@jozveyar/contracts/checkout';
 import { formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
+import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
 import { OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
 import { FlowNav, SumValue, SummaryLines, Tomans, printLabel } from '../../../components/checkout/parts';
 import { JozveBrief, Recap, RecapAddress, RecapDelivery, RecapJozveValue } from '../../../components/checkout/recap';
@@ -137,6 +138,8 @@ function Owner({ token, view, details }: { token: string; view: OrderView; detai
   return (
     <main>
       <OrderMode />
+      {/* پیش‌نویس جزوهٔ همین سفارش در این زبانه (۳د) */}
+      {paid ? <ForgetDraft token={token} /> : null}
       <div className="site-wrap home-more">
         <FlowNav current={paid ? 'done' : 3} />
 

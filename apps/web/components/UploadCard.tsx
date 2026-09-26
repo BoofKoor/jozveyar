@@ -36,6 +36,10 @@ export function UploadCard() {
           چند فایل هم می‌شود؛ پشت‌سرهم در یک جزوه صحافی می‌شوند.
         </span>
       </span>
+      {/* فقط وقتی جزوه بعد از رفرش برمی‌گردد (`data-restoring` روی ریشه، ۳د): جای همهٔ کارت، تا جزوه برسد */}
+      <span className="home-restoring" role="status">
+        در حال برگرداندن جزوه…
+      </span>
     </>
   );
 }

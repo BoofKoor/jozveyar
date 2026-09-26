@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useRef, type ReactNode } from 'react';
 import { bytesParts, formatNumber, formatPages } from '@jozveyar/text';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import type { AnalysisSummaryView } from '../lib/fileSummary';
@@ -9,6 +9,7 @@ import type { SectionView } from '../lib/jozveView';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import type { UploadSnapshot } from '../lib/upload/client';
 import { AddFiles } from './AddFiles';
+import { ACCEPT } from './DropZone';
 import { Inline } from './Inline';
 
 /*
@@ -327,9 +328,58 @@ function Failure({ title, hint, testId }: { title?: string; hint: string; testId
   );
 }
 
+/** «a.pdf»، «b.pdf» و 3 فایل دیگر — نام لاتین جدا، تا جهت متن فارسی به هم نریزد. */
+export function Names({ names, max = 3 }: { names: readonly string[]; max?: number }) {
+  const shown = names.slice(0, max);
+  const rest = names.length - shown.length;
+  // گیومه بیرون از نام: جهتش مال متن فارسی است، و نام لاتین داخل bdi جدا می‌ماند.
+  const parts: ReactNode[] = shown.map((name) => (
+    <span key={name} className="font-semibold text-ink">
+      «<bdi>{name}</bdi>»
+    </span>
+  ));
+  if (rest > 0) {
+    parts.push(
+      <>
+        <span className="num">{formatNumber(rest)}</span> فایل دیگر
+      </>,
+    );
+  }
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          {i === 0 ? null : i === parts.length - 1 ? ' و ' : '، '}
+          {part}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
+ * فایل‌های جزوه‌ای که بعد از رفرش برگشت و روی سرور نرسیده بودند (۳د، ADR-036): چرا، و راه جلو. مرورگر اجازه نمی‌دهد
+ * صفحه خودش فایل را دوباره باز کند (ADR-024)؛ همان فایل از همان تکه ادامه می‌دهد. یک بار برای همهٔ فایل‌ها.
+ */
+export function WaitingNote({ names }: { names: readonly string[] }) {
+  const many = names.length > 1;
+  return (
+    <Note tone="info" testId="jozve-waiting">
+      <p className="font-semibold">همان {many ? 'فایل‌ها' : 'فایل'} را دوباره انتخاب کن</p>
+      <p className="mt-1">
+        صفحه از نو بار شد و <Names names={names} /> هنوز کامل به سرور نرسیده {many ? 'بودند' : 'بود'}. مرورگر خودش فایل
+        را دوباره باز نمی‌کند؛ همان را انتخاب کن تا ارسال ادامه پیدا کند.
+        {many ? ' همه را یک‌جا هم می‌شود با «افزودن فایل» داد؛ هر کدام سر جای خودش می‌نشیند.' : ''}
+      </p>
+    </Note>
+  );
+}
+
 interface Props {
   section: SectionView;
   onAdd: (files: File[]) => void;
+  /** فایل تازه همان‌جا؛ برای فایل برگشته، همان فایل (`WaitingCard`). */
+  onReplace: (key: string, file: File) => void;
   onReset: () => void;
 }
 
@@ -341,8 +391,10 @@ interface Props {
  *    کند دیگر معنا ندارد.
  *  - بقیه: بررسی مرورگر، یا پیش‌فاکتور مسیر سرور (`AnalysisCard`).
  */
-export function SingleFileCard({ section, onAdd, onReset }: Props) {
+export function SingleFileCard({ section, onAdd, onReplace, onReset }: Props) {
   const { state, upload, kind, serverPath, serverReady, serverFailed, estimate, uploadRefused } = section;
+
+  if (section.waiting) return <WaitingCard section={section} onReplace={onReplace} onReset={onReset} />;
 
   if (serverPath && !serverReady && (!estimate || serverFailed)) {
     const failure = serverFailed
@@ -396,13 +448,49 @@ export function SingleFileCard({ section, onAdd, onReset }: Props) {
   return <AnalysisCard section={section} serverUnavailable={estimate && uploadRefused} onAdd={onAdd} onReset={onReset} />;
 }
 
+/** جزوهٔ تک‌فایلی که بعد از رفرش برگشت و فایلش روی سرور نرسیده بود: همان فایل، یا فایل دیگر. */
+function WaitingCard({ section, onReplace, onReset }: Omit<Props, 'onAdd'>) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <section data-testid="file-waiting" className="jy-card" aria-labelledby="jozve-title">
+      <CardHead files={1} pages={0} />
+      <FileRow section={section} pages={0} sizes={[]} />
+      <div className="mt-4">
+        <WaitingNote names={[section.name]} />
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={() => input.current?.click()} className="jy-btn jy-btn--primary">
+          همان فایل را انتخاب کن
+        </button>
+        <button type="button" onClick={onReset} className="jy-btn jy-btn--secondary">
+          فایل دیگری بینداز
+        </button>
+      </div>
+      <input
+        ref={input}
+        id="jozve-replace"
+        type="file"
+        accept={ACCEPT}
+        tabIndex={-1}
+        aria-hidden="true"
+        className="sr-only"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) onReplace(section.key, file);
+        }}
+      />
+    </section>
+  );
+}
+
 /** بررسی مرورگر، یا پیش‌فاکتور مسیر سرور: کارت «جزوهٔ تو» با یک ردیف فایل و «افزودن فایل به همین جزوه». */
 function AnalysisCard({
   section,
   serverUnavailable,
   onAdd,
   onReset,
-}: Props & {
+}: Omit<Props, 'onReplace'> & {
   /** پیش‌فاکتور Word یا عکس که سرور نمی‌تواند تأییدش کند (آپلود پذیرفته نشد). */
   serverUnavailable: boolean;
 }) {

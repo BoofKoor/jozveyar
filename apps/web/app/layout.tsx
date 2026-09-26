@@ -40,7 +40,8 @@ export const viewport: Viewport = {
  */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fa" dir="rtl">
+    // `data-restoring` را اسکریپت درون HTML صفحهٔ اصلی پیش از رسم می‌گذارد (۳د)؛ React نباید آن را ناجوری بداند.
+    <html lang="fa" dir="rtl" suppressHydrationWarning>
       <body className="site">
         <SiteHeader />
         <div className="site-grow">{children}</div>

@@ -13,7 +13,7 @@ import { MemoryDriver } from '@jozveyar/storage';
 
 import { memoryStore } from '../server/testing';
 import { createUploadService, type Result } from '../server/uploads';
-import { startUpload, type UploaderDeps, type UploadFile, type UploadSnapshot } from './client';
+import { followUpload, startUpload, type UploaderDeps, type UploadFile, type UploadSnapshot } from './client';
 
 const MiB = 1024 * 1024;
 const SESSION = 'c'.repeat(64);
@@ -247,5 +247,52 @@ describe('آپلودگر مرورگر', () => {
     expect(seen.at(-1)?.analysis).toMatchObject({ pageCount: 7, colorPageCount: 1, colorPages: [5] });
     // قبل از آماده شدن، «در صف» دیده شده بود.
     expect(seen.some((s) => s.analysis?.state === 'pending')).toBe(true);
+  });
+
+  it('سند فایلی که بعد از رفرش برگشت (۳د): بررسی سرور تا «آماده»، و با کنار رفتن فایل روی سرور هم پاک', async () => {
+    const { result } = await finalPhase(makeFile(MiB));
+    const id = result.documentId!;
+    const seen: UploadSnapshot[] = [];
+    let polls = 0;
+    const follow = followUpload(id, { ...result, analysis: { state: 'pending' } }, (s) => seen.push(s), {
+      ...deps(),
+      analysisWatchMs: 60_000,
+      sleep: async () => {
+        polls += 1;
+        if (polls === 2) {
+          store.rows.get(id)!.status = 'ready';
+          store.serverAnalyses.set(id, {
+            engine: 'server-pymupdf-test',
+            pageCount: 3,
+            elapsedMs: 5,
+            pages: Array.from({ length: 3 }, () => ({ widthPt: 595, heightPt: 842, color: false, blank: false, warnings: [] })),
+          });
+        }
+      },
+    });
+    await expect.poll(() => seen.at(-1)?.analysis?.state).toBe('ready');
+    expect(seen.at(-1)).toMatchObject({ phase: 'done', documentId: id, analysis: { pageCount: 3 } });
+
+    await follow.cancel({ discard: true });
+    expect(store.rows.get(id)!.status).toBe('failed');
+  });
+
+  it('سند نیمه‌کارهٔ فایل برگشته: دنبال نمی‌شود، فقط با فایل دیگر پاک می‌شود؛ رفتن از صفحه پاکش نمی‌کند', async () => {
+    beforePut = () => new Response('', { status: 500 });
+    const { result } = await finalPhase(makeFile(MiB));
+    const id = result.documentId!;
+    const calls: string[] = [];
+    const counting = (async (input: string | URL, init: RequestInit = {}) => {
+      calls.push(`${init.method ?? 'GET'} ${String(input)}`);
+      return fakeFetch(input, init);
+    }) as typeof fetch;
+
+    await followUpload(id, null, () => undefined, { ...deps(), fetch: counting }).cancel();
+    expect(calls).toEqual([]);
+    expect(storage.uploads.size).toBe(1);
+
+    await followUpload(id, null, () => undefined, { ...deps(), fetch: counting }).cancel({ discard: true });
+    expect(calls).toEqual([`DELETE /api/uploads/${id}`]);
+    expect(storage.uploads.size).toBe(0);
   });
 });

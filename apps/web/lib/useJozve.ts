@@ -60,6 +60,7 @@ export function useJozve() {
     move: jozve.move,
     remove: jozve.remove,
     replace: jozve.replace,
+    restore: jozve.restore,
     reset: jozve.reset,
   };
 }
