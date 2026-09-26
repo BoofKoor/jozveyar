@@ -12,6 +12,7 @@ import {
   StorageError,
   type LifecycleRule,
   type ObjectInfo,
+  type ObjectStream,
   type StorageDriver,
   type UploadedPart,
 } from './driver.js';
@@ -24,7 +25,7 @@ interface Upload {
 
 export class MemoryDriver implements StorageDriver {
   readonly uploads = new Map<string, Upload>();
-  readonly objects = new Map<string, ObjectInfo & { contentType: string }>();
+  readonly objects = new Map<string, ObjectInfo & { contentType: string; bytes?: Uint8Array }>();
   lifecycle: LifecycleRule[] = [];
   corsOrigins: string[] = [];
 
@@ -84,6 +85,27 @@ export class MemoryDriver implements StorageDriver {
   async headObject(key: string) {
     const object = this.objects.get(key);
     return object ? { sizeBytes: object.sizeBytes, etag: object.etag } : null;
+  }
+
+  /** فایلی با همین بایت‌ها، مثل کاری که کارگر با PDF جزوه می‌کند. */
+  putObject(key: string, bytes: Uint8Array, contentType = 'application/pdf') {
+    this.objects.set(key, { sizeBytes: bytes.byteLength, etag: `"${randomUUID()}"`, contentType, bytes });
+  }
+
+  async getObject(key: string): Promise<ObjectStream | null> {
+    const object = this.objects.get(key);
+    if (!object) return null;
+    const bytes = object.bytes ?? new Uint8Array(object.sizeBytes);
+    return {
+      sizeBytes: object.sizeBytes,
+      etag: object.etag,
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+    };
   }
 
   async deleteObject(key: string) {

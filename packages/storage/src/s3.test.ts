@@ -104,6 +104,49 @@ describe('درایور S3', () => {
     await expect(driver.headObject('k')).rejects.toMatchObject({ code: 'unavailable' });
   });
 
+  it('خواندن فایل: GET امضاشده به آدرس داخلی، بدنه جریانی؛ نبودن null و خطای سرور StorageError', async () => {
+    const { driver, calls } = driverWith([
+      { status: 200, body: '%PDF-1.4 jozve', headers: { 'content-length': '14', etag: '"e1"' } },
+      { status: 404, body: '<Error><Code>NoSuchKey</Code><Message>x</Message></Error>' },
+      { status: 503, body: '<Error><Code>ServiceUnavailable</Code><Message>busy</Message></Error>' },
+    ]);
+    const found = await driver.getObject('orders/10027/jozve-1.pdf');
+    expect(found).toMatchObject({ sizeBytes: 14, etag: '"e1"' });
+    expect(await new Response(found!.body).text()).toBe('%PDF-1.4 jozve');
+    expect(calls[0]!.url.href).toBe('http://garage:3900/jozveyar/orders/10027/jozve-1.pdf');
+    expect(calls[0]!.init.method).toBe('GET');
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toMatch(/^AWS4-HMAC-SHA256 /);
+    expect(await driver.getObject('orders/1/jozve-1.pdf')).toBeNull();
+    await expect(driver.getObject('k')).rejects.toMatchObject({ code: 'unavailable', status: 503 });
+  });
+
+  it('سقف زمان فقط تا سرآیندها: بدنهٔ کند بعد از سقف هم کامل می‌رسد؛ سرآیندی که نیامد «در دسترس نیست»', async () => {
+    const slow = (async (_input: URL | string, init: RequestInit = {}) => {
+      const signal = init.signal!;
+      const encoder = new TextEncoder();
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          for (const part of ['aa', 'bb', 'cc']) {
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            if (signal.aborted) return controller.error(signal.reason);
+            controller.enqueue(encoder.encode(part));
+          }
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-length': '6' } });
+    }) as typeof fetch;
+    const never = ((_input: URL | string, init: RequestInit = {}) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener('abort', () => reject(new TypeError('aborted')));
+      })) as typeof fetch;
+    const make = (fetchImpl: typeof fetch) =>
+      new S3Driver({ endpoint: 'http://garage:3900', region: 'us-east-1', bucket: 'b', accessKeyId: 'a', secretAccessKey: 's', timeoutMs: 50, fetch: fetchImpl });
+    const found = await make(slow).getObject('k');
+    expect(await new Response(found!.body).text()).toBe('aabbcc');
+    await expect(make(never).getObject('k')).rejects.toMatchObject({ code: 'unavailable' });
+  });
+
   it('پیکربندی باکت به خود باکت می‌رود و Content-MD5 دارد', async () => {
     const { driver, calls } = driverWith([{}]);
     await driver.putLifecycleRules([{ id: 'uploads', prefix: 'uploads/', expireDays: 2, abortIncompleteDays: 1 }]);

@@ -5,9 +5,10 @@
  * کد دامنه لازمش ندارد — و هر پیاده‌سازی تازه (Garage امروز، آروان یا پارس‌پک
  * فردا) فقط همین را باید برآورده کند.
  *
- * نکتهٔ اصلی طراحی: بایت‌های فایل هیچ‌وقت از این اینترفیس رد نمی‌شوند.
+ * نکتهٔ اصلی طراحی: بایت‌های فایل کاربر هیچ‌وقت از سرور وب رد نمی‌شوند.
  * مرورگر با URL امضاشده مستقیم به استوریج می‌فرستد و سرور فقط فرمان می‌دهد و
- * می‌سنجد. به همین دلیل «دیسک محلی» پیاده‌سازی ممکنی نیست و عمداً رد شد.
+ * می‌سنجد. به همین دلیل «دیسک محلی» پیاده‌سازی ممکنی نیست و عمداً رد شد. تنها
+ * خواندن بایت‌ها `getObject` است، برای دانلود PDF جزوه در پنل ادمین (ADR-037).
  */
 
 export interface UploadedPart {
@@ -20,6 +21,11 @@ export interface UploadedPart {
 export interface ObjectInfo {
   sizeBytes: number;
   etag: string;
+}
+
+/** بدنهٔ یک فایل، جریانی: تا گیرنده می‌خواند می‌آید، نه یک‌جا در حافظه. */
+export interface ObjectStream extends ObjectInfo {
+  body: ReadableStream<Uint8Array>;
 }
 
 export interface LifecycleRule {
@@ -58,10 +64,20 @@ export interface StorageDriver {
   /** null یعنی فایل نیست. */
   headObject(key: string): Promise<ObjectInfo | null>;
 
+  /**
+   * بایت‌های یک فایل از آدرس داخلی، جریانی؛ null یعنی فایل نیست. فقط برای پنل ادمین، که PDF جزوه را از
+   * راه خودش می‌دهد تا مسیر `/jozveyar/` Nginx همان «فقط PUT» بماند (ADR-037). سقف زمان فقط تا رسیدن
+   * سرآیندهاست: جزوه تا گیگابایت است و بدنه تا هر وقت که گیرنده بخواند جریان دارد.
+   */
+  getObject(key: string): Promise<ObjectStream | null>;
+
   /** فایلی که نیست خطا نیست. */
   deleteObject(key: string): Promise<void>;
 
-  /** URL دانلود — برای کارگر و پنل در قدم‌های بعد. */
+  /**
+   * URL دانلود امضاشده برای میزبان عمومی. امروز کسی به کارش نمی‌برد: مسیر `/jozveyar/` Nginx فقط PUT است و
+   * پنل جزوه را با `getObject` از راه خودش می‌دهد (ADR-037).
+   */
   presignGetObject(
     key: string,
     expiresInSeconds: number,
