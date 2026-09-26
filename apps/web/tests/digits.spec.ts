@@ -49,8 +49,30 @@ interface Ink {
  * اسکرین‌شات عنصر برش را گرد می‌کند و وسط را تا نیم پیکسل جابه‌جا می‌کند.
  */
 async function ink(page: Page, target: Locator): Promise<Ink> {
+  const scrollBehavior = await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior);
+  expect(scrollBehavior, 'اسکرول نرم در سنجش خاموش است («حرکت کمتر»)').toBe('auto');
   // وسط صفحه، نه لبه: در موبایل نوار قیمت ثابت پایین صفحه است و اسکرین‌شات آن را می‌گرفت، نه جعبه را
   await target.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  // سنجش وقتی جعبه ایستاده است: جای اسکرول و خود جعبه در دو فریم پشت‌سرهم همان‌اند (حداکثر ۱۲۰ فریم یا ۲ ثانیه؛ اگر
+  // نایستاد، سنجش جابه‌جایی پایین همان را می‌گیرد).
+  await target.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        let last = '';
+        let same = 0;
+        let frames = 0;
+        const tick = () => {
+          const r = el.getBoundingClientRect();
+          const now = `${scrollX},${scrollY},${r.x},${r.y}`;
+          same = now === last ? same + 1 : 0;
+          last = now;
+          if (same >= 2 || ++frames > 120) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+        setTimeout(resolve, 2000);
+      }),
+  );
   const covered = await target.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
@@ -141,7 +163,13 @@ async function expectCentered(page: Page, target: Locator, { horizontal = false 
   }
 }
 
-test.use({ deviceScaleFactor: 2 });
+/*
+ * «حرکت کمتر»: صفحه اسکرول نرم دارد (`scroll-behavior: smooth` در globals.css، فقط بی این ترجیح)، پس اسکرولی که
+ * Playwright پیش از `fill` می‌کند هم نرم است و با اسکرول یک‌بارهٔ سنجش کشمکش دارد: جای نهایی اسکرول هر بار جایی
+ * بین ۵۷۱ و ۵۸۲ می‌نشست، نه ۵۵۹ که `scrollIntoView` می‌خواهد، و در اجرای main پس از #36 جعبه وسط سنجش ۳ پیکسل
+ * جابه‌جا شد. با «حرکت کمتر» هر بار همان ۵۵۹. جای رقم به حرکت بند نیست.
+ */
+test.use({ deviceScaleFactor: 2, reducedMotion: 'reduce' });
 
 for (const viewport of [
   { width: 390, height: 844 },

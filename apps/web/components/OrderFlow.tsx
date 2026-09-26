@@ -29,6 +29,21 @@ function loadDesk(): Promise<DeskModule> {
 
 const preloadDesk = () => void loadDesk().catch(() => undefined);
 
+/**
+ * ساختن اولین `Intl.NumberFormat` صفحه (بار دادهٔ ICU) با پردازندهٔ ۴× کند ۲۶ تا ۴۳ میلی‌ثانیه است و بعدی‌ها تقریباً
+ * هیچ. بی این، همان در راه اولین قیمت می‌افتاد (`formatNumber` رابط پس از فایل). پس یکی در زمان بیکاری پس از بار
+ * صفحه ساخته و رها می‌شود، پیش از هر فایلی (docs/UI.md، «۳ج»)؛ در بار شدن ماژول نه، تا بار صفحه کندتر نشود.
+ */
+function warmNumberFormat(): () => void {
+  const warm = () => void new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(0);
+  if (typeof requestIdleCallback === 'function') {
+    const id = requestIdleCallback(warm, { timeout: 2000 });
+    return () => cancelIdleCallback(id);
+  }
+  const timer = setTimeout(warm, 500);
+  return () => clearTimeout(timer);
+}
+
 interface Props {
   /** تیتر و متن قهرمان (کامپوننت سرور). */
   hero: ReactNode;
@@ -82,6 +97,8 @@ export function OrderFlow({ hero, upload, trust, more, children }: Props) {
     window.addEventListener('dragenter', preloadDesk, { once: true });
     return () => window.removeEventListener('dragenter', preloadDesk);
   }, []);
+
+  useEffect(warmNumberFormat, []);
 
   /*
    * رابط پس از فایل در رسم کم‌اولویت (transition) می‌آید، نه در همان کار انداختن فایل: رسمش چند تکه
