@@ -26,6 +26,10 @@
   --jy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' aria-hidden='true'%3E%3Cpath d='M5.5 5.5l9 9M14.5 5.5l-9 9'/%3E%3C/svg%3E");
 }
 
+@utility jy-icon-download {
+  --jy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'%3E%3Cpath d='M10 3v10M6 9l4 4 4-4M3.5 13.5v2.5h13v-2.5'/%3E%3C/svg%3E");
+}
+
 @utility jy-icon-error {
   --jy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'%3E%3Ccircle cx='10' cy='10' r='8'/%3E%3Cpath d='M7.4 7.4l5.2 5.2M12.6 7.4l-5.2 5.2'/%3E%3C/svg%3E");
 }

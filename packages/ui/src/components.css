@@ -95,6 +95,19 @@
   .jy-btn--text:active {
     background: var(--color-green-100);
   }
+  /*
+   * کار برگشت‌ناپذیر (لغو سفارش، غیرفعال کردن ادمین؛ طرح پنل، برش ۴): متن و لبهٔ خطا روی کاغذ، و زمینهٔ
+   * خطا با اشاره‌گر. رنگ وضعیت فقط با متن کار (قاعدهٔ برند)، پس همیشه با برچسبی که می‌گوید چه می‌شود.
+   */
+  .jy-btn--danger {
+    background: var(--color-paper);
+    border-color: var(--color-error-text);
+    color: var(--color-error-text);
+  }
+  .jy-btn--danger:hover,
+  .jy-btn--danger:active {
+    background: var(--color-error-bg);
+  }
   /* اندازه‌ها بعد از گونه‌ها، تا padding دکمهٔ فقط‌آیکون بر padding گونهٔ متنی غلبه کند */
   .jy-btn--sm {
     min-height: 36px;
@@ -270,6 +283,11 @@
   .jy-badge--error {
     background: var(--color-error-bg);
     color: var(--color-error-text);
+  }
+  /* بی وضعیت (نقش ادمین، «بعدتر»؛ طرح پنل، برش ۴): سبز کم‌رنگ، بی آیکون، چون معنایی جز متنش ندارد. */
+  .jy-badge--neutral {
+    background: var(--color-green-100);
+    color: var(--color-green-800);
   }
 
   /*
