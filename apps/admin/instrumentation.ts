@@ -12,6 +12,9 @@ export async function register() {
   console.log(describeConfig(process.env));
   const config = adminConfig(process.env);
   if (!config) return;
+  // بی استوریج، پنل بالا می‌آید و فقط دانلود PDF جزوه (۴٫۲) بسته است؛ بلند، تا بعد از استقرار دیده شود.
+  const { storageFromEnv } = await import('@jozveyar/storage');
+  if (!storageFromEnv(process.env)) console.log('⚠ پنل ادمین: استوریج (S3_*) پیکربندی نشده؛ دانلود PDF جزوه بسته است.');
 
   const { createDb } = await import('@jozveyar/db');
   const conn = createDb(config.databaseUrl, { max: 1 });

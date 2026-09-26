@@ -195,6 +195,19 @@ describe('رویدادها', () => {
       ['سارا', ['کد نادرست در کار حساس', '؛ حساب قفل و نشست‌ها بسته شد']],
     ]);
   });
+
+  it('کار سفارش‌ها (۴٫۲) با شمارهٔ سفارش، جدا از جملهٔ فارسی؛ جزوهٔ دوم هم گفته می‌شود', () => {
+    const lines = eventLines([
+      event('orders.pdf_download', { targetType: 'order', detail: { orderNumber: 10027, item: 1 } }),
+      event('orders.pdf_rebuild', { targetType: 'order', detail: { orderNumber: 10031, previous: { attempts: 3, error: 'transient' } } }),
+      event('orders.pdf_download', { targetType: 'order', detail: { orderNumber: 10040, item: 2 } }),
+    ]);
+    expect(lines.map((l) => [l.who, l.text])).toEqual([
+      ['سارا', ['PDF سفارش ', { ltr: '10027' }, ' دانلود شد']],
+      ['سارا', ['ساختن دوبارهٔ PDF سفارش ', { ltr: '10031' }]],
+      ['سارا', ['PDF سفارش ', { ltr: '10040' }, ' (جزوهٔ ', { ltr: '2' }, ')', ' دانلود شد']],
+    ]);
+  });
 });
 
 describe('QR', () => {

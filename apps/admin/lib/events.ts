@@ -52,6 +52,13 @@ function loginFailed(detail: Detail): Segment[] {
   }
 }
 
+/** «10027»، و اگر سفارش چند جزوه دارد «10027 (جزوهٔ 2)»؛ عدد جدا از جملهٔ فارسی. */
+function orderRef(detail: Detail): Segment[] {
+  const number = typeof detail.orderNumber === 'number' ? String(detail.orderNumber) : '';
+  const item = typeof detail.item === 'number' && detail.item > 1 ? [' (جزوهٔ ', { ltr: String(detail.item) }, ')'] : [];
+  return [{ ltr: number }, ...item];
+}
+
 function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
   const detail = (event.detail ?? {}) as Detail;
   const name = str(detail.username);
@@ -81,6 +88,10 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: [{ ltr: name }, ' غیرفعال شد'] };
     case 'admins.invite_revoked':
       return { badge: null, text: ['دعوت ', { ltr: name }, ' لغو شد'] };
+    case 'orders.pdf_download':
+      return { badge: null, text: ['PDF سفارش ', ...orderRef(detail), ' دانلود شد'] };
+    case 'orders.pdf_rebuild':
+      return { badge: null, text: ['ساختن دوبارهٔ PDF سفارش ', ...orderRef(detail)] };
     default:
       return { badge: null, text: [event.action] };
   }
@@ -124,9 +135,10 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
   return days;
 }
 
-/** چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش در ۴٫۲، تعرفه ۴٫۵، تنظیمات ۴٫۶). */
+/** چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات ۴٫۶). */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
   { kind: 'auth', label: 'ورود' },
+  { kind: 'orders', label: 'سفارش' },
   { kind: 'admins', label: 'ادمین‌ها' },
 ] as const;
