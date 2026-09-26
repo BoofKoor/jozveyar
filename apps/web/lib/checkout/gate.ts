@@ -18,12 +18,25 @@ export type OrderGate =
   /** فایلی هنوز در راه سرور است، یا سرور هنوز بررسی‌اش می‌کند. */
   | { kind: 'sending' }
   /** فایلی به سرور نرسید یا سرور نتوانست بخواندش. */
-  | { kind: 'stuck'; sections: SectionView[] };
+  | { kind: 'stuck'; sections: SectionView[] }
+  /** جزوه بعد از رفرش برگشت و فایلی منتظر انتخاب دوباره است (۳د)؛ سفارش بی آن فصل ساخته نمی‌شود. */
+  | { kind: 'waiting' }
+  /** فایلی خوانده نشد (ADR-030)؛ پیام و راه جلویش در کارت همان فایل است. */
+  | { kind: 'blocked' };
 
+/**
+ * «همه روی سرور و شمرده» یعنی **همهٔ** فایل‌های جزوه، نه فقط آنها که در قیمت‌اند: فایلی که منتظر انتخاب دوباره
+ * است، خوانده نشد یا هنوز شمرده نشده، در `included` نیست، ولی سفارش بی آن فصل ساخته نمی‌شود. رابط «ادامه» را برای
+ * همین‌ها جدا می‌بندد؛ برگشت بعد از رفرش (۳د) فقط به همین دروازه تکیه دارد.
+ */
 export function orderGate(view: JozveView, config: OrderConfig): OrderGate {
+  if (view.waiting.length > 0) return { kind: 'waiting' };
+  if (view.blocked.length > 0) return { kind: 'blocked' };
   const stuck = view.included.filter((s) => !s.serverReady && (s.uploadRefused || s.serverFailed));
   if (stuck.length > 0) return { kind: 'stuck', sections: stuck };
-  if (view.included.length === 0 || view.included.some((s) => !s.serverReady || !s.documentId)) return { kind: 'sending' };
+  if (view.pending.length > 0 || view.included.length === 0 || view.included.some((s) => !s.serverReady || !s.documentId)) {
+    return { kind: 'sending' };
+  }
   return {
     kind: 'ready',
     items: [

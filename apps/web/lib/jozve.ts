@@ -16,11 +16,27 @@ import type { FileKind } from './analysis-protocol';
 import { browserPriceReady, isFileError, isServerPath, type AnalysisState } from './fileAnalysis';
 import type { UploadPhase, UploadSnapshot } from './upload/client';
 
+/**
+ * فایلی که بعد از رفرش برگشت و هنوز دست مرورگر نیست (۳د، ADR-036): نام، حجم و تاریخ تغییرش، همان اثر
+ * انگشتی که آپلودگر برای ادامه دارد (ADR-024).
+ */
+export interface RestoredFile {
+  name: string;
+  size: number;
+  lastModified: number;
+  /** سندش روی سرور اگر آپلودش شروع شده بود، تا بعد ادامه یا پاک شود. */
+  documentId: string | null;
+}
+
 /** یک فایل جزوه، با هر چه مرورگر و سرور تا این لحظه درباره‌اش می‌دانند. */
 export interface Section {
   /** کلید محلی و پایدار در جابه‌جایی؛ شناسهٔ سند سرور نیست. */
   key: string;
-  file: File;
+  /**
+   * خود فایل؛ یا در جزوه‌ای که بعد از رفرش برگشت، فقط نشانی‌اش: مرورگر اجازه نمی‌دهد صفحه خودش فایل را
+   * دوباره باز کند. سرور منبع حقیقت است، پس فایلی که روی سرور است بی خود فایل هم قیمت و سفارش دارد.
+   */
+  file: File | RestoredFile;
   kind: FileKind | null;
   analysis: AnalysisState;
   /** null تا وقتی نوبت آپلودش نرسیده. */

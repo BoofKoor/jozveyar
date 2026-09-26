@@ -5,6 +5,9 @@ import type { OrderConfig } from '../lib/orderConfig';
 import { useJozve } from '../lib/useJozve';
 import { DropZone } from './DropZone';
 
+/** همان `RESTORING_ATTR` (`lib/draftKey.ts`)؛ اینجا نوشته، تا آن ماژول به باندل اولیه نیاید. */
+const RESTORING_ATTR = 'data-restoring';
+
 /** رابط پس از فایل: تکهٔ جدای JS، بیرون از باندل اولیه (docs/UI.md، ۴ب). */
 type DeskModule = typeof import('./OrderDesk');
 let deskModule: DeskModule | null = null;
@@ -76,6 +79,15 @@ export function OrderFlow({ hero, upload, trust, more, children }: Props) {
   const [config, setConfig] = useState<OrderConfig | null>(null);
   const [loaded, setLoaded] = useState<DeskModule | null>(null);
   const [failed, setFailed] = useState(false);
+  /*
+   * جزوه‌ای که بعد از رفرش برمی‌گردد (۳د، ADR-036): اسکریپت درون HTML پیش از رسم پیش‌نویس همین زبانه را دیده و
+   * نشانه را روی ریشه گذاشته است، پس صفحه از همان اولین رسم حالت سفارش است و کارت بارگذاری «در حال برگرداندن
+   * جزوه…» (home.css). بقیه در تکهٔ رابط پس از فایل است (`Restore`): خواندن پیش‌نویس، پرسیدن از سرور، برداشتن
+   * نشانه، و `lost`، یک خط که چرا جزوه برنگشت. اینجا فقط بار کردن آن تکه.
+   */
+  const [restore, setRestore] = useState<'restoring' | 'lost' | null>(() =>
+    typeof document !== 'undefined' && document.documentElement.hasAttribute(RESTORING_ATTR) ? 'restoring' : null,
+  );
   const ordering = jozve.sections.length > 0;
   // تکه‌ای که پیش از فایل (با نشانهٔ قصد) رسیده، همان لحظهٔ انداختن فایل رسم می‌شود.
   const desk = loaded ?? deskModule;
@@ -84,13 +96,18 @@ export function OrderFlow({ hero, upload, trust, more, children }: Props) {
   const requestDesk = useCallback(() => {
     loadDesk().then(
       (module) => startTransition(() => setLoaded(module)),
-      () => setFailed(true),
+      () => {
+        setFailed(true);
+        // جزوهٔ برگشته هم نمی‌آید: صفحهٔ معمول، و پیش‌نویس برای بار بعد می‌ماند.
+        setRestore(null);
+        document.documentElement.removeAttribute(RESTORING_ATTR);
+      },
     );
   }, []);
 
   useEffect(() => {
-    if (ordering && !desk) requestDesk();
-  }, [ordering, desk, requestDesk]);
+    if ((ordering || restore === 'restoring') && !desk) requestDesk();
+  }, [ordering, restore, desk, requestDesk]);
 
   // فایلی که به پنجره کشیده شد، قصد است؛ روی خود کارت هم DropZone همین را می‌گوید.
   useEffect(() => {
@@ -108,6 +125,10 @@ export function OrderFlow({ hero, upload, trust, more, children }: Props) {
   const deskReady = ordering && (desk !== null || failed);
   const showDesk = useDeferredValue(deskReady) && deskReady;
 
+  useEffect(() => {
+    if (showDesk) setRestore(null);
+  }, [showDesk]);
+
   return (
     <>
       <div className="home-top">
@@ -116,6 +137,9 @@ export function OrderFlow({ hero, upload, trust, more, children }: Props) {
             {hero}
             {showDesk ? null : (
               <div className="home-hero__order">
+                {restore && desk ? (
+                  <desk.Restore state={restore} jozve={jozve} onConfig={setConfig} onDone={setRestore} />
+                ) : null}
                 <DropZone
                   onFiles={(files) => {
                     preloadDesk();

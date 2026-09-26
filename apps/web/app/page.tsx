@@ -3,6 +3,14 @@ import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
 import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
+import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
+
+/**
+ * پیش از رسم (۳د، ADR-036): اگر این زبانه پیش‌نویس سفارش دارد، صفحه از همان اولین رسم حالت سفارش است و کارت
+ * بارگذاری «در حال برگرداندن جزوه…»، نه لحظه‌ای صفحهٔ اول. چند بایت درون HTML، نه در باندل؛ حافظهٔ بستهٔ سایت یعنی
+ * صفحهٔ معمول.
+ */
+const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})&&document.documentElement.setAttribute(${JSON.stringify(RESTORING_ATTR)},'')}catch(e){}`;
 
 /**
  * صفحهٔ اصلی — هم لندینگ سئو است و هم ابزار سفارش. طرح ز (docs/UI.md، ۴الف و ۴ب؛ چیدمان در
@@ -48,6 +56,8 @@ export default function HomePage() {
 
   return (
     <>
+      {/* eslint-disable-next-line react/no-danger */}
+      <script dangerouslySetInnerHTML={{ __html: RESTORE_SCRIPT }} />
       <script
         type="application/ld+json"
         // eslint-disable-next-line react/no-danger

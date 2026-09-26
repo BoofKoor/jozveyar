@@ -22,7 +22,15 @@ import {
   type WorkerResponse,
 } from './analysis-protocol';
 import { applyWorkerMessage, initialAnalysis, toServerPath, type AnalysisState } from './fileAnalysis';
-import { moveSection, nextAnalysisJob, nextUpload, orderBatch, uploadActive, type Section } from './jozve';
+import {
+  moveSection,
+  nextAnalysisJob,
+  nextUpload,
+  orderBatch,
+  uploadActive,
+  type RestoredFile,
+  type Section,
+} from './jozve';
 import type { UploadHandle, UploadSnapshot } from './upload/client';
 
 /** کارگر تحلیل از دید صف: فرستادن یک کار و بستن. */
@@ -42,6 +50,20 @@ export interface JozveDeps {
   now(): number;
 }
 
+/**
+ * سند فایلی که بعد از رفرش برگشت (۳د): بررسی سرورش تا نتیجه دنبال می‌شود، و `cancel({ discard })` آن را روی سرور
+ * هم پاک می‌کند. دستگیره همین حالا برمی‌گردد، تا «حذف» پیش از رسیدن ماژول آپلودگر هم گم نشود. پیاده‌سازی‌اش با
+ * خود برگشت می‌آید (`OrderDesk`)، نه در باندل اولیه.
+ */
+export type FollowDocument = (
+  documentId: string,
+  upload: UploadSnapshot | null,
+  onChange: (snapshot: UploadSnapshot) => void,
+) => Pick<UploadHandle, 'cancel'>;
+
+/** فایل جزوه‌ای که بعد از رفرش برگشت (`restoredSection` در `lib/restore.ts`)، پیش از گرفتن کلید در صف. */
+export type RestoredSection = Omit<Section, 'key' | 'file'> & { file: RestoredFile };
+
 export interface JozveSnapshot {
   sections: readonly Section[];
   /** نام فایل‌هایی که از سقف جزوه بیشتر بودند و اضافه نشدند. */
@@ -58,7 +80,7 @@ export function createJozve(deps: JozveDeps) {
   let worker: AnalysisWorkerPort | null = null;
   /** کاری که الان در کارگر است — حداکثر یکی. */
   let inFlight: { job: number; key: string; startedAt: number } | null = null;
-  const handles = new Map<string, UploadHandle>();
+  const handles = new Map<string, Pick<UploadHandle, 'cancel'>>();
   const analysisSent = new Set<string>();
   let active = true;
 
@@ -70,14 +92,14 @@ export function createJozve(deps: JozveDeps) {
   }
   const find = (key: string) => snapshot.sections.find((s) => s.key === key);
   /** همان فایل هنوز همان‌جاست — نه حذف شده، نه جایگزین. */
-  const current = (key: string, file: File) => find(key)?.file === file;
+  const current = (key: string, file: File | RestoredFile) => find(key)?.file === file;
   function patch(key: string, change: (section: Section) => Section) {
     commit({ sections: snapshot.sections.map((s) => (s.key === key ? change(s) : s)) });
   }
   const patchAnalysis = (key: string, change: (analysis: AnalysisState) => AnalysisState) =>
     patch(key, (s) => ({ ...s, analysis: change(s.analysis) }));
 
-  function createSection(file: File): Section {
+  function createSection(file: File): Section & { file: File } {
     keys += 1;
     return { key: `s${keys}`, file, kind: fileKind(file.name), analysis: initialAnalysis(file), upload: null };
   }
@@ -93,7 +115,9 @@ export function createJozve(deps: JozveDeps) {
       worker = null;
       return;
     }
-    const section = find(next.key)!;
+    const { file } = find(next.key)!;
+    // فقط فایلی که همین حالا دست مرورگر است در صف کارگر می‌آید؛ برگشته‌ها هرگز (`lib/restore.ts`).
+    if (!(file instanceof File)) return;
     jobs += 1;
     const job = jobs;
     inFlight = { job, key: next.key, startedAt: deps.now() };
@@ -106,7 +130,7 @@ export function createJozve(deps: JozveDeps) {
     }
     if (!next.countOnly) patchAnalysis(next.key, (a) => ({ ...a, phase: 'reading' }));
 
-    deps.readFile(section.file).then(
+    deps.readFile(file).then(
       (buffer) => {
         if (inFlight?.job !== job || !worker) return;
         worker.post({
@@ -157,7 +181,7 @@ export function createJozve(deps: JozveDeps) {
     worker = null;
   }
 
-  function estimateOffice(section: Section) {
+  function estimateOffice(section: Section & { file: File }) {
     const ext = extensionOf(section.file.name);
     if (ext !== 'docx' && ext !== 'pptx') return; // doc و ppt قدیمی چنین فهرستی ندارند
     deps
@@ -178,6 +202,8 @@ export function createJozve(deps: JozveDeps) {
     const key = nextUpload(snapshot.sections);
     if (!key) return;
     const { file } = find(key)!;
+    // برگشته‌ها (۳د) اینجا نمی‌رسند: مرورگر نخواندشان، پس نه قیمت مرورگر دارند و نه مسیر سرور.
+    if (!(file instanceof File)) return;
     // «شروع شد» همین حالا ثبت می‌شود تا تا رسیدن ماژول آپلودگر، کس دیگری نوبت نگیرد.
     patch(key, (s) => ({ ...s, upload: { phase: 'starting', documentId: null, sentBytes: 0, totalBytes: file.size } }));
 
@@ -207,12 +233,13 @@ export function createJozve(deps: JozveDeps) {
       );
   }
 
-  /** فایل کنار رفت: آپلودش روی سرور هم لغو و دیسک آزاد می‌شود. */
-  function discardUpload(key: string) {
+  /** فایل کنار رفت: آپلودش روی سرور هم لغو و دیسک آزاد می‌شود؛ `keep` فقط متوقفش می‌کند. */
+  function discardUpload(key: string, keep?: boolean) {
     const handle = handles.get(key);
     handles.delete(key);
-    if (handle) void handle.cancel({ discard: true });
+    if (handle) void handle.cancel({ discard: !keep });
   }
+
 
   /**
    * تحلیل مرورگر کنار تحلیل سرور ذخیره می‌شود (ADR-002) — یک بار، وقتی هم فایل رسیده و
@@ -270,14 +297,40 @@ export function createJozve(deps: JozveDeps) {
       pump();
     },
 
-    /** فایل تازه همان‌جای جزوه — راه جلوی تقریباً هر شکست: «خروجی PDF بگیر و جایش بگذار». */
-    replace(key: string, file: File) {
+    /**
+     * فایل تازه همان‌جای جزوه — راه جلوی تقریباً هر شکست: «خروجی PDF بگیر و جایش بگذار». `keep`: همان فایلی که
+     * جزوهٔ برگشته بعد از رفرش منتظرش بود (۳د)؛ سندش روی سرور می‌ماند تا آپلود از همان تکه ادامه دهد (ADR-024).
+     */
+    replace(key: string, file: File, keep?: boolean) {
       if (!find(key)) return;
       cancelAnalysis(key);
-      discardUpload(key);
+      discardUpload(key, keep);
       const fresh = createSection(file);
       commit({ sections: snapshot.sections.map((s) => (s.key === key ? fresh : s)) });
       estimateOffice(fresh);
+      pump();
+    },
+
+    /**
+     * جزوه‌ای که بعد از رفرش برگشت (۳د، ADR-036): همان فایل‌ها به همان ترتیب، هر کدام با آنچه سرور درباره‌اش
+     * گفت (`lib/restore.ts`). هیچ‌کدام به کارگر تحلیل یا آپلودگر نمی‌رود: یا روی سرور است، یا منتظر همان فایل.
+     */
+    restore(restored: readonly RestoredSection[], follow: FollowDocument) {
+      // کاربر در همین فاصله فایل تازه‌ای انداخت: جزوهٔ تازه‌اش می‌ماند.
+      if (snapshot.sections.length > 0) return;
+      const fresh = restored.map((section) => ({ ...section, key: `s${(keys += 1)}` }));
+      commit({ sections: fresh, overflow: [] });
+      // سند روی سرور، مثل آپلود زنده: پیگیری تا پایان بررسی سرور، و با «حذف» یا «از اول» پاک.
+      for (const { key, file, upload } of fresh) {
+        if (file.documentId) {
+          handles.set(
+            key,
+            follow(file.documentId, upload, (next) => {
+              if (current(key, file)) patch(key, (s) => ({ ...s, upload: next }));
+            }),
+          );
+        }
+      }
       pump();
     },
 

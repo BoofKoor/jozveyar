@@ -93,6 +93,36 @@ export function fingerprint(file: UploadFile): string {
 
 class Stopped extends Error {}
 
+/**
+ * بعد از رسیدن فایل، وضعیت تحلیل سرور تا نتیجه (`ready` یا `failed`)، هر `analysisPollMs`. پشت done نیست: قیمت
+ * مرورگر همان لحظه معتبر است و این فقط هم‌ترازش می‌کند. `fetchStatus` برای پاسخ ناموفق null می‌دهد.
+ */
+async function followAnalysis(
+  fetchStatus: () => Promise<ServerStatus | null>,
+  from: ServerAnalysisView['state'],
+  emit: (analysis: ServerAnalysisView) => void,
+  deps: UploaderDeps,
+  signal: AbortSignal,
+) {
+  const pollMs = deps.analysisPollMs ?? 2000;
+  const deadline = Date.now() + (deps.analysisWatchMs ?? ANALYSIS_WATCH_MS);
+  let state = from;
+  while (state !== 'ready' && state !== 'failed' && Date.now() < deadline) {
+    await deps.sleep(pollMs);
+    if (signal.aborted) return;
+    try {
+      const status = await fetchStatus();
+      if (!status) continue;
+      if (!status.analysis) return; // فایل دیگر روی سرور نیست (انصراف یا انقضا)
+      state = status.analysis.state;
+      emit(status.analysis);
+    } catch {
+      if (signal.aborted) return;
+      // شبکه لحظه‌ای افتاد؛ دور بعد دوباره.
+    }
+  }
+}
+
 export interface UploadHandle {
   done: Promise<UploadSnapshot>;
   /** توقف. با `discard` سند و تکه‌ها روی سرور هم پاک می‌شوند. */
@@ -244,30 +274,19 @@ export function startUpload(
     );
   }
 
-  /**
-   * بعد از رسیدن فایل، وضعیت تحلیل سرور تا نتیجه. پشت done نیست: قیمت
-   * مرورگر همان لحظه معتبر است و این فقط هم‌ترازش می‌کند.
-   */
-  async function watchAnalysis(id: string, first?: ServerAnalysisView) {
-    if (first) emit({ analysis: first });
-    const pollMs = deps.analysisPollMs ?? 2000;
-    const deadline = Date.now() + (deps.analysisWatchMs ?? ANALYSIS_WATCH_MS);
-    let state = first?.state;
-    while (state !== 'ready' && state !== 'failed' && Date.now() < deadline) {
-      await deps.sleep(pollMs);
-      if (controller.signal.aborted) return;
-      try {
+  /** بعد از رسیدن فایل، وضعیت تحلیل سرور تا نتیجه (`followAnalysis`). */
+  function watchAnalysis(id: string, first: ServerAnalysisView) {
+    emit({ analysis: first });
+    void followAnalysis(
+      async () => {
         const response = await api(`/${id}`);
-        if (!response.ok) continue;
-        const status = (await response.json()) as ServerStatus;
-        if (!status.analysis) return; // فایل دیگر روی سرور نیست (انصراف یا انقضا)
-        state = status.analysis.state;
-        emit({ analysis: status.analysis });
-      } catch (error) {
-        if (error instanceof Stopped || controller.signal.aborted) return;
-        // شبکه لحظه‌ای افتاد؛ دور بعد دوباره.
-      }
-    }
+        return response.ok ? ((await response.json()) as ServerStatus) : null;
+      },
+      first.state,
+      (analysis) => emit({ analysis }),
+      deps,
+      controller.signal,
+    );
   }
 
   async function run(): Promise<UploadSnapshot> {
@@ -284,7 +303,7 @@ export function startUpload(
     if (status.status === 'uploaded') {
       forget();
       emit({ phase: 'done', sentBytes: file.size });
-      void watchAnalysis(status.documentId, status.analysis);
+      watchAnalysis(status.documentId, status.analysis ?? { state: 'pending' });
       return { ...snapshot };
     }
 
@@ -297,7 +316,7 @@ export function startUpload(
         forget();
         emit({ phase: 'done', sentBytes: file.size });
         const completed = (await response.json().catch(() => null)) as ServerStatus | null;
-        void watchAnalysis(status.documentId, completed?.analysis ?? { state: 'pending' });
+        watchAnalysis(status.documentId, completed?.analysis ?? { state: 'pending' });
         return { ...snapshot };
       }
       const body = (await response.json().catch(() => ({}))) as { error?: string; missing?: number[] };
@@ -325,6 +344,40 @@ export function startUpload(
           .fetch(`${API}/${id}`, { method: 'DELETE', credentials: 'same-origin', keepalive: true })
           .catch(() => undefined);
       }
+    },
+  };
+}
+
+/**
+ * سند فایلی که بعد از رفرش برگشت (۳د، ADR-036). خود فایل دست مرورگر نیست، ولی سندش روی سرور است: اگر سرور هنوز
+ * بررسی‌اش می‌کند، مثل پایان آپلود تا نتیجه دنبال می‌شود؛ و `cancel({ discard })` مثل انصراف آپلود روی سرور هم
+ * پاکش می‌کند. `upload` null یعنی آپلودش نیمه‌کاره ماند و فایل منتظر انتخاب دوباره است: فقط برای پاک کردن.
+ */
+export function followUpload(
+  documentId: string,
+  upload: UploadSnapshot | null,
+  onChange: (snapshot: UploadSnapshot) => void,
+  deps: UploaderDeps,
+): Pick<UploadHandle, 'cancel'> {
+  const controller = new AbortController();
+  const path = `${API}/${encodeURIComponent(documentId)}`;
+  if (upload?.phase === 'done') {
+    void followAnalysis(
+      async () => {
+        const response = await deps.fetch(path, { credentials: 'same-origin', signal: controller.signal });
+        return response.ok ? ((await response.json()) as ServerStatus) : null;
+      },
+      upload.analysis?.state ?? 'pending',
+      (analysis) => onChange({ ...upload, analysis }),
+      deps,
+      controller.signal,
+    );
+  }
+  return {
+    async cancel({ discard = false } = {}) {
+      controller.abort();
+      if (!discard) return;
+      await deps.fetch(path, { method: 'DELETE', credentials: 'same-origin', keepalive: true }).catch(() => undefined);
     },
   };
 }

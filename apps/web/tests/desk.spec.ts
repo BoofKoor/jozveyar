@@ -369,6 +369,9 @@ test.describe('رابط پس از فایل، تکهٔ جدا', () => {
     await expect(page.getByTestId('price-total')).toContainText('61,000', { timeout: 20_000 });
     await expect(page.getByTestId('stat-page-count')).toHaveText('10');
     await expect(retry).toHaveCount(0);
+    // تکه‌ای که هنوز در راه است، با بسته شدن صفحه پاسخش را از دست می‌دهد («Response has been disposed»): روی main
+    // هم یک بار از ۲۰ همین تست را می‌انداخت. رهگیری پیش از پایان تست برداشته می‌شود.
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 });
 

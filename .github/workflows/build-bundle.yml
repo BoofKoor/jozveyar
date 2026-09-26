@@ -236,7 +236,8 @@ jobs:
       # Garage واقعی، و همان ایمیج کارگری که سرور می‌سازد (`docworker-smoke`). از «ادامه» تا «سفارش ثبت
       # شد»؛ کد پیامکی را تست از `sms_messages` می‌خواند (پیامک کنسولی). پایگاه دادهٔ تازه (`jy_e2e`)،
       # چون عددهای انتظار از `quote()` و تعرفهٔ پایه‌اند و پایگاه دادهٔ تست واحد ردیف‌های خودش را دارد.
-      # `upload.spec.ts` هم همین‌جا: آپلود واقعی، و Word و عکس با LibreOffice کارگر.
+      # `upload.spec.ts` هم همین‌جا: آپلود واقعی، و Word و عکس با LibreOffice کارگر. و `restore.spec.ts` (برش ۳د،
+      # ADR-036): رفرش در هر قدم، «پرداخت» دوباره بعد از رفرش، سندی که دیگر روی سرور نیست، و زمان رفرش تا قیمت.
       # سرور روی پورت ۳۱۰۰ پیکربندی Playwright، تا Playwright سرور دومی بالا نیاورد (`reuseExistingServer`).
       # وب مهاجرت‌ها را پیش از اولین پاسخ اعمال می‌کند، پس کارگر بعد از «وب سالم» می‌آید (مثل compose تولید).
       - name: مسیر خرید، سرتاسری
@@ -261,7 +262,7 @@ jobs:
             docworker-smoke
           cd apps/web
           E2E_CHECKOUT_BASE_URL=http://127.0.0.1:3100 E2E_UPLOAD_BASE_URL=http://127.0.0.1:3100 \
-            pnpm exec playwright test tests/checkout.spec.ts tests/upload.spec.ts
+            pnpm exec playwright test tests/checkout.spec.ts tests/upload.spec.ts tests/restore.spec.ts
 
       - name: لاگ مسیر خرید، اگر افتاد
         if: failure()

@@ -5,8 +5,7 @@ import { formatTomans } from '@jozveyar/text';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
 import { publishDockHeight } from '../lib/dock';
 import type { OrderConfig } from '../lib/orderConfig';
-import { Note } from './AnalysisCard';
-import { Names } from './JozveFiles';
+import { Names, Note } from './AnalysisCard';
 import { SumValue, SummaryLines, printLabel } from './checkout/parts';
 
 /**
@@ -17,8 +16,9 @@ import { SumValue, SummaryLines, printLabel } from './checkout/parts';
  * - `sending`: فایلی هنوز به سرور نرسیده یا سرور بررسی‌اش می‌کند؛ سفارش با شمارش سرور است (ADR-034).
  * - `stuck`: فایلی به سرور نرسید؛ یادداشت خلاصه راه جلو را می‌گوید.
  * - `busy`: «ادامه» زده شد و قیمت سرور در راه است.
+ * - `waiting`: جزوه بعد از رفرش برگشت و فایلی منتظر انتخاب دوباره است (۳د، ADR-036).
  */
-export type DeskAction = 'checking' | 'blocked' | 'soon' | 'sending' | 'stuck' | 'busy' | 'go';
+export type DeskAction = 'checking' | 'blocked' | 'soon' | 'sending' | 'stuck' | 'busy' | 'waiting' | 'go';
 
 const LABEL: Record<DeskAction, string> = {
   checking: 'در حال بررسی…',
@@ -27,6 +27,7 @@ const LABEL: Record<DeskAction, string> = {
   sending: 'در حال ارسال فایل…',
   stuck: 'ادامه — آدرس و تحویل',
   busy: 'ادامه — آدرس و تحویل',
+  waiting: 'اول همان فایل را دوباره انتخاب کن',
   go: 'ادامه — آدرس و تحویل',
 };
 
@@ -38,6 +39,7 @@ const SHORT: Record<DeskAction, string> = {
   sending: 'ارسال…',
   stuck: 'ادامه',
   busy: 'ادامه',
+  waiting: 'ادامه',
   go: 'ادامه',
 };
 
@@ -46,6 +48,7 @@ const NAME: Partial<Record<DeskAction, string>> = {
   soon: 'ثبت سفارش آنلاین به‌زودی',
   sending: 'ادامه — در حال ارسال فایل',
   stuck: 'ادامه — اول فایل باید به سرور برسد',
+  waiting: 'ادامه — اول همان فایل را دوباره انتخاب کن',
 };
 
 /** در حال کار: چرخندهٔ کیت و متن خواندنی. */
@@ -100,6 +103,8 @@ interface Props {
    * است: جزوه‌ای که یک فصلش کم است بی‌صدا سفارش داده نمی‌شود.
    */
   blocked: readonly string[];
+  /** فایل‌های جزوهٔ برگشته که منتظر انتخاب دوباره‌اند (۳د)؛ در این قیمت نیستند. */
+  waiting: readonly string[];
 }
 
 /**
@@ -116,6 +121,7 @@ export function OrderSummary({
   provisional,
   pending,
   blocked,
+  waiting,
   notes,
   ...action
 }: Props & ActionProps & { config: OrderConfig; priceList: PriceList; notes?: ReactNode }) {
@@ -149,8 +155,13 @@ export function OrderSummary({
           <Note tone="info" testId="price-pending">
             قیمت <Names names={pending} /> بعد از بررسی روی سرور به این اضافه می‌شود.
           </Note>
-        ) : provisional ? (
+        ) : provisional && waiting.length === 0 ? (
           <Note tone="info">بررسی فایل ادامه دارد؛ عدد ممکن است کمی جابه‌جا شود.</Note>
+        ) : null}
+        {waiting.length > 0 ? (
+          <Note tone="info" testId="price-waiting">
+            قیمت <Names names={waiting} /> بعد از انتخاب دوبارهٔ همان فایل به این اضافه می‌شود.
+          </Note>
         ) : null}
         {blocked.length > 0 ? (
           <Note tone="error" testId="price-blocked">

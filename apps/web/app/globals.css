@@ -104,17 +104,21 @@
    * حالت سفارش: وقتی جزوه‌ای در کار است، جزیرهٔ سفارش نشانهٔ `[data-jozve]` را می‌گذارد. کل صفحه
    * green-50 می‌شود و کارت‌ها رویش سفیدند؛ سربرگ بی ناوبری می‌شود و لوگو بی پیوند، تا جزوهٔ
    * نیمه‌کاره با یک کلیک پاک نشود. بی JS. (چیدمان صفحهٔ اصلی در این حالت: home.css)
+   * `data-restoring` روی ریشه همین حالت است، پیش از رسیدن جزوه‌ای که بعد از رفرش برمی‌گردد (۳د).
    */
-  body:has([data-jozve]) {
+  body:has([data-jozve]),
+  [data-restoring] > body {
     background: var(--color-band);
   }
   .site-ordering {
     display: none;
   }
-  body:has([data-jozve]) .site-idle {
+  body:has([data-jozve]) .site-idle,
+  [data-restoring] > body .site-idle {
     display: none;
   }
-  body:has([data-jozve]) .site-ordering {
+  body:has([data-jozve]) .site-ordering,
+  [data-restoring] > body .site-ordering {
     display: block;
   }
 
@@ -128,7 +132,8 @@
     background: var(--color-band);
     border-block-start: 1px solid var(--color-line);
   }
-  body:has([data-jozve]) .site-foot {
+  body:has([data-jozve]) .site-foot,
+  [data-restoring] > body .site-foot {
     margin-block-start: 0;
   }
   .site-foot__brand img {

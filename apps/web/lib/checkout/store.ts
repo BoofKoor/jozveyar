@@ -71,6 +71,21 @@ export interface CheckoutState {
   busy: Busy;
 }
 
+/**
+ * آنچه از مسیر خرید بعد از رفرش برمی‌گردد (۳د، ADR-036): جا، گیرنده، موبایلی که تایپ شده، شمارش معکوس کد (خود
+ * کد نه)، و کلید «پرداخت» با آنچه با آن فرستاده شد، تا زدن دوباره همان سفارش را بدهد. قیمت نه: از سرور تازه
+ * گرفته می‌شود. `auth` هم نه: از `GET /api/checkout`.
+ */
+export interface CheckoutDraft {
+  place: Place | null;
+  recipient: RecipientInput;
+  mobile: string;
+  otp: Otp | null;
+  pay: { payload: string; key: string } | null;
+  /** توکن سفارشی که آخرین «پرداخت» ساخت؛ صفحهٔ همان سفارش، وقتی پرداخت شد، پیش‌نویس را پاک می‌کند. */
+  order: string | null;
+}
+
 export interface CheckoutStoreDeps {
   api: CheckoutApi;
   now: () => number;
@@ -136,6 +151,8 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
   const newKey = deps.newKey ?? newCheckoutKey;
   /** کلید «پرداخت» و آنچه با آن فرستاده شد. */
   let lastPay: { payload: string; key: string } | null = null;
+  /** سفارشی که آخرین «پرداخت» ساخت یا پیدا کرد. */
+  let placedOrder: string | null = null;
   /** شمارهٔ آخرین درخواست قیمت؛ پاسخ دیررسِ درخواستی کهنه نادیده گرفته می‌شود. */
   let quoteSeq = 0;
 
@@ -226,6 +243,22 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
       return () => {
         listeners.delete(listener);
       };
+    },
+
+    /** پیش‌نویس همین مسیر خرید، برای برگشت بعد از رفرش (`lib/draft.ts`). */
+    draft(): CheckoutDraft {
+      const { place, recipient, mobile, otp } = state;
+      return { place, recipient, mobile, otp, pay: lastPay, order: placedOrder };
+    },
+
+    /**
+     * مسیر خریدی که بعد از رفرش برگشت (۳د): پیش از «ادامه» و پیش از قیمت سرور. پیش‌نویس سنجیده رسیده است
+     * (`lib/restore.ts`، و جا با فهرست شهرها در `restoreCheckout`).
+     */
+    hydrate(draft: CheckoutDraft) {
+      lastPay = draft.pay;
+      placedOrder = draft.order;
+      set({ place: draft.place, recipient: draft.recipient, mobile: draft.mobile, otp: draft.otp });
     },
 
     /** موبایلی که همین مرورگر پیش‌تر تأیید کرده (`GET /api/checkout`). */
@@ -412,6 +445,7 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
       });
       if (result.ok) {
         const { order, payment } = result.value;
+        placedOrder = order.token;
         // صفحه می‌رود؛ دکمه تا رفتن در حال کار می‌ماند (`resume` اگر مرورگر برش گرداند).
         deps.navigate(payment ? payment.redirectUrl : `/order/${order.token}`);
         return null;

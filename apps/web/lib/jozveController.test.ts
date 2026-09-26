@@ -8,8 +8,11 @@ import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts/constants';
 
 import type { WorkerResponse } from './analysis-protocol';
-import { jozveView } from './jozveView';
-import { createJozve, type JozveDeps } from './jozveController';
+import { orderGate } from './checkout/gate';
+import type { DraftFile } from './draft';
+import { restoredSection, type DocumentStatus } from './restore';
+import { jozveView, matchAwaited } from './jozveView';
+import { createJozve, type FollowDocument, type JozveDeps } from './jozveController';
 import type { UploadHandle, UploadSnapshot } from './upload/client';
 
 type Outcome = number | 'corrupt' | 'hang';
@@ -52,9 +55,28 @@ class FakeUpload {
   }
 }
 
+/** پیگیری سند فایلی که بعد از رفرش برگشت (۳د): تست خودش پایان بررسی سرور را می‌رساند. */
+class FakeFollow {
+  cancelled: { discard: boolean } | null = null;
+  constructor(
+    readonly documentId: string,
+    readonly upload: UploadSnapshot | null,
+    private readonly onChange: (s: UploadSnapshot) => void,
+  ) {}
+  readonly handle = {
+    cancel: async (options?: { discard?: boolean }) => {
+      this.cancelled = { discard: Boolean(options?.discard) };
+    },
+  };
+  ready(pageCount: number) {
+    this.onChange({ ...this.upload!, analysis: { state: 'ready', pageCount } });
+  }
+}
+
 function harness(outcomes: Record<string, Outcome>, options: { office?: Record<string, number>; noWorker?: boolean } = {}) {
   const log: string[] = [];
   const uploads: FakeUpload[] = [];
+  const follows: FakeFollow[] = [];
   const sent: string[] = [];
   const names = new WeakMap<ArrayBuffer, string>();
   let open = 0;
@@ -128,12 +150,21 @@ function harness(outcomes: Record<string, Outcome>, options: { office?: Record<s
   };
 
   const jozve = createJozve(deps);
+  const follow: FollowDocument = (documentId, upload, onChange) => {
+    const fake = new FakeFollow(documentId, upload, onChange);
+    follows.push(fake);
+    log.push(`follow ${documentId}`);
+    return fake.handle;
+  };
   return {
+    restore: (sections: Parameters<typeof jozve.restore>[0]) => jozve.restore(sections, follow),
     jozve,
     log,
     uploads,
+    follows,
     sent,
     upload: (name: string) => uploads.find((u) => u.file.name === name)!,
+    follow: (documentId: string) => follows.find((f) => f.documentId === documentId)!,
     get stats() {
       return { maxOpen, alive, maxAlive, workersCreated, maxActiveUploads };
     },
@@ -292,5 +323,114 @@ describe('کارهای کاربر', () => {
     h.jozve.reset();
     expect(h.jozve.getSnapshot().sections).toEqual([]);
     expect(h.stats.alive).toBe(0);
+  });
+});
+
+describe('جزوهٔ برگشته بعد از رفرش (۳د)', () => {
+  /** همان فایلی که کاربر پیش از رفرش انداخته بود: نام، حجم و تاریخ تغییرش همان است. */
+  const disk = (name: string, lastModified = 1_700_000_000_000) => new File(['%PDF'], name, { lastModified });
+  const DOC = { a: 'a0000000-0000-4000-8000-000000000001', b: 'b0000000-0000-4000-8000-000000000002', c: 'c0000000-0000-4000-8000-000000000003' };
+  const draftFile = (name: string, documentId: string | null): DraftFile => ({ name, size: 4, lastModified: 1_700_000_000_000, documentId });
+  const arrived = (pageCount?: number): DocumentStatus => ({
+    kind: 'arrived',
+    analysis: pageCount ? { state: 'ready', pageCount } : { state: 'running' },
+  });
+  const onServer = (name: string, id: string, pageCount?: number) => restoredSection(draftFile(name, id), arrived(pageCount));
+  const partial = (name: string, id: string) => restoredSection(draftFile(name, id), { kind: 'partial' });
+  const never = (name: string) => restoredSection(draftFile(name, null), null);
+  const INITIAL = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 1 } as const;
+
+  it('فایل روی سرور: عدد از سرور، بی کارگر تحلیل و بی آپلود؛ بررسی نیمه‌کارهٔ سرور تا نتیجه دنبال می‌شود', async () => {
+    const h = harness({});
+    h.restore([onServer('a.pdf', DOC.a, 10), onServer('b.docx', DOC.b)]);
+    await settle();
+    expect(h.log).toEqual([`follow ${DOC.a}`, `follow ${DOC.b}`]);
+    expect(h.stats.workersCreated).toBe(0);
+    expect(h.view()).toMatchObject({ pageCount: 10, provisional: true, waiting: [] });
+    expect(h.view().pending.map((v) => v.name)).toEqual(['b.docx']);
+    expect(orderGate(h.view(), INITIAL).kind).toBe('sending');
+
+    h.follow(DOC.b).ready(6);
+    await settle();
+    expect(h.view()).toMatchObject({ pageCount: 16, provisional: false });
+    const gate = orderGate(h.view(), INITIAL);
+    expect(gate.kind === 'ready' && gate.items[0]!.documentIds).toEqual([DOC.a, DOC.b]);
+  });
+
+  it('فایلی که نرسیده بود منتظر همان فایل است: نه قیمت، نه سفارش، نه کارگر، نه آپلود', async () => {
+    const h = harness({ 'b.pdf': 6 });
+    h.restore([onServer('a.pdf', DOC.a, 10), never('b.pdf')]);
+    await settle();
+    const view = h.view();
+    expect(view.waiting.map((v) => v.name)).toEqual(['b.pdf']);
+    expect(view).toMatchObject({ pageCount: 10, provisional: true, blocked: [], pending: [] });
+    expect(orderGate(view, INITIAL).kind).toBe('waiting');
+    expect(h.log).toEqual([`follow ${DOC.a}`]);
+  });
+
+  it('همان فایل: سند نیمه‌کاره روی سرور می‌ماند تا آپلود از همان تکه ادامه دهد، و قیمت مرورگر فوری برمی‌گردد', async () => {
+    const h = harness({ 'a.pdf': 10 });
+    h.restore([partial('a.pdf', DOC.a)]);
+    await settle();
+    const [a] = h.jozve.getSnapshot().sections;
+    const { resumed } = matchAwaited(h.jozve.getSnapshot().sections, [disk('a.pdf')]);
+    expect(resumed.map((r) => r.key)).toEqual([a!.key]);
+    h.jozve.replace(a!.key, resumed[0]!.file, true);
+    await settle();
+    expect(h.follow(DOC.a).cancelled).toEqual({ discard: false });
+    expect(h.log).toEqual([`follow ${DOC.a}`, 'full a.pdf', 'upload a.pdf']);
+    expect(h.view()).toMatchObject({ pageCount: 10, waiting: [] });
+  });
+
+  it('فایل دیگر به جای فایل منتظر: جایگزینی، و سند نیمه‌کارهٔ قبلی روی سرور پاک می‌شود', async () => {
+    const h = harness({ 'a.pdf': 10 });
+    h.restore([partial('a.pdf', DOC.a)]);
+    await settle();
+    const [a] = h.jozve.getSnapshot().sections;
+    // همان نام، تاریخ تغییر دیگر: فایل دیگری است
+    const other = disk('a.pdf', 1_700_000_999_999);
+    expect(matchAwaited(h.jozve.getSnapshot().sections, [other]).resumed).toEqual([]);
+    h.jozve.replace(a!.key, other);
+    await settle();
+    expect(h.follow(DOC.a).cancelled).toEqual({ discard: true });
+  });
+
+  it('همهٔ فایل‌ها یک‌جا با «افزودن فایل»: هر کدام سر جای خودش، و فایل تازه ته جزوه', async () => {
+    const h = harness({ 'a.pdf': 10, 'c.pdf': 6, 'x.pdf': 2 });
+    h.restore([never('a.pdf'), onServer('b.pdf', DOC.b, 4), never('c.pdf')]);
+    await settle();
+    // همان کاری که «افزودن فایل» رابط می‌کند (`OrderDesk`)
+    const { resumed, rest } = matchAwaited(h.jozve.getSnapshot().sections, [disk('x.pdf'), disk('c.pdf'), disk('a.pdf')]);
+    expect(rest.map((f) => f.name)).toEqual(['x.pdf']);
+    for (const { key, file } of resumed) h.jozve.replace(key, file, true);
+    h.jozve.add(rest);
+    await settle();
+    expect(h.names()).toEqual(['a.pdf', 'b.pdf', 'c.pdf', 'x.pdf']);
+    expect(h.view()).toMatchObject({ pageCount: 22, waiting: [] });
+  });
+
+  it('حذف و «از اول» سند روی سرور را هم پاک می‌کنند؛ رفتن از صفحه فقط پیگیری را می‌ایستاند', async () => {
+    const h = harness({});
+    h.restore([onServer('a.pdf', DOC.a, 10), partial('b.pdf', DOC.b), onServer('c.pdf', DOC.c)]);
+    await settle();
+    h.jozve.remove(h.jozve.getSnapshot().sections[0]!.key);
+    await settle();
+    expect(h.follow(DOC.a).cancelled).toEqual({ discard: true });
+    h.jozve.dispose();
+    expect(h.follow(DOC.c).cancelled).toEqual({ discard: false });
+    h.jozve.resume();
+    h.jozve.reset();
+    await settle();
+    // `dispose` دستگیره‌ها را رها کرده بود؛ «از اول» بعدش چیزی دو بار پاک نمی‌کند.
+    expect(h.follow(DOC.b).cancelled).toEqual({ discard: false });
+  });
+
+  it('فایل تازه‌ای که پیش از رسیدن جزوهٔ برگشته انداخته شد می‌ماند', async () => {
+    const h = harness({ 'n.pdf': 3 });
+    h.jozve.add([disk('n.pdf')]);
+    h.restore([onServer('a.pdf', DOC.a, 10)]);
+    await settle();
+    expect(h.names()).toEqual(['n.pdf']);
+    expect(h.follows).toEqual([]);
   });
 });

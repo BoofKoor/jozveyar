@@ -231,3 +231,141 @@ test.describe('چند فایل روی موبایل', () => {
     await expect(price(page)).toContainText('305,800');
   });
 });
+
+/**
+ * برگشت بعد از رفرش (برش ۳د، ADR-036)، بی سرور: آپلود «در دسترس نیست»، پس هیچ فایلی روی سرور نیست و جزوهٔ
+ * برگشته منتظر همان فایل‌هاست. با سرور (فایل روی سرور، قدم‌های خرید، «پرداخت» دوباره، سند پاک‌شده، زمان) در
+ * `restore.spec.ts`. فایل‌ها از دیسک‌اند، نه بافر: بافر هر بار تاریخ تغییر تازه می‌گیرد و «همان فایل» نیست.
+ */
+test.describe('برگشت بعد از رفرش (۳د)، بی سرور', () => {
+  const tile = (page: Page, title: string) => page.locator('label.jy-tile').filter({ has: page.getByText(title, { exact: true }) });
+
+  test('همان فایل‌ها به همان ترتیب، منتظر انتخاب دوباره؛ همه یک‌جا سر جای خودشان، با همان تنظیمات چاپ', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf'), fixture('mixed-color-10.pdf')]);
+    await expect(price(page)).toContainText('86,600', { timeout: 20_000 });
+    // ترتیبی که کاربر ساخت، و تنظیمی که عوض کرد، هر دو باید برگردند
+    await page.getByRole('button', { name: '«plain-bw-10.pdf» یکی بالاتر' }).click();
+    await expect.poll(() => names(page)).toEqual(['image-scan-6.pdf', 'plain-bw-10.pdf', 'mixed-color-10.pdf']);
+    await tile(page, 'رنگی').click();
+    const order = await names(page);
+    await expect(price(page)).not.toContainText('86,600');
+    const total = await price(page).textContent();
+
+    await page.reload();
+    await expect(page.getByTestId('jozve-waiting')).toContainText('همان فایل‌ها را دوباره انتخاب کن');
+    expect(await names(page)).toEqual(order);
+    await expect(rows(page).getByTestId('section-waiting')).toHaveCount(3);
+    await expect(rows(page).getByTestId('section-status').first()).toContainText('منتظر همان فایل');
+
+    // همه یک‌جا و به هر ترتیبی: هر فایل سر جای خودش
+    await page.setInputFiles('#jozve-add', [fixture('mixed-color-10.pdf'), fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
+    await expect(price(page)).toHaveText(total!, { timeout: 20_000 });
+    expect(await names(page)).toEqual(order);
+    await expect(tile(page, 'رنگی').locator('input')).toBeChecked();
+    await expect(page.getByTestId('jozve-waiting')).toHaveCount(0);
+  });
+
+  test('تک‌فایل: «همان فایل را انتخاب کن»، و «ادامه» تا آن موقع بسته', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    await page.reload();
+    await expect(page.getByTestId('file-waiting')).toContainText('plain-bw-10.pdf');
+    await expect(page.getByTestId('jozve-waiting')).toContainText('همان فایل را دوباره انتخاب کن');
+    // هیچ فایلی در قیمت نیست، پس هنوز قیمت و «ادامه»ای نیست
+    await expect(price(page)).toHaveCount(0);
+    await page.setInputFiles('#jozve-replace', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    await expect(page.getByTestId('file-waiting')).toHaveCount(0);
+  });
+
+  test('پیش از هر اسکریپتی حالت سفارش است و کارت «در حال برگرداندن جزوه…» می‌گوید، نه لحظه‌ای صفحهٔ اول', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+
+    // اسکریپت‌های صفحه تا اجازهٔ تست نمی‌رسند: فقط HTML، CSS و اسکریپت چندبایتی درون HTML
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/_next/static/chunks/**', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('html')).toHaveAttribute('data-restoring', '');
+    await expect(page.locator('.home-restoring')).toHaveText('در حال برگرداندن جزوه…');
+    await expect(page.locator('.home-restoring')).toBeVisible();
+    await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeHidden();
+    await expect(page.locator('#how')).toBeHidden();
+    await expect(page.locator('#jozve-file')).toBeHidden();
+
+    release();
+    await expect(page.getByTestId('file-waiting')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('html')).not.toHaveAttribute('data-restoring');
+    await expect(page.locator('.home-restoring')).toHaveCount(0);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('زبانهٔ تازه جزوهٔ تازه است؛ «فایل دیگری بینداز» پیش‌نویس را هم پاک می‌کند', async ({ page, context }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    await page.reload();
+    await expect(page.getByTestId('file-waiting')).toBeVisible();
+
+    const other = await context.newPage();
+    await other.goto('/');
+    await other.waitForLoadState('networkidle');
+    await expect(other.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+    await expect(other.getByTestId('file-waiting')).toHaveCount(0);
+    await other.close();
+
+    await page.getByRole('button', { name: 'فایل دیگری بینداز' }).click();
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+    await expect(page.getByTestId('file-waiting')).toHaveCount(0);
+  });
+
+  test('پیش‌نویس دستکاری‌شده: صحافی و کاغذی که تعرفه ندارد (حتی «constructor») یعنی پیش‌فرض‌ها، نه صفحهٔ شکسته', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    // پیش‌نویسی که صفحه با رفرش می‌نویسد، پیش از هر اسکریپت صفحه دستکاری می‌شود
+    await page.addInitScript(() => {
+      const raw = sessionStorage.getItem('jy.draft');
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      draft.config = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'constructor', paperTypeId: 'constructor', copies: 1 };
+      sessionStorage.setItem('jy.draft', JSON.stringify(draft));
+    });
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    await page.reload();
+    await expect(page.getByTestId('file-waiting')).toBeVisible();
+    await page.setInputFiles('#jozve-replace', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    expect(errors).toEqual([]);
+  });
+
+  test('حافظهٔ بستهٔ سایت: صفحهٔ معمول، بی خطا', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'sessionStorage', {
+        get() {
+          throw new DOMException('بسته', 'SecurityError');
+        },
+      });
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+    await expect(page.getByTestId('file-waiting')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+});
