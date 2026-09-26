@@ -218,6 +218,10 @@ jobs:
       - name: بیلد
         run: pnpm --filter @jozveyar/web build
 
+      # پنل ادمین (برش ۴، ADR-037): اپ جدا، و دستور سرور (`dist/cli.mjs`، با esbuild) کنار آن.
+      - name: بیلد پنل
+        run: pnpm --filter @jozveyar/admin build
+
       # تست سرتاسری مرورگر روی همین build تولیدی (ADR-018) — دروازه، مثل تست واحد: بستهٔ
       # شکسته منتشر نمی‌شود. بدون استوریج و پایگاه داده (`S3_ENDPOINT` و `DATABASE_URL` فقط
       # در مراحل خودشان‌اند)، همان حالتی که `flow.spec.ts`، `jozve.spec.ts` و `site.spec.ts`
@@ -270,6 +274,39 @@ jobs:
           cat "$RUNNER_TEMP/web.log" || true
           docker logs docworker || true
 
+      # پنل ادمین، سرتاسری (برش ۴٫۱؛ ADR-037 و ADR-038): همان build پنل و همان دستور سرور، روی پایگاه دادهٔ
+      # تازه‌ای (`jy_admin`) که یک وب جدا روی ۳۱۰۱ مهاجرت و نقش‌هایش را نوشته، مثل compose تولید (پنل بعد از «وب
+      # سالم»). دروازهٔ مسیر محرمانه، ثبت با QR، ورود، قفل، متصدی، کار حساس با کد تازه، رویدادها، CSP و گوشی.
+      # کد برنامهٔ تأیید را تست خودش از کلید صفحهٔ ثبت می‌سازد. رمزها همین‌جا تصادفی‌اند و `set -x` ندارد.
+      - name: پنل، سرتاسری
+        env:
+          DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
+          ADMIN_ORIGIN: http://127.0.0.1:3200
+          E2E_ADMIN_BASE_URL: http://127.0.0.1:3200
+        run: |
+          set -eu
+          docker run --rm --network host -e PGPASSWORD=jozveyar postgres:17-alpine \
+            psql -h 127.0.0.1 -U jozveyar -d jozveyar -v ON_ERROR_STOP=1 -c 'CREATE DATABASE jy_admin'
+          node apps/web/scripts/serve-standalone.mjs 3101 > "$RUNNER_TEMP/web-admin.log" 2>&1 &
+          timeout 120 sh -c 'until grep -qF "✓ دادهٔ پایه" "$0"; do sleep 1; done' "$RUNNER_TEMP/web-admin.log"
+          SESSION_SECRET="$(openssl rand -hex 32)"
+          SECRETS_KEY="$(openssl rand -hex 32)"
+          ADMIN_BASE_PATH="/$(openssl rand -hex 8)"
+          export SESSION_SECRET SECRETS_KEY ADMIN_BASE_PATH
+          node apps/admin/scripts/serve-standalone.mjs 3200 > "$RUNNER_TEMP/admin.log" 2>&1 &
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:3200/api/health > /dev/null; do sleep 1; done'
+          timeout 30 sh -c 'until grep -qF "⚠ پنل ادمین: هنوز هیچ ادمینی" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
+          grep -F '✓ پنل ادمین: آماده' "$RUNNER_TEMP/admin.log"
+          if grep -F "$ADMIN_BASE_PATH" "$RUNNER_TEMP/admin.log"; then echo 'مسیر محرمانه در لاگ پنل آمد' >&2; exit 1; fi
+          cd apps/admin
+          pnpm exec playwright test
+
+      - name: لاگ پنل، اگر افتاد
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/web-admin.log" || true
+          cat "$RUNNER_TEMP/admin.log" || true
+
       # خروجی standalone دو چیز را خودش نمی‌آورد و باید کنار server.js بنشینند.
       # همان مراحل serve-standalone.mjs، اینجا برای بسته‌بندی.
       - name: مونتاژ بسته
@@ -289,12 +326,28 @@ jobs:
           tar -czf jozveyar-bundle.tar.gz -C "$OUT" .
           ls -lh jozveyar-bundle.tar.gz
 
+      # بستهٔ پنل ادمین، مثل وب: standalone، استاتیک و public کنارش، دستور سرور، و commit. `-T` یعنی محتوا به
+      # همان پوشه، حتی اگر اجرای سرتاسری پیش‌تر ساخته باشدش. مهاجرت ندارد؛ آن با وب است.
+      - name: مونتاژ بستهٔ پنل
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          set -eux
+          OUT=apps/admin/.next/standalone
+          mkdir -p "$OUT/apps/admin/.next/static" "$OUT/apps/admin/public" "$OUT/apps/admin/dist"
+          cp -rT apps/admin/.next/static "$OUT/apps/admin/.next/static"
+          cp -rT apps/admin/public "$OUT/apps/admin/public"
+          cp apps/admin/dist/cli.mjs "$OUT/apps/admin/dist/cli.mjs"
+          echo "$GITHUB_SHA" > "$OUT/COMMIT"
+          tar -czf jozveyar-admin.tar.gz -C "$OUT" .
+          ls -lh jozveyar-admin.tar.gz
+
       # اثر انگشت، تا سرور بفهمد نسخهٔ جدید آمده یا نه.
       - name: اثر انگشت
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
           sha256sum jozveyar-bundle.tar.gz | cut -d' ' -f1 > jozveyar-bundle.sha256
-          cat jozveyar-bundle.sha256
+          sha256sum jozveyar-admin.tar.gz | cut -d' ' -f1 > jozveyar-admin.sha256
+          cat jozveyar-bundle.sha256 jozveyar-admin.sha256
 
       # ایمیج پایهٔ کارگر — فقط اگر این شناسه تازه است، و **قبل از** بستهٔ کد:
       # بسته‌ای که به پایهٔ منتشرنشده اشاره کند هیچ‌وقت منتشر نمی‌شود. تگ
@@ -360,6 +413,8 @@ jobs:
           files: |
             jozveyar-bundle.tar.gz
             jozveyar-docworker.tar.gz
+            jozveyar-admin.tar.gz
             jozveyar-bundle.sha256
             jozveyar-docworker.sha256
+            jozveyar-admin.sha256
           prerelease: true

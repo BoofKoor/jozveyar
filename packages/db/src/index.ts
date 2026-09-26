@@ -20,6 +20,8 @@ export * from './reference.js';
 export * from './auth.js';
 export * from './orders.js';
 export * from './sms.js';
+export * from './admin.js';
+export * from './sealed.js';
 export { runMigrations } from './migrate.js';
 
 export type Database = ReturnType<typeof createDb>;

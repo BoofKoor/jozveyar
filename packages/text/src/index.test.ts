@@ -8,6 +8,7 @@ import {
   formatJalaliWeekday,
   formatNumber,
   formatPages,
+  formatTehranTime,
   formatTomans,
   formatWeight,
   isWorkingDay,
@@ -294,6 +295,13 @@ describe('روز کاری و مهلت تحویل به پست (ADR-013)', () => {
   /** لحظه‌ای به ساعت تهران: `tehran('2026-09-26 10:00')`. تهران از ۱۴۰۱ ساعت تابستانی ندارد: +۳:۳۰. */
   const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
   const none = new Set<string>();
+
+  it('ساعت به وقت تهران، ۲۴ ساعته و دو رقمی: «11:20»، «00:05»', () => {
+    expect(formatTehranTime(new Date('2026-10-05T07:50:00Z'))).toBe('11:20');
+    expect(formatTehranTime(tehran('2026-09-26 00:05'))).toBe('00:05');
+    expect(formatTehranTime(tehran('2026-09-26 23:59'))).toBe('23:59');
+    expect(formatTehranTime(tehran('2026-09-26 09:07'))).not.toMatch(/[۰-۹]/);
+  });
 
   it('روز هفته و تاریخ بی سال: «شنبه 4 مهر»', () => {
     expect(formatJalaliWeekday(tehran('2026-09-26 10:00'))).toBe('شنبه 4 مهر');

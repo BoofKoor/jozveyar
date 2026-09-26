@@ -1,0 +1,55 @@
+/**
+ * پیکربندی پنل از `.env` سرور (همان `env_file` کانتینر وب): پایگاه داده، `SESSION_SECRET`، `SECRETS_KEY`،
+ * `ADMIN_BASE_PATH` و `ADMIN_ORIGIN`. خالص است، بی I/O، تا تست بی سرور همهٔ حالت‌ها را بسنجد.
+ *
+ * هر کدام نباشد پنل بسته است (همه‌چیز ۴۰۴) و لاگ بالا آمدن نامش را می‌گوید، نه مقدارش.
+ */
+
+import { secretsKeyOf } from '@jozveyar/db';
+
+import { gateOf } from '../gate';
+import { originOf } from '../security';
+
+/** همان کمینهٔ مسیر خرید (`apps/web/lib/server/checkoutMode.ts`)؛ `bootstrap.sh` ۶۴ رقم hex می‌سازد. */
+export const MIN_SECRET_LENGTH = 32;
+
+export interface AdminConfig {
+  databaseUrl: string;
+  secret: string;
+  secretsKey: Buffer;
+  gate: string;
+  /** null یعنی از خود درخواست؛ دستور سرور بی آن پیوند نمی‌سازد. */
+  origin: string | null;
+}
+
+type Env = Record<string, string | undefined>;
+
+/** چه چیزی کم است؛ نام‌ها، نه مقدارها. */
+export function configProblems(env: Env): string[] {
+  const problems: string[] = [];
+  if (!env.DATABASE_URL) problems.push('DATABASE_URL نیست');
+  if ((env.SESSION_SECRET ?? '').length < MIN_SECRET_LENGTH) problems.push('SESSION_SECRET نیست یا کوتاه است');
+  if (!secretsKeyOf(env.SECRETS_KEY)) problems.push('SECRETS_KEY نیست یا ۶۴ رقم hex نیست');
+  if (!gateOf(env.ADMIN_BASE_PATH)) problems.push('ADMIN_BASE_PATH نیست یا کوتاه‌تر از ۱۶ نویسه است');
+  if (env.ADMIN_ORIGIN && !originOf(env.ADMIN_ORIGIN)) problems.push('ADMIN_ORIGIN نشانی درستی نیست');
+  return problems;
+}
+
+export function adminConfig(env: Env): AdminConfig | null {
+  if (configProblems(env).length > 0) return null;
+  return {
+    databaseUrl: env.DATABASE_URL!,
+    secret: env.SESSION_SECRET!,
+    secretsKey: secretsKeyOf(env.SECRETS_KEY)!,
+    gate: gateOf(env.ADMIN_BASE_PATH)!,
+    origin: originOf(env.ADMIN_ORIGIN),
+  };
+}
+
+/** یک خط برای لاگ بالا آمدن؛ `deploy-bundle.sh` همین را می‌جوید. مسیر محرمانه هرگز در آن نیست. */
+export function describeConfig(env: Env): string {
+  const problems = configProblems(env);
+  if (problems.length > 0) return `✗ پنل ادمین: بسته — ${problems.join('؛ ')}`;
+  const origin = originOf(env.ADMIN_ORIGIN);
+  return `✓ پنل ادمین: آماده${origin ? ` روی ${new URL(origin).host}` : ''}`;
+}

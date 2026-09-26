@@ -51,6 +51,21 @@ export function formatJalaliNumeric(date: Date): string {
   return `${get('year').replace(/\D/g, '')}/${get('month')}/${get('day')}`;
 }
 
+let tehranTime: Intl.DateTimeFormat | undefined;
+
+/** ساعت و دقیقه به وقت تهران، ۲۴ ساعته با ارقام لاتین: `09:05`، `23:40` (پنل ادمین، برش ۴). */
+export function formatTehranTime(date: Date): string {
+  tehranTime ??= new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran',
+    hourCycle: 'h23',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const parts = tehranTime.formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('hour')}:${get('minute')}`;
+}
+
 /** نام روزهای هفته، به ترتیب `getUTCDay` (۰ یکشنبه). */
 const WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
 

@@ -36,6 +36,22 @@ services:
       postgres: { condition: service_healthy }
     expose: ['3000']
 
+  # پنل ادمین (برش ۴، ADR-037): زیردامنهٔ جدا، کانتینر جدا، همان پایگاه داده و همان .env. ایمیجش را
+  # deploy-bundle.sh از بستهٔ CI می‌سازد. پورتی بیرون باز نمی‌شود و Nginx وابسته‌اش نیست: نامش را هنگام
+  # درخواست حل می‌کند، پس نبودن پنل سایت را پایین نمی‌آورد.
+  admin:
+    image: jozveyar/admin:${TAG:-latest}
+    restart: unless-stopped
+    mem_limit: ${ADMIN_MEM_LIMIT:-384m}
+    env_file: [../.env]
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres: { condition: service_healthy }
+      # مهاجرت و نقش‌ها با وب است؛ «وب سالم» یعنی جدول‌های پنل و نقش‌هایش هست.
+      web: { condition: service_healthy }
+    expose: ['3000']
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped

@@ -788,3 +788,164 @@ export const smsMessages = pgTable(
   },
   (t) => [index('sms_messages_to').on(t.toMobile, t.createdAt)],
 );
+
+/* ──────────────────────────── پنل ادمین (برش ۴، ADR-037 و ADR-038) ──────────────────────────── */
+
+/**
+ * ادمین پنل: نام کاربری، رمز (argon2id) و رمز برنامهٔ تأیید (TOTP). ثبت‌نام ندارد: هر ادمین با پیوند
+ * یک‌باره (`admin_invites`) رمز و برنامهٔ تأیید را خودش می‌گذارد، و تا آن موقع هر دو خالی‌اند.
+ *
+ * - `totp_sealed` رمز برنامهٔ تأیید است، مهروموم‌شده با `SECRETS_KEY` (`sealed.ts`)؛ نشت پایگاه داده
+ *   بی آن کلید کد تازه‌ای نمی‌سازد.
+ * - `totp_last_step` آخرین گام ۳۰ ثانیه‌ای پذیرفته‌شده: هر کد فقط یک بار (بازپخش نه).
+ * - `failed_attempts` اشتباه‌های پشت‌سرهم؛ پنجمی `locked_until` را می‌گذارد.
+ * - ادمین پاک نمی‌شود، غیرفعال می‌شود: رویدادهایش به او اشاره می‌کنند.
+ */
+export const adminUsers = pgTable(
+  'admin_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    username: text('username').notNull().unique(),
+    displayName: text('display_name').notNull(),
+    passwordHash: text('password_hash'),
+    totpSealed: text('totp_sealed'),
+    totpLastStep: bigint('totp_last_step', { mode: 'number' }),
+    failedAttempts: smallint('failed_attempts').notNull().default(0),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** null یعنی دستور روی سرور (اولین ادمین، یا بازیابی مالک). */
+    createdBy: uuid('created_by'),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  },
+  (t) => [
+    check('admin_users_username', sql`${t.username} ~ '^[a-z][a-z0-9_.-]{2,31}$'`),
+    check('admin_users_display_name', sql`length(btrim(${t.displayName})) BETWEEN 1 AND 100`),
+    check('admin_users_failed_attempts', sql`${t.failedAttempts} >= 0`),
+    /** رمز و برنامهٔ تأیید با هم می‌آیند و با هم می‌روند؛ نیمی از ورود معنا ندارد. */
+    check('admin_users_credentials', sql`(${t.passwordHash} IS NULL) = (${t.totpSealed} IS NULL)`),
+    foreignKey({ columns: [t.createdBy], foreignColumns: [t.id], name: 'admin_users_created_by_fk' }),
+  ],
+);
+
+/**
+ * پیوند ثبت یک‌باره: ۱۵ دقیقه، یک بار. اولین ادمین را دستور روی سرور می‌سازد، بقیه را مالک از پنل؛ «کد
+ * ورود تازه» (گوشی گم شد) هم همین است. رمز برنامهٔ تأیید از ساختن پیوند ثابت است، تا بار دوباره شدن
+ * صفحه همان QR را نشان دهد.
+ */
+export const adminInvites = pgTable(
+  'admin_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    totpSealed: text('totp_sealed').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    /** کنار گذاشته، بی استفاده: پیوند تازه‌تر، «لغو دعوت»، یا غیرفعال شدن ادمین. */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => adminUsers.id),
+  },
+  (t) => [index('admin_invites_user').on(t.adminUserId, t.createdAt)],
+);
+
+/** نشست پنل: کوکی `__Host-jy_admin`، فقط هشش اینجا. ۱۲ ساعت، یا ۱ ساعت بی‌کاری (ADR-037). */
+export const adminSessions = pgTable(
+  'admin_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tokenHash: text('token_hash').notNull().unique(),
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('admin_sessions_user').on(t.adminUserId)],
+);
+
+/** هر تلاش ورود، برای سقف هر IP (۳۰ در ساعت). IP فقط HMAC، مثل `otp_requests`. */
+export const adminLoginAttempts = pgTable(
+  'admin_login_attempts',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    /** همان که تایپ شد، کوچک‌شده؛ ممکن است چنین ادمینی نباشد. */
+    username: text('username').notNull(),
+    adminUserId: uuid('admin_user_id').references(() => adminUsers.id),
+    ipHash: text('ip_hash').notNull(),
+    ok: boolean('ok').notNull(),
+  },
+  (t) => [index('admin_login_attempts_ip').on(t.ipHash, t.at)],
+);
+
+/**
+ * نقش‌ها و مجوزها (ADR-007): نقش می‌گوید «چه کاری»، `scope` روی انتساب می‌گوید «روی کدام سفارش‌ها».
+ * نقش‌ها و مجوزها در کد تعریف شده‌اند (`ADMIN_ROLES`) و `seedReferenceData` اینجا می‌نشاندشان.
+ */
+export const roles = pgTable('roles', {
+  id: text('id').primaryKey(),
+  nameFa: text('name_fa').notNull(),
+});
+
+export const permissions = pgTable('permissions', {
+  id: text('id').primaryKey(),
+  nameFa: text('name_fa').notNull(),
+});
+
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    roleId: text('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
+    permissionId: text('permission_id')
+      .notNull()
+      .references(() => permissions.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.roleId, t.permissionId] })],
+);
+
+export const adminUserRoles = pgTable(
+  'admin_user_roles',
+  {
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: 'cascade' }),
+    roleId: text('role_id')
+      .notNull()
+      .references(() => roles.id),
+    /** null یعنی همهٔ سفارش‌ها. محدودسازی سطر (چاپخانه) با برش ۵؛ تا آن موقع فقط null. */
+    scope: jsonb('scope'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.adminUserId, t.roleId] }),
+    check('admin_user_roles_scope', sql`${t.scope} IS NULL`),
+  ],
+);
+
+/**
+ * هر کار ادمین: چه کسی، کی، چه کاری روی چه چیزی (ADR-038). فقط افزودنی: تریگر
+ * `admin_events_append_only` عوض کردن و پاک کردن را رد می‌کند. مقدار کلید یا رمز هیچ‌وقت در `detail`
+ * نمی‌نشیند.
+ */
+export const adminEvents = pgTable(
+  'admin_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    /** null یعنی دستور روی سرور، یا تلاش ورود با نام ناشناس. */
+    adminUserId: uuid('admin_user_id').references(() => adminUsers.id),
+    action: text('action').notNull(),
+    targetType: text('target_type'),
+    targetId: text('target_id'),
+    ipHash: text('ip_hash'),
+    detail: jsonb('detail'),
+  },
+  (t) => [index('admin_events_at').on(t.at), index('admin_events_actor').on(t.adminUserId, t.at)],
+);

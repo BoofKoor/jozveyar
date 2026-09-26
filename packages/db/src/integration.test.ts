@@ -13,7 +13,7 @@
  * خراب را می‌گیرند، یا `bigint` سالم برمی‌گردد. اینها فقط با پستگرس معلوم می‌شوند.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { priceListSchema, type PriceList } from '@jozveyar/contracts';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
@@ -57,6 +57,17 @@ import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
 import { PREPARE_ORDER_JOB, createOrderStore, type NewOrder } from './orders.js';
 import { createSmsLog } from './sms.js';
+import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
+import {
+  adminEvents,
+  adminInvites,
+  adminLoginAttempts,
+  adminSessions,
+  adminUserRoles,
+  adminUsers,
+  rolePermissions,
+} from './schema.js';
+import { sql } from 'drizzle-orm';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -988,6 +999,287 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('تنظیم سقف کد کل سایت پیش‌فرض دارد', async () => {
       const [row] = await conn.db.select().from(settings).where(eq(settings.key, 'otp.site_hourly_limit'));
       expect(row!.value).toBe(300);
+    });
+  });
+  describe('پنل ادمین روی پستگرس (برش ۴٫۱)', () => {
+    const at = new Date('2026-10-05T07:50:00Z');
+    const later = (ms: number) => new Date(at.getTime() + ms);
+    const event = (action: string, adminUserId: string | null = null): AdminEventInput => ({ adminUserId, action, at });
+
+    /** رویداد فقط افزودنی است و ادمین پاک‌نشدنی؛ تست از صفر با TRUNCATE، که تریگر ردیفی ندارد. */
+    async function clearAdmin() {
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users`,
+      );
+    }
+
+    function invite(username: string, extra: Partial<NewInvite> = {}): NewInvite {
+      return {
+        inviteId: randomUUID(),
+        newUserId: randomUUID(),
+        username,
+        displayName: `ادمین ${username}`,
+        role: 'operator',
+        tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+        totpSealed: 'v1.sealed-invite',
+        at,
+        expiresAt: later(15 * 60_000),
+        createdBy: null,
+        allowExisting: false,
+        event: { adminUserId: null, action: 'admins.invite', targetType: 'admin', detail: { username } },
+        ...extra,
+      };
+    }
+
+    /** ادمین ثبت‌شده با یک نشست. */
+    async function enrolled(username: string, role: 'owner' | 'operator' = 'operator') {
+      const store = createAdminStore(conn);
+      const inv = invite(username, { role });
+      const created = await store.createInvite(inv);
+      if (!created.ok) throw new Error(created.reason);
+      const sessionHash = randomUUID().replace(/-/g, '').repeat(2);
+      await store.completeInvite({
+        inviteId: inv.inviteId,
+        userId: created.userId,
+        passwordHash: '$argon2id$v=19$m=19456,t=2,p=1$fake',
+        totpSealed: 'v1.sealed-user',
+        totpStep: 1,
+        at,
+        session: { tokenHash: sessionHash, expiresAt: later(12 * 3600_000) },
+        ipHash: 'ip',
+      });
+      return { userId: created.userId, sessionHash, invite: inv };
+    }
+
+    beforeAll(async () => {
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+    });
+
+    beforeEach(async () => {
+      await clearAdmin();
+    });
+
+    it('نقش‌ها و مجوزها دقیقاً همان کد؛ مجوز اضافه با بالا آمدن بعدی می‌رود', async () => {
+      const read = async (role: string) =>
+        (await conn.db.select().from(rolePermissions).where(eq(rolePermissions.roleId, role))).map((r) => r.permissionId).sort();
+      expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
+      expect(await read('operator')).toEqual(['files.download', 'orders.address', 'orders.read', 'orders.status', 'tariff.read']);
+      expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
+      await conn.db.insert(rolePermissions).values({ roleId: 'operator', permissionId: 'secrets.edit' });
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      expect(await read('operator')).not.toContain('secrets.edit');
+    });
+
+    it('پیوند ثبت: ادمین تازه بی رمز، با نقش؛ نام تکراری نه؛ بازیابی همه‌چیز را از نو می‌کند', async () => {
+      const store = createAdminStore(conn);
+      const first = await store.createInvite(invite('sara', { role: 'owner' }));
+      expect(first).toMatchObject({ ok: true, reset: false });
+      const user = await store.findUserByUsername('sara');
+      expect(user).toMatchObject({ passwordHash: null, totpSealed: null, disabledAt: null });
+      expect(await store.rolesOf(user!.id)).toEqual(['owner']);
+      expect(await store.createInvite(invite('sara'))).toEqual({ ok: false, reason: 'username_taken' });
+      expect(await store.createInvite(invite('nobody', { role: null, allowExisting: true }))).toEqual({ ok: false, reason: 'role_required' });
+
+      const { userId, sessionHash } = await enrolled('ali');
+      const reset = await store.createInvite(invite('ali', { allowExisting: true, role: null }));
+      expect(reset).toEqual({ ok: true, userId, reset: true });
+      const after = await store.findUser(userId);
+      expect(after).toMatchObject({ passwordHash: null, totpSealed: null, totpLastStep: null });
+      expect((await store.findSession(sessionHash))!.revokedAt).not.toBeNull();
+      expect(await store.rolesOf(userId)).toEqual(['operator']);
+      const events = await conn.db
+        .select()
+        .from(adminEvents)
+        .where(sql`${adminEvents.targetId} = ${userId} AND ${adminEvents.action} = 'admins.invite'`)
+        .orderBy(adminEvents.id);
+      expect(events.map((e) => (e.detail as { reset: boolean }).reset)).toEqual([false, true]);
+    });
+
+    it('پیوند فقط یک بار و فقط تا مهلتش؛ مصرف‌شده دیگر عوض نمی‌شود', async () => {
+      const store = createAdminStore(conn);
+      const { userId, invite: inv } = await enrolled('ali');
+      const again = await store.completeInvite({
+        inviteId: inv.inviteId,
+        userId,
+        passwordHash: 'x',
+        totpSealed: 'y',
+        totpStep: 2,
+        at,
+        session: { tokenHash: 'z'.repeat(64), expiresAt: later(1000) },
+        ipHash: null,
+      });
+      expect(again).toBe(false);
+      expect(
+        await rejectedConstraint(conn.db.update(adminInvites).set({ usedAt: null }).where(eq(adminInvites.id, inv.inviteId))),
+      ).toBe('admin_invites_final');
+
+      const late = invite('reza', { expiresAt: later(15 * 60_000) });
+      const created = await store.createInvite(late);
+      const tooLate = await store.completeInvite({
+        inviteId: late.inviteId,
+        userId: created.ok ? created.userId : '',
+        passwordHash: 'x',
+        totpSealed: 'y',
+        totpStep: 2,
+        at: later(15 * 60_000),
+        session: { tokenHash: 'w'.repeat(64), expiresAt: later(1000) },
+        ipHash: null,
+      });
+      expect(tooLate).toBe(false);
+    });
+
+    it('ثبت: رمز، برنامهٔ تأیید، نشست و دو رویداد در یک تراکنش', async () => {
+      const store = createAdminStore(conn);
+      const { userId, sessionHash } = await enrolled('ali');
+      expect(await store.findUser(userId)).toMatchObject({ totpSealed: 'v1.sealed-user', totpLastStep: 1, lastLoginAt: at });
+      const session = await store.findSession(sessionHash);
+      expect(session).toMatchObject({ revokedAt: null, roles: ['operator'] });
+      expect(session!.permissions).toEqual(['files.download', 'orders.address', 'orders.read', 'orders.status', 'tariff.read']);
+      const actions = (await store.listEvents({ limit: 10 })).map((e) => e.action);
+      expect(actions).toEqual(['auth.login', 'admins.enroll', 'admins.invite']);
+    });
+
+    it('رویداد فقط افزودنی؛ ادمین پاک نمی‌شود؛ نقش بی scope؛ رمز و برنامهٔ تأیید با هم', async () => {
+      const store = createAdminStore(conn);
+      const { userId } = await enrolled('ali');
+      const [one] = await conn.db.select().from(adminEvents).limit(1);
+      expect(await rejectedConstraint(conn.db.update(adminEvents).set({ action: 'x' }).where(eq(adminEvents.id, one!.id)))).toBe(
+        'admin_events_append_only',
+      );
+      expect(await rejectedConstraint(conn.db.delete(adminEvents).where(eq(adminEvents.id, one!.id)))).toBe('admin_events_append_only');
+      expect(await rejectedConstraint(conn.db.delete(adminUsers).where(eq(adminUsers.id, userId)))).toBe('admin_users_no_delete');
+      expect(
+        await rejectedConstraint(conn.db.update(adminUserRoles).set({ scope: { partner: 1 } }).where(eq(adminUserRoles.adminUserId, userId))),
+      ).toBe('admin_user_roles_scope');
+      expect(await rejectedConstraint(conn.db.update(adminUsers).set({ totpSealed: null }).where(eq(adminUsers.id, userId)))).toBe(
+        'admin_users_credentials',
+      );
+      expect(await rejectedConstraint(store.createInvite(invite('Sara')))).toBe('admin_users_username');
+      expect(await rejectedConstraint(store.createInvite(invite('ab')))).toBe('admin_users_username');
+    });
+
+    it('هشت سنجش هم‌زمان: فقط پنج فرصت، درست یک قفل، و شمار از صفر', async () => {
+      const store = createAdminStore(conn);
+      const { userId } = await enrolled('ali');
+      const lockUntil = later(15 * 60_000);
+      const claims = await Promise.all([1, 2, 3, 4, 5, 6, 7, 8].map(() => store.claimAttempt(userId, 5, at, lockUntil)));
+      expect(claims.filter((c) => c.allowed)).toHaveLength(5);
+      expect(claims.filter((c) => c.allowed && c.lockedUntil !== null)).toHaveLength(1);
+      expect(claims.filter((c) => !c.allowed).map((c) => c.lockedUntil)).toEqual([lockUntil, lockUntil, lockUntil]);
+      expect(await store.findUser(userId)).toMatchObject({ failedAttempts: 0, lockedUntil: lockUntil });
+
+      // تا پایان قفل نه؛ بعدش دوباره (شاهد): قفل کهنه پاک و شمار یکی.
+      expect(await store.claimAttempt(userId, 5, later(15 * 60_000 - 1), later(30 * 60_000))).toEqual({
+        allowed: false,
+        lockedUntil: lockUntil,
+      });
+      expect(await store.claimAttempt(userId, 5, later(15 * 60_000), later(30 * 60_000))).toEqual({
+        allowed: true,
+        lockedUntil: null,
+      });
+      expect(await store.findUser(userId)).toMatchObject({ failedAttempts: 1, lockedUntil: null });
+
+      // سنجش درست (کار حساس) شمار و قفل را پاک می‌کند، مثل ورود.
+      await store.claimAttempt(userId, 1, later(15 * 60_000), later(40 * 60_000));
+      expect((await store.findUser(userId))!.lockedUntil).toEqual(later(40 * 60_000));
+      await store.clearFailures(userId);
+      expect(await store.findUser(userId)).toMatchObject({ failedAttempts: 0, lockedUntil: null });
+    });
+
+    it('یک گام کد فقط یک بار، حتی هم‌زمان؛ گام کهنه‌تر نه', async () => {
+      const store = createAdminStore(conn);
+      const { userId } = await enrolled('ali');
+      const claims = await Promise.all([1, 2, 3, 4, 5].map(() => store.claimTotpStep(userId, 100)));
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(await store.claimTotpStep(userId, 100)).toBe(false);
+      expect(await store.claimTotpStep(userId, 99)).toBe(false);
+      expect(await store.claimTotpStep(userId, 101)).toBe(true);
+    });
+
+    it('تلاش‌های ورود IP در پنجره شمرده می‌شوند، نه بیرونش؛ ورود موفق همان ردیف را موفق می‌کند', async () => {
+      const store = createAdminStore(conn);
+      const { userId } = await enrolled('ali');
+      await store.recordAttempt({ username: 'x', adminUserId: null, ipHash: 'ip1', at: later(-61 * 60_000) });
+      await store.recordAttempt({ username: 'x', adminUserId: null, ipHash: 'ip1', at: later(-10 * 60_000) });
+      const attemptId = await store.recordAttempt({ username: 'ali', adminUserId: null, ipHash: 'ip1', at: later(-5 * 60_000) });
+      await store.recordAttempt({ username: 'x', adminUserId: null, ipHash: 'ip2', at: later(-5 * 60_000) });
+      expect(await store.countAttempts('ip1', later(-60 * 60_000))).toBe(2);
+
+      await store.claimAttempt(userId, 5, at, later(15 * 60_000));
+      await store.startSession({
+        userId,
+        tokenHash: 'n'.repeat(64),
+        at,
+        expiresAt: later(12 * 3600_000),
+        attemptId,
+        event: { adminUserId: userId, action: 'auth.login', ipHash: 'ip1', at },
+      });
+      const rows = await conn.db
+        .select()
+        .from(adminLoginAttempts)
+        .where(eq(adminLoginAttempts.ipHash, 'ip1'))
+        .orderBy(adminLoginAttempts.id);
+      expect(rows.map((r) => [r.username, r.ok, r.adminUserId])).toEqual([
+        ['x', false, null],
+        ['x', false, null],
+        ['ali', true, userId],
+      ]);
+      expect(await store.findUser(userId)).toMatchObject({ failedAttempts: 0, lockedUntil: null, lastLoginAt: at });
+      expect((await store.findSession('n'.repeat(64)))!.user.id).toBe(userId);
+      expect(await store.countAttempts('ip1', later(-60 * 60_000))).toBe(2);
+    });
+
+    it('آخرین مالک غیرفعال نمی‌شود؛ غیرفعال شدن نشست‌ها را می‌بندد', async () => {
+      const store = createAdminStore(conn);
+      const sara = await enrolled('sara', 'owner');
+      expect(await store.disableUser(sara.userId, at, event('admins.disable'))).toBe('last_owner');
+      const mina = await enrolled('mina', 'owner');
+      expect(await store.disableUser(sara.userId, at, event('admins.disable', mina.userId))).toBe('ok');
+      expect((await store.findSession(sara.sessionHash))!.revokedAt).not.toBeNull();
+      expect(await store.disableUser(mina.userId, at, event('admins.disable'))).toBe('last_owner');
+      expect(await store.disableUser(sara.userId, at, event('admins.disable'))).toBe('not_found');
+    });
+
+    it('لغو دعوت: ادمینی که هرگز ثبت نکرد غیرفعال می‌شود، ثبت‌شده نه', async () => {
+      const store = createAdminStore(conn);
+      const created = await store.createInvite(invite('reza'));
+      const rezaId = created.ok ? created.userId : '';
+      expect(await store.revokeInvites(rezaId, at, event('admins.invite_revoked'))).toBe(1);
+      expect((await store.findUser(rezaId))!.disabledAt).not.toBeNull();
+      // بازیابی ادمینی که قبلاً ثبت کرده بود: لغوش او را غیرفعال نمی‌کند؛ فقط تا پیوند تازه کد ورود ندارد.
+      const ali = await enrolled('ali');
+      await store.createInvite(invite('ali', { allowExisting: true, role: null }));
+      expect(await store.revokeInvites(ali.userId, at, event('admins.invite_revoked'))).toBe(1);
+      expect((await store.findUser(ali.userId))!.disabledAt).toBeNull();
+      expect(await store.revokeInvites(ali.userId, at, event('admins.invite_revoked'))).toBe(0);
+    });
+
+    it('فهرست ادمین‌ها با نقش و پیوند زنده؛ رویدادها با نام و پیشوند', async () => {
+      const store = createAdminStore(conn);
+      await enrolled('sara', 'owner');
+      await store.createInvite(invite('reza'));
+      const admins = await store.listAdmins(at);
+      expect(admins.map((a) => [a.user.username, a.roles, a.invite !== null])).toEqual([
+        ['sara', ['owner'], false],
+        ['reza', ['operator'], true],
+      ]);
+      expect((await store.listAdmins(later(16 * 60_000))).find((a) => a.user.username === 'reza')!.invite).toBeNull();
+      const auth = await store.listEvents({ limit: 10, actionPrefix: 'auth' });
+      expect(auth.map((e) => [e.action, e.username])).toEqual([['auth.login', 'sara']]);
+      const all = await store.listEvents({ limit: 2 });
+      expect(all).toHaveLength(2);
+      const older = await store.listEvents({ limit: 10, beforeId: all[1]!.id });
+      expect(older.every((e) => e.id < all[1]!.id)).toBe(true);
+    });
+
+    it('بیرون رفتن: فقط همان نشست، و بار دوم هیچ', async () => {
+      const store = createAdminStore(conn);
+      const { userId, sessionHash } = await enrolled('ali');
+      expect(await store.revokeSession(sessionHash, at)).toEqual({ adminUserId: userId });
+      expect(await store.revokeSession(sessionHash, at)).toBeNull();
+      await store.touchSession((await store.findSession(sessionHash))!.sessionId, later(60_000));
+      const [row] = await conn.db.select().from(adminSessions).where(eq(adminSessions.tokenHash, sessionHash));
+      expect(row!.lastSeenAt).toEqual(later(60_000));
     });
   });
 });
