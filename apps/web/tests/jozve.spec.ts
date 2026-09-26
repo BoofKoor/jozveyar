@@ -22,6 +22,11 @@ const price = (page: Page) => page.getByTestId('price-total');
 const rows = (page: Page) => page.getByTestId('section');
 const row = (page: Page, name: string) => rows(page).filter({ has: page.getByTestId('section-name').getByText(name, { exact: true }) });
 const names = (page: Page) => page.getByTestId('section-name').allTextContents();
+/**
+ * «ادامه» وقتی جزوه کامل و بی فایل خوانده‌نشده است. این تست‌ها بی پایگاه داده اجرا می‌شوند، پس مسیر خرید
+ * خاموش است و «ادامه» همان «ثبت سفارش آنلاین به‌زودی» (ADR-035، برش ۳ج)؛ مسیر خرید باز در `checkout.spec.ts`.
+ */
+const ready = (page: Page) => page.getByRole('button', { name: 'ثبت سفارش آنلاین به‌زودی' });
 
 test.describe('چند فایل در یک جزوه', () => {
   test('سه PDF با هم: صفحه‌ها جمع و یک صحافی — ۸۶,۶۰۰ نه ۱۷۶,۶۰۰', async ({ page }) => {
@@ -40,7 +45,7 @@ test.describe('چند فایل در یک جزوه', () => {
       '3 صفحهٔ رنگی در فایل‌های این جزوه پیدا شد. اگر سیاه‌سفید انتخاب کنی، این صفحه‌ها هم سیاه‌سفید چاپ می‌شوند.',
       { timeout: 20_000 },
     );
-    await expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled();
+    await expect(ready(page)).toBeVisible();
   });
 
   test('ترتیب اولیه از نام، با فهم عدد؛ جابه‌جایی فقط ترتیب است', async ({ page }) => {
@@ -133,7 +138,7 @@ test.describe('چند فایل در یک جزوه', () => {
     await expect.poll(() => names(page)).toEqual(['فصل 1.pdf', 'mixed-color-10.pdf', 'فصل 3.pdf']);
     await expect(price(page)).toContainText('86,600', { timeout: 20_000 });
     await expect(page.getByTestId('price-blocked')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled({ timeout: 20_000 });
+    await expect(ready(page)).toBeVisible({ timeout: 20_000 });
   });
 
   test('هر لحظه حداکثر یک کارگر تحلیل — یک pdf.js برای کل صف', async ({ page }) => {
@@ -157,7 +162,7 @@ test.describe('چند فایل در یک جزوه', () => {
       fixture('dpi-mix-4.pdf'),
     ]);
     await expect(page.getByTestId('stat-page-count')).toHaveText('30', { timeout: 20_000 });
-    await expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled({ timeout: 20_000 });
+    await expect(ready(page)).toBeVisible({ timeout: 20_000 });
     expect(spawned).toBe(1);
     expect(most).toBe(1);
     // صف خالی شد: کارگر و حافظهٔ pdf.js آزاد شدند.
@@ -221,7 +226,7 @@ test.describe('چند فایل روی موبایل', () => {
     expect(fullPriceMs).toBeLessThan(2_000);
 
     // و بررسی تا آخر تمام می‌شود بی اینکه عدد عوض شود؛ اسکن زرد رنگی نیست.
-    await expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled({ timeout: 60_000 });
+    await expect(ready(page)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('color-hint')).toHaveText('همهٔ فایل‌ها تماماً سیاه‌سفیدند.');
     await expect(price(page)).toContainText('305,800');
   });

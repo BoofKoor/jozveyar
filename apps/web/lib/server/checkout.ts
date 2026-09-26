@@ -28,8 +28,9 @@ import type { CheckoutDocument, OrderDetails, OrderRow, OrderStore } from '@jozv
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { formatDeadlineDay, postHandoffDue, tidyInputFa, toLatinDigits } from '@jozveyar/text';
+import { formatDeadlineDay, postHandoffDue } from '@jozveyar/text';
 
+import { checkRecipient } from '../recipient';
 import type { AuthUser } from './auth';
 import type { PaymentGateway } from './payments';
 import { fail, ok, type Result } from './result';
@@ -95,20 +96,13 @@ function expiring(file: { fileExpiresAt: Date | null; fileDeletedAt: Date | null
 }
 
 /**
- * گیرنده، فارسی‌نرمال و سنجیده؛ `fields` می‌گوید رابط کدام فیلد را قرمز کند. نرمال‌سازی «آ» و همزه را
- * نگه می‌دارد (`tidyInputFa`): این متن روی برچسب پست چاپ می‌شود.
+ * گیرنده، فارسی‌نرمال و سنجیده؛ `fields` می‌گوید رابط کدام فیلد را قرمز کند. همان قاعده‌ای که مرورگر
+ * پیش از قدم پرداخت می‌سنجد (`lib/recipient.ts`)؛ اینجا دوباره، چون سرور منبع حقیقت است.
  */
 function recipientOf(input: Recipient): Result<{ name: string; addressText: string; postalCode: string | null }> {
-  const fields: string[] = [];
-  const name = tidyInputFa(input.name);
-  if (name.length < 2 || name.length > 100) fields.push('recipient.name');
-  const addressText = tidyInputFa(input.addressText);
-  if (addressText.length < 10 || addressText.length > 500) fields.push('recipient.addressText');
-  const digits = toLatinDigits(input.postalCode ?? '').replace(/[\s-]/g, '');
-  const postalCode = digits === '' ? null : digits;
-  if (postalCode !== null && !/^\d{10}$/.test(postalCode)) fields.push('recipient.postalCode');
+  const { value, fields } = checkRecipient(input);
   if (fields.length > 0) return fail(400, 'invalid_request', { fields });
-  return ok({ name, addressText, postalCode });
+  return ok(value);
 }
 
 function summary(order: OrderRow): OrderSummary {

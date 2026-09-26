@@ -232,6 +232,43 @@ jobs:
           pnpm --filter @jozveyar/web exec playwright install --with-deps chromium
           pnpm --filter @jozveyar/web test:e2e
 
+      # مسیر خرید، سرتاسری (برش ۳ج؛ ADR-033 تا ADR-035): همین build با `CHECKOUT_MODE=mock`، پستگرس و
+      # Garage واقعی، و همان ایمیج کارگری که سرور می‌سازد (`docworker-smoke`). از «ادامه» تا «سفارش ثبت
+      # شد»؛ کد پیامکی را تست از `sms_messages` می‌خواند (پیامک کنسولی). پایگاه دادهٔ تازه (`jy_e2e`)،
+      # چون عددهای انتظار از `quote()` و تعرفهٔ پایه‌اند و پایگاه دادهٔ تست واحد ردیف‌های خودش را دارد.
+      # `upload.spec.ts` هم همین‌جا: آپلود واقعی، و Word و عکس با LibreOffice کارگر.
+      # سرور روی پورت ۳۱۰۰ پیکربندی Playwright، تا Playwright سرور دومی بالا نیاورد (`reuseExistingServer`).
+      # وب مهاجرت‌ها را پیش از اولین پاسخ اعمال می‌کند، پس کارگر بعد از «وب سالم» می‌آید (مثل compose تولید).
+      - name: مسیر خرید، سرتاسری
+        env:
+          DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_e2e
+          S3_ENDPOINT: http://127.0.0.1:3900
+          S3_PUBLIC_ENDPOINT: http://127.0.0.1:3900
+          S3_BUCKET: jozveyar
+          CHECKOUT_MODE: mock
+          NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3100
+          DOCWORKER_POLL_SECONDS: '0.5'
+        run: |
+          set -eux
+          docker run --rm --network host -e PGPASSWORD=jozveyar postgres:17-alpine \
+            psql -h 127.0.0.1 -U jozveyar -d jozveyar -v ON_ERROR_STOP=1 -c 'CREATE DATABASE jy_e2e'
+          SESSION_SECRET="$(openssl rand -hex 32)" \
+            node apps/web/scripts/serve-standalone.mjs 3100 > "$RUNNER_TEMP/web.log" 2>&1 &
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:3100/api/health > /dev/null; do sleep 1; done'
+          grep -F 'مسیر خرید: mock' "$RUNNER_TEMP/web.log"
+          docker run -d --name docworker --network host \
+            -e DATABASE_URL -e S3_ENDPOINT -e S3_BUCKET -e S3_ACCESS_KEY -e S3_SECRET_KEY -e DOCWORKER_POLL_SECONDS \
+            docworker-smoke
+          cd apps/web
+          E2E_CHECKOUT_BASE_URL=http://127.0.0.1:3100 E2E_UPLOAD_BASE_URL=http://127.0.0.1:3100 \
+            pnpm exec playwright test tests/checkout.spec.ts tests/upload.spec.ts
+
+      - name: لاگ مسیر خرید، اگر افتاد
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/web.log" || true
+          docker logs docworker || true
+
       # خروجی standalone دو چیز را خودش نمی‌آورد و باید کنار server.js بنشینند.
       # همان مراحل serve-standalone.mjs، اینجا برای بسته‌بندی.
       - name: مونتاژ بسته

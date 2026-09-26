@@ -72,7 +72,7 @@ const MAX_SIZES = 3;
  * «A4، A3 و Letter»؛ اندازهٔ بی‌نام به میلی‌متر («170×240 میلی‌متر»). نام لاتین در bdi، تا کنار
  * ویرگول فارسی برعکس دیده نشود.
  */
-function SizeNames({ sizes }: { sizes: readonly { name: string }[] }) {
+export function SizeNames({ sizes }: { sizes: readonly { name: string }[] }) {
   const parts: ReactNode[] = sizes.slice(0, MAX_SIZES).map(({ name }) => {
     const label = paperSizeLabel(name);
     return 'mm' in label ? (
@@ -125,7 +125,8 @@ export function FileInfo({ pages, sizes, size }: { pages: number; sizes: readonl
 export function CardHead({ files, pages }: { files: number; pages: number }) {
   return (
     <div className="jy-card__head">
-      <h2 id="jozve-title" className="jy-card__title">
+      {/* برگشت از مسیر خرید به «جزوه و قیمت» فوکوس را اینجا می‌آورد (`OrderDesk`) */}
+      <h2 id="jozve-title" className="jy-card__title" tabIndex={-1}>
         جزوهٔ تو
       </h2>
       <p className="jy-card__meta">

@@ -629,6 +629,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    /* هم‌قد دکمهٔ ۵۲ پیکسلی؛ قدم شهر دکمه ندارد و نوار نباید کوتاه‌تر شود (طرح مسیر خرید) */
+    min-height: 52px;
   }
   .home-dock__price {
     display: flex;
@@ -646,7 +648,7 @@
   }
   @media (width <= 860px) {
     /* «ادامه» و «ثبت‌نام لازم نیست» در نوار پایین‌اند؛ خلاصهٔ در جریان صفحه ریز قیمت و یادداشت‌ها را دارد */
-    .home-sum :is(.home-sum__go, .home-sum__secure) {
+    .home-sum :is(.home-sum__go, .home-sum__secure, .home-sum__terms) {
       display: none;
     }
   }
