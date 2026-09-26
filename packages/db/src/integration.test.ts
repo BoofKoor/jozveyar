@@ -28,6 +28,7 @@ import {
   jobs,
   orderItemSections,
   orderItems,
+  orderStatusEvents,
   orders,
   otpRequests,
   payments,
@@ -53,6 +54,9 @@ import {
   type NewUploadDocument,
 } from './documents.js';
 import { randomUUID } from 'node:crypto';
+import { createAuthStore } from './auth.js';
+import { PREPARE_ORDER_JOB, createOrderStore, type NewOrder } from './orders.js';
+import { createSmsLog } from './sms.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -664,6 +668,326 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         ...SEED_PRICE_LIST,
         shippingRates: byKey(SEED_PRICE_LIST.shippingRates),
       });
+    });
+  });
+
+  // در همین فایل، به همان دلیل «سند و آپلود». سرویس‌های وب با پیاده‌سازی حافظه‌ای تست می‌شوند
+  // (apps/web/lib/server)؛ اینجا همان چیزی سنجیده می‌شود که فقط پستگرس معنایش را دارد: قفل، تراکنش،
+  // و اتمی بودن.
+  describe('مسیر خرید روی پستگرس (برش ۳ب)', () => {
+    const SESSION = 'e'.repeat(64);
+    const MOBILE = '09121234567';
+    let docIds: string[] = [];
+
+    beforeAll(async () => {
+      await clearOrders(conn);
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const store = createDocumentStore(conn);
+      docIds = [];
+      for (const pages of [48, 54]) {
+        const id = randomUUID();
+        await store.insertUpload({
+          id,
+          sessionHash: SESSION,
+          originalName: `جلسه ${pages}.pdf`,
+          sourceKind: 'pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1_000,
+          storageKey: `uploads/${id}.pdf`,
+          uploadId: 'u',
+          partSizeBytes: 8 * 1024 * 1024,
+        });
+        const at = new Date();
+        await store.markUploaded(id, at, new Date(at.getTime() + 2 * 86_400_000), null);
+        await conn.db.update(documents).set({ status: 'ready', pageCount: pages }).where(eq(documents.id, id));
+        docIds.push(id);
+      }
+    });
+
+    afterAll(async () => {
+      await clearOrders(conn);
+    });
+
+    const otpAt = (createdAt: Date, over: Partial<{ codeHash: string }> = {}) => ({
+      codeHash: over.codeHash ?? 'f'.repeat(64),
+      createdAt,
+      expiresAt: new Date(createdAt.getTime() + 120_000),
+    });
+
+    it('صدور کد زیر قفل: ده درخواست هم‌زمان برای یک شماره، فقط پنج کد', async () => {
+      const auth = createAuthStore(conn);
+      const since = new Date(Date.now() - 3_600_000);
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          auth.issueOtp({ mobile: MOBILE, ipHash: `ip${i}`, sessionHash: SESSION, since }, (counts) =>
+            counts.mobile < 5 ? otpAt(new Date()) : null,
+          ),
+        ),
+      );
+      expect(results.filter(Boolean)).toHaveLength(5);
+      const rows = await conn.db.select().from(otpRequests).where(eq(otpRequests.mobile, MOBILE));
+      expect(rows).toHaveLength(5);
+    });
+
+    it('شمارش پنجره: شماره، IP و کل سایت، با قدیمی‌ترین و تازه‌ترین؛ بیرون از پنجره شمرده نمی‌شود', async () => {
+      await conn.db.delete(otpRequests);
+      const auth = createAuthStore(conn);
+      const now = Date.now();
+      const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000);
+      const issue = (mobile: string, ipHash: string, createdAt: Date) =>
+        auth.issueOtp({ mobile, ipHash, sessionHash: SESSION, since: new Date(0) }, () => otpAt(createdAt));
+      await issue(MOBILE, 'ip-a', at(90)); // بیرون از پنجرهٔ یک ساعته
+      await issue(MOBILE, 'ip-a', at(50));
+      await issue(MOBILE, 'ip-b', at(10));
+      await issue('09351234567', 'ip-a', at(5));
+      let seen: unknown;
+      await auth.issueOtp({ mobile: MOBILE, ipHash: 'ip-a', sessionHash: SESSION, since: at(60) }, (counts) => {
+        seen = counts;
+        return null;
+      });
+      expect(seen).toEqual({
+        mobile: 2,
+        mobileOldest: at(50),
+        mobileLatest: at(10),
+        ip: 2,
+        ipOldest: at(50),
+        site: 3,
+        siteOldest: at(50),
+      });
+    });
+
+    it('فرصت کد اتمی: ده سنجش هم‌زمان، فقط سه؛ کد منقضی فرصتی ندارد', async () => {
+      const auth = createAuthStore(conn);
+      const issued = await auth.issueOtp(
+        { mobile: '09131234567', ipHash: 'ip', sessionHash: SESSION, since: new Date() },
+        () => otpAt(new Date()),
+      );
+      const now = new Date();
+      const claims = await Promise.all(Array.from({ length: 10 }, () => auth.claimOtpAttempt(issued!.id, now, 3)));
+      expect(claims.filter((n) => n !== null).sort()).toEqual([1, 2, 3]);
+      const expired = await auth.issueOtp(
+        { mobile: '09141234567', ipHash: 'ip', sessionHash: SESSION, since: new Date() },
+        () => otpAt(new Date(Date.now() - 180_000)),
+      );
+      expect(await auth.claimOtpAttempt(expired!.id, new Date(), 3)).toBeNull();
+    });
+
+    it('ورود یک بار: دو ورود هم‌زمان با یک کد، یک نشست؛ نشست باطل و منقضی پیدا نمی‌شود', async () => {
+      const auth = createAuthStore(conn);
+      const issued = await auth.issueOtp(
+        { mobile: '09151234567', ipHash: 'ip', sessionHash: SESSION, since: new Date() },
+        () => otpAt(new Date()),
+      );
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 30 * 86_400_000);
+      const logins = await Promise.all([
+        auth.login({ otpId: issued!.id, mobile: '09151234567', tokenHash: 'a1'.repeat(32), now, expiresAt }),
+        auth.login({ otpId: issued!.id, mobile: '09151234567', tokenHash: 'b2'.repeat(32), now, expiresAt }),
+      ]);
+      expect(logins.filter(Boolean)).toHaveLength(1);
+      const winner = logins[0] ? 'a1'.repeat(32) : 'b2'.repeat(32);
+      expect(await auth.findSession(winner, now)).toMatchObject({ mobile: '09151234567', userId: logins.find(Boolean)!.userId });
+      expect(await auth.findSession(winner, expiresAt)).toBeNull();
+      expect(await auth.latestOtp(SESSION, '09151234567')).toMatchObject({ id: issued!.id, consumedAt: now });
+      // کد فقط در همان مرورگری که خواستش: نشست ناشناس دیگر کدی نمی‌بیند.
+      expect(await auth.latestOtp('d'.repeat(64), '09151234567')).toBeNull();
+      expect(await auth.revokeSession(winner, now)).toBe(true);
+      expect(await auth.revokeSession(winner, now)).toBe(false);
+      expect(await auth.findSession(winner, now)).toBeNull();
+    });
+
+    /** سفارش همان‌طور که سرویس می‌سازد: قیمت `quote()` با بخش‌های سرور و یک قاعده برای کل جزوه. */
+    async function newOrder(over: Partial<NewOrder> = {}): Promise<NewOrder> {
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: MOBILE })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+        .returning();
+      const sections = [
+        { documentId: docIds[0]!, pageCount: 48 },
+        { documentId: docIds[1]!, pageCount: 54 },
+      ];
+      const rules = [{ pageRanges: [[1, 102]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
+      const breakdown = quote(
+        {
+          items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }],
+          shipping: { methodId: 'post', zoneId: 'tehran' },
+        },
+        SEED_PRICE_LIST,
+      );
+      return {
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        breakdown,
+        quoteSnapshot: { totalRials: breakdown.totalRials },
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: 'tehran',
+        provinceId: 8,
+        cityId: 394,
+        recipientName: 'سارا احمدی',
+        recipientPhone: MOBILE,
+        addressText: 'تهران، خیابان ولیعصر، پلاک 12',
+        postalCode: null,
+        items: [{ pageCount: 102, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        ...over,
+      };
+    }
+
+    it('سفارش کامل در یک تراکنش: قلم، بخش‌ها با نام فایل، قاعده و رویداد', async () => {
+      const store = createOrderStore(conn);
+      const { order, created } = await store.createOrder(await newOrder());
+      expect(created).toBe(true);
+      expect(order).toMatchObject({ status: 'awaiting_payment', totalRials: 3_377_000, shippingRials: 1_295_000 });
+      expect(order.orderNumber).toBeGreaterThanOrEqual(10_001);
+
+      const details = await store.details(order.publicToken);
+      expect(details!.items).toEqual([
+        expect.objectContaining({
+          seq: 1,
+          pageCount: 102,
+          sections: [
+            expect.objectContaining({ seq: 1, documentId: docIds[0], pageCount: 48, originalName: 'جلسه 48.pdf' }),
+            expect.objectContaining({ seq: 2, documentId: docIds[1], pageCount: 54, originalName: 'جلسه 54.pdf' }),
+          ],
+          rules: [expect.objectContaining({ seq: 1, pageRanges: [[1, 102]], colorMode: 'bw' })],
+        }),
+      ]);
+      expect(details!.payments).toEqual([]);
+      const events = await conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, order.id));
+      expect(events).toEqual([expect.objectContaining({ fromStatus: null, toStatus: 'awaiting_payment', actor: 'user' })]);
+      expect(await store.details(randomUUID())).toBeNull();
+    });
+
+    it('یک کلید، یک سفارش: دو «پرداخت» هم‌زمان با یک کلید، دومی همان سفارش را می‌گیرد', async () => {
+      const store = createOrderStore(conn);
+      const input = await newOrder();
+      const [a, b] = await Promise.all([store.createOrder(input), store.createOrder(input)]);
+      expect([a.created, b.created].sort()).toEqual([false, true]);
+      expect(a.order.id).toBe(b.order.id);
+      expect(await store.findByCheckoutKey(input.checkoutKey)).toMatchObject({ id: a.order.id });
+      const rows = await conn.db.select().from(orders).where(eq(orders.checkoutKey, input.checkoutKey));
+      expect(rows).toHaveLength(1);
+    });
+
+    it('سفارشی که پوشش صفحه‌اش غلط است هیچ ردی نمی‌گذارد: همه یا هیچ', async () => {
+      const store = createOrderStore(conn);
+      const input = await newOrder();
+      const broken = { ...input, items: [{ ...input.items[0]!, rules: [{ ...input.items[0]!.rules[0]!, pageRanges: [[1, 101]] as [number, number][] }] }] };
+      expect(await rejectedConstraint(store.createOrder(broken))).toBe('order_items_cover_pages');
+      expect(await store.findByCheckoutKey(input.checkoutKey)).toBeNull();
+    });
+
+    it('سندهای سفارش: مالک، وضعیت و شمارش سرور؛ سندی که در سفارش است شناخته می‌شود', async () => {
+      const store = createOrderStore(conn);
+      const rows = await store.documents([docIds[0]!, randomUUID()]);
+      expect(rows).toEqual([
+        expect.objectContaining({ id: docIds[0], sessionHash: SESSION, status: 'ready', pageCount: 48, fileDeletedAt: null }),
+      ]);
+      expect(await store.documents([])).toEqual([]);
+      // «انصراف» آپلود فایل سندی را که در سفارش است پاک نمی‌کند (`uploads.ts`).
+      const documentsStore = createDocumentStore(conn);
+      expect(await documentsStore.inOrder(docIds[0]!)).toBe(true);
+      expect(await documentsStore.inOrder(randomUUID())).toBe(false);
+    });
+
+    it('برگشت از درگاه: موفق در یک تراکنش — پرداخت، سفارش، رویداد و کار prepare_order', async () => {
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder(await newOrder());
+      const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+      await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
+      expect(await store.recordMockDecision(authority, 'success', new Date())).toBe(true);
+      expect(await store.recordMockDecision(authority, 'failure', new Date())).toBe(false);
+      const found = await store.gatewayPayment('mock', authority);
+      expect(found).toMatchObject({ payment: { raw: { decision: 'success' } }, order: { id: order.id } });
+
+      const paidAt = new Date();
+      const due = new Date(paidAt.getTime() + 2 * 86_400_000);
+      const settled = await store.settlePayment('mock', authority, async () => ({
+        kind: 'succeeded',
+        refId: '803114',
+        cardMask: null,
+        raw: { decision: 'success' },
+        paidAt,
+        postHandoffDueAt: due,
+      }));
+      expect(settled).toMatchObject({ settled: true, payment: { status: 'succeeded', refId: '803114' }, order: { status: 'paid' } });
+      expect(settled!.order.postHandoffDueAt).toEqual(due);
+      const queued = await conn.db.select().from(jobs).where(eq(jobs.orderId, order.id));
+      expect(queued).toEqual([expect.objectContaining({ kind: PREPARE_ORDER_JOB, status: 'queued', documentId: null })]);
+      const events = await conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, order.id));
+      expect(events.map((e) => [e.fromStatus, e.toStatus, e.actor])).toEqual([
+        [null, 'awaiting_payment', 'user'],
+        ['awaiting_payment', 'paid', 'gateway'],
+      ]);
+
+      // برگشت تکراری: درگاه دوباره سنجیده نمی‌شود و چیزی عوض نمی‌شود.
+      let asked = 0;
+      const again = await store.settlePayment('mock', authority, async () => {
+        asked += 1;
+        return { kind: 'failed', code: 'cancelled', raw: null };
+      });
+      expect(again).toMatchObject({ settled: false, payment: { status: 'succeeded' } });
+      expect(asked).toBe(0);
+      expect(await store.settlePayment('zarinpal', authority, async () => ({ kind: 'failed', code: 'x', raw: null }))).toBeNull();
+    });
+
+    it('دو برگشت هم‌زمان از یک پرداخت: درگاه یک بار سنجیده می‌شود', async () => {
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder(await newOrder());
+      const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+      await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
+      let asked = 0;
+      const decide = async () => {
+        asked += 1;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const paidAt = new Date();
+        return { kind: 'succeeded' as const, refId: '1', cardMask: null, raw: null, paidAt, postHandoffDueAt: paidAt };
+      };
+      const results = await Promise.all([store.settlePayment('mock', authority, decide), store.settlePayment('mock', authority, decide)]);
+      expect(asked).toBe(1);
+      expect(results.map((r) => r!.settled).sort()).toEqual([false, true]);
+    });
+
+    it('دو پرداخت موفق برای یک سفارش ممکن نیست؛ ناموفق سفارش را دست نمی‌زند', async () => {
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder(await newOrder());
+      const authorities = [1, 2, 3].map(() => `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`);
+      for (const authority of authorities) {
+        await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
+      }
+      const failed = await store.settlePayment('mock', authorities[0]!, async () => ({ kind: 'failed', code: 'declined', raw: { decision: 'failure' } }));
+      expect(failed).toMatchObject({ settled: true, payment: { status: 'failed', failureCode: 'declined' }, order: { status: 'awaiting_payment' } });
+      const success = async () => {
+        const paidAt = new Date();
+        return { kind: 'succeeded' as const, refId: '2', cardMask: null, raw: null, paidAt, postHandoffDueAt: paidAt };
+      };
+      await store.settlePayment('mock', authorities[1]!, success);
+      expect(await rejectedConstraint(store.settlePayment('mock', authorities[2]!, success))).toBe('payments_one_success');
+      const details = await store.details(order.publicToken);
+      expect(details!.payments.map((p) => p.status).sort()).toEqual(['failed', 'pending', 'succeeded']);
+    });
+
+    it('سفارش در انتظاری که فایلش رفت منقضی می‌شود؛ پرداخت‌شده نه', async () => {
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder(await newOrder());
+      expect(await store.expireOrder(order.id, new Date())).toBe(true);
+      expect(await store.expireOrder(order.id, new Date())).toBe(false);
+      const [row] = await conn.db.select().from(orders).where(eq(orders.id, order.id));
+      expect(row!.status).toBe('expired');
+      const events = await conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, order.id));
+      expect(events.at(-1)).toMatchObject({ fromStatus: 'awaiting_payment', toStatus: 'expired', actor: 'system' });
+    });
+
+    it('پیامک کنسولی با متن کامل در sms_messages می‌نشیند', async () => {
+      await createSmsLog(conn).insert({ provider: 'console', toMobile: MOBILE, purpose: 'otp', body: 'کد تأیید جزوه‌یار: 04821', status: 'logged' });
+      const [row] = await conn.db.select().from(smsMessages).where(eq(smsMessages.toMobile, MOBILE));
+      expect(row).toMatchObject({ provider: 'console', purpose: 'otp', status: 'logged', body: 'کد تأیید جزوه‌یار: 04821' });
+    });
+
+    it('تنظیم سقف کد کل سایت پیش‌فرض دارد', async () => {
+      const [row] = await conn.db.select().from(settings).where(eq(settings.key, 'otp.site_hourly_limit'));
+      expect(row!.value).toBe(300);
     });
   });
 });

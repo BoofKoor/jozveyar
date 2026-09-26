@@ -72,7 +72,8 @@ def converted_key(storage_key: str) -> str:
     return f"{stem}.converted.pdf"
 
 
-def _download(storage: S3Storage, key: str, path: str) -> None:
+def download(storage: S3Storage, key: str, path: str) -> None:
+    """فایل استوریج روی دیسک؛ نبودنش شکست قطعی است (`file_missing`)، نه تلاش دوباره."""
     try:
         storage.download(key, path)
     except StorageError as error:
@@ -109,7 +110,7 @@ def convert_document(
     # فایل موقت روی دیسک، نه حافظه؛ همه‌چیز با همین پوشه پاک می‌شود.
     with tempfile.TemporaryDirectory(prefix="docworker-") as workdir:
         source = os.path.join(workdir, "upload")
-        _download(storage, storage_key, source)
+        download(storage, storage_key, source)
         try:
             result = convert.to_pdf(source, workdir, office)
         except convert.ConversionFailure as failure:
@@ -178,7 +179,7 @@ def analyze_document(conn: psycopg.Connection, storage: S3Storage, document_id: 
     # فایل موقت روی دیسک، نه حافظه: فایل ۱٫۵ گیگابایتی نباید کانتینر را بکشد.
     with tempfile.TemporaryDirectory(prefix="docworker-") as workdir:
         path = os.path.join(workdir, "source.pdf")
-        _download(storage, key, path)
+        download(storage, key, path)
         if conversion is None:
             # پسوند فقط ادعای کاربر است: «جزوه.pdf» که در واقع Word یا عکس است و
             # مرورگر نتوانست بخواندش، بی‌صدا به تبدیل می‌رود.

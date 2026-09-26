@@ -17,6 +17,9 @@ export * from './seed.js';
 export * from './documents.js';
 export * from './holidays.js';
 export * from './reference.js';
+export * from './auth.js';
+export * from './orders.js';
+export * from './sms.js';
 export { runMigrations } from './migrate.js';
 
 export type Database = ReturnType<typeof createDb>;

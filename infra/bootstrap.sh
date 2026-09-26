@@ -103,12 +103,17 @@ S3_ACCESS_KEY=
 S3_SECRET_KEY=
 GARAGE_RPC_SECRET=
 
-# درگاه نمونه تا نماد الکترونیک فعال شود.
+# مسیر خرید خاموش تا درگاه و پنل پیامک واقعی (برش ۷، ADR-035): «ثبت سفارش
+# آنلاین به‌زودی». درگاه نمونه روی این دامنه هرگز، حتی با CHECKOUT_MODE=mock.
+CHECKOUT_MODE=off
+
+# درگاه نمونه تا نماد الکترونیک فعال شود؛ فقط در CHECKOUT_MODE=live خوانده می‌شود.
 PAYMENT_PROVIDER=mock
 PAYMENT_MERCHANT_ID=
 PAYMENT_CALLBACK_URL=https://${DOMAIN}/pay/callback
 
-# پیامک کنسولی: OTP در دیتابیس می‌نشیند و بدون پنل پیامکی قابل تست است.
+# پیامک کنسولی: OTP در دیتابیس می‌نشیند و بدون پنل پیامکی قابل تست است؛
+# فقط در CHECKOUT_MODE=live خوانده می‌شود (برش ۷).
 SMS_PROVIDER=console
 SMS_API_KEY=
 SMS_OTP_TEMPLATE=

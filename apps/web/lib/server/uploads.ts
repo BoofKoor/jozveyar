@@ -73,7 +73,9 @@ export type UploadErrorCode =
   | 'not_found'
   | 'not_uploading'
   | 'incomplete'
-  | 'size_mismatch';
+  | 'size_mismatch'
+  /** سند در سفارش است؛ فایلش با «انصراف» پاک نمی‌شود (برش ۳ب). */
+  | 'in_order';
 
 export type Result<T> =
   | { ok: true; value: T }
@@ -498,11 +500,16 @@ export function createUploadService(deps: UploadServiceDeps) {
       return ok({ saved: await deps.store.saveBrowserAnalysis(doc.id, parsed.data) });
     },
 
-    /** کاربر فایل دیگری انداخت: دیسک همین حالا آزاد می‌شود، نه دو روز بعد. */
+    /**
+     * کاربر فایل دیگری انداخت: دیسک همین حالا آزاد می‌شود، نه دو روز بعد. جز فایلی که در سفارش است:
+     * PDF جزوهٔ سفارش بعد از پرداخت از همان ساخته می‌شود (برش ۳ب)، و سند سفارش پرداخت‌نشده باید برای
+     * «دوباره پرداخت کن» بماند.
+     */
     async abort(sessionHash: string, id: string): Promise<Result<{ aborted: true }>> {
       const doc = await owned(sessionHash, id);
       if (!doc) return fail(404, 'not_found');
       if (doc.status === 'failed') return ok({ aborted: true });
+      if (await deps.store.inOrder(doc.id)) return fail(409, 'in_order');
       try {
         if (doc.status === 'uploading') {
           await deps.storage.abortMultipartUpload(doc.storageKey!, doc.uploadId!);

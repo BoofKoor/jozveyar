@@ -9,8 +9,8 @@
 
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
 S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
-مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها)،
-DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰).
+مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، و از برش ۳ب
+ساختن PDF جزوهٔ سفارش پرداخت‌شده)، DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰).
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from .jobs import (
     convert_document,
     mark_document_failed,
 )
+from .orders import PREPARE_ORDER, prepare_order
 from .storage import S3Storage
 
 log = logging.getLogger("docworker")
@@ -40,7 +41,7 @@ log = logging.getLogger("docworker")
 # سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
 
-KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT)
+KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER)
 # شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
 EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
 
@@ -94,10 +95,13 @@ class Worker:
         job = queue.claim(conn, self.id, self.kinds, LEASE_SECONDS)
         if job is None:
             return False
-        log.info("کار %s (%s) سند %s — تلاش %s", job.id, job.kind, job.document_id, job.attempts)
+        target = f"سفارش {job.order_id}" if job.order_id else f"سند {job.document_id}"
+        log.info("کار %s (%s) %s — تلاش %s", job.id, job.kind, target, job.attempts)
         try:
             if job.kind == CONVERT_DOCUMENT:
                 result = convert_document(conn, self.storage, self.office, job.document_id)
+            elif job.kind == PREPARE_ORDER:
+                result = prepare_order(conn, self.storage, job.order_id)
             else:
                 result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)
@@ -106,13 +110,16 @@ class Worker:
         except PermanentFailure as failure:
             conn.rollback()
             queue.fail(conn, job, f"{failure.code}: {failure}", permanent=True)
-            mark_document_failed(conn, job.document_id, failure.code)
+            # شکست کار سفارش مال سفارش است، نه سندهایش: سند سالم می‌ماند و پنل (برش ۴) کار شکست‌خورده را
+            # با `last_error` نشان می‌دهد.
+            if job.document_id:
+                mark_document_failed(conn, job.document_id, failure.code)
             conn.commit()
             log.warning("✗ کار %s شکست قطعی: %s", job.id, failure.code)
         except Exception as error:  # noqa: BLE001 — هر خطای دیگری گذرا فرض می‌شود
             conn.rollback()
             final = queue.fail(conn, job, repr(error), permanent=False)
-            if final:
+            if final and job.document_id:
                 mark_document_failed(conn, job.document_id, EXHAUSTED.get(job.kind, "analysis_failed"))
             conn.commit()
             log.exception("✗ کار %s شکست%s", job.id, " — تلاش‌ها تمام شد" if final else "، دوباره تلاش می‌شود")

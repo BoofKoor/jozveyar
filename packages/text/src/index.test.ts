@@ -17,6 +17,7 @@ import {
   postHandoffDue,
   recipientSurname,
   rialsToTomans,
+  tidyInputFa,
   toLatinDigits,
   tomansToRials,
   unifyLetters,
@@ -68,6 +69,28 @@ describe('normalizeFa', () => {
 
   it('علامت جهت‌دهی نامرئی را پاک می‌کند', () => {
     expect(normalizeFa('‎طهماسبی‏')).toBe('طهماسبی');
+  });
+});
+
+describe('tidyInputFa — نشانی و نام گیرنده، برای چاپ روی برچسب پست', () => {
+  it('ي و ك عربی فارسی می‌شوند و ارقام لاتین', () => {
+    expect(tidyInputFa('مشهد، بلوار وكيل‌آباد ۱۲، پلاک ٢٤')).toBe('مشهد، بلوار وکیل‌آباد 12، پلاک 24');
+  });
+
+  it('«آ»، همزه و نیم‌فاصله دست نمی‌خورند — برخلاف normalizeFa که برای مقایسه است', () => {
+    expect(tidyInputFa('وکیل‌آباد، مؤسسهٔ آموزش')).toBe('وکیل‌آباد، مؤسسهٔ آموزش');
+    expect(normalizeFa('وکیل‌آباد')).toBe('وکیل اباد');
+  });
+
+  it('خط تازه و فاصلهٔ تکراری و فاصلهٔ نشکن یک فاصله می‌شوند', () => {
+    expect(tidyInputFa('  تهران،\n  خیابان\u00A0ولیعصر\t پلاک 3  ')).toBe('تهران، خیابان ولیعصر پلاک 3');
+  });
+
+  it('نامرئی‌ها پاک می‌شوند؛ نیم‌فاصلهٔ کنار فاصله یا تکراری هم', () => {
+    expect(tidyInputFa('\u200Eسارا\u200F \u200Bاحمدی\uFEFF')).toBe('سارا احمدی');
+    expect(tidyInputFa('می\u200C\u200Cروم')).toBe('می\u200Cروم');
+    expect(tidyInputFa('وکیل\u200C آباد')).toBe('وکیل آباد');
+    expect(tidyInputFa('\u200Cسارا\u200C')).toBe('سارا');
   });
 });
 

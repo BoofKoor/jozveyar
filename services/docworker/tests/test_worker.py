@@ -79,8 +79,9 @@ def test_unreachable_database_waits(worker, monkeypatch):
 
 
 def test_worker_takes_every_kind_by_default(monkeypatch):
+    """از برش ۳ب، ساختن PDF جزوهٔ سفارش پرداخت‌شده هم (`prepare_order`)."""
     monkeypatch.delenv("DOCWORKER_KINDS", raising=False)
-    assert kinds_from_env() == ["convert_document", "analyze_document"] == list(KINDS)
+    assert kinds_from_env() == ["convert_document", "analyze_document", "prepare_order"] == list(KINDS)
 
 
 def test_a_node_can_take_only_analysis(monkeypatch):

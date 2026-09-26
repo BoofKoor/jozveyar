@@ -75,6 +75,29 @@ export function tidyFa(input: string): string {
   return unifyLetters(input.normalize('NFC')).replace(/[ \t]+/g, ' ').trim();
 }
 
+/** نویسه‌های نامرئی جز نیم‌فاصله: فاصلهٔ صفر، اتصال، علامت‌ها و جاسازی‌های جهت، BOM. */
+const INVISIBLE = /[​‍‎‏‪-‮⁦-⁩﻿]/g;
+
+/**
+ * متنی که کاربر تایپ کرده و عیناً نمایش یا چاپ می‌شود — نشانی و نام گیرنده (برش ۳): ي و ك عربی فارسی
+ * می‌شوند، ارقام لاتین، نویسهٔ نامرئی جز نیم‌فاصله پاک، نیم‌فاصلهٔ کنار فاصله یا تکراری پاک، و هر فاصله
+ * و خط تازه یک فاصله.
+ *
+ * برخلاف `tidyFa` و `normalizeFa`، «آ»، همزه و اعراب دست نمی‌خورند: آن دو برای مقایسه‌اند، و اینجا
+ * «وکیل‌آباد» روی برچسب پست نباید «وکیل‌اباد» شود، یا «مؤسسه» «موسسه».
+ */
+export function tidyInputFa(input: string): string {
+  return toLatinDigits(input.normalize('NFC'))
+    .replace(/[يى]/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(INVISIBLE, '')
+    .replace(/\s+/g, ' ')
+    .replace(/‌+/g, '‌')
+    .replace(/ ?‌ ?/g, (match) => (match === '‌' ? match : ' '))
+    .trim()
+    .replace(/^‌+|‌+$/g, '');
+}
+
 /**
  * شمارهٔ موبایل ایران به یک شکل واحد: `09123456789`.
  *
