@@ -1,0 +1,583 @@
+/**
+ * پنل ادمین در پایگاه داده (برش ۴، ADR-037 و ADR-038): ادمین‌ها، پیوند ثبت یک‌باره، نشست، تلاش‌های ورود،
+ * نقش‌ها و رویدادها.
+ *
+ * مثل `auth.ts` فقط ذخیره و خواندن است، بی تصمیم: سقف‌ها، مهلت‌ها، رمز و کد در سرویس ورود پنل
+ * (`apps/admin/lib/server/auth.ts`) گرفته می‌شوند تا با پیاده‌سازی حافظه‌ای هم تست شوند. آنچه اینجاست همان
+ * است که درستی‌اش فقط با پستگرس معلوم می‌شود:
+ *
+ *  - **اتمی:** فرصت سنجش (`claimAttempt`) و مصرف گام کد (`claimTotpStep`) هر کدام یک `UPDATE`اند؛ دو
+ *    درخواست هم‌زمان نه یک کد را دو بار می‌پذیرند، نه از سقف اشتباه می‌گذرند.
+ *  - **یک تراکنش:** کاری که رویداد دارد، رویدادش را در همان تراکنش می‌نویسد؛ کار بی رد نمی‌ماند.
+ *  - **یک قفل:** ساختن و غیرفعال کردن ادمین زیر یک قفل مشورتی، تا «آخرین مالک» و «نام تکراری» مسابقه ندهند.
+ */
+
+import { and, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+
+import type { Database } from './index.js';
+import {
+  adminEvents,
+  adminInvites,
+  adminLoginAttempts,
+  adminSessions,
+  adminUserRoles,
+  adminUsers,
+  permissions,
+  rolePermissions,
+  roles,
+} from './schema.js';
+
+/** کلید قفل مشورتی ساختن و غیرفعال کردن ادمین: «adm» به عدد. */
+const ADMIN_LOCK = 0x61646d;
+
+/**
+ * مجوزها. کد با همین نام‌ها می‌سنجد؛ `seedReferenceData` همین‌ها را در `permissions` می‌نشاند. هر برش
+ * مجوز خودش را اینجا دارد، حتی اگر صفحه‌اش هنوز ساخته نشده، تا نقش‌ها از روز اول کامل باشند.
+ */
+export const ADMIN_PERMISSIONS = {
+  'orders.read': 'دیدن سفارش‌ها',
+  'orders.status': 'تغییر وضعیت سفارش',
+  'orders.address': 'ویرایش نشانی گیرنده',
+  'files.download': 'دانلود PDF جزوه',
+  'tariff.read': 'دیدن تعرفه',
+  'tariff.edit': 'ساختن و فعال کردن تعرفه',
+  'settings.edit': 'تنظیمات',
+  'secrets.edit': 'کلیدهای سرویس‌ها',
+  'admins.manage': 'ادمین‌ها',
+  'events.read': 'رویدادها',
+} as const;
+
+export type AdminPermission = keyof typeof ADMIN_PERMISSIONS;
+
+const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
+
+/** نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز؛ متصدی سفارش، وضعیت، نشانی، دانلود و دیدن تعرفه. چاپخانه با برش ۵. */
+export const ADMIN_ROLES = {
+  owner: { nameFa: 'مالک', permissions: ALL_PERMISSIONS },
+  operator: {
+    nameFa: 'متصدی',
+    permissions: ['orders.read', 'orders.status', 'orders.address', 'files.download', 'tariff.read'] as AdminPermission[],
+  },
+} as const satisfies Record<string, { nameFa: string; permissions: readonly AdminPermission[] }>;
+
+export type AdminRole = keyof typeof ADMIN_ROLES;
+
+export const isAdminRole = (value: unknown): value is AdminRole =>
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(ADMIN_ROLES, value);
+
+export type AdminUserRow = typeof adminUsers.$inferSelect;
+export type AdminInviteRow = typeof adminInvites.$inferSelect;
+export type AdminEventRow = typeof adminEvents.$inferSelect;
+
+/** یک رویداد ادمین. `detail` هرگز رمز یا مقدار کلید ندارد. */
+export interface AdminEventInput {
+  adminUserId: string | null;
+  action: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  ipHash?: string | null;
+  detail?: unknown;
+  at: Date;
+}
+
+export interface AdminSessionView {
+  sessionId: string;
+  createdAt: Date;
+  expiresAt: Date;
+  lastSeenAt: Date;
+  revokedAt: Date | null;
+  user: AdminUserRow;
+  roles: string[];
+  permissions: string[];
+}
+
+export interface AdminListItem {
+  user: AdminUserRow;
+  roles: string[];
+  /** پیوند ثبتی که هنوز زنده است. */
+  invite: { expiresAt: Date } | null;
+}
+
+export interface AdminEventView extends AdminEventRow {
+  username: string | null;
+  displayName: string | null;
+}
+
+export interface NewInvite {
+  inviteId: string;
+  /** شناسهٔ ادمین تازه؛ برای ادمین موجود نادیده. */
+  newUserId: string;
+  username: string;
+  displayName: string;
+  /** null برای ادمین موجود یعنی همان نقش‌های قبلی. */
+  role: AdminRole | null;
+  tokenHash: string;
+  totpSealed: string;
+  at: Date;
+  expiresAt: Date;
+  createdBy: string | null;
+  /** «کد ورود تازه» یا دستور سرور برای ادمین موجود؛ false یعنی نام تکراری خطاست. */
+  allowExisting: boolean;
+  event: Omit<AdminEventInput, 'targetId' | 'at'>;
+}
+
+export type CreatedInvite =
+  | { ok: true; userId: string; reset: boolean }
+  | { ok: false; reason: 'username_taken' | 'role_required' };
+
+export interface CompletedInvite {
+  inviteId: string;
+  userId: string;
+  passwordHash: string;
+  totpSealed: string;
+  totpStep: number;
+  at: Date;
+  session: { tokenHash: string; expiresAt: Date };
+  ipHash: string | null;
+}
+
+export interface AdminStore {
+  findUserByUsername(username: string): Promise<AdminUserRow | null>;
+  findUser(id: string): Promise<AdminUserRow | null>;
+  rolesOf(userId: string): Promise<string[]>;
+  /** تلاش‌های ورود این IP از `since` به بعد. */
+  countAttempts(ipHash: string, since: Date): Promise<number>;
+  /**
+   * تلاش ورود، پیش از هر سنجش و «ناموفق»؛ ورود موفق همان ردیف را موفق می‌کند (`startSession`). پس هر
+   * درخواست یک ردیف، و درخواست‌های هم‌زمان هم پیش از سنجش شمرده می‌شوند.
+   */
+  recordAttempt(attempt: { username: string; adminUserId: string | null; ipHash: string; at: Date }): Promise<number>;
+  /**
+   * یک فرصت سنجش رمز یا کد، اتمی و پیش از خود سنجش (بدبینانه): اگر حساب قفل نیست، شمار بالا می‌رود، و اگر
+   * به `maxFailures` رسید، قفل تا `lockUntil` می‌نشیند و شمار از صفر. سنجش درست بعدش همه را پاک می‌کند
+   * (`startSession`، `clearFailures`). پس درخواست‌های هم‌زمان هم در هر دورهٔ قفل بیش از `maxFailures` بار
+   * سنجیده نمی‌شوند. حساب قفل: `allowed: false` با زمان پایان قفل؛ وگرنه `lockedUntil` فقط اگر همین فرصت
+   * قفل را نشاند.
+   */
+  claimAttempt(
+    userId: string,
+    maxFailures: number,
+    at: Date,
+    lockUntil: Date,
+  ): Promise<{ allowed: boolean; lockedUntil: Date | null }>;
+  /** کد درست در کاری حساس: شمار و قفل از صفر، مثل ورود موفق. */
+  clearFailures(userId: string): Promise<void>;
+  /** گام کد، اتمی: فقط اگر از آخرین گام پذیرفته‌شده بزرگ‌تر است. false یعنی این کد یک بار به کار رفته. */
+  claimTotpStep(userId: string, step: number): Promise<boolean>;
+  /** ورود موفق در یک تراکنش: شمار اشتباه صفر، قفل برداشته، آخرین ورود، نشست تازه، تلاش «موفق» و رویداد. */
+  startSession(input: {
+    userId: string;
+    tokenHash: string;
+    at: Date;
+    expiresAt: Date;
+    attemptId: number;
+    event: AdminEventInput;
+  }): Promise<void>;
+  findSession(tokenHash: string): Promise<AdminSessionView | null>;
+  touchSession(sessionId: string, at: Date): Promise<void>;
+  revokeSession(tokenHash: string, at: Date): Promise<{ adminUserId: string } | null>;
+  revokeUserSessions(userId: string, at: Date): Promise<void>;
+  /**
+   * پیوند ثبت، در یک تراکنش زیر قفل: ادمین تازه با نقشش، یا برای ادمین موجود (بازیابی) رمز و برنامهٔ تأییدش
+   * پاک، نشست‌ها و پیوندهای زنده‌اش باطل، و دوباره فعال. بعد خود پیوند و رویداد.
+   */
+  createInvite(input: NewInvite): Promise<CreatedInvite>;
+  findInvite(tokenHash: string): Promise<{ invite: AdminInviteRow; user: AdminUserRow; roles: string[] } | null>;
+  /**
+   * ثبت با پیوند، در یک تراکنش: پیوند مصرف می‌شود (فقط اگر هنوز زنده است)، رمز و برنامهٔ تأیید می‌نشینند،
+   * نشست تازه و دو رویداد. false یعنی پیوند دیگر زنده نبود.
+   */
+  completeInvite(input: CompletedInvite): Promise<boolean>;
+  listAdmins(at: Date): Promise<AdminListItem[]>;
+  /**
+   * غیرفعال کردن در یک تراکنش زیر قفل: نشست‌ها و پیوندهای زنده باطل، و رویداد. آخرین مالک فعال غیرفعال
+   * نمی‌شود.
+   */
+  disableUser(userId: string, at: Date, event: AdminEventInput): Promise<'ok' | 'last_owner' | 'not_found'>;
+  /** پیوندهای زندهٔ یک ادمین کنار می‌روند؛ ادمینی که هرگز وارد نشده بود، غیرفعال هم می‌شود. */
+  revokeInvites(userId: string, at: Date, event: AdminEventInput): Promise<number>;
+  logEvent(event: AdminEventInput): Promise<void>;
+  listEvents(query: { limit: number; beforeId?: number; actionPrefix?: string }): Promise<AdminEventView[]>;
+}
+
+const eventRow = (event: AdminEventInput) => ({
+  adminUserId: event.adminUserId,
+  action: event.action,
+  targetType: event.targetType ?? null,
+  targetId: event.targetId ?? null,
+  ipHash: event.ipHash ?? null,
+  detail: event.detail ?? null,
+  at: event.at,
+});
+
+export function createAdminStore({ db }: Database): AdminStore {
+  type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+  async function rolesIn(tx: Tx | typeof db, userIds: string[]): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
+    if (userIds.length === 0) return map;
+    const rows = await tx
+      .select({ userId: adminUserRoles.adminUserId, roleId: adminUserRoles.roleId })
+      .from(adminUserRoles)
+      .where(inArray(adminUserRoles.adminUserId, userIds))
+      .orderBy(adminUserRoles.roleId);
+    for (const row of rows) map.set(row.userId, [...(map.get(row.userId) ?? []), row.roleId]);
+    return map;
+  }
+
+  async function activeOwners(tx: Tx): Promise<string[]> {
+    const rows = await tx
+      .select({ id: adminUsers.id })
+      .from(adminUsers)
+      .innerJoin(adminUserRoles, eq(adminUserRoles.adminUserId, adminUsers.id))
+      .where(and(eq(adminUserRoles.roleId, 'owner'), isNull(adminUsers.disabledAt)));
+    return rows.map((row) => row.id);
+  }
+
+  async function revokeOpenInvites(tx: Tx, userId: string, at: Date): Promise<number> {
+    const rows = await tx
+      .update(adminInvites)
+      .set({ revokedAt: at })
+      .where(and(eq(adminInvites.adminUserId, userId), isNull(adminInvites.usedAt), isNull(adminInvites.revokedAt)))
+      .returning({ id: adminInvites.id });
+    return rows.length;
+  }
+
+  return {
+    async findUserByUsername(username) {
+      const [row] = await db.select().from(adminUsers).where(eq(adminUsers.username, username)).limit(1);
+      return row ?? null;
+    },
+
+    async findUser(id) {
+      const [row] = await db.select().from(adminUsers).where(eq(adminUsers.id, id)).limit(1);
+      return row ?? null;
+    },
+
+    async rolesOf(userId) {
+      return (await rolesIn(db, [userId])).get(userId) ?? [];
+    },
+
+    async countAttempts(ipHash, since) {
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(adminLoginAttempts)
+        .where(and(eq(adminLoginAttempts.ipHash, ipHash), gt(adminLoginAttempts.at, since)));
+      return row?.n ?? 0;
+    },
+
+    async recordAttempt(attempt) {
+      const [row] = await db
+        .insert(adminLoginAttempts)
+        .values({ ...attempt, ok: false })
+        .returning({ id: adminLoginAttempts.id });
+      return row!.id;
+    },
+
+    async claimAttempt(userId, maxFailures, at, lockUntil) {
+      const reached = sql`${adminUsers.failedAttempts} + 1 >= ${maxFailures}`;
+      const [row] = await db
+        .update(adminUsers)
+        .set({
+          failedAttempts: sql`CASE WHEN ${reached} THEN 0 ELSE ${adminUsers.failedAttempts} + 1 END`,
+          lockedUntil: sql`CASE WHEN ${reached} THEN ${lockUntil.toISOString()}::timestamptz ELSE NULL END`,
+        })
+        .where(and(eq(adminUsers.id, userId), or(isNull(adminUsers.lockedUntil), lte(adminUsers.lockedUntil, at))))
+        .returning({ lockedUntil: adminUsers.lockedUntil });
+      if (row) return { allowed: true, lockedUntil: row.lockedUntil };
+      const [user] = await db
+        .select({ lockedUntil: adminUsers.lockedUntil })
+        .from(adminUsers)
+        .where(eq(adminUsers.id, userId))
+        .limit(1);
+      return { allowed: false, lockedUntil: user?.lockedUntil ?? null };
+    },
+
+    async clearFailures(userId) {
+      await db.update(adminUsers).set({ failedAttempts: 0, lockedUntil: null }).where(eq(adminUsers.id, userId));
+    },
+
+    async claimTotpStep(userId, step) {
+      const rows = await db
+        .update(adminUsers)
+        .set({ totpLastStep: step })
+        .where(
+          and(
+            eq(adminUsers.id, userId),
+            sql`(${adminUsers.totpLastStep} IS NULL OR ${adminUsers.totpLastStep} < ${step})`,
+          ),
+        )
+        .returning({ id: adminUsers.id });
+      return rows.length > 0;
+    },
+
+    async startSession(input) {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(adminUsers)
+          .set({ failedAttempts: 0, lockedUntil: null, lastLoginAt: input.at })
+          .where(eq(adminUsers.id, input.userId));
+        await tx.insert(adminSessions).values({
+          tokenHash: input.tokenHash,
+          adminUserId: input.userId,
+          createdAt: input.at,
+          expiresAt: input.expiresAt,
+          lastSeenAt: input.at,
+        });
+        await tx
+          .update(adminLoginAttempts)
+          .set({ ok: true, adminUserId: input.userId })
+          .where(eq(adminLoginAttempts.id, input.attemptId));
+        await tx.insert(adminEvents).values(eventRow(input.event));
+      });
+    },
+
+    async findSession(tokenHash) {
+      const [row] = await db
+        .select({ session: adminSessions, user: adminUsers })
+        .from(adminSessions)
+        .innerJoin(adminUsers, eq(adminUsers.id, adminSessions.adminUserId))
+        .where(eq(adminSessions.tokenHash, tokenHash))
+        .limit(1);
+      if (!row) return null;
+      const perms = await db
+        .selectDistinct({ id: rolePermissions.permissionId })
+        .from(adminUserRoles)
+        .innerJoin(rolePermissions, eq(rolePermissions.roleId, adminUserRoles.roleId))
+        .where(eq(adminUserRoles.adminUserId, row.user.id));
+      return {
+        sessionId: row.session.id,
+        createdAt: row.session.createdAt,
+        expiresAt: row.session.expiresAt,
+        lastSeenAt: row.session.lastSeenAt,
+        revokedAt: row.session.revokedAt,
+        user: row.user,
+        roles: (await rolesIn(db, [row.user.id])).get(row.user.id) ?? [],
+        permissions: perms.map((p) => p.id).sort(),
+      };
+    },
+
+    async touchSession(sessionId, at) {
+      await db
+        .update(adminSessions)
+        .set({ lastSeenAt: at })
+        .where(and(eq(adminSessions.id, sessionId), lt(adminSessions.lastSeenAt, at)));
+    },
+
+    async revokeSession(tokenHash, at) {
+      const [row] = await db
+        .update(adminSessions)
+        .set({ revokedAt: at })
+        .where(and(eq(adminSessions.tokenHash, tokenHash), isNull(adminSessions.revokedAt)))
+        .returning({ adminUserId: adminSessions.adminUserId });
+      return row ?? null;
+    },
+
+    async revokeUserSessions(userId, at) {
+      await db
+        .update(adminSessions)
+        .set({ revokedAt: at })
+        .where(and(eq(adminSessions.adminUserId, userId), isNull(adminSessions.revokedAt)));
+    },
+
+    async createInvite(input) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${ADMIN_LOCK})`);
+        const [existing] = await tx
+          .select()
+          .from(adminUsers)
+          .where(eq(adminUsers.username, input.username))
+          .limit(1)
+          .for('update');
+        let userId: string;
+        if (existing) {
+          if (!input.allowExisting) return { ok: false, reason: 'username_taken' } as const;
+          userId = existing.id;
+          await tx
+            .update(adminUsers)
+            .set({ passwordHash: null, totpSealed: null, totpLastStep: null, failedAttempts: 0, lockedUntil: null, disabledAt: null })
+            .where(eq(adminUsers.id, userId));
+          await tx
+            .update(adminSessions)
+            .set({ revokedAt: input.at })
+            .where(and(eq(adminSessions.adminUserId, userId), isNull(adminSessions.revokedAt)));
+          await revokeOpenInvites(tx, userId, input.at);
+          if (input.role) {
+            await tx.delete(adminUserRoles).where(eq(adminUserRoles.adminUserId, userId));
+            await tx.insert(adminUserRoles).values({ adminUserId: userId, roleId: input.role });
+          }
+        } else {
+          if (!input.role) return { ok: false, reason: 'role_required' } as const;
+          userId = input.newUserId;
+          await tx.insert(adminUsers).values({
+            id: userId,
+            username: input.username,
+            displayName: input.displayName,
+            createdAt: input.at,
+            createdBy: input.createdBy,
+          });
+          await tx.insert(adminUserRoles).values({ adminUserId: userId, roleId: input.role });
+        }
+        await tx.insert(adminInvites).values({
+          id: input.inviteId,
+          adminUserId: userId,
+          tokenHash: input.tokenHash,
+          totpSealed: input.totpSealed,
+          createdAt: input.at,
+          expiresAt: input.expiresAt,
+          createdBy: input.createdBy,
+        });
+        await tx.insert(adminEvents).values(
+          eventRow({ ...input.event, targetId: userId, at: input.at, detail: { ...(input.event.detail as object), reset: Boolean(existing) } }),
+        );
+        return { ok: true, userId, reset: Boolean(existing) } as const;
+      });
+    },
+
+    async findInvite(tokenHash) {
+      const [row] = await db
+        .select({ invite: adminInvites, user: adminUsers })
+        .from(adminInvites)
+        .innerJoin(adminUsers, eq(adminUsers.id, adminInvites.adminUserId))
+        .where(eq(adminInvites.tokenHash, tokenHash))
+        .limit(1);
+      if (!row) return null;
+      return { ...row, roles: (await rolesIn(db, [row.user.id])).get(row.user.id) ?? [] };
+    },
+
+    async completeInvite(input) {
+      return db.transaction(async (tx) => {
+        const [used] = await tx
+          .update(adminInvites)
+          .set({ usedAt: input.at })
+          .where(
+            and(
+              eq(adminInvites.id, input.inviteId),
+              isNull(adminInvites.usedAt),
+              isNull(adminInvites.revokedAt),
+              gt(adminInvites.expiresAt, input.at),
+            ),
+          )
+          .returning({ id: adminInvites.id });
+        if (!used) return false;
+        await tx
+          .update(adminUsers)
+          .set({
+            passwordHash: input.passwordHash,
+            totpSealed: input.totpSealed,
+            totpLastStep: input.totpStep,
+            failedAttempts: 0,
+            lockedUntil: null,
+            lastLoginAt: input.at,
+          })
+          .where(and(eq(adminUsers.id, input.userId), isNull(adminUsers.disabledAt)));
+        await tx.insert(adminSessions).values({
+          tokenHash: input.session.tokenHash,
+          adminUserId: input.userId,
+          createdAt: input.at,
+          expiresAt: input.session.expiresAt,
+          lastSeenAt: input.at,
+        });
+        await tx.insert(adminEvents).values([
+          eventRow({ adminUserId: input.userId, action: 'admins.enroll', targetType: 'admin', targetId: input.userId, ipHash: input.ipHash, at: input.at }),
+          eventRow({ adminUserId: input.userId, action: 'auth.login', ipHash: input.ipHash, at: input.at }),
+        ]);
+        return true;
+      });
+    },
+
+    async listAdmins(at) {
+      const users = await db.select().from(adminUsers).orderBy(adminUsers.createdAt);
+      const byUser = await rolesIn(
+        db,
+        users.map((u) => u.id),
+      );
+      const open = await db
+        .select({ userId: adminInvites.adminUserId, expiresAt: adminInvites.expiresAt })
+        .from(adminInvites)
+        .where(and(isNull(adminInvites.usedAt), isNull(adminInvites.revokedAt), gt(adminInvites.expiresAt, at)))
+        .orderBy(desc(adminInvites.expiresAt));
+      return users.map((user) => {
+        const invite = open.find((row) => row.userId === user.id);
+        return { user, roles: byUser.get(user.id) ?? [], invite: invite ? { expiresAt: invite.expiresAt } : null };
+      });
+    },
+
+    async disableUser(userId, at, event) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${ADMIN_LOCK})`);
+        const [user] = await tx.select().from(adminUsers).where(eq(adminUsers.id, userId)).limit(1).for('update');
+        if (!user || user.disabledAt) return 'not_found' as const;
+        const owners = await activeOwners(tx);
+        if (owners.includes(userId) && owners.length <= 1) return 'last_owner' as const;
+        await tx.update(adminUsers).set({ disabledAt: at }).where(eq(adminUsers.id, userId));
+        await tx
+          .update(adminSessions)
+          .set({ revokedAt: at })
+          .where(and(eq(adminSessions.adminUserId, userId), isNull(adminSessions.revokedAt)));
+        await revokeOpenInvites(tx, userId, at);
+        await tx.insert(adminEvents).values(eventRow(event));
+        return 'ok' as const;
+      });
+    },
+
+    async revokeInvites(userId, at, event) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${ADMIN_LOCK})`);
+        const n = await revokeOpenInvites(tx, userId, at);
+        if (n === 0) return 0;
+        // ادمینی که هرگز ثبت نکرد، بی پیوند فقط یک نام است؛ غیرفعال می‌شود تا فهرست بی صاحب نماند. ادمینی که
+        // قبلاً وارد شده بود (بازیابی) غیرفعال نمی‌شود؛ فقط تا پیوند تازه کد ورود ندارد.
+        await tx
+          .update(adminUsers)
+          .set({ disabledAt: at })
+          .where(
+            and(
+              eq(adminUsers.id, userId),
+              isNull(adminUsers.passwordHash),
+              isNull(adminUsers.lastLoginAt),
+              isNull(adminUsers.disabledAt),
+            ),
+          );
+        await tx.insert(adminEvents).values(eventRow(event));
+        return n;
+      });
+    },
+
+    async logEvent(event) {
+      await db.insert(adminEvents).values(eventRow(event));
+    },
+
+    async listEvents(query) {
+      const where = and(
+        query.beforeId ? lt(adminEvents.id, query.beforeId) : undefined,
+        query.actionPrefix ? sql`${adminEvents.action} LIKE ${`${query.actionPrefix}.%`}` : undefined,
+      );
+      const rows = await db
+        .select({ event: adminEvents, username: adminUsers.username, displayName: adminUsers.displayName })
+        .from(adminEvents)
+        .leftJoin(adminUsers, eq(adminUsers.id, adminEvents.adminUserId))
+        .where(where)
+        .orderBy(desc(adminEvents.id))
+        .limit(query.limit);
+      return rows.map((row) => ({ ...row.event, username: row.username, displayName: row.displayName }));
+    },
+  };
+}
+
+/** نقش‌ها و مجوزها در پایگاه داده، از `ADMIN_ROLES`؛ در `seedReferenceData`، زیر همان قفل. */
+export async function seedAdminRoles(tx: Database['db']): Promise<void> {
+  await tx
+    .insert(permissions)
+    .values(Object.entries(ADMIN_PERMISSIONS).map(([id, nameFa]) => ({ id, nameFa })))
+    .onConflictDoUpdate({ target: permissions.id, set: { nameFa: sql`excluded.name_fa` } });
+  await tx
+    .insert(roles)
+    .values(Object.entries(ADMIN_ROLES).map(([id, role]) => ({ id, nameFa: role.nameFa })))
+    .onConflictDoUpdate({ target: roles.id, set: { nameFa: sql`excluded.name_fa` } });
+  // مجوزهای هر نقش دقیقاً همان کد: مجوزی که از کد رفته، از نقش هم می‌رود.
+  for (const [roleId, role] of Object.entries(ADMIN_ROLES)) {
+    await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+    await tx.insert(rolePermissions).values(role.permissions.map((permissionId) => ({ roleId, permissionId })));
+  }
+}

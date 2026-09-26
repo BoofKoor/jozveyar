@@ -3,7 +3,8 @@
  *
  *  - منطقه‌های کرایه، استان‌ها و شهرها، از `@jozveyar/geo` — سفارش به شهر و استان کلید خارجی دارد؛
  *  - تعرفهٔ پایه، اگر هنوز هیچ تعرفه‌ای نیست — قیمت قطعی سرور از تعرفهٔ پایگاه داده است (قاعدهٔ ۲)؛
- *  - پیش‌فرض‌های `settings`: روز کاری تحویل به پست و تعطیلی‌های رسمی.
+ *  - پیش‌فرض‌های `settings`: روز کاری تحویل به پست و تعطیلی‌های رسمی؛
+ *  - نقش‌ها و مجوزهای پنل ادمین (`ADMIN_ROLES`، برش ۴): همیشه دقیقاً همان کد.
  *
  * هنگام بالا آمدن سرور، بعد از مهاجرت‌ها اجرا می‌شود (`instrumentation.ts`) و idempotent است. شهر و
  * استان با شناسه به‌روز می‌شوند و **هیچ‌وقت پاک نمی‌شوند** (سفارش به آنها اشاره می‌کند). تعرفه و
@@ -18,6 +19,7 @@ import { count, sql } from 'drizzle-orm';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
 import type { PriceList, SettingKey, SettingValue } from '@jozveyar/contracts';
 
+import { seedAdminRoles } from './admin.js';
 import { OFFICIAL_HOLIDAYS } from './holidays.js';
 import type { Database } from './index.js';
 import { cities, priceLists, provinces, settings, shippingZones } from './schema.js';
@@ -93,6 +95,8 @@ export async function seedReferenceData(
       await seedPriceList({ db: tx } as unknown as Database, options.priceList);
       priceListInserted = options.priceList.version;
     }
+
+    await seedAdminRoles(tx as unknown as Database['db']);
 
     const inserted = await tx
       .insert(settings)

@@ -50,6 +50,20 @@
       "when": 1790375336764,
       "tag": "0006_order_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790448300111,
+      "tag": "0007_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790448312243,
+      "tag": "0008_admin_guards",
+      "breakpoints": true
     }
   ]
 }

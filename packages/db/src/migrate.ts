@@ -37,8 +37,14 @@ export async function runMigrations(
   }
 }
 
-// اجرای مستقیم از خط فرمان. `import` شدن این ماژول نباید چیزی را اجرا کند.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// اجرای مستقیم از خط فرمان. `import` شدن این ماژول نباید چیزی را اجرا کند. نام فایل هم سنجیده می‌شود:
+// در بستهٔ تک‌فایلی (دستور سرور پنل، `apps/admin/dist/cli.mjs`) `import.meta.url` همان فایل ورودی است و
+// برابری تنها، مهاجرت را درون دستور دیگری اجرا می‌کرد.
+if (
+  process.argv[1] &&
+  /[\\/]migrate\.[cm]?[jt]s$/.test(process.argv[1]) &&
+  import.meta.url === `file://${process.argv[1]}`
+) {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('✗ DATABASE_URL تنظیم نشده است.');
