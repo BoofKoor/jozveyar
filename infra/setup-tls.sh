@@ -10,6 +10,10 @@
 #   • Nginx بالا نیست  → حالت `--standalone`، certbot خودش پورت ۸۰ را می‌گیرد
 #   • Nginx بالا هست    → حالت `--webroot`، بدون قطع سرویس
 #
+# زیردامنهٔ پنل ادمین (`admin.<دامنه>`، برش ۴) هم در همین گواهی می‌آید، اگر رکورد DNSش حل شود؛ `--expand`
+# گواهی موجود را بی قطع سرویس با نام تازه جایگزین می‌کند، با همان مسیر (`live/<دامنه>/`) که Nginx می‌خواند.
+# رکورد DNS بعداً آمد؟ همین اسکریپت را دوباره بزنید.
+#
 # اجرا (روی سرور):
 #   ./infra/setup-tls.sh you@example.com
 
@@ -65,11 +69,22 @@ fi
 NGINX_UP=0
 $COMPOSE ps --services --filter status=running 2>/dev/null | grep -qx nginx && NGINX_UP=1
 
+# ── زیردامنهٔ پنل ────────────────────────────────────────────────────────
+ADMIN_DOMAIN="admin.${DOMAIN}"
+NAMES=(-d "$DOMAIN" -d "www.${DOMAIN}")
+if getent hosts "$ADMIN_DOMAIN" >/dev/null 2>&1; then
+  NAMES+=(-d "$ADMIN_DOMAIN")
+  ok "${ADMIN_DOMAIN} حل می‌شود — در گواهی می‌آید"
+else
+  info "⚠ ${ADMIN_DOMAIN} هنوز حل نمی‌شود — گواهی فعلاً بی آن. بعد از رکورد DNS همین اسکریپت را دوباره بزنید."
+fi
+
 CERTBOT_ARGS=(
   certonly
   --email "$EMAIL" --agree-tos --no-eff-email
   --non-interactive
-  -d "$DOMAIN" -d "www.${DOMAIN}"
+  --expand
+  "${NAMES[@]}"
 )
 [[ "$STAGING" == "1" ]] && CERTBOT_ARGS+=(--staging)
 
@@ -93,7 +108,7 @@ fi
 
 [[ -f "infra/certs/live/${DOMAIN}/fullchain.pem" ]] \
   || die "گواهی ساخته نشد. لاگ: infra/certs/../var/log/letsencrypt/"
-ok "گواهی صادر شد برای ${DOMAIN} و www.${DOMAIN}"
+ok "گواهی صادر شد برای ${DOMAIN} و www.${DOMAIN}$( (( ${#NAMES[@]} > 4 )) && echo " و ${ADMIN_DOMAIN}")"
 
 # ── ۳. بالا آوردن Nginx (یا بارگذاری مجدد) ───────────────────────────────
 if (( NGINX_UP )); then
@@ -144,6 +159,9 @@ fi
 
 echo ""
 ok "https://${DOMAIN} آماده است."
+if (( ${#NAMES[@]} > 4 )); then
+  ok "پنل: https://${ADMIN_DOMAIN} (مسیر محرمانه‌اش در .env؛ پیوند ورود با ./infra/admin-invite.sh)"
+fi
 echo ""
 echo "بررسی سایت:   curl -sI https://${DOMAIN} | head -1"
 echo ""

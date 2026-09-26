@@ -155,6 +155,20 @@ for round in $(seq 1 20); do
 done
 ok "بستهٔ وب ${HEAD_SHA:0:7} دریافت و تأیید شد ($(du -h "${WORK}/jozveyar-bundle.tar.gz" | cut -f1))"
 
+# پنل ادمین (برش ۴، ADR-037): بستهٔ جدای خودش (خروجی standalone پنل و دستور سرور)، از همان commit و با
+# همان سنجش؛ CDN می‌تواند یکی را تازه و دیگری را کهنه بدهد.
+for round in $(seq 1 20); do
+  ADMIN_SHA=$(fetch_verified jozveyar-admin)
+  ADMIN_COMMIT=$(tar -xzf "${WORK}/jozveyar-admin.tar.gz" -O ./COMMIT 2>/dev/null | tr -d '[:space:]' || true)
+  if [[ "$ADMIN_COMMIT" == "$HEAD_SHA" || "${DEPLOY_ANY_BUNDLE:-0}" == "1" ]]; then
+    break
+  fi
+  (( round == 20 )) && die "بعد از ده دقیقه، بستهٔ پنل هنوز از ${ADMIN_COMMIT:0:7} است نه ${HEAD_SHA:0:7}. workflow «build-bundle» را در گیت‌هاب ببینید."
+  info "بستهٔ پنل از ${ADMIN_COMMIT:0:7} است، نه ${HEAD_SHA:0:7} — ۳۰ ثانیه صبر… (${round}/20)"
+  sleep 30
+done
+ok "بستهٔ پنل ${HEAD_SHA:0:7} دریافت و تأیید شد ($(du -h "${WORK}/jozveyar-admin.tar.gz" | cut -f1))"
+
 # کارگر اسناد جدا منتشر می‌شود و فقط وقتی عوض شده دوباره ساخته می‌شود. بسته‌اش
 # فقط کد است (چند کیلوبایت)؛ LibreOffice و فونت‌ها در ایمیج پایه‌اند (ensure_base).
 DW_SHA=$(curl -fsSL --retry 3 "${BASE}/jozveyar-docworker.sha256" | tr -d '[:space:]' || true)
@@ -169,10 +183,11 @@ else
 fi
 
 # اگر همین نسخه از قبل مستقر است، کار دیگری لازم نیست.
-if (( DW_BUILD == 0 )) && [[ -f .bundle-sha256 ]] && [[ "$(cat .bundle-sha256)" == "$ACTUAL" ]]; then
+if (( DW_BUILD == 0 )) && [[ -f .bundle-sha256 ]] && [[ "$(cat .bundle-sha256)" == "$ACTUAL" ]] \
+   && [[ -f .admin-sha256 ]] && [[ "$(cat .admin-sha256)" == "$ADMIN_SHA" ]]; then
   info "همین نسخه از قبل مستقر است."
   RUNNING=$($COMPOSE ps --services --filter status=running 2>/dev/null || true)
-  if grep -qx web <<<"$RUNNING" && grep -qx docworker <<<"$RUNNING"; then
+  if grep -qx web <<<"$RUNNING" && grep -qx docworker <<<"$RUNNING" && grep -qx admin <<<"$RUNNING"; then
     ok "سرویس‌ها در حال اجرا هستند — کاری لازم نیست."
     exit 0
   fi
@@ -190,6 +205,14 @@ tar -xzf "${WORK}/jozveyar-bundle.tar.gz" -C "${WORK}/ctx/bundle"
 cp apps/web/Dockerfile.bundle "${WORK}/ctx/Dockerfile"
 docker build -t "jozveyar/web:${IMAGE_TAG}" "${WORK}/ctx"
 ok "ایمیج jozveyar/web:${IMAGE_TAG} ساخته شد"
+
+rm -rf "${WORK}/admin" && mkdir -p "${WORK}/admin/bundle"
+tar -xzf "${WORK}/jozveyar-admin.tar.gz" -C "${WORK}/admin/bundle"
+[[ -f "${WORK}/admin/bundle/apps/admin/server.js" && -f "${WORK}/admin/bundle/apps/admin/dist/cli.mjs" ]] \
+  || die "ساختار بستهٔ پنل غیرمنتظره است — نقطهٔ ورود یا دستور سرور پیدا نشد."
+cp apps/admin/Dockerfile.bundle "${WORK}/admin/Dockerfile"
+docker build -t "jozveyar/admin:${IMAGE_TAG}" "${WORK}/admin"
+ok "ایمیج jozveyar/admin:${IMAGE_TAG} ساخته شد"
 
 BASE_ID=""
 if (( DW_BUILD )); then
@@ -213,7 +236,33 @@ fi
 step "استوریج"
 APP_DIR="$APP_DIR" DOMAIN="$DOMAIN" ./infra/setup-storage.sh
 
-# ── ۴. بالا آوردن ────────────────────────────────────────────────────────
+# ── ۴. پنل: سه مقدار .env ────────────────────────────────────────────────
+# idempotent و بی چاپ مقدار. فقط وقتی نیستند ساخته می‌شوند؛ مقداری که هست هرگز عوض نمی‌شود — SECRETS_KEY
+# تازه رمزهای برنامهٔ تأیید ادمین‌ها را بی‌اثر می‌کرد. مقدار خراب دست نمی‌خورد: پنل بسته می‌ماند و خط لاگش
+# (پایین) می‌گوید کدام.
+step "پنل: تنظیمات"
+env_value() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
+# put_env <نام> <مقدار> <توضیح>: فقط وقتی صدا زده می‌شود که مقدار نیست (یا جای‌نگهدار نمونه است). خط خالی
+# موجود همان‌جا پر می‌شود؛ نبود، با توضیحش ته فایل می‌آید.
+put_env() {
+  if grep -qE "^$1=" .env; then
+    sed -i "s|^$1=.*|$1=$2|" .env
+  else
+    printf '\n# %s\n%s=%s\n' "$3" "$1" "$2" >> .env
+  fi
+  ok "${1} ساخته شد (در .env)"
+}
+[[ -n "$(env_value SECRETS_KEY)" ]] \
+  || put_env SECRETS_KEY "$(openssl rand -hex 32)" "مهروموم رمز برنامهٔ تأیید ادمین‌ها (برش ۴)؛ گم شود، ادمین‌ها با admin-invite.sh از نو ثبت می‌کنند. از .env نسخهٔ پشتیبان بگیرید."
+ADMIN_PATH_NOW=$(env_value ADMIN_BASE_PATH)
+if [[ -z "$ADMIN_PATH_NOW" || "$ADMIN_PATH_NOW" == "/change-this-secret-path" ]]; then
+  put_env ADMIN_BASE_PATH "/$(openssl rand -hex 8)" "مسیر محرمانهٔ پنل (برش ۴)؛ پیوند ورود با ./infra/admin-invite.sh"
+fi
+[[ -n "$(env_value ADMIN_ORIGIN)" ]] || put_env ADMIN_ORIGIN "https://admin.${DOMAIN}" "نشانی پنل (برش ۴)"
+chmod 600 .env
+ok "تنظیمات پنل در .env هست"
+
+# ── ۵. بالا آوردن ────────────────────────────────────────────────────────
 step "بالا آوردن سرویس‌ها"
 HAS_CERT=0
 [[ -f "infra/certs/live/${DOMAIN}/fullchain.pem" ]] && HAS_CERT=1
@@ -222,7 +271,18 @@ if (( HAS_CERT )); then
   TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans
 else
   info "گواهی TLS هنوز نیست — nginx فعلاً بالا نمی‌آید."
-  TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans postgres redis garage web docworker
+  TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans postgres redis garage web docworker admin
+fi
+
+# Nginx پیکربندی را فقط هنگام بالا آمدن می‌خواند؛ فایلش با git pull عوض شده باشد (مثل بلوک پنل در برش ۴)،
+# اینجا دوباره خوانده می‌شود، بی قطع سرویس. اول سنجش: پیکربندی نادرست جای پیکربندی کارکن فعلی را نمی‌گیرد.
+if (( HAS_CERT )) && $COMPOSE ps --services --filter status=running 2>/dev/null | grep -qx nginx; then
+  if $COMPOSE exec -T nginx nginx -t >/dev/null 2>&1; then
+    $COMPOSE exec -T nginx nginx -s reload >/dev/null 2>&1 && ok "Nginx پیکربندی تازه را خواند"
+  else
+    printf '\033[0;31m✗ پیکربندی Nginx نادرست است — همان قبلی می‌ماند:\033[0m\n' >&2
+    $COMPOSE exec -T nginx nginx -t >&2 || true
+  fi
 fi
 
 info "انتظار برای سلامت اپ…"
@@ -247,8 +307,36 @@ else
   $COMPOSE logs --since 10m web 2>/dev/null | grep -E 'مهاجرت|Error' | tail -5 >&2 || true
 fi
 
+# خط‌های بالا آمدن (تصمیم ۲۳): حالت مسیر خرید، مهاجرت و دادهٔ پایه از وب، و حال پنل. هیچ‌کدام مقدار .env یا
+# مسیر محرمانه ندارد.
+startup_lines() {
+  $COMPOSE logs --no-log-prefix --since 10m "$1" 2>/dev/null | grep -E "^(✓|✗|⚠) ($2)" | sed 's/^/  /' || true
+}
+info "بالا آمدن وب:"
+startup_lines web 'مسیر خرید|مهاجرت|دادهٔ پایه'
+
+info "انتظار برای سلامت پنل…"
+ADMIN_OK=0
+for _ in $(seq 1 30); do
+  if $COMPOSE exec -T admin node -e \
+      "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+      >/dev/null 2>&1; then
+    ADMIN_OK=1
+    break
+  fi
+  sleep 2
+done
+if (( ADMIN_OK )); then
+  info "بالا آمدن پنل:"
+  startup_lines admin 'پنل ادمین'
+else
+  # پنل جداست: سایت با پنل بیمار هم کار می‌کند، پس استقرار نمی‌افتد، ولی بلند گفته می‌شود.
+  printf '\033[0;31m✗ پنل سالم نشد — سایت دست نخورده است. لاگ: %s logs admin\033[0m\n' "$COMPOSE" >&2
+fi
+
 echo "$ACTUAL" > .bundle-sha256
 echo "$DW_SHA" > .docworker-sha256
+echo "$ADMIN_SHA" > .admin-sha256
 
 # هر استقرار ایمیج قبلی را بی‌تگ جا می‌گذارد (~۶۷ مگابایت) و کش ساخت هم
 # لایه‌های COPY را نگه می‌دارد که دیگر به کار نمی‌آیند. استوریج روی همین
@@ -263,7 +351,7 @@ if [[ -n "$BASE_ID" ]]; then
 fi
 ok "ایمیج‌های کهنه پاک شدند"
 
-# ── ۵. وضعیت ─────────────────────────────────────────────────────────────
+# ── ۶. وضعیت ─────────────────────────────────────────────────────────────
 step "وضعیت"
 $COMPOSE ps
 echo ""
@@ -271,6 +359,7 @@ ok "تمام شد."
 echo ""
 if (( HAS_CERT )); then
   echo "سایت: https://${DOMAIN}"
+  echo "پنل: https://admin.${DOMAIN} — پیوند ورود اولین ادمین (یا کد ورود تازه): ./infra/admin-invite.sh <نام کاربری>"
 else
   echo "یک قدم مانده — گواهی و بالا آوردن Nginx:"
   echo "  ./infra/setup-tls.sh ایمیل-شما@example.com"

@@ -84,6 +84,7 @@ else
   POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')
   SESSION_SECRET=$(openssl rand -hex 32)
   ADMIN_BASE_PATH="/$(openssl rand -hex 8)"
+  SECRETS_KEY=$(openssl rand -hex 32)
 
   cat > .env <<EOF
 NEXT_PUBLIC_SITE_URL=https://${DOMAIN}
@@ -118,17 +119,22 @@ SMS_PROVIDER=console
 SMS_API_KEY=
 SMS_OTP_TEMPLATE=
 
+# پنل ادمین (برش ۴، ADR-037): زیردامنهٔ جدا و مسیر محرمانه. SECRETS_KEY رمزهای برنامهٔ تأیید ادمین‌ها را
+# مهروموم می‌کند؛ گم شود، ادمین‌ها با ./infra/admin-invite.sh از نو ثبت می‌کنند. از .env نسخهٔ پشتیبان بگیرید.
 ADMIN_BASE_PATH=${ADMIN_BASE_PATH}
+ADMIN_ORIGIN=https://admin.${DOMAIN}
+SECRETS_KEY=${SECRETS_KEY}
 SESSION_SECRET=${SESSION_SECRET}
 
 # سقف حافظهٔ کانتینرها — روی سرور بزرگ‌تر بالا ببرید.
 WEB_MEM_LIMIT=640m
 POSTGRES_MEM_LIMIT=512m
+ADMIN_MEM_LIMIT=384m
 EOF
   chmod 600 .env
   ok ".env ساخته شد با رمزهای تصادفی"
-  info "مسیر محرمانهٔ پنل ادمین: ${ADMIN_BASE_PATH}"
-  info "این مسیر فقط در .env روی همین سرور است — جایی یادداشتش کنید."
+  info "مسیر محرمانهٔ پنل ادمین فقط در .env روی همین سرور است؛ پیوند ورود اولین ادمین، بعد از deploy-bundle.sh:"
+  info "  ./infra/admin-invite.sh <نام کاربری>"
 fi
 
 # ── ۳. بیلد ──────────────────────────────────────────────────────────────
