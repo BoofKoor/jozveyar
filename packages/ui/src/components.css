@@ -139,9 +139,10 @@
   }
   /*
    * دکمهٔ در حال کار بسته است، ولی متنش («در حال بررسی…») وضعیت است، نه برچسب دکمهٔ بسته؛ پس
-   * خواندنی: متن ثانویه، 6.47 به 1 روی زمینهٔ green-50 (رنگ بستهٔ کیت 3.66 است).
+   * خواندنی: متن ثانویه، 6.47 به 1 روی زمینهٔ green-50 (رنگ بستهٔ کیت 3.66 است). `is-status` همین
+   * است بی چرخنده: دکمهٔ بسته‌ای که متنش وضعیت را می‌گوید («ثبت سفارش آنلاین به‌زودی»).
    */
-  .jy-btn.is-loading:is(:disabled, [aria-disabled='true']) {
+  .jy-btn:is(.is-loading, .is-status):is(:disabled, [aria-disabled='true']) {
     color: var(--color-muted);
   }
   .jy-btn.is-loading::before {
@@ -471,6 +472,70 @@
     margin: 0;
     appearance: none;
   }
+  /* نشانی: چند خط؛ با خطا همان جا، یک پیکسل padding کمتر برای لبهٔ دوپیکسلی */
+  textarea.jy-input {
+    min-height: 104px;
+    padding: 10px 12px;
+    line-height: 1.8;
+    resize: vertical;
+  }
+  textarea.jy-input[aria-invalid='true'] {
+    padding: 9px 11px;
+  }
+  /* عدد و شماره (کد پستی، موبایل): چپ‌به‌راست، از آغاز خودش */
+  .jy-input--ltr {
+    direction: ltr;
+    text-align: start;
+  }
+  /* کد پیامکی: رقم درشت و باز، وسط جعبه، نه خط متن (--jy-digit-rise) */
+  .jy-input--code {
+    max-width: 220px;
+    min-height: 56px;
+    direction: ltr;
+    text-align: center;
+    font-size: var(--text-h3);
+    font-weight: 600;
+    letter-spacing: 0.5em;
+    text-indent: 0.5em;
+    padding-block-start: calc(2 * var(--jy-digit-rise));
+  }
+  .jy-input--code[aria-invalid='true'] {
+    padding-block-start: calc(2 * var(--jy-digit-rise));
+  }
+
+  /* ===== فیلد: برچسب همیشه بالای فیلد، راهنما، و خطا با سه نشانه (لبه، آیکون، پیام) ===== */
+  .jy-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .jy-label {
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  .jy-optional {
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .jy-hint {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .jy-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: var(--text-small);
+    font-weight: 600;
+    line-height: 1.7;
+    color: var(--color-error-text);
+  }
+  .jy-error > .jy-icon {
+    width: 16px;
+    height: 16px;
+    margin-block-start: 3px;
+  }
 
   /* ===== رادیو و کاشی انتخاب ===== */
   .jy-radio {
@@ -657,6 +722,25 @@
     background: var(--color-green-600);
     border-color: var(--color-green-600);
     color: var(--color-paper);
+  }
+  /* قدم انجام‌شده: تیک به جای عدد، و پیوند برای برگشتن (هدف لمسی ۴۴)؛ پس از پرداخت فقط تیک */
+  .jy-flow__n:has(> .jy-icon) {
+    padding: 0;
+  }
+  .jy-flow > li.is-done .jy-flow__n {
+    border-color: var(--color-green-600);
+    color: var(--color-green-700);
+  }
+  .jy-flow__n > .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .jy-flow > li > a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    color: inherit;
   }
 
   /* ===== سؤال‌ها: فهرست details، متن در HTML می‌ماند ===== */
