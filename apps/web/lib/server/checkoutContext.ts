@@ -12,7 +12,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 
-import type { CheckoutMode } from '@jozveyar/contracts/checkout';
+import type { CheckoutMode, OrderView } from '@jozveyar/contracts/checkout';
 import { createAuthStore, createOrderStore, createSmsLog, getDb, type AuthStore, type OrderStore } from '@jozveyar/db';
 
 import { createAuthService, tokenHash, type AuthService, type AuthUser } from './auth';
@@ -20,6 +20,7 @@ import { createCheckoutService, orderView, type CheckoutService } from './checko
 import { configuredMode, effectiveMode, sessionSecretOf } from './checkoutMode';
 import { noStore, respond } from './context';
 import { mockGateway } from './payments';
+import type { Result } from './result';
 import { readSetting } from './settings';
 import { consoleSms } from './sms';
 
@@ -27,15 +28,19 @@ import { consoleSms } from './sms';
 export const AUTH_COOKIE = 'jy_auth';
 const sessionSecret = () => sessionSecretOf(process.env.SESSION_SECRET);
 
-/** حالت مسیر خرید برای همین درخواست. */
-export function checkoutModeOf(request: NextRequest): CheckoutMode {
+/**
+ * حالت مسیر خرید برای نام‌هایی که درخواست برای میزبانش آورده (`Host`، `X-Forwarded-Host`، نشانی). صفحهٔ
+ * سرور (درگاه نمونه) هم همین را با سرآیندهای خودش صدا می‌زند.
+ */
+export function checkoutModeFor(hosts: readonly (string | null | undefined)[]): CheckoutMode {
   const configured = configuredMode(process.env.CHECKOUT_MODE);
   if (configured === 'off' || !process.env.DATABASE_URL || !sessionSecret()) return 'off';
-  return effectiveMode(configured, [
-    request.headers.get('host'),
-    request.headers.get('x-forwarded-host'),
-    request.nextUrl.hostname,
-  ]);
+  return effectiveMode(configured, hosts);
+}
+
+/** حالت مسیر خرید برای همین درخواست. */
+export function checkoutModeOf(request: NextRequest): CheckoutMode {
+  return checkoutModeFor([request.headers.get('host'), request.headers.get('x-forwarded-host'), request.nextUrl.hostname]);
 }
 
 interface Stores {
@@ -100,22 +105,37 @@ export async function withCheckout(
   }
 }
 
-/** صفحهٔ سفارش: پایگاه داده کافی است، مسیر خرید نه. */
+/**
+ * سرویس‌های خرید برای صفحهٔ سرور (درگاه نمونه، ۳ج)؛ صفحه پیش از این `checkoutModeFor` را سنجیده. مثل
+ * `withCheckout`، خطای پیش‌بینی‌نشده را صفحه خودش نشان می‌دهد.
+ */
+export function checkoutServices(): Services {
+  return servicesOf();
+}
+
+/**
+ * صفحهٔ سفارش (JSON یا صفحهٔ سرور `/order/<توکن>`): پایگاه داده کافی است، مسیر خرید نه. null یعنی پایگاه
+ * داده‌ای نیست؛ آن‌وقت مثل سفارش ناموجود.
+ */
+export async function orderViewOf(token: string, authToken: string | null): Promise<Result<OrderView> | null> {
+  if (!process.env.DATABASE_URL) return null;
+  const { orders, auth } = storesOf();
+  const at = new Date();
+  const session = await sessionUser(auth, authToken, at);
+  return orderView(orders, token, session, at);
+}
+
 export async function orderViewFor(request: NextRequest, token: string): Promise<NextResponse> {
-  if (!process.env.DATABASE_URL) return notFound();
   try {
-    const { orders, auth } = storesOf();
-    const at = new Date();
-    const session = await sessionUser(auth, request, at);
-    return respond(await orderView(orders, token, session, at));
+    const view = await orderViewOf(token, authTokenOf(request));
+    return view ? respond(view) : notFound();
   } catch (error) {
     console.error('✗ خطای صفحهٔ سفارش:', error);
     return unavailable();
   }
 }
 
-async function sessionUser(store: AuthStore, request: NextRequest, at: Date): Promise<AuthUser | null> {
-  const token = authTokenOf(request);
+async function sessionUser(store: AuthStore, token: string | null, at: Date): Promise<AuthUser | null> {
   if (!token) return null;
   const session = await store.findSession(tokenHash(token), at);
   return session ? { userId: session.userId, mobile: session.mobile } : null;
@@ -123,10 +143,14 @@ async function sessionUser(store: AuthStore, request: NextRequest, at: Date): Pr
 
 /* ────────────────────────── کوکی نشست ────────────────────────── */
 
-/** توکن `jy_auth`، اگر شکلش درست است. */
+/** مقدار کوکی `jy_auth`، اگر شکلش درست است؛ صفحهٔ سرور با `cookies()` همین را می‌خواند. */
+export function authTokenFrom(value: string | undefined): string | null {
+  return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
+}
+
+/** توکن `jy_auth` این درخواست، اگر شکلش درست است. */
 export function authTokenOf(request: NextRequest): string | null {
-  const token = request.cookies.get(AUTH_COOKIE)?.value;
-  return token && /^[A-Za-z0-9_-]{43}$/.test(token) ? token : null;
+  return authTokenFrom(request.cookies.get(AUTH_COOKIE)?.value);
 }
 
 const secureRequest = (request: NextRequest) => request.headers.get('x-forwarded-proto') === 'https';

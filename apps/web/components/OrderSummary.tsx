@@ -1,14 +1,97 @@
 'use client';
 
-import { formatNumber, formatTomans } from '@jozveyar/text';
+import type { ReactNode } from 'react';
+import { formatTomans } from '@jozveyar/text';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
+import { publishDockHeight } from '../lib/dock';
 import type { OrderConfig } from '../lib/orderConfig';
 import { Note } from './AnalysisCard';
 import { Names } from './JozveFiles';
+import { SumValue, SummaryLines, printLabel } from './checkout/parts';
+
+/**
+ * «ادامه»ی قدم «جزوه و قیمت»، از دید خلاصه و نوار موبایل (`OrderDesk` حسابش می‌کند):
+ * - `checking`: بررسی مرورگر تمام نشده، یا هنوز نمی‌دانیم ثبت سفارش باز است (`GET /api/checkout`).
+ * - `blocked`: فایلی خوانده نشد؛ جزوه‌ای که یک فصلش کم است بی‌صدا سفارش داده نمی‌شود (ADR-030).
+ * - `soon`: ثبت سفارش آنلاین هنوز باز نیست (`CHECKOUT_MODE=off`، سایت زنده تا برش ۷؛ ADR-035).
+ * - `sending`: فایلی هنوز به سرور نرسیده یا سرور بررسی‌اش می‌کند؛ سفارش با شمارش سرور است (ADR-034).
+ * - `stuck`: فایلی به سرور نرسید؛ یادداشت خلاصه راه جلو را می‌گوید.
+ * - `busy`: «ادامه» زده شد و قیمت سرور در راه است.
+ */
+export type DeskAction = 'checking' | 'blocked' | 'soon' | 'sending' | 'stuck' | 'busy' | 'go';
+
+const LABEL: Record<DeskAction, string> = {
+  checking: 'در حال بررسی…',
+  blocked: 'اول تکلیف فایل خوانده‌نشده را روشن کن',
+  soon: 'ثبت سفارش آنلاین به‌زودی',
+  sending: 'در حال ارسال فایل…',
+  stuck: 'ادامه — آدرس و تحویل',
+  busy: 'ادامه — آدرس و تحویل',
+  go: 'ادامه — آدرس و تحویل',
+};
+
+/** متن کوتاه نوار موبایل؛ نامش (`aria-label`) همان متن کامل خلاصه است. */
+const SHORT: Record<DeskAction, string> = {
+  checking: 'بررسی…',
+  blocked: 'ادامه',
+  soon: 'به‌زودی',
+  sending: 'ارسال…',
+  stuck: 'ادامه',
+  busy: 'ادامه',
+  go: 'ادامه',
+};
+
+const NAME: Partial<Record<DeskAction, string>> = {
+  blocked: 'ادامه — اول تکلیف فایل خوانده‌نشده را روشن کن',
+  soon: 'ثبت سفارش آنلاین به‌زودی',
+  sending: 'ادامه — در حال ارسال فایل',
+  stuck: 'ادامه — اول فایل باید به سرور برسد',
+};
+
+/** در حال کار: چرخندهٔ کیت و متن خواندنی. */
+const LOADING: ReadonlySet<DeskAction> = new Set(['checking', 'sending', 'busy']);
+
+interface ActionProps {
+  action: DeskAction;
+  /** «ادامه»: قیمت سرور و قدم شهر (مسیر خرید). */
+  onContinue: () => void;
+  /** نشانهٔ قصد (اشاره‌گر یا فوکوس روی «ادامه»): تکهٔ مسیر خرید از همین لحظه بار می‌شود. */
+  onIntent: () => void;
+}
+
+/**
+ * دکمهٔ «ادامه»، در خلاصه و در نوار موبایل. «به‌زودی» بسته است ولی در ترتیب Tab می‌ماند (`aria-disabled`)،
+ * تا صفحه‌خوان هم بشنود چرا؛ متنش وضعیت است و خواندنی (`is-status`). بقیهٔ حالت‌های بسته، مثل ۴ب، `disabled`.
+ */
+function ContinueButton({ action, onContinue, onIntent, short }: ActionProps & { short: boolean }) {
+  const soon = action === 'soon';
+  const loading = LOADING.has(action);
+  const open = action === 'go';
+  return (
+    <button
+      type="button"
+      disabled={!open && !soon}
+      aria-disabled={soon ? true : undefined}
+      aria-busy={action === 'busy' ? true : undefined}
+      aria-label={short ? NAME[action] ?? (loading && action !== 'busy' ? undefined : LABEL[action]) : undefined}
+      onPointerEnter={onIntent}
+      onFocus={onIntent}
+      onClick={() => {
+        if (open) onContinue();
+      }}
+      className={`jy-btn jy-btn--primary jy-btn--lg${short ? ' shrink-0' : ' jy-btn--block home-sum__go'}${
+        loading ? ' is-loading' : soon ? ' is-status' : ''
+      }`}
+    >
+      {short ? SHORT[action] : LABEL[action]}
+      {open ? <span className="jy-icon jy-icon-arrow" aria-hidden="true" /> : null}
+    </button>
+  );
+}
 
 interface Props {
   breakdown: Breakdown;
-  /** تا وقتی تحلیل تمام نشده، قیمت «تا این لحظه» است و «ادامه» در حال کار. */
+  /** تا وقتی تحلیل تمام نشده، قیمت «تا این لحظه» است. */
   provisional: boolean;
   /** فایل‌هایی از جزوه که هنوز شمرده نشده‌اند؛ قیمتشان بعداً اضافه می‌شود (ADR-030). */
   pending: readonly string[];
@@ -17,18 +100,6 @@ interface Props {
    * است: جزوه‌ای که یک فصلش کم است بی‌صدا سفارش داده نمی‌شود.
    */
   blocked: readonly string[];
-}
-
-/** «245,000» و «تومان» کوچک کنارش؛ عدد در span خودش. */
-function Total({ rials, testId }: { rials: number; testId: string }) {
-  return (
-    <span className="home-sum__value">
-      <span data-testid={testId} className="num">
-        {formatTomans(rials, false)}
-      </span>
-      <small>تومان</small>
-    </span>
-  );
 }
 
 /**
@@ -45,7 +116,9 @@ export function OrderSummary({
   provisional,
   pending,
   blocked,
-}: Props & { config: OrderConfig; priceList: PriceList }) {
+  notes,
+  ...action
+}: Props & ActionProps & { config: OrderConfig; priceList: PriceList; notes?: ReactNode }) {
   const item = breakdown.items[0];
   const binding = priceList.bindingTypes[config.bindingTypeId]?.nameFa ?? '';
 
@@ -54,48 +127,11 @@ export function OrderSummary({
       <h2 id="summary-title" className="jy-card__title">
         خلاصهٔ سفارش
       </h2>
-      {item ? (
-        <dl className="home-sum__lines">
-          <div>
-            <dt>
-              چاپ {config.colorMode === 'color' ? 'رنگی' : 'سیاه‌سفید'}، {config.sidesMode === 'double' ? 'دورو' : 'یکرو'} ·{' '}
-              <span className="num">{formatNumber(item.printedSides)}</span> صفحه
-            </dt>
-            <dd className="num">{formatTomans(item.printRials, false)}</dd>
-          </div>
-          {item.paperRials > 0 ? (
-            <div>
-              <dt>کاغذ</dt>
-              <dd className="num">{formatTomans(item.paperRials, false)}</dd>
-            </div>
-          ) : null}
-          <div>
-            <dt>
-              صحافی {binding} ·{' '}
-              {item.volumes > 1 ? (
-                <>
-                  <span className="num">{formatNumber(item.volumes)}</span> جلد
-                </>
-              ) : (
-                <>
-                  <span className="num">{formatNumber(item.sheets)}</span> برگ
-                </>
-              )}
-            </dt>
-            <dd className="num">{formatTomans(item.bindingRials, false)}</dd>
-          </div>
-          <div>
-            <dt>تعداد</dt>
-            <dd>
-              <span className="num">{formatNumber(item.copies)}</span> نسخه
-            </dd>
-          </div>
-        </dl>
-      ) : null}
+      {item ? <SummaryLines item={item} print={printLabel(config.colorMode, config.sidesMode)} bindingName={binding} /> : null}
 
       <div className="home-sum__total">
         <span className="home-sum__label">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
-        <Total rials={breakdown.totalWithoutShippingRials} testId="summary-total" />
+        <SumValue rials={breakdown.totalWithoutShippingRials} testId="summary-total" />
       </div>
 
       {breakdown.shippingFromRials !== null ? (
@@ -126,47 +162,16 @@ export function OrderSummary({
             این سفارش از حداقل مبلغ کمتر است. چند جزوه را با هم بفرست تا هزینهٔ ارسال بین‌شان تقسیم شود.
           </Note>
         ) : null}
+        {notes}
       </div>
 
-      <button
-        type="button"
-        disabled={provisional || blocked.length > 0}
-        className={`jy-btn jy-btn--primary jy-btn--lg jy-btn--block home-sum__go${provisional ? ' is-loading' : ''}`}
-      >
-        {provisional
-          ? 'در حال بررسی…'
-          : blocked.length > 0
-            ? 'اول تکلیف فایل خوانده‌نشده را روشن کن'
-            : 'ادامه — آدرس و تحویل'}
-        {provisional || blocked.length > 0 ? null : <span className="jy-icon jy-icon-arrow" aria-hidden="true" />}
-      </button>
+      <ContinueButton {...action} short={false} />
       <p className="home-sum__secure">
         <span className="jy-icon jy-icon-lock" aria-hidden="true" />
         ثبت‌نام لازم نیست؛ موبایل فقط موقع پرداخت.
       </p>
     </div>
   );
-}
-
-/**
- * ارتفاع نوار قیمت را در `--price-dock` روی پاورقی سایت می‌گذارد. در موبایل نوار ثابت پایین صفحه
- * است و ته صفحه را می‌پوشاند؛ پاورقی (کامپوننت سرور، بی JS) همین‌قدر پایینش خالی می‌گذارد
- * (globals.css). ارتفاع با عرض و شکستن خط‌ها عوض می‌شود، پس اندازه گرفته می‌شود نه حدس زده. در
- * دسکتاپ نوار پنهان است و ارتفاعش صفر. React 19 پاک‌سازیِ ref را موقع برداشتن نوار اجرا می‌کند.
- *
- * روی خود پاورقی، نه `<html>`: متغیر ارث می‌رسد، پس عوض کردنش روی ریشه سبک کل صفحه را دوباره
- * حساب می‌کرد؛ با پردازندهٔ ۴ برابر کند، قیمت سه‌فایلی حدود ۲۵ میلی‌ثانیه دیرتر می‌آمد.
- */
-function publishDockHeight(dock: HTMLDivElement | null) {
-  if (!dock || typeof ResizeObserver === 'undefined') return;
-  const footer = document.querySelector<HTMLElement>('body > footer');
-  if (!footer) return;
-  const observer = new ResizeObserver(() => footer.style.setProperty('--price-dock', `${dock.offsetHeight}px`));
-  observer.observe(dock);
-  return () => {
-    observer.disconnect();
-    footer.style.removeProperty('--price-dock');
-  };
 }
 
 /**
@@ -177,32 +182,20 @@ function publishDockHeight(dock: HTMLDivElement | null) {
  * `price-total` جمع همین نوار است، چون در موبایل همین همیشه دیده می‌شود؛ در دسکتاپ نوار پنهان است و
  * جمع دیدنی `summary-total` خلاصهٔ سفارش است.
  */
-export function PriceDock({ breakdown, provisional, blocked }: Omit<Props, 'pending'>) {
-  const held = provisional || blocked.length > 0;
+export function PriceDock({ breakdown, provisional, ...action }: Pick<Props, 'breakdown' | 'provisional'> & ActionProps) {
   return (
     <div ref={publishDockHeight} className="home-dock" role="region" aria-label="قیمت">
       <div className="site-wrap home-dock__in">
         <p className="home-dock__price">
           <span className="home-dock__label">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
-          <Total rials={breakdown.totalWithoutShippingRials} testId="price-total" />
+          <SumValue rials={breakdown.totalWithoutShippingRials} testId="price-total" />
           {breakdown.shippingFromRials !== null ? (
             <span className="home-dock__ship">
               + ارسال از <span className="num">{formatTomans(breakdown.shippingFromRials, false)}</span> تومان
             </span>
           ) : null}
         </p>
-        <button
-          type="button"
-          disabled={held}
-          // نام همان «ادامه» خلاصهٔ سفارش است؛ متن دیدنی کوتاه، چون نوار جای جملهٔ بلند ندارد
-          aria-label={
-            provisional ? undefined : blocked.length > 0 ? 'ادامه — اول تکلیف فایل خوانده‌نشده را روشن کن' : 'ادامه — آدرس و تحویل'
-          }
-          className={`jy-btn jy-btn--primary jy-btn--lg shrink-0${provisional ? ' is-loading' : ''}`}
-        >
-          {provisional ? 'بررسی…' : 'ادامه'}
-          {held ? null : <span className="jy-icon jy-icon-arrow" aria-hidden="true" />}
-        </button>
+        <ContinueButton {...action} short />
       </div>
     </div>
   );

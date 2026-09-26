@@ -59,7 +59,7 @@ test.describe('سئو و بار اولیه', () => {
    * وارد صفحه شود، از جست‌وجوی نام (تست پایین) رد می‌شد. هر نشانه رشته‌ای است که
    * کوچک‌سازی عوضش نمی‌کند.
    */
-  test('باندل اولیهٔ صفحهٔ اصلی زیر سقف، بی pdf.js و آپلودگر و خوانندهٔ Word و zod و رابط پس از فایل', async ({ page }) => {
+  test('باندل اولیهٔ صفحهٔ اصلی زیر سقف، بی pdf.js و آپلودگر و خوانندهٔ Word و zod و رابط پس از فایل و مسیر خرید', async ({ page }) => {
     const bodies = new Map<string, Promise<Buffer | null>>();
     page.on('response', (response) => {
       if (response.request().resourceType() !== 'script') return;
@@ -74,6 +74,7 @@ test.describe('سئو و بار اولیه', () => {
     expect(scripts.length).toBeGreaterThan(0);
     expect(gzipBytes).toBeLessThanOrEqual(INITIAL_JS_BUDGET_KB * 1000);
 
+    // نشانهٔ فارسی هم بایت‌های UTF-8 خودش است، همان‌طور که در کد کوچک‌شده می‌آید
     const code = scripts.map((body) => body.toString('latin1')).join('\n');
     for (const [marker, module] of [
       ['GlobalWorkerOptions', 'pdf.js'],
@@ -83,8 +84,12 @@ test.describe('سئو و بار اولیه', () => {
       // رابط پس از فایل و موتور قیمت با اولین فایل (یا نشانهٔ قصد) بار می‌شوند، نه با صفحه (docs/UI.md، ۴ب)
       ['home-sum__total', 'رابط پس از فایل (خلاصهٔ سفارش)'],
       ['binding_band_missing', 'موتور قیمت (quote)'],
+      // مسیر خرید و فهرست شهرها با «ادامه» بار می‌شوند (docs/UI.md، ۳ج)؛ شاهدش در `checkout.spec.ts`
+      ['ck-cities', 'مسیر خرید (قدم شهر)'],
+      ['/api/checkout/otp', 'مسیر خرید (کد پیامکی)'],
+      ['بندرعباس', 'فهرست شهرها (@jozveyar/geo)'],
     ] as const) {
-      expect(code.includes(marker), `${module} در باندل اولیه آمده`).toBe(false);
+      expect(code.includes(Buffer.from(marker).toString('latin1')), `${module} در باندل اولیه آمده`).toBe(false);
     }
   });
 

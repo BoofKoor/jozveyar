@@ -32,6 +32,12 @@ function brandChannels(name: string): number[] {
 /** کانال‌های رنگی که مرورگر حساب کرده (`getComputedStyle`). */
 const channels = (computed: string) => computed.match(/\d+(?:\.\d+)?/g)!.slice(0, 3).map(Number);
 const tile = (page: Page, title: string) => page.locator('label.jy-tile').filter({ has: page.getByText(title, { exact: true }) });
+/**
+ * «ادامه»ی قدم «جزوه و قیمت». این تست‌ها بی پایگاه داده اجرا می‌شوند، پس مسیر خرید خاموش است و «ادامه» همان
+ * «ثبت سفارش آنلاین به‌زودی» (ADR-035، برش ۳ج): بسته ولی در ترتیب Tab، با متن خواندنی. مسیر خرید باز در
+ * `checkout.spec.ts`.
+ */
+const SOON = 'ثبت سفارش آنلاین به‌زودی';
 
 /** قیمت یک جزوهٔ `pages` صفحه‌ای با همان `quote()` فلوی سفارش؛ بی ارسال. */
 function quoteFor(
@@ -204,8 +210,8 @@ test.describe('قیمت همیشه روی صفحه', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/');
     await dropReady(page);
-    const go = page.getByRole('button', { name: 'ادامه — آدرس و تحویل' });
-    await expect(go).toBeEnabled();
+    const go = page.getByRole('button', { name: SOON });
+    await expect(go).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeGreaterThan(400);
     await atEachScroll(page, async (where) => {
       await expect(summaryTotal(page), `جمع، ${where}`).toBeInViewport();
@@ -233,9 +239,9 @@ test.describe('قیمت همیشه روی صفحه', () => {
     await page.goto('/');
     await dropReady(page);
     const dock = page.getByRole('region', { name: 'قیمت' });
-    const go = dock.getByRole('button', { name: 'ادامه — آدرس و تحویل' });
-    await expect(go).toBeEnabled();
-    await expect(go).toHaveText('ادامه');
+    const go = dock.getByRole('button', { name: SOON });
+    await expect(go).toBeVisible();
+    await expect(go).toHaveText('به‌زودی');
     await atEachScroll(page, async (where) => {
       await expect(dock.getByTestId('price-total'), `جمع، ${where}`).toBeInViewport();
       await expect(go, `«ادامه»، ${where}`).toBeInViewport();
@@ -278,7 +284,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
         'یکی کمتر',
         'copies',
         'یکی بیشتر',
-        'ادامه — آدرس و تحویل',
+        SOON,
         ...questions.map((q) => q.trim()),
         'نماد اعتماد الکترونیکی',
       ]);
@@ -363,6 +369,64 @@ test.describe('رابط پس از فایل، تکهٔ جدا', () => {
     await expect(page.getByTestId('price-total')).toContainText('61,000', { timeout: 20_000 });
     await expect(page.getByTestId('stat-page-count')).toHaveText('10');
     await expect(retry).toHaveCount(0);
+  });
+});
+
+/**
+ * سایت زنده تا برش ۷ (`CHECKOUT_MODE=off`، ADR-035). این تست‌ها بی پایگاه داده‌اند، پس مسیر خرید همین‌جا خاموش
+ * است؛ باز بودنش، و شاهد نشانهٔ تکهٔ مسیر خرید، در `checkout.spec.ts`.
+ */
+test.describe('ثبت سفارش خاموش', () => {
+  /** تکهٔ مسیر خرید: نام کلاس قدم شهر در کد کوچک‌شده هم می‌ماند (مثل `DESK`). */
+  const CHECKOUT = 'ck-cities';
+
+  test('«به‌زودی» بسته است ولی فوکوس می‌گیرد؛ حالت یک بار، وقتی قیمت نهایی شد؛ نه تکهٔ مسیر خرید، نه قیمت سرور', async ({ page }) => {
+    // راهنمای رنگ در لحظهٔ درخواست حالت: درخواست زودتر در راه اولین قیمت بود (docs/UI.md، ۳ج)
+    await page.addInitScript(() => {
+      const original = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        if (String(input).startsWith('/api/checkout')) {
+          (window as unknown as { hintAtStatus?: string | null }).hintAtStatus =
+            document.querySelector('[data-testid="color-hint"]')?.textContent ?? null;
+        }
+        return original(input, init);
+      };
+    });
+    const calls: string[] = [];
+    const chunks: string[] = [];
+    page.on('request', (request) => {
+      const { pathname } = new URL(request.url());
+      if (pathname.startsWith('/api/checkout')) calls.push(pathname);
+    });
+    page.on('response', async (response) => {
+      if (response.request().resourceType() !== 'script') return;
+      const body = await response.body().catch(() => null);
+      if (body?.toString('latin1').includes(CHECKOUT)) chunks.push(response.url());
+    });
+    await page.goto('/');
+    // رابط پس از فایل با نشانهٔ قصد می‌آید، ولی حالت مسیر خرید را فقط بعد از اولین قیمت می‌پرسد
+    await page.locator('label.jy-upload').hover();
+    await page.waitForLoadState('networkidle');
+    expect(calls).toEqual([]);
+
+    const status = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/checkout');
+    await dropReady(page);
+    expect(await (await status).json()).toEqual({ mode: 'off', auth: null });
+    expect(await page.evaluate(() => (window as unknown as { hintAtStatus?: string | null }).hintAtStatus)).toBe(ALL_BW);
+
+    const soon = page.getByRole('button', { name: SOON });
+    await expect(soon).toHaveAttribute('aria-disabled', 'true');
+    // `aria-disabled`، نه `disabled`: فوکوس می‌گیرد و صفحه‌خوان چرایش را می‌شنود
+    await soon.focus();
+    await expect(soon).toBeFocused();
+    await page.keyboard.press('Enter');
+    await soon.click({ force: true });
+    // هیچ قدمی باز نشد و هیچ درخواستی نرفت
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { level: 2, name: 'جزوهٔ تو' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'به کدام شهر بفرستیم؟' })).toHaveCount(0);
+    expect(calls).toEqual(['/api/checkout']);
+    expect(chunks).toEqual([]);
   });
 });
 

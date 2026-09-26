@@ -41,8 +41,12 @@ function contrast(a: number[], b: number[]) {
 const card = (page: Page) => page.getByRole('region', { name: 'جزوهٔ تو' });
 const colorHint = (page: Page) => page.getByTestId('color-hint');
 const fileInfo = (page: Page) => page.getByTestId('file-info');
+/**
+ * بررسی تمام شد و جزوه آماده است. بی پایگاه داده مسیر خرید خاموش است، پس «ادامه» همان «ثبت سفارش آنلاین
+ * به‌زودی» است (ADR-035، برش ۳ج).
+ */
 const ready = (page: Page) =>
-  expect(page.getByRole('button', { name: 'ادامه — آدرس و تحویل' })).toBeEnabled({ timeout: 30_000 });
+  expect(page.getByRole('button', { name: 'ثبت سفارش آنلاین به‌زودی' })).toBeVisible({ timeout: 30_000 });
 
 /**
  * `.num`های دیدنی صفحه، و آنهایی که حرف فارسی دارند. `.num` جهت را چپ‌به‌راست می‌کند؛ روی متن
@@ -267,6 +271,28 @@ test.describe('رنگ (قاعدهٔ رنگ در docs/UI.md)', () => {
       return [style.color, style.backgroundColor];
     });
     expect(contrast(channels(text!), channels(background!))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('متن «ثبت سفارش آنلاین به‌زودی» دکمهٔ بسته هم خوانده می‌شود: دست‌کم ۴٫۵ به ۱', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    const soon = page.getByRole('button', { name: 'ثبت سفارش آنلاین به‌زودی' });
+    await expect(soon).toBeVisible({ timeout: 30_000 });
+    // همان «ادامه» است، بسته با `aria-disabled` و متنش وضعیت (`is-status`)
+    await expect(soon).toHaveAttribute('aria-disabled', 'true');
+    await expect(soon).toHaveClass(/\bis-status\b/);
+    const colors = () =>
+      soon.evaluate((button) => {
+        const style = getComputedStyle(button);
+        return [style.color, style.backgroundColor];
+      });
+    const [text, background] = await colors();
+    expect(contrast(channels(text!), channels(background!))).toBeGreaterThanOrEqual(4.5);
+
+    // شاهد: بی `is-status` همان رنگ بستهٔ کیت است، و زیر ۴٫۵
+    await soon.evaluate((button) => button.classList.remove('is-status'));
+    const [plain, same] = await colors();
+    expect(contrast(channels(plain!), channels(same!))).toBeLessThan(4.5);
   });
 });
 

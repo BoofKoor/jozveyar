@@ -7,6 +7,8 @@
 @import '@jozveyar/ui/styles.css';
 /* صفحهٔ اصلی، از طرح ز (docs/UI.md، ۴الف). در همین ساخت Tailwind، تا متغیرهای توکنی که به کار می‌برد ساخته شوند. */
 @import './home.css';
+/* مسیر خرید، صفحهٔ سفارش و درگاه نمونه، از طرح docs/ui/mockups/checkout.html (برش ۳ج). */
+@import './checkout.css';
 
 /*
  * وزیرمتن، فقط دو وزن، لوکال.
