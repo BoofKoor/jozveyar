@@ -26,15 +26,21 @@ import {
   orderState,
   orderTimeline,
   paymentView,
-  pdfReady,
-  pdfView,
+  pdfFileName,
   phoneText,
+  printReady,
+  printView,
+  purgedNote,
   reasonOf,
   shippingText,
   specFacts,
   staleSections,
   sumLines,
+  ticketFileName,
+  ticketView,
   timelineWhen,
+  volumeFileName,
+  type JobFailure,
 } from '../../../../../lib/orders';
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
@@ -50,6 +56,9 @@ export async function generateMetadata({ params }: { params: Promise<{ number: s
 const PAGE_ERRORS = new Set([
   'pdf_not_ready',
   'pdf_not_failed',
+  'ticket_not_ready',
+  'ticket_not_failed',
+  'files_deleted',
   'files_gone',
   'storage_unavailable',
   'order_not_found',
@@ -71,8 +80,52 @@ function span(from: Date, to: Date | null, now: Date): string {
   return `${whenText(from, now)} تا ${end}`;
 }
 
-/** PDF جزوه (طرح پنل): دانلود، در حال ساختن، یا ساخته نشد با دلیل و «دوباره بساز». */
-function PdfBox({
+/** «دوباره بساز» فایل چاپ یا برگه: فرم بی JS، برگشت به همین صفحه. */
+function RebuildForm({ gate, orderNumber, kind }: { gate: string; orderNumber: number; kind: 'print' | 'ticket' }) {
+  return (
+    <form action={rebuildPdfAction}>
+      <input type="hidden" name="gate" value={gate} />
+      <input type="hidden" name="number" value={orderNumber} />
+      <input type="hidden" name="kind" value={kind} />
+      <button type="submit" className="jy-btn jy-btn--secondary">
+        دوباره بساز
+      </button>
+    </form>
+  );
+}
+
+/** «سه تلاش ناموفق: استوریج جواب نداد (شنبه 14:06 تا 14:21).» */
+function FailureNote({ failure, now, children }: { failure: JobFailure; now: Date; children: React.ReactNode }) {
+  return (
+    <p className="jy-note jy-note--error">
+      <span className="jy-icon jy-icon-error" aria-hidden="true" />
+      <span>
+        {failure.attempts > 0 ? (
+          <>
+            <span className="num">{formatNumber(failure.attempts)}</span> تلاش ناموفق:{' '}
+          </>
+        ) : null}
+        {failure.reason}
+        {failure.from ? ` (${span(failure.from, failure.to, now)})` : ''}. {children}
+      </span>
+    </p>
+  );
+}
+
+const Size = ({ bytes }: { bytes: number }) => {
+  const size = bytesParts(bytes);
+  return (
+    <>
+      <span className="num">{size.value}</span> {size.unit}
+    </>
+  );
+};
+
+/**
+ * فایل چاپ یک جزوه (طرح پنل، ADR-043): هر جلد یک ردیف با دانلود، و «چه عوض شد» با پیوند PDF اصلی جزوه؛ در حال ساختن؛ یا
+ * ساخته نشد با دلیل و «دوباره بساز».
+ */
+function PrintRows({
   gate,
   details,
   item,
@@ -85,79 +138,148 @@ function PdfBox({
   now: Date;
   canDownload: boolean;
 }) {
-  const view = pdfView(details, item, now);
-  if (view.kind === 'unpaid') return <p className="ad-hint ad-gap">PDF جزوه بعد از پرداخت ساخته می‌شود.</p>;
-  if (view.kind === 'closed') return <p className="ad-hint ad-gap">PDF جزوه ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.</p>;
+  const view = printView(details, item, now);
+  const orderNumber = details.order.orderNumber;
   const icon = <span className="jy-icon jy-icon-file ad-pdf__icon" aria-hidden="true" />;
-  if (view.kind === 'ready') {
-    const size = view.bytes === null ? null : bytesParts(view.bytes);
-    return (
-      <div className="ad-pdf" data-pdf="ready">
-        {icon}
-        <div className="ad-pdf__body">
-          <p className="ad-pdf__name ad-ltr">{view.fileName}</p>
-          <p className="ad-pdf__meta">
-            <span className="num">{formatNumber(view.pages)}</span> صفحه
-            {size ? (
-              <>
-                {' · '}
-                <span className="num">{size.value}</span> {size.unit}
-              </>
-            ) : null}
-            {' · '}ساخته شد {whenText(view.readyAt, now)}
-          </p>
-        </div>
-        {canDownload ? (
-          <a
-            className="jy-btn jy-btn--secondary"
-            href={panelPath(gate, `/orders/${details.order.orderNumber}/pdf/${item.seq}`)}
-            download={view.fileName}
-          >
-            <span className="jy-icon jy-icon-download" aria-hidden="true" />
-            دانلود PDF
-          </a>
-        ) : null}
-      </div>
-    );
-  }
+  if (view.kind === 'unpaid' || view.kind === 'closed' || view.kind === 'purged') return null;
   if (view.kind === 'building') {
     return (
-      <div className="ad-pdf" data-pdf="building">
+      <li data-print="building">
         {icon}
-        <div className="ad-pdf__body">
-          <p className="ad-pdf__meta">
-            در حال ساختن PDF جزوه…{view.retrying ? ' تلاش قبلی ناموفق بود؛ کارگر خودش دوباره امتحان می‌کند.' : ''}
+        <div className="ad-print__body">
+          <p className="ad-print__meta">
+            در حال ساختن فایل چاپ…{view.retrying ? ' تلاش قبلی ناموفق بود؛ کارگر خودش دوباره امتحان می‌کند.' : ''}
           </p>
         </div>
-      </div>
+      </li>
     );
   }
+  if (view.kind === 'failed') {
+    return (
+      <li data-print="failed">
+        {icon}
+        <div className="ad-print__body">
+          <p className="ad-pdf__name ad-ltr">{volumeFileName(orderNumber, item.seq, 1, 1)}</p>
+          <p className="ad-print__meta">فایل چاپ ساخته نشد</p>
+        </div>
+        {canDownload && view.rebuild ? <RebuildForm gate={gate} orderNumber={orderNumber} kind="print" /> : null}
+        <FailureNote failure={view} now={now}>
+          {!view.rebuild
+            ? 'فایل‌های مشتری دیگر روی سرور نیستند، پس دوباره ساختنش ممکن نیست؛ با مشتری تماس بگیر.'
+            : view.rebuild.until
+              ? `فایل‌های مشتری تا ${whenText(view.rebuild.until, now)} روی سرورند؛ دوباره بساز.`
+              : 'PDF جزوه روی سرور است؛ دوباره بساز.'}
+        </FailureNote>
+      </li>
+    );
+  }
+  const many = view.volumes.length > 1;
   return (
-    <div className="ad-pdf" data-pdf="failed">
-      {icon}
-      <div className="ad-pdf__body">
-        <p className="ad-pdf__name ad-ltr">{view.fileName}</p>
-        <p className="ad-pdf__meta">ساخته نشد</p>
+    <>
+      {view.volumes.map((volume, i) => (
+        <li key={volume.volume} data-print="ready" data-volume={volume.volume}>
+          {icon}
+          <div className="ad-print__body">
+            <p className="ad-pdf__name ad-ltr">{volume.fileName}</p>
+            <p className="ad-print__meta">
+              {many ? (
+                <>
+                  جلد <span className="num">{volume.volume}</span> · صفحهٔ <span className="num">{formatNumber(volume.firstPage)}</span>{' '}
+                  تا <span className="num">{formatNumber(volume.lastPage)}</span>
+                  {volume.sheets !== null ? (
+                    <>
+                      {' · '}
+                      <span className="num">{formatNumber(volume.sheets)}</span> برگ
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  فایل چاپ · <span className="num">{formatNumber(volume.lastPage)}</span> صفحه، A4 عمودی، یک جلد
+                </>
+              )}
+              {' · '}
+              <Size bytes={volume.bytes} />
+              {' · '}ساخته شد {whenText(volume.builtAt, now)}
+            </p>
+          </div>
+          {canDownload ? (
+            <a
+              className="jy-btn jy-btn--secondary"
+              href={panelPath(gate, `/orders/${orderNumber}/print/${item.seq}/${volume.volume}`)}
+              download={volume.fileName}
+            >
+              <span className="jy-icon jy-icon-download" aria-hidden="true" />
+              دانلود
+            </a>
+          ) : null}
+          {i === view.volumes.length - 1 ? (
+            <p className="ad-print__orig">
+              <Segments segs={view.note} />
+              {!view.reused && canDownload && item.printPdfKey ? (
+                <>
+                  {' '}
+                  <a
+                    className="jy-link"
+                    href={panelPath(gate, `/orders/${orderNumber}/pdf/${item.seq}`)}
+                    download={pdfFileName(orderNumber, item.seq)}
+                  >
+                    PDF اصلی جزوه
+                  </a>
+                  ، بی تغییر.
+                </>
+              ) : null}
+            </p>
+          ) : null}
+        </li>
+      ))}
+    </>
+  );
+}
+
+/** برگهٔ سفارش (طرح پنل): دیدن و دانلود؛ در حال به‌روز شدن یا ساختن؛ یا ساخته نشد با «دوباره بساز». */
+function TicketRow({ gate, details, now, canDownload }: { gate: string; details: PanelOrderDetails; now: Date; canDownload: boolean }) {
+  const view = ticketView(details);
+  const orderNumber = details.order.orderNumber;
+  if (view.kind === 'unpaid' || view.kind === 'purged') return null;
+  const meta =
+    view.kind === 'ready'
+      ? 'شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه'
+      : view.kind === 'updating'
+        ? 'در حال به‌روز شدن با نام و نشانی تازه…'
+        : view.kind === 'building'
+          ? `در حال ساختن برگه…${view.retrying ? ' تلاش قبلی ناموفق بود؛ کارگر خودش دوباره امتحان می‌کند.' : ''}`
+          : view.kind === 'closed'
+            ? 'برگه ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.'
+            : 'برگهٔ سفارش ساخته نشد';
+  const self = panelPath(gate, `/orders/${orderNumber}/ticket`);
+  return (
+    <li data-ticket={view.kind}>
+      <span className="jy-icon jy-icon-tag ad-pdf__icon" aria-hidden="true" />
+      <div className="ad-print__body">
+        <p className="ad-pdf__name">برگهٔ سفارش</p>
+        <p className="ad-print__meta">{meta}</p>
       </div>
-      {canDownload && view.filesUntil ? (
-        <form action={rebuildPdfAction}>
-          <input type="hidden" name="gate" value={gate} />
-          <input type="hidden" name="number" value={details.order.orderNumber} />
-          <button type="submit" className="jy-btn jy-btn--secondary">
-            دوباره بساز
-          </button>
-        </form>
+      {view.kind === 'ready' && canDownload ? (
+        <>
+          <Link href={self} className="jy-btn jy-btn--text">
+            دیدن
+          </Link>
+          <a className="jy-btn jy-btn--secondary" href={`${self}/pdf`} download={`${ticketFileName(orderNumber)}.pdf`}>
+            <span className="jy-icon jy-icon-download" aria-hidden="true" />
+            دانلود
+          </a>
+        </>
       ) : null}
-      <p className="jy-note jy-note--error">
-        <span className="jy-icon jy-icon-error" aria-hidden="true" />
-        <span>
-          <span className="num">{formatNumber(view.attempts)}</span> تلاش ناموفق: {view.reason} ({span(view.from, view.to, now)}).{' '}
-          {view.filesUntil
-            ? `فایل‌های مشتری تا ${whenText(view.filesUntil, now)} روی سرورند؛ دوباره بساز.`
-            : 'فایل‌های مشتری دیگر روی سرور نیستند، پس دوباره ساختنش ممکن نیست؛ با مشتری تماس بگیر.'}
-        </span>
-      </p>
-    </div>
+      {view.kind === 'failed' ? (
+        <>
+          {canDownload ? <RebuildForm gate={gate} orderNumber={orderNumber} kind="ticket" /> : null}
+          <FailureNote failure={view} now={now}>
+            برگه از دادهٔ سفارش ساخته می‌شود و فایل مشتری نمی‌خواهد؛ دوباره بساز.
+          </FailureNote>
+        </>
+      ) : null}
+    </li>
   );
 }
 
@@ -199,9 +321,10 @@ function AdvanceForm({
 const byWhom = (at: Date, now: Date, adminName: string | null | undefined) => `${whenText(at, now)}${adminName ? `، ${adminName}` : ''}`;
 
 /**
- * ستون کنار (طرح پنل): وضعیت، مهلت و کار بعدی. سفارش باز یک دکمهٔ اصلی دارد، «شروع چاپ» (تا PDF جزوه ساخته نشده بسته:
- * «اول PDF جزوه ساخته شود») و بعد «تحویل پست شد»، با «لغو سفارش»؛ به پست رسیده روز و به‌موقع بودنش را دارد، و لغوشده
- * دلیلش را. مالک هر وضعیت پس از پرداخت جز «در صف چاپ» را یک قدم برمی‌گرداند. پرداخت‌نشده همان کارت‌های ۴٫۲.
+ * ستون کنار (طرح پنل): وضعیت، مهلت و کار بعدی. سفارش باز یک دکمهٔ اصلی دارد، «شروع چاپ» (تا فایل چاپ همهٔ جزوه‌ها ساخته
+ * نشده بسته: «اول فایل چاپ ساخته شود»، برش ۵٫۱) و بعد «تحویل پست شد»، با «لغو سفارش»؛ به پست رسیده روز و به‌موقع بودنش را
+ * دارد، و لغوشده دلیلش را. مالک هر وضعیت پس از پرداخت جز «در صف چاپ» را یک قدم برمی‌گرداند، مگر فایل‌هایش پاک شده باشد
+ * (ADR-044). پرداخت‌نشده همان کارت‌های ۴٫۲.
  */
 function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDetailsView; stale: boolean; mode: Mode }) {
   const { details, bounds, canStatus, canRevert, revertTo } = view;
@@ -230,7 +353,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
     const card = dueCard(order.postHandoffDueAt, bounds);
     const printing = order.status === 'printing';
     const since = printing ? lastMoveTo(details.statusEvents, 'printing') : null;
-    const ready = pdfReady(details);
+    const ready = printReady(details);
     let actions: React.ReactNode = null;
     if (mode === 'cancel' && canStatus) actions = reasonForm('cancel', 'cancelled');
     else if (revert) actions = revert;
@@ -257,7 +380,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
           ) : null}
           {canStatus && !printing && !ready ? (
             <button type="button" className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block is-status" aria-disabled="true">
-              اول PDF جزوه ساخته شود
+              اول فایل چاپ ساخته شود
             </button>
           ) : null}
           {canStatus ? <ModeLink href={`${self}?do=cancel`}>لغو سفارش</ModeLink> : null}
@@ -367,9 +490,10 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
 }
 
 /**
- * جزئیات سفارش (طرح پنل، ADR-039): وضعیت، مهلت و کار بعدی در ستون کنار (در گوشی بالای همه)؛ جزوه با فایل‌ها، مشخصات و
- * PDF جزوه؛ گیرنده و نشانی، با «ویرایش» تا پیش از پست؛ مبلغ منجمد؛ پرداخت‌ها؛ و رویدادها. لغو، برگرداندن و ویرایش در
- * همین صفحه باز می‌شوند (`?do=`)؛ هر کار از وضعیتی که صفحه نشان داد.
+ * جزئیات سفارش (طرح پنل، ADR-039): وضعیت، مهلت و کار بعدی در ستون کنار (در گوشی بالای همه)؛ جزوه با فایل‌ها، مشخصات، و از
+ * ۵٫۱ فایل چاپ هر جلد و برگهٔ سفارش (ADR-043)، یا «فایل‌ها پاک شد» (ADR-044)؛ گیرنده و نشانی، با «ویرایش» تا پیش از پست؛
+ * مبلغ منجمد؛ پرداخت‌ها؛ و رویدادها. لغو، برگرداندن و ویرایش در همین صفحه باز می‌شوند (`?do=`)؛ هر کار از وضعیتی که صفحه
+ * نشان داد.
  */
 export default async function OrderPage({
   params,
@@ -417,6 +541,9 @@ export default async function OrderPage({
   const self = panelPath(gate, `/orders/${order.orderNumber}`);
   const breakdown = breakdownOf(order);
   const many = details.items.length > 1;
+  const purged = purgedNote(details);
+  const printable = isPaidStatus(order.status) && !purged;
+  const ticketRow = <TicketRow gate={gate} details={details} now={now} canDownload={canDownload} />;
   const entries = orderTimeline(details);
   const when = timelineWhen(entries);
 
@@ -451,7 +578,11 @@ export default async function OrderPage({
                     'جزوه'
                   )}
                 </h2>
-                {item.sections.length > 1 ? (
+                {(breakdown.items[i]?.volumes ?? 1) > 1 ? (
+                  <span className="jy-card__meta">
+                    <span className="num">{formatNumber(breakdown.items[i]!.volumes)}</span> جلد، هر جلد یک فایل
+                  </span>
+                ) : item.sections.length > 1 ? (
                   <span className="jy-card__meta">
                     <span className="num">{formatNumber(item.sections.length)}</span> فایل، پشت‌سرهم با یک صحافی
                   </span>
@@ -480,9 +611,36 @@ export default async function OrderPage({
                   </div>
                 ))}
               </dl>
-              <PdfBox gate={gate} details={details} item={item} now={now} canDownload={canDownload} />
+              {purged ? (
+                <p className="jy-note ad-gap">
+                  <span className="jy-icon jy-icon-info" aria-hidden="true" />
+                  <span>
+                    <Segments segs={purged} />
+                  </span>
+                </p>
+              ) : !isPaidStatus(order.status) ? (
+                <p className="ad-hint ad-gap">فایل چاپ و برگهٔ سفارش بعد از پرداخت ساخته می‌شوند.</p>
+              ) : printView(details, item, now).kind === 'closed' ? (
+                <p className="ad-hint ad-gap">فایل چاپ ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.</p>
+              ) : (
+                <ul className="ad-print" aria-label="فایل‌های چاپ">
+                  <PrintRows gate={gate} details={details} item={item} now={now} canDownload={canDownload} />
+                  {many ? null : ticketRow}
+                </ul>
+              )}
             </section>
           ))}
+
+          {many && printable ? (
+            <section className="jy-card" aria-labelledby="t-ticket">
+              <h2 id="t-ticket" className="jy-card__title">
+                برگهٔ سفارش
+              </h2>
+              <ul className="ad-print" aria-label="برگهٔ سفارش">
+                {ticketRow}
+              </ul>
+            </section>
+          ) : null}
 
           {mode === 'edit' && canEditRecipient ? (
             <RecipientForm

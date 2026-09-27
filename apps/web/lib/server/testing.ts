@@ -342,6 +342,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         paidAt: null,
         postHandoffDueAt: null,
         handedToPostAt: null,
+        filesDeletedAt: null,
         shippingMethodId: input.shippingMethodId,
         shippingZoneId: input.shippingZoneId,
         provinceId: input.provinceId,

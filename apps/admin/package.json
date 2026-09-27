@@ -11,6 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@jozveyar/analysis": "workspace:*",
     "@jozveyar/contracts": "workspace:*",
     "@jozveyar/db": "workspace:*",
     "@jozveyar/pricing": "workspace:*",

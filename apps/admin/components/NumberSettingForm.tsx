@@ -4,11 +4,12 @@ import { useActionState, useRef, useState } from 'react';
 
 import { saveSettingAction, type SettingState } from '../app/[gate]/actions';
 import { messageOf } from '../lib/messages';
+import type { NumberSettingKey } from '../lib/settings';
 
 interface Props {
   gate: string;
   /** نام تنظیم در `settings`. */
-  settingKey: 'order.sla_days' | 'otp.site_hourly_limit';
+  settingKey: NumberSettingKey;
   title: string;
   label: string;
   /** شناسهٔ یکتای کارت و فیلد. */
@@ -26,7 +27,8 @@ interface Props {
 }
 
 /**
- * یک تنظیم عددی در کارت خودش (طرح پنل `m-settings`): روز کاری تحویل به پست با شمارنده، و سقف ساعتی کد پیامکی با فیلد. خطای
+ * یک تنظیم عددی در کارت خودش (طرح پنل `m-settings`): روز کاری تحویل به پست و روزهای نگهداری فایل‌های سفارش با شمارنده، و سقف
+ * ساعتی کد پیامکی با فیلد. خطای
  * مقدار همین‌جا با عدد نوشته‌شده؛ عددی که صفحه نشان داد با فرم می‌رود (`seen`)، تا اگر زبانه یا ادمین دیگری همین حالا
  * عوضش کرده باشد، رونویسی نشود.
  */

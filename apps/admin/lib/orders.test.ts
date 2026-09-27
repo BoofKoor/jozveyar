@@ -1,18 +1,29 @@
 /**
  * سفارش‌ها به زبان پنل (`orders.ts`): جست‌وجو، مرز روز تهران، کاشی‌ها و کارت مهلت، ردیف، مشخصات و ریز قیمت
- * منجمد، پرداخت‌ها، PDF جزوه و رویدادها. عددهای تصمیم (حاشیهٔ یک ساعت، مهلت نیم ساعت) صریح‌اند، نه از ثابت کد.
+ * منجمد، پرداخت‌ها، فایل چاپ و برگهٔ سفارش (۵٫۱) و رویدادها. عددهای تصمیم (حاشیهٔ یک ساعت، مهلت نیم ساعت) صریح‌اند، نه از
+ * ثابت کد.
  * «حالا» همان طرح پنل است: دوشنبه 13 مهر 1405، ساعت 11:20 تهران.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import type { OrderRow, PanelOrderDetails, PanelOrderItem, PanelOrderLine, PanelStatusEvent, PaymentRow } from '@jozveyar/db';
+import type {
+  OrderRow,
+  PanelOrderDetails,
+  PanelOrderItem,
+  PanelOrderLine,
+  PanelPdfJob,
+  PanelPrintVolume,
+  PanelStatusEvent,
+  PaymentRow,
+} from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { postHandoffDue } from '@jozveyar/text';
 
 import {
   bucketOf,
+  changesNote,
   dayBounds,
   dueBadge,
   dueCard,
@@ -28,15 +39,20 @@ import {
   pageOf,
   parseSearch,
   paymentView,
-  pdfReady,
-  pdfView,
+  pdfFileName,
+  printReady,
+  printView,
+  purgedNote,
+  rebuildable,
   rowState,
   specFacts,
   staleSections,
   statsSegs,
   sumLines,
+  ticketView,
   timelineWhen,
   transitionOf,
+  volumeFileName,
   type Seg,
 } from './orders';
 
@@ -304,6 +320,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     printPdfBytes: null,
     printPdfSha256: null,
     printPdfReadyAt: null,
+    printFiles: [],
     bindingName: 'طلق و سیم',
     sections: ['ریاضی ۲ - جلسه ۱.pdf', 'ریاضی ۲ - جلسه ۲.pdf', 'حل تمرین فصل ۱.docx'].map((name, i) => ({
       seq: i + 1,
@@ -338,6 +355,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     paidAt: tehran('2026-10-03 14:05'),
     postHandoffDueAt: END_MONDAY,
     handedToPostAt: null,
+    filesDeletedAt: null,
     shippingMethodId: 'post',
     shippingZoneId: 'other',
     provinceId: 11,
@@ -360,6 +378,8 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     payments: [],
     statusEvents: [],
     pdfJob: { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: order.paidAt!, updatedAt: order.paidAt!, finishedAt: order.paidAt! },
+    ticketJob: null,
+    ticket: null,
     events: [],
     ...over.rest,
   };
@@ -368,6 +388,20 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
 /** یک تغییر وضعیت؛ ادمین فقط با `actor: 'admin'`. */
 function statusEvent(over: Partial<PanelStatusEvent> & Pick<PanelStatusEvent, 'fromStatus' | 'toStatus'>): PanelStatusEvent {
   return { id: 1, orderId: 'o1', at: NOW, actor: 'admin', adminUserId: null, adminName: null, note: null, ...over };
+}
+
+/** فایل چاپ یک جلد، همان‌طور که کارگر می‌نویسد (۵٫۱). */
+function volume(n: number, firstPage: number, lastPage: number, over: Partial<PanelPrintVolume> = {}): PanelPrintVolume {
+  return {
+    volume: n,
+    firstPage,
+    lastPage,
+    storageKey: `orders/10027/print-1-${n}.pdf`,
+    sizeBytes: 40_265_318,
+    changes: null,
+    createdAt: tehran('2026-10-03 14:06'),
+    ...over,
+  };
 }
 
 describe('جزئیات سفارش', () => {
@@ -413,33 +447,144 @@ describe('جزئیات سفارش', () => {
     expect(filesUntil(d.items, new Date(NOW.getTime() + 3 * 24 * 60 * MINUTE))).toBeNull();
   });
 
-  it('PDF جزوه: بعد از پرداخت، ساخته شده، در حال ساختن، یا ساخته نشد با دلیل', () => {
-    expect(pdfView(details({ order: { status: 'awaiting_payment' } }), details().items[0]!, NOW)).toEqual({ kind: 'unpaid' });
-    const ready = details({ item: { printPdfReadyAt: tehran('2026-10-03 14:06'), printPdfBytes: 40_265_318 } });
-    expect(pdfView(ready, ready.items[0]!, NOW)).toEqual({
+  it('فایل چاپ: بعد از پرداخت، ساخته شده، در حال ساختن، یا ساخته نشد با دلیل و «دوباره بساز» تا وقتی ممکن است', () => {
+    expect(printView(details({ order: { status: 'awaiting_payment' } }), details().items[0]!, NOW)).toEqual({ kind: 'unpaid' });
+    const built = tehran('2026-10-03 14:06');
+    const ready = details({ item: { printPdfKey: 'orders/10027/jozve-1.pdf', printPdfReadyAt: built, printFiles: [volume(1, 1, 120, { storageKey: 'orders/10027/jozve-1.pdf' })] } });
+    expect(printView(ready, ready.items[0]!, NOW)).toEqual({
       kind: 'ready',
-      fileName: 'jozve-10027-1.pdf',
-      pages: 120,
-      bytes: 40_265_318,
-      readyAt: tehran('2026-10-03 14:06'),
+      volumes: [{ volume: 1, fileName: 'jozve-10027-1.pdf', firstPage: 1, lastPage: 120, sheets: 60, bytes: 40_265_318, builtAt: built }],
+      reused: true,
+      note: ['همهٔ صفحه‌ها A4 عمودی بود؛ فایل چاپ همان PDF جزوه است.'],
     });
     const queued = details({ rest: { pdfJob: { ...details().pdfJob!, status: 'queued', attempts: 0 } } });
-    expect(pdfView(queued, queued.items[0]!, NOW)).toEqual({ kind: 'building', retrying: false });
+    expect(printView(queued, queued.items[0]!, NOW)).toEqual({ kind: 'building', retrying: false });
     const retrying = details({ rest: { pdfJob: { ...details().pdfJob!, status: 'queued', attempts: 1, lastError: "StorageError('x')" } } });
-    expect(pdfView(retrying, retrying.items[0]!, NOW)).toEqual({ kind: 'building', retrying: true });
-    const failedJob = { status: 'failed' as const, attempts: 3, maxAttempts: 3, lastError: "StorageError('GET → 503')", createdAt: tehran('2026-10-03 14:06'), updatedAt: NOW, finishedAt: tehran('2026-10-03 14:21') };
+    expect(printView(retrying, retrying.items[0]!, NOW)).toEqual({ kind: 'building', retrying: true });
+    const failedJob: PanelPdfJob = { status: 'failed', attempts: 3, maxAttempts: 3, lastError: "StorageError('GET → 503')", createdAt: tehran('2026-10-03 14:06'), updatedAt: NOW, finishedAt: tehran('2026-10-03 14:21') };
     const failed = details({ rest: { pdfJob: failedJob } });
-    expect(pdfView(failed, failed.items[0]!, NOW)).toEqual({
+    // PDF جزوه ساخته نشده: «دوباره بساز» تا فایل‌های مشتری هستند.
+    expect(printView(failed, failed.items[0]!, NOW)).toEqual({
       kind: 'failed',
-      fileName: 'jozve-10027-1.pdf',
       attempts: 3,
       reason: 'استوریج یا پایگاه داده جواب نداد',
       from: tehran('2026-10-03 14:06'),
       to: tehran('2026-10-03 14:21'),
-      filesUntil: new Date(NOW.getTime() + 2 * 24 * 60 * MINUTE),
+      rebuild: { until: new Date(NOW.getTime() + 2 * 24 * 60 * MINUTE) },
     });
     const missing = details({ rest: { pdfJob: { ...failedJob, attempts: 1, lastError: 'file_missing: file_missing' } } });
-    expect(pdfView(missing, missing.items[0]!, NOW)).toMatchObject({ reason: 'فایل مشتری روی استوریج پیدا نشد', attempts: 1 });
+    expect(printView(missing, missing.items[0]!, NOW)).toMatchObject({ reason: 'فایل مشتری روی استوریج پیدا نشد', attempts: 1 });
+    // PDF جزوه ساخته شد و فایل چاپ نه: از همان PDF، بی مهلت، حتی وقتی فایل‌های مشتری رفته‌اند.
+    const gone = details({ item: { printPdfReadyAt: built, sections: details().items[0]!.sections.map((s) => ({ ...s, fileDeletedAt: NOW })) }, rest: { pdfJob: { ...failedJob, lastError: 'breakdown_mismatch: x' } } });
+    expect(printView(gone, gone.items[0]!, NOW)).toMatchObject({ kind: 'failed', reason: 'جلدبندی ریز قیمت با صفحه‌های جزوه نخواند', rebuild: { until: null } });
+    // هیچ‌کدام: فایل‌های مشتری رفته و PDF جزوه ساخته نشد.
+    const dead = details({ item: { sections: gone.items[0]!.sections }, rest: { pdfJob: failedJob } });
+    expect(printView(dead, dead.items[0]!, NOW)).toMatchObject({ kind: 'failed', rebuild: null });
+    expect(rebuildable(dead.items, NOW)).toBeNull();
+    // کار تمام شد ولی فایل چاپی نساخت (کارگر پیش از ۵٫۱، هنگام استقرار): همان «ساخته نشد»، با «دوباره بساز».
+    expect(printView(details(), details().items[0]!, NOW)).toMatchObject({ kind: 'failed', reason: 'کارگر چیزی نساخت', from: null });
+  });
+
+  it('فایل چاپ چند جلدی: هر جلد با نامش، بازه و برگش؛ «تقسیم شد» وقتی صفحه‌ای عوض نشد', () => {
+    const d = details({
+      item: {
+        printPdfKey: 'orders/10027/jozve-1.pdf',
+        printPdfReadyAt: NOW,
+        printFiles: [volume(1, 1, 60, { storageKey: 'orders/10027/print-1-1.pdf' }), volume(2, 61, 120, { storageKey: 'orders/10027/print-1-2.pdf' })],
+      },
+    });
+    const view = printView(d, d.items[0]!, NOW);
+    expect(view.kind === 'ready' && view.volumes.map((v) => [v.fileName, v.firstPage, v.lastPage])).toEqual([
+      ['jozve-10027-1-jeld-1.pdf', 1, 60],
+      ['jozve-10027-1-jeld-2.pdf', 61, 120],
+    ]);
+    expect(view.kind === 'ready' && [view.reused, text(view.note)]).toEqual([
+      false,
+      'همهٔ صفحه‌ها A4 عمودی بود؛ فقط به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.',
+    ]);
+    expect([volumeFileName(10040, 1, 1, 1), volumeFileName(10040, 1, 2, 2), pdfFileName(10040, 1)]).toEqual([
+      'jozve-10040-1.pdf',
+      'jozve-10040-1-jeld-2.pdf',
+      'jozve-10040-1-asli.pdf',
+    ]);
+  });
+
+  it('«چه عوض شد»، همان طرح: بازه با نام فایل مشتری، نام اندازه همان سایت، و «بقیه بی تغییر»', () => {
+    const note = (changes: PanelPrintVolume['changes'][], pageCount = 120) =>
+      text(
+        changesNote(
+          details({
+            item: {
+              pageCount,
+              printFiles: changes.map((c, i) => volume(i + 1, i === 0 ? 1 : 61, changes.length === 1 ? 120 : i === 0 ? 60 : 120, { changes: c })),
+            },
+          }).items[0]!,
+        ),
+      );
+    expect(note([{ resized: [[103, 120, 612, 792]] }])).toBe(
+      'صفحهٔ 103 تا 120 (فایل حل تمرین فصل ۱.docx) اندازهٔ Letter داشت و روی A4 نشست؛ بقیه بی تغییر.',
+    );
+    // بازهٔ دو فایل، اندازهٔ بی‌نام به میلی‌متر، صفحهٔ تنها، چرخش و حاشیه‌نویسی.
+    expect(note([{ resized: [[40, 50, 482, 680]], rotated: [[5, 5]], annotated: [[12, 12]] }])).toBe(
+      'صفحهٔ 40 تا 50 (2 فایل) اندازهٔ 170×240 میلی‌متر داشت و روی A4 نشست؛ صفحهٔ 5 (فایل ریاضی ۲ - جلسه ۱.pdf) افقی بود و چرخید، بالایش لبهٔ چپ کاغذ؛ صفحهٔ 12 (فایل ریاضی ۲ - جلسه ۱.pdf) حاشیه‌نویسی داشت و جزو صفحه شد؛ بقیه بی تغییر.',
+    );
+    // بازه‌ای که از مرز دو جلد می‌گذرد یکی است؛ و با تقسیم.
+    expect(note([{ rotated: [[55, 60]] }, { rotated: [[61, 64]] }])).toBe(
+      'صفحهٔ 55 تا 64 (فایل ریاضی ۲ - جلسه ۲.pdf) افقی بود و چرخید، بالایش لبهٔ چپ کاغذ؛ بقیه بی تغییر؛ به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.',
+    );
+    // بیش از سه بازه از یک نوع: بقیه با شمارشان.
+    expect(note([{ resized: [[1, 1, 420, 595], [3, 3, 420, 595], [5, 5, 420, 595], [7, 7, 420, 595], [9, 9, 420, 595]] }])).toBe(
+      'صفحهٔ 1 (فایل ریاضی ۲ - جلسه ۱.pdf) اندازهٔ A5 داشت و روی A4 نشست؛ صفحهٔ 3 (فایل ریاضی ۲ - جلسه ۱.pdf) اندازهٔ A5 داشت و روی A4 نشست؛ صفحهٔ 5 (فایل ریاضی ۲ - جلسه ۱.pdf) اندازهٔ A5 داشت و روی A4 نشست؛ و 2 بازهٔ دیگر هم؛ بقیه بی تغییر.',
+    );
+    // همهٔ صفحه‌ها عوض شد: «بقیه» ندارد.
+    expect(note([{ rotated: [[1, 120]] }])).toBe('صفحهٔ 1 تا 120 (3 فایل) افقی بود و چرخید، بالایش لبهٔ چپ کاغذ.');
+  });
+
+  it('برگهٔ سفارش: با دادهٔ امروز، در حال به‌روز شدن، در حال ساختن، یا ساخته نشد؛ برگهٔ کهنه هرگز', () => {
+    const job = (status: PanelPdfJob['status'], over: Partial<PanelPdfJob> = {}): PanelPdfJob => ({
+      status,
+      attempts: 1,
+      maxAttempts: 3,
+      lastError: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      finishedAt: status === 'done' || status === 'failed' ? NOW : null,
+      ...over,
+    });
+    const view = (rest: Partial<PanelOrderDetails>, order: Partial<OrderRow> = {}) => ticketView(details({ order, rest }));
+    const fresh = { sizeBytes: 38_000, builtAt: NOW, fresh: true };
+    expect(view({ ticket: fresh, ticketJob: job('done') })).toEqual({ kind: 'ready', bytes: 38_000, builtAt: NOW });
+    expect(view({ ticket: { ...fresh, fresh: false }, ticketJob: job('queued', { attempts: 0 }) })).toEqual({ kind: 'updating' });
+    expect(view({ ticket: null, ticketJob: job('running') })).toEqual({ kind: 'building', retrying: false });
+    expect(view({ ticket: null, ticketJob: job('failed', { lastError: 'font_missing: x' }) })).toMatchObject({
+      kind: 'failed',
+      reason: 'قلم وزیرمتن روی کارگر پیدا نشد',
+    });
+    // برگهٔ کهنه‌ای که کارش در صف نیست (پیش از ۵٫۱ کاری نبود): «ساخته نشد»، نه برگهٔ کهنه.
+    expect(view({ ticket: { ...fresh, fresh: false }, ticketJob: null })).toMatchObject({ kind: 'failed', reason: 'کارگر چیزی نساخت' });
+    expect(view({ ticket: fresh }, { status: 'awaiting_payment' })).toEqual({ kind: 'unpaid' });
+    expect(view({ ticket: fresh }, { status: 'handed_to_post', handedToPostAt: NOW })).toMatchObject({ kind: 'ready' });
+    expect(view({ ticket: null, ticketJob: job('failed') }, { status: 'cancelled' })).toEqual({ kind: 'closed' });
+    expect(view({ ticket: fresh }, { status: 'handed_to_post', handedToPostAt: NOW, filesDeletedAt: NOW })).toEqual({ kind: 'purged' });
+  });
+
+  it('فایل‌های پاک‌شده (ADR-044): پیام همان طرح با روزهای پس از پست یا لغو؛ نه فایل چاپ، نه «شروع چاپ»', () => {
+    const handedAt = tehran('2026-09-05 16:40');
+    const deletedAt = tehran('2026-10-05 17:10');
+    const d = details({ order: { status: 'handed_to_post', handedToPostAt: handedAt, filesDeletedAt: deletedAt } });
+    expect(text(purgedNote(d)!)).toBe(
+      'فایل‌های این سفارش (PDF جزوه، فایل چاپ و برگه) دوشنبه 13 مهر پاک شد: 30 روز پس از تحویل پست. مشخصات، مبلغ و رویدادها می‌مانند.',
+    );
+    const cancelled = details({
+      order: { status: 'cancelled', filesDeletedAt: deletedAt },
+      rest: { statusEvents: [statusEvent({ fromStatus: 'paid', toStatus: 'cancelled', at: tehran('2026-09-27 10:00') })] },
+    });
+    expect(text(purgedNote(cancelled)!)).toContain(': 8 روز پس از لغو.');
+    expect(purgedNote(details())).toBeNull();
+    expect(printView(d, d.items[0]!, NOW)).toEqual({ kind: 'purged' });
+    const printed = details({ item: { printFiles: [volume(1, 1, 120)] } });
+    expect(printReady(printed)).toBe(true);
+    expect(printReady({ ...printed, order: { ...printed.order, filesDeletedAt: NOW } })).toBe(false);
   });
 
   it('پرداخت‌ها: موفق با کد پیگیری، ناموفق با دلیل، بی برگشت بعد از نیم ساعت، و هنوز در درگاه', () => {
@@ -483,9 +628,9 @@ describe('جزئیات سفارش', () => {
     ]);
   });
 
-  it('رویدادهای سفارش به ترتیب زمان: ساخته شد، پرداخت شد، PDF، و کار ادمین‌ها؛ روز فقط در اولین سطر هر روز', () => {
+  it('رویدادهای سفارش به ترتیب زمان: ساخته شد، پرداخت شد، PDF و فایل چاپ، و کار ادمین‌ها؛ روز فقط در اولین سطر هر روز', () => {
     const d = details({
-      item: { printPdfReadyAt: tehran('2026-10-03 14:06') },
+      item: { printPdfReadyAt: tehran('2026-10-03 14:06'), printFiles: [volume(1, 1, 120, { createdAt: tehran('2026-10-03 14:06') })] },
       rest: {
         statusEvents: [
           statusEvent({ id: 1, fromStatus: null, toStatus: 'awaiting_payment', at: tehran('2026-10-03 13:57'), actor: 'user' }),
@@ -501,9 +646,9 @@ describe('جزئیات سفارش', () => {
     expect(entries.map((e) => [text(e.text), e.who])).toEqual([
       ['سفارش ساخته شد', 'مشتری'],
       ['پرداخت شد', 'درگاه'],
-      ['PDF جزوه ساخته شد', 'سیستم'],
-      ['ساختن دوبارهٔ PDF جزوه', 'سارا'],
-      ['PDF جزوه دانلود شد', 'علی'],
+      ['PDF جزوه و فایل چاپ ساخته شد', 'سیستم'],
+      ['ساختن دوبارهٔ فایل چاپ', 'سارا'],
+      ['PDF اصلی جزوه دانلود شد', 'علی'],
     ]);
     expect(timelineWhen(entries)).toEqual([
       { day: 'شنبه 11 مهر', time: '13:57' },
@@ -515,7 +660,7 @@ describe('جزئیات سفارش', () => {
     const failed = orderTimeline(
       details({ rest: { pdfJob: { status: 'failed', attempts: 3, maxAttempts: 3, lastError: 'x', createdAt: NOW, updatedAt: NOW, finishedAt: NOW } } }),
     );
-    expect(failed.map((e) => text(e.text))).toEqual(['ساختن PDF جزوه ناموفق ماند']);
+    expect(failed.map((e) => text(e.text))).toEqual(['ساختن فایل چاپ ناموفق ماند']);
     const expired = orderTimeline(
       details({
         rest: {
@@ -583,25 +728,26 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
     expect(line(0, 0, 0, 0)).toBeNull();
   });
 
-  it('PDF جزوه: ساخته‌شده در هر وضعیت پس از پرداخت دانلودی است؛ ساخته‌نشدهٔ سفارش بسته دیگر لازم نیست', () => {
-    const readyAt = tehran('2026-10-03 14:06');
+  it('فایل چاپ: ساخته‌شده در هر وضعیت پس از پرداخت دانلودی است؛ ساخته‌نشدهٔ سفارش بسته دیگر لازم نیست', () => {
+    const printFiles = [volume(1, 1, 120)];
     for (const status of ['printing', 'handed_to_post', 'cancelled'] as const) {
-      const ready = details({ order: { status }, item: { printPdfReadyAt: readyAt } });
-      expect(pdfView(ready, ready.items[0]!, NOW)).toMatchObject({ kind: 'ready' });
+      const ready = details({ order: { status }, item: { printFiles } });
+      expect(printView(ready, ready.items[0]!, NOW)).toMatchObject({ kind: 'ready' });
     }
     const cancelled = details({ order: { status: 'cancelled' }, rest: { pdfJob: { ...details().pdfJob!, status: 'failed', lastError: 'order_closed: cancelled' } } });
-    expect(pdfView(cancelled, cancelled.items[0]!, NOW)).toEqual({ kind: 'closed' });
+    expect(printView(cancelled, cancelled.items[0]!, NOW)).toEqual({ kind: 'closed' });
     const printing = details({ order: { status: 'printing' }, rest: { pdfJob: { ...details().pdfJob!, status: 'queued', attempts: 0 } } });
-    expect(pdfView(printing, printing.items[0]!, NOW)).toEqual({ kind: 'building', retrying: false });
+    expect(printView(printing, printing.items[0]!, NOW)).toEqual({ kind: 'building', retrying: false });
     // کار شکستی که لغوش برگشت: دلیلش روشن، و «دوباره بساز» تا فایل‌ها هستند.
     const reopened = details({ rest: { pdfJob: { ...details().pdfJob!, status: 'failed', attempts: 1, lastError: 'order_closed: cancelled' } } });
-    expect(pdfView(reopened, reopened.items[0]!, NOW)).toMatchObject({ kind: 'failed', reason: 'سفارش لغو شده بود' });
-    // «شروع چاپ» فقط وقتی PDF همهٔ جزوه‌ها ساخته شده.
-    expect(pdfReady(details())).toBe(false);
-    expect(pdfReady(details({ item: { printPdfReadyAt: readyAt } }))).toBe(true);
-    const two = details({ item: { printPdfReadyAt: readyAt } });
-    expect(pdfReady({ ...two, items: [two.items[0]!, { ...two.items[0]!, id: 'i2', seq: 2, printPdfReadyAt: null }] })).toBe(false);
-    expect(pdfReady({ ...two, items: [] })).toBe(false);
+    expect(printView(reopened, reopened.items[0]!, NOW)).toMatchObject({ kind: 'failed', reason: 'سفارش لغو شده بود' });
+    // «شروع چاپ» فقط وقتی فایل چاپ همهٔ جزوه‌ها ساخته شده؛ PDF جزوه به‌تنهایی نه (شاهد).
+    expect(printReady(details())).toBe(false);
+    expect(printReady(details({ item: { printPdfReadyAt: NOW } }))).toBe(false);
+    expect(printReady(details({ item: { printFiles } }))).toBe(true);
+    const two = details({ item: { printFiles } });
+    expect(printReady({ ...two, items: [two.items[0]!, { ...two.items[0]!, id: 'i2', seq: 2, printFiles: [] }] })).toBe(false);
+    expect(printReady({ ...two, items: [] })).toBe(false);
   });
 
   it('رویدادهای وضعیت با نام ادمین؛ برگرداندن با دلیلش؛ ویرایش گیرنده؛ رویداد ادمینِ وضعیت یک بار', () => {

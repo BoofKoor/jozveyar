@@ -237,6 +237,26 @@ describe('تنظیم‌های عددی', () => {
     expect(await panel.saveNumber(OWNER, { key: 'otp.site_hourly_limit', value: '0', seen: '100000' }, 'ip')).toMatchObject({ status: 400 });
   });
 
+  it('روزهای نگهداری فایل‌های سفارش (۵٫۱، ADR-044): ۷ تا ۳۶۵، ارقام فارسی هم؛ بیرون از بازه هیچ', async () => {
+    const { panel, settings } = service();
+    settings.values.set('order.files_retention_days', 30);
+    expect(await panel.saveNumber(OWNER, { key: 'order.files_retention_days', value: '۴۵', seen: '30' }, 'ip')).toEqual(
+      ok({ key: 'order.files_retention_days', value: 45, written: true }),
+    );
+    expect(settings.events).toMatchObject([{ action: 'settings.update', detail: { key: 'order.files_retention_days', from: 30, to: 45 } }]);
+    // کمتر از یک هفته فرصت چاپ دوبارهٔ بستهٔ گم‌شده را می‌برد؛ بیش از یک سال فقط دیسک است. مرزها صریح.
+    for (const [value, good] of [['7', true], ['365', true], ['6', false], ['366', false], ['0', false]] as const) {
+      const seen = String(settings.values.get('order.files_retention_days'));
+      const result = await panel.saveNumber(OWNER, { key: 'order.files_retention_days', value, seen }, 'ip');
+      expect(result.ok, value).toBe(good);
+      if (!good) expect(result).toMatchObject({ status: 400, error: 'invalid_setting' });
+    }
+    // فقط مالک (`settings.edit`).
+    expect(await panel.saveNumber(OPERATOR, { key: 'order.files_retention_days', value: '40', seen: '365' }, 'ip')).toMatchObject({
+      status: 403,
+    });
+  });
+
   it('همان که دیده شد: زبانه‌ای که عدد کهنه را دید رونویسی نمی‌کند؛ تنظیم دیگر پیدا نمی‌شود', async () => {
     const { panel, settings } = service();
     settings.values.set('order.sla_days', 4);

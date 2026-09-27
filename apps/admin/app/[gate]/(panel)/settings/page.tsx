@@ -25,6 +25,7 @@ const one = (query: Query, key: string) => (typeof query[key] === 'string' ? (qu
 
 const SLA = SETTING_SCHEMAS['order.sla_days'];
 const OTP = SETTING_SCHEMAS['otp.site_hourly_limit'];
+const KEEP = SETTING_SCHEMAS['order.files_retention_days'];
 
 /** یک روز تعطیل با «حذف»، بی پرسش: برگشت‌پذیر است و مهلت سفارش‌های ثبت‌شده عوض نمی‌شود. */
 function Day({ gate, day }: { gate: string; day: Holiday }) {
@@ -98,6 +99,10 @@ export default async function SettingsPage({ params, searchParams }: { params: P
     ) : values && done === 'otp.site_hourly_limit' && v === values.otpLimit ? (
       <Alert tone="success">
         سقف ساعتی کد پیامکی کل سایت ذخیره شد: <span className="num">{formatNumber(v)}</span> کد در ساعت.
+      </Alert>
+    ) : values && done === 'order.files_retention_days' && v === values.retentionDays ? (
+      <Alert tone="success">
+        روزهای نگهداری فایل‌های سفارش ذخیره شد: <span className="num">{v}</span> روز. کارگر در دور بعدش با همین پاک می‌کند.
       </Alert>
     ) : null;
 
@@ -188,6 +193,20 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                     (<span className="num">20</span>) ثابت است.
                   </>
                 }
+              />
+              <NumberSettingForm
+                key={`keep:${values.retentionDays}:${mark}`}
+                gate={gate}
+                settingKey="order.files_retention_days"
+                id="keep"
+                title="فایل‌های سفارش"
+                label="روز نگهداری بعد از «تحویل پست شد» یا «لغو شد»"
+                value={values.retentionDays}
+                min={KEEP.minValue ?? 7}
+                max={KEEP.maxValue ?? 365}
+                stepper
+                rangeError={`روز نگهداری عدد صحیح ${KEEP.minValue} تا ${KEEP.maxValue} باشد.`}
+                hint="PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند."
               />
             </div>
 

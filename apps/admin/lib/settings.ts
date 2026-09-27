@@ -28,8 +28,8 @@ export const HOLIDAYS_SHOWN = 5;
 /** از بهمن، نبودن تعطیلی‌های سال بعد هشدار است: نوروز سال بعد در مهلت سفارش‌های اسفند می‌افتد. */
 export const NEXT_YEAR_WARNING_MONTH = 11;
 
-/** تنظیم‌های عددی صفحه، با نامشان در `settings`. */
-export const NUMBER_SETTINGS = ['order.sla_days', 'otp.site_hourly_limit'] as const;
+/** تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044). */
+export const NUMBER_SETTINGS = ['order.sla_days', 'otp.site_hourly_limit', 'order.files_retention_days'] as const;
 export type NumberSettingKey = (typeof NUMBER_SETTINGS)[number];
 export const isNumberSetting = (value: unknown): value is NumberSettingKey =>
   typeof value === 'string' && (NUMBER_SETTINGS as readonly string[]).includes(value);
