@@ -48,19 +48,40 @@ import {
  *
  * قیمت یک سفارش ثبت‌شده هیچ‌وقت بازمحاسبه نمی‌شود؛ سفارش `priceListVersion` را
  * نگه می‌دارد و برای هر سؤالی به همان نسخه رجوع می‌شود.
+ *
+ * از برش ۴٫۵ (ADR-040) ویرایش فقط با نسخهٔ تازه است: پیش‌نویس (`activated_at` خالی) از روی نسخهٔ فعال، که
+ * پنل ویرایش و پاکش می‌کند؛ و نسخه‌ای که یک بار فعال شد، با همهٔ ردیف‌هایش، دیگر نه عوض می‌شود و نه پاک. این
+ * را تریگرهای `price_lists_frozen` و `price_list_rows_frozen` در خود پایگاه داده می‌سنجند (0013)؛ فقط
+ * `is_active` جابه‌جا می‌شود، برای برگشت به نسخهٔ قبل.
  */
-export const priceLists = pgTable('price_lists', {
-  version: integer('version').primaryKey(),
-  label: text('label').notNull(),
-  /** ریال به‌ازای هر **رو** چاپ‌شده — نه هر برگ. */
-  clickRateColorRials: bigint('click_rate_color_rials', { mode: 'number' }).notNull(),
-  clickRateBwRials: bigint('click_rate_bw_rials', { mode: 'number' }).notNull(),
-  /** `PricingSettings` — مالیات، رُند، وزن بسته‌بندی، مساحت برگ. */
-  settings: jsonb('settings').notNull(),
-  /** دقیقاً یکی فعال است؛ با ایندکس یکتای جزئی در مهاجرت تضمین می‌شود. */
-  isActive: boolean('is_active').notNull().default(false),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const priceLists = pgTable(
+  'price_lists',
+  {
+    version: integer('version').primaryKey(),
+    label: text('label').notNull(),
+    /** ریال به‌ازای هر **رو** چاپ‌شده — نه هر برگ. */
+    clickRateColorRials: bigint('click_rate_color_rials', { mode: 'number' }).notNull(),
+    clickRateBwRials: bigint('click_rate_bw_rials', { mode: 'number' }).notNull(),
+    /** `PricingSettings` — مالیات، رُند، وزن بسته‌بندی، مساحت برگ. */
+    settings: jsonb('settings').notNull(),
+    /** دقیقاً یکی فعال است؛ با ایندکس یکتای جزئی در مهاجرت تضمین می‌شود. */
+    isActive: boolean('is_active').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * اولین بار که فعال شد؛ یک بار نوشته می‌شود، و اگر نوشته نشده باشد تریگر با فعال شدن می‌نویسدش. null یعنی
+     * پیش‌نویس.
+     */
+    activatedAt: timestamp('activated_at', { withTimezone: true }),
+    /**
+     * ادمینی که پیش‌نویس را ساخت؛ null برای تعرفهٔ پایه. بی کلید خارجی: ادمین پاک نمی‌شود (`admin_users_no_delete`)، و
+     * تاریخچهٔ تعرفه به جدول‌های پنل بسته نمی‌ماند.
+     */
+    createdBy: uuid('created_by'),
+    /** نسخه‌ای که پیش‌نویس از رویش ساخته شد: نسخهٔ فعال همان لحظه. */
+    basedOn: integer('based_on'),
+  },
+  (t) => [foreignKey({ columns: [t.basedOn], foreignColumns: [t.version], name: 'price_lists_based_on_fk' })],
+);
 
 export const paperTypes = pgTable(
   'paper_types',
@@ -611,6 +632,11 @@ export const orders = pgTable(
     index('orders_due').on(t.status, t.postHandoffDueAt),
     /** آمار پیشخوان (برش ۴٫۳): سفارش‌هایی که در هفتهٔ گذشته به پست رسیدند. */
     index('orders_handed').on(t.handedToPostAt),
+    /**
+     * شمار سفارش‌های هر نسخهٔ تعرفه در پنل (برش ۴٫۵)، و سنجش کلید خارجی وقتی پیش‌نویسی پاک می‌شود؛ بی این، هر دو
+     * همهٔ سفارش‌ها را می‌خواندند.
+     */
+    index('orders_price_list').on(t.priceListVersion),
     foreignKey({
       columns: [t.cityId, t.provinceId],
       foreignColumns: [cities.id, cities.provinceId],

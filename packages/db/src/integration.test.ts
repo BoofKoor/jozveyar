@@ -42,7 +42,7 @@ import {
   smsMessages,
   users,
 } from './schema.js';
-import { eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
 import { HOLIDAYS_SETTING, SLA_DAYS_SETTING, seedReferenceData } from './reference.js';
@@ -73,8 +73,12 @@ import {
   adminSessions,
   adminUserRoles,
   adminUsers,
+  bindingTypes,
+  paperTypes,
   rolePermissions,
+  shippingMethods,
 } from './schema.js';
+import { createTariffStore, type TariffActor } from './tariff.js';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -107,6 +111,15 @@ async function clearOrders({ db }: Database) {
   await db.delete(smsMessages);
 }
 
+/**
+ * تعرفه‌ها از صفر. نسخه‌ای که یک بار فعال شده پاک نمی‌شود (تریگر `price_lists_frozen`، برش ۴٫۵)، پس TRUNCATE، که تریگر
+ * ردیفی ندارد؛ CASCADE سفارش‌ها و هرچه به آنها بسته است (و کارهای صف) را هم خالی می‌کند.
+ */
+async function clearPriceLists(conn: Database) {
+  await clearOrders(conn);
+  await conn.db.execute(sql`TRUNCATE price_lists CASCADE`);
+}
+
 describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
   let conn: Database;
 
@@ -115,8 +128,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     conn = createDb(DATABASE_URL!);
     // هر اجرا از صفر: تست نباید به حالت باقی‌مانده از اجرای قبلی وابسته باشد. سفارش به تعرفه و
     // سند اشاره می‌کند و پرداخت به سفارش، پس اول این‌ها (برش ۳).
-    await clearOrders(conn);
-    await conn.db.delete(priceLists);
+    await clearPriceLists(conn);
   });
 
   afterAll(async () => {
@@ -199,11 +211,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
   });
 
   describe('محدودیت‌هایی که تعرفهٔ خراب را رد می‌کنند', () => {
+    // روی پیش‌نویس: ردیف نسخهٔ فعال‌شده (۱) پیش از این محدودیت‌ها به تریگر `price_list_rows_frozen` می‌خورد (برش ۴٫۵).
+    const DRAFT = 90;
+    beforeAll(async () => {
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: DRAFT, label: 'پیش‌نویس محدودیت‌ها' }, { activate: false });
+    });
+
     it('بازهٔ صحافی همپوشان رد می‌شود', async () => {
       expect(
         await rejectedConstraint(
           conn.db.insert(bindingRateBands).values({
-            priceListVersion: 1,
+            priceListVersion: DRAFT,
             bindingTypeId: 'spiral_clear',
             minSheets: 100,
             maxSheets: 200,
@@ -217,7 +235,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(
         await rejectedConstraint(
           conn.db.insert(shippingRates).values({
-          priceListVersion: 1,
+          priceListVersion: DRAFT,
           methodId: 'post',
           zoneId: 'other',
           minWeightGrams: 500,
@@ -232,7 +250,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(
         await rejectedConstraint(
           conn.db.insert(shippingRates).values({
-          priceListVersion: 1,
+          priceListVersion: DRAFT,
           methodId: 'post',
           zoneId: 'other',
           minWeightGrams: 9_000,
@@ -492,10 +510,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     });
 
     it('نرخ برای منطقه‌ای که نیست رد می‌شود', async () => {
+      // روی پیش‌نویس، مثل محدودیت‌های تعرفه: نسخهٔ ۱ فعال‌شده است و ردیف تازه نمی‌گیرد.
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 91, label: 'پیش‌نویس منطقه' }, { activate: false });
       expect(
         await rejectedConstraint(
           conn.db.insert(shippingRates).values({
-            priceListVersion: 1,
+            priceListVersion: 91,
             methodId: 'post',
             zoneId: 'mars',
             minWeightGrams: 0,
@@ -675,8 +695,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     });
 
     it('تعرفهٔ پایه فقط وقتی هیچ تعرفه‌ای نیست درج می‌شود', async () => {
-      await clearOrders(conn);
-      await conn.db.delete(priceLists);
+      await clearPriceLists(conn);
       const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       expect(seeded.priceListInserted).toBe(1);
       // ترتیب ردیف‌ها از پایگاه داده قرار نیست؛ خود نرخ‌ها باید همان باشند.
@@ -2097,6 +2116,376 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await panel.stats({ since: new Date(since.getTime() - 1), at: END_MONDAY })).toEqual({ printing: 2, handed: 3, onTime: 2 });
       expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 1) })).toEqual({ printing: 2, handed: 2, onTime: 1 });
       expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 2) })).toEqual({ printing: 2, handed: 1, onTime: 0 });
+    });
+  });
+  // در همین فایل، به همان دلیل «سند و آپلود». سنجش پیش‌نویس، متن‌ها، مجوز و کد تازه در سرویس تعرفهٔ پنل با ذخیره‌گاه ساختگی
+  // (`apps/admin/lib/server/tariff.test.ts`)؛ اینجا همان که فقط پستگرس معنایش را دارد: تریگرها، قفل، تراکنش و رویداد.
+  describe('تعرفه در پنل روی پستگرس (برش ۴٫۵)', () => {
+    const NOW = new Date('2026-10-05T07:50:00Z');
+    const MINUTE = 60_000;
+    const Tehran = PROVINCES.find((p) => p.name === 'تهران')!;
+    let sara: string;
+    const actor = (): TariffActor => ({ adminUserId: sara, ipHash: 'ip' });
+    const tariffEvents = async () =>
+      (await conn.db.select().from(adminEvents).orderBy(adminEvents.id)).filter((e) => e.action.startsWith('tariff.'));
+    const headOf = async (version: number) => (await conn.db.select().from(priceLists).where(eq(priceLists.version, version)))[0];
+
+    /** سفارش کمینه با نسخهٔ `version`، برای شمار سفارش‌های هر نسخه؛ پول و جای ارسال فقط محدودیت‌ها را می‌خوانند. */
+    async function orderOn(version: number) {
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: '09121112233' })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: NOW } })
+        .returning();
+      await conn.db.insert(orders).values({
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        priceListVersion: version,
+        priceBreakdown: {},
+        subtotalRials: 10,
+        shippingRials: 10,
+        totalRials: 20,
+        estWeightGrams: 100,
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: 'tehran',
+        provinceId: Tehran.id,
+        recipientName: 'سارا احمدی',
+        recipientPhone: '09121112233',
+        addressText: 'پردیس، فاز ۲، پلاک ۱۲',
+      });
+    }
+
+    beforeAll(async () => {
+      await clearPriceLists(conn);
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
+      sara = admin!.id;
+    });
+
+    // هر تست از نسخهٔ ۱ فعال، بی پیش‌نویس و بی نسخهٔ دیگر؛ رویداد فقط افزودنی است، پس TRUNCATE.
+    beforeEach(async () => {
+      await clearPriceLists(conn);
+      await conn.db.execute(sql`TRUNCATE admin_events`);
+      await seedPriceList(conn, SEED_PRICE_LIST);
+    });
+
+    afterAll(async () => {
+      await clearPriceLists(conn);
+      await seedPriceList(conn, SEED_PRICE_LIST);
+    });
+
+    it('نسخهٔ فعال‌شده تغییرناپذیر است: سر، ردیف‌ها، زمان فعال شدن و پاک کردن؛ فقط `is_active` جابه‌جا می‌شود', async () => {
+      const first = await headOf(1);
+      // تعرفهٔ پایه با فعال شدنش زمان گرفت (تریگر، نه کد).
+      expect(first!.activatedAt).toBeInstanceOf(Date);
+      const v1 = eq(priceLists.version, 1);
+      for (const change of [
+        { label: 'تعرفهٔ دیگر' },
+        { clickRateBwRials: 17_000 },
+        { clickRateColorRials: 22_000 },
+        { settings: { ...SEED_PRICE_LIST.settings, vatPercent: 9 } },
+        { activatedAt: null },
+        { activatedAt: NOW },
+        { createdBy: sara },
+        { basedOn: 1 },
+        { createdAt: NOW },
+      ]) {
+        expect(await rejectedConstraint(conn.db.update(priceLists).set(change).where(v1)), JSON.stringify(change)).toBe('price_lists_frozen');
+      }
+      expect(await rejectedConstraint(conn.db.delete(priceLists).where(v1))).toBe('price_lists_frozen');
+
+      // ردیف‌ها: عوض کردن، پاک کردن و درج، در هر پنج جدول.
+      for (const [name, query] of [
+        ['کاغذ', conn.db.update(paperTypes).set({ gsm: 90 }).where(eq(paperTypes.priceListVersion, 1))],
+        ['صحافی', conn.db.update(bindingTypes).set({ maxSheetsPerVolume: 900 }).where(eq(bindingTypes.priceListVersion, 1))],
+        ['بازه', conn.db.update(bindingRateBands).set({ priceRials: 1 }).where(eq(bindingRateBands.priceListVersion, 1))],
+        ['روش ارسال', conn.db.update(shippingMethods).set({ enabled: true }).where(eq(shippingMethods.priceListVersion, 1))],
+        ['کرایه', conn.db.update(shippingRates).set({ priceRials: 1 }).where(eq(shippingRates.priceListVersion, 1))],
+        ['پاک کردن بازه', conn.db.delete(bindingRateBands).where(eq(bindingRateBands.priceListVersion, 1))],
+        ['پاک کردن کرایه', conn.db.delete(shippingRates).where(eq(shippingRates.priceListVersion, 1))],
+        [
+          'بازهٔ تازه',
+          conn.db.insert(bindingRateBands).values({ priceListVersion: 1, bindingTypeId: 'spiral_clear', minSheets: 801, maxSheets: 900, priceRials: 1 }),
+        ],
+        ['کاغذ تازه', conn.db.insert(paperTypes).values({ priceListVersion: 1, id: 'glossy', nameFa: 'گلاسه', gsm: 120 })],
+      ] as const) {
+        expect(await rejectedConstraint(query), name).toBe('price_list_rows_frozen');
+      }
+
+      // برگشت: نسخهٔ ۲ فعال و ۱ خاموش، بعد ۱ دوباره؛ زمان اولین فعال شدن ۱ همان می‌ماند.
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 2, label: 'دو' });
+      expect((await headOf(1))!.isActive).toBe(false);
+      await activatePriceList(conn, 1);
+      const again = await headOf(1);
+      expect(again!.isActive).toBe(true);
+      expect(again!.activatedAt).toEqual(first!.activatedAt);
+      // سفارشی که به نسخه اشاره می‌کند هم آن را نگه می‌دارد، حتی بی تریگر (کلید خارجی).
+      expect((await loadPriceList(conn, 1)).label).toBe(SEED_PRICE_LIST.label);
+    });
+
+    it('پیش‌نویس آزاد است و با ردیف‌هایش پاک می‌شود؛ ردیفش به نسخهٔ فعال‌شده نمی‌رود؛ درج فعال زمانش را می‌گیرد', async () => {
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 2, label: 'پیش‌نویس' }, { activate: false });
+      expect((await headOf(2))!.activatedAt).toBeNull();
+      const v2 = eq(priceLists.version, 2);
+      await conn.db.update(priceLists).set({ label: 'پیش‌نویس مهر', clickRateBwRials: 17_000 }).where(v2);
+      await conn.db.update(bindingRateBands).set({ priceRials: 460_000 }).where(eq(bindingRateBands.priceListVersion, 2));
+      await conn.db.delete(shippingRates).where(and(eq(shippingRates.priceListVersion, 2), eq(shippingRates.zoneId, 'other')));
+      expect((await headOf(2))!.label).toBe('پیش‌نویس مهر');
+      // جابه‌جا کردن ردیف پیش‌نویس به نسخهٔ فعال‌شده هم عوض کردن آن است.
+      expect(
+        await rejectedConstraint(
+          conn.db
+            .update(bindingRateBands)
+            .set({ priceListVersion: 1, minSheets: 801, maxSheets: 900 })
+            .where(and(eq(bindingRateBands.priceListVersion, 2), eq(bindingRateBands.minSheets, 1))),
+        ),
+      ).toBe('price_list_rows_frozen');
+      // و برعکس: ردیف نسخهٔ فعال‌شده به پیش‌نویس هم نمی‌رود.
+      expect(
+        await rejectedConstraint(
+          conn.db
+            .update(bindingRateBands)
+            .set({ priceListVersion: 2, minSheets: 801, maxSheets: 900 })
+            .where(and(eq(bindingRateBands.priceListVersion, 1), eq(bindingRateBands.minSheets, 1))),
+        ),
+      ).toBe('price_list_rows_frozen');
+
+      await conn.db.delete(priceLists).where(v2);
+      expect(await headOf(2)).toBeUndefined();
+      const [left] = await conn.db.select({ n: count() }).from(bindingRateBands).where(eq(bindingRateBands.priceListVersion, 2));
+      expect(left!.n).toBe(0);
+
+      // درج مستقیم نسخهٔ فعال (مثل SQL تست سایت): زمان فعال شدن را تریگر می‌نویسد.
+      const inserted = await conn.db.transaction(async (tx) => {
+        await tx.update(priceLists).set({ isActive: false }).where(eq(priceLists.isActive, true));
+        const [row] = await tx
+          .insert(priceLists)
+          .values({ version: 3, label: 'سه', clickRateColorRials: 1, clickRateBwRials: 1, settings: SEED_PRICE_LIST.settings, isActive: true })
+          .returning();
+        await tx.update(priceLists).set({ isActive: false }).where(eq(priceLists.version, 3));
+        await tx.update(priceLists).set({ isActive: true }).where(eq(priceLists.version, 1));
+        return row!;
+      });
+      expect(inserted.activatedAt).toBeInstanceOf(Date);
+
+      // دیوار دوم: بی تریگر، CHECK نسخهٔ فعال بی زمان فعال شدن را نمی‌پذیرد. تغییر تریگر با تراکنش برمی‌گردد.
+      let rejected: string | undefined;
+      await conn.db
+        .transaction(async (tx) => {
+          await tx.execute(sql`ALTER TABLE price_lists DISABLE TRIGGER price_lists_frozen`);
+          rejected = await rejectedConstraint(tx.update(priceLists).set({ activatedAt: null }).where(eq(priceLists.isActive, true)));
+          tx.rollback();
+        })
+        .catch(() => undefined);
+      expect(rejected).toBe('price_lists_active_activated');
+      expect(await rejectedConstraint(conn.db.update(priceLists).set({ activatedAt: null }).where(eq(priceLists.version, 1)))).toBe(
+        'price_lists_frozen',
+      );
+    });
+
+    it('ردیفی که هم‌زمان با فعال شدن نسخه می‌رسد، منتظر می‌ماند و بعد رد می‌شود', async () => {
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 2, label: 'پیش‌نویس' }, { activate: false });
+      let late: Promise<string | undefined> | undefined;
+      let settled = false;
+      await conn.db.transaction(async (tx) => {
+        await tx.update(priceLists).set({ activatedAt: NOW }).where(eq(priceLists.version, 2));
+        // اتصال دیگر، پیش از COMMIT فعال شدن: سرِ نسخه را قفل‌شده می‌بیند و منتظر می‌ماند.
+        late = rejectedConstraint(
+          conn.db.insert(bindingRateBands).values({ priceListVersion: 2, bindingTypeId: 'spiral_clear', minSheets: 801, maxSheets: 900, priceRials: 1 }),
+        ).finally(() => {
+          settled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(settled).toBe(false);
+      });
+      expect(await late).toBe('price_list_rows_frozen');
+      const [bands] = await conn.db.select({ n: count() }).from(bindingRateBands).where(eq(bindingRateBands.priceListVersion, 2));
+      expect(bands!.n).toBe(SEED_PRICE_LIST.bindingTypes.spiral_clear!.bands.length);
+    });
+
+    it('نسخهٔ تازه از روی نسخهٔ فعال با شمارهٔ بعدی، سازنده، «از روی» و رویداد؛ هر بار یک پیش‌نویس، حتی هم‌زمان', async () => {
+      const store = createTariffStore(conn);
+      // تاریخچه‌ای با شمارهٔ بزرگ‌تر: پیش‌نویس تازه بعد از بزرگ‌ترین شماره است، نه بعد از نسخهٔ فعال.
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 7, label: 'هفت' });
+      await activatePriceList(conn, 1);
+      const made = await Promise.all(Array.from({ length: 5 }, () => store.createDraft({ at: NOW, label: 'تعرفهٔ مهر 1405', actor: actor() })));
+      expect(made.map((m) => m.version)).toEqual([8, 8, 8, 8, 8]);
+      expect(made.filter((m) => m.created)).toHaveLength(1);
+      expect(await store.load(8)).toEqual({ ...(await store.load(1))!, version: 8, label: 'تعرفهٔ مهر 1405' });
+      const head = await headOf(8);
+      expect(head).toMatchObject({ isActive: false, activatedAt: null, createdBy: sara, basedOn: 1, createdAt: NOW });
+      const events = await tariffEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        action: 'tariff.draft',
+        adminUserId: sara,
+        targetType: 'price_list',
+        targetId: '8',
+        ipHash: 'ip',
+        detail: { version: 8, from: 1 },
+      });
+      // پیش‌نویسی که پاک شد، شماره‌اش آزاد است: سفارشی به آن اشاره نکرده.
+      expect(await store.deleteDraft({ version: 8, at: NOW, actor: actor() })).toBe('ok');
+      expect(await store.createDraft({ at: NOW, label: 'دوباره', actor: actor() })).toEqual({ version: 8, created: true });
+    });
+
+    it('ذخیرهٔ پیش‌نویس: سر و ردیف‌ها از نو با رویداد؛ محتوایی که عوض شده بود نه؛ همپوشانی را پایگاه داده هم می‌گیرد؛ پس از فعال شدن نه', async () => {
+      const store = createTariffStore(conn);
+      const { version } = await store.createDraft({ at: NOW, label: 'مهر', actor: actor() });
+      const base = (await store.load(version))!;
+      const spiral = base.bindingTypes.spiral_clear!;
+      const edited: PriceList = {
+        ...base,
+        label: 'تعرفهٔ مهر 1405',
+        clickRates: { color: 22_000, bw: 17_000 },
+        bindingTypes: {
+          ...base.bindingTypes,
+          spiral_clear: {
+            ...spiral,
+            bands: [
+              { minSheets: 1, maxSheets: 300, priceRials: 480_000 },
+              { minSheets: 301, maxSheets: 800, priceRials: 600_000 },
+            ],
+          },
+        },
+        shippingRates: base.shippingRates.map((r) =>
+          r.zoneId === 'tehran' && r.minWeightGrams === 0 ? { ...r, priceRials: 1_350_000 } : r,
+        ),
+      };
+      let seen: PriceList | null = null;
+      const save = (list: PriceList, verify: (current: PriceList) => boolean = () => true) =>
+        store.saveDraft({ list, verify, at: NOW, actor: actor() });
+      expect(
+        await save(edited, (current) => {
+          seen = current;
+          return true;
+        }),
+      ).toBe('ok');
+      expect(seen).toEqual(base);
+      expect(await store.load(version)).toEqual(edited);
+
+      // محتوایی که از وقتی ادمین دید عوض شده: هیچ.
+      expect(await save({ ...edited, label: 'دیگر' }, () => false)).toBe('changed');
+      expect((await store.load(version))!.label).toBe('تعرفهٔ مهر 1405');
+
+      // همپوشانی: سنجش سرویس پیش از این است، ولی پایگاه داده هم رد می‌کند و هیچ نیمه‌کاره نمی‌ماند.
+      const overlapping: PriceList = {
+        ...edited,
+        label: 'همپوشان',
+        bindingTypes: {
+          ...edited.bindingTypes,
+          spiral_clear: {
+            ...spiral,
+            bands: [
+              { minSheets: 1, maxSheets: 300, priceRials: 1 },
+              { minSheets: 300, maxSheets: 800, priceRials: 1 },
+            ],
+          },
+        },
+      };
+      expect(await rejectedConstraint(save(overlapping))).toBe('binding_rate_bands_no_overlap');
+      expect(await store.load(version)).toEqual(edited);
+      expect((await tariffEvents()).map((e) => e.action)).toEqual(['tariff.draft', 'tariff.draft_save']);
+      expect((await tariffEvents())[1]).toMatchObject({ targetId: String(version), detail: { version } });
+
+      expect(await store.activate({ version, expectedActive: 1, verify: () => true, at: NOW, actor: actor() })).toMatchObject({ ok: true });
+      expect(await save(edited)).toBe('not_draft');
+      expect(await save({ ...edited, version: 999 })).toBe('not_draft');
+    });
+
+    it('پاک کردن پیش‌نویس با ردیف‌ها و رویداد؛ نسخهٔ فعال‌شده و نسخه‌ای که نیست نه', async () => {
+      const store = createTariffStore(conn);
+      const { version } = await store.createDraft({ at: NOW, label: 'مهر', actor: actor() });
+      expect(await store.deleteDraft({ version, at: NOW, actor: actor() })).toBe('ok');
+      expect(await store.load(version)).toBeNull();
+      const [left] = await conn.db.select({ n: count() }).from(shippingRates).where(eq(shippingRates.priceListVersion, version));
+      expect(left!.n).toBe(0);
+      expect(await store.deleteDraft({ version: 1, at: NOW, actor: actor() })).toBe('not_draft');
+      expect(await store.deleteDraft({ version: 999, at: NOW, actor: actor() })).toBe('not_draft');
+      expect(await store.load(1)).not.toBeNull();
+      expect((await tariffEvents()).map((e) => [e.action, e.detail])).toEqual([
+        ['tariff.draft', { version, from: 1 }],
+        ['tariff.draft_delete', { version }],
+      ]);
+    });
+
+    it('فعال کردن: نسخهٔ قبل خاموش و رویداد در یک تراکنش؛ نسخهٔ فعال یا محتوای دیگر «عوض شد»؛ دو کلیک یک بار؛ برگشت به نسخهٔ قبل', async () => {
+      const store = createTariffStore(conn);
+      const { version } = await store.createDraft({ at: NOW, label: 'مهر', actor: actor() });
+      const activate = (target: number, expectedActive: number | null, at: Date, verify: (list: PriceList) => boolean = () => true) =>
+        store.activate({ version: target, expectedActive, verify, at, actor: actor() });
+
+      expect(await activate(version, 99, NOW)).toEqual({ ok: false, reason: 'changed', active: 1 });
+      let seen: PriceList | null = null;
+      expect(
+        await activate(version, 1, NOW, (list) => {
+          seen = list;
+          return false;
+        }),
+      ).toEqual({ ok: false, reason: 'changed', active: 1 });
+      expect(seen).toEqual(await store.load(version));
+      expect(await activate(999, 1, NOW)).toEqual({ ok: false, reason: 'not_found', active: 1 });
+      expect((await headOf(1))!.isActive).toBe(true);
+      expect((await tariffEvents()).map((e) => e.action)).toEqual(['tariff.draft']);
+
+      const at = new Date(NOW.getTime() + MINUTE);
+      expect(await activate(version, 1, at)).toEqual({ ok: true, already: false, previous: 1 });
+      expect(await headOf(version)).toMatchObject({ isActive: true, activatedAt: at });
+      expect((await headOf(1))!.isActive).toBe(false);
+      expect((await loadActivePriceList(conn)).version).toBe(version);
+      // دو کلیک: دومی همان را فعال می‌بیند، موفق و بی رویداد دوم.
+      expect(await activate(version, 1, at)).toEqual({ ok: true, already: true, previous: version });
+
+      // برگشت: نسخهٔ ۱ دوباره، با زمان اولین فعال شدنش.
+      const firstOfOne = (await headOf(1))!.activatedAt;
+      const later = new Date(NOW.getTime() + 5 * MINUTE);
+      expect(await activate(1, version, later)).toEqual({ ok: true, already: false, previous: version });
+      expect(await headOf(1)).toMatchObject({ isActive: true, activatedAt: firstOfOne });
+      expect(await headOf(version)).toMatchObject({ isActive: false, activatedAt: at });
+
+      const events = (await tariffEvents()).filter((e) => e.action === 'tariff.activate');
+      expect(events.map((e) => [e.targetId, e.detail, e.at])).toEqual([
+        [String(version), { version, previous: 1, again: false }, at],
+        ['1', { version: 1, previous: version, again: true }, later],
+      ]);
+      // فعال شدن‌ها: تعرفهٔ پایه (بی نام، با بالا آمدن وب)، بعد دو فعال کردن از پنل با نام.
+      expect(await store.activations()).toEqual([
+        { version: 1, at: firstOfOne, adminName: null },
+        { version, at, adminName: 'سارا رضایی' },
+        { version: 1, at: later, adminName: 'سارا رضایی' },
+      ]);
+    });
+
+    it('دو فعال‌سازی هم‌زمان: یکی فعال می‌شود و دیگری «عوض شد» می‌گیرد، نه خطای ایندکس یکتا', async () => {
+      const store = createTariffStore(conn);
+      await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 2, label: 'دو' });
+      await activatePriceList(conn, 1);
+      const { version: draft } = await store.createDraft({ at: NOW, label: 'مهر', actor: actor() });
+      const results = await Promise.all(
+        [2, draft].map((target) => store.activate({ version: target, expectedActive: 1, verify: () => true, at: NOW, actor: actor() })),
+      );
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      expect(results.find((r) => !r.ok)).toMatchObject({ ok: false, reason: 'changed' });
+      const active = await conn.db.select({ version: priceLists.version }).from(priceLists).where(eq(priceLists.isActive, true));
+      expect(active).toHaveLength(1);
+      expect((await tariffEvents()).filter((e) => e.action === 'tariff.activate')).toHaveLength(1);
+    });
+
+    it('فهرست نسخه‌ها: تازه‌ترین اول، شمار سفارش‌های هر نسخه با هر وضعیتی، سازنده و «از روی»', async () => {
+      const store = createTariffStore(conn);
+      await orderOn(1);
+      await orderOn(1);
+      const { version } = await store.createDraft({ at: NOW, label: 'مهر', actor: actor() });
+      const list = await store.versions();
+      expect(list.map((v) => ({ version: v.version, isActive: v.isActive, draft: v.activatedAt === null, basedOn: v.basedOn, by: v.createdBy, orders: v.orders }))).toEqual([
+        { version, isActive: false, draft: true, basedOn: 1, by: { id: sara, name: 'سارا رضایی' }, orders: 0 },
+        { version: 1, isActive: true, draft: false, basedOn: null, by: null, orders: 2 },
+      ]);
+      expect(list[1]!.label).toBe(SEED_PRICE_LIST.label);
     });
   });
 });
