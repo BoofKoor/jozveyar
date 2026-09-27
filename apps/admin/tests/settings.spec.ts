@@ -251,9 +251,13 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(field).toHaveValue('1000');
     expect(await settingOf('otp.site_hourly_limit')).toBe(1000);
     for (const bad of ['0', '100001', 'سیصد']) {
+      // هر بار از صفحهٔ تازه: خطای این سه یک متن است، و خطای بار قبل پیش از پاسخ سرور هم دیده می‌شد؛ پاسخ دیررس بعد فرم را
+      // بازمی‌نشاند و عدد بعدی را رونویسی می‌کرد (درس CI ۴٫۶).
+      await page.goto(at('/settings'));
       await field.fill(bad);
       await card(page, 'otp.site_hourly_limit').getByRole('button', { name: 'ذخیره' }).click();
       await expect(card(page, 'otp.site_hourly_limit').locator('.jy-error'), bad).toHaveText('سقف عدد صحیح 1 تا 100,000 باشد.');
+      await expect(field, bad).toHaveValue(bad);
     }
     expect(await settingOf('otp.site_hourly_limit')).toBe(1000);
     await field.fill('300');
