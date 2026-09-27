@@ -6,7 +6,7 @@ import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/che
 import { PROVINCES, findCity, findProvince, placeIsValid, popularCities, searchCities, type City } from '@jozveyar/geo';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
-import { tidyInputFa } from '@jozveyar/text/input';
+import { RECIPIENT_LIMITS, checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
 import { formatClock, formatMobile, minutesFrom } from '../../lib/checkout/format';
 import type { Step } from '../../lib/checkout/steps';
@@ -20,7 +20,6 @@ import {
 import { publishDockHeight } from '../../lib/dock';
 import type { JozveView } from '../../lib/jozveView';
 import type { OrderConfig } from '../../lib/orderConfig';
-import { RECIPIENT_LIMITS, checkRecipient, type RecipientField } from '../../lib/recipient';
 import { Note, SizeNames } from '../AnalysisCard';
 import { FlowNav, SumValue, SummaryLines, Tomans, printLabel } from './parts';
 import { JozveBrief, Pieces, Recap, RecapAddress, RecapDelivery, RecapJozveValue, placeName } from './recap';

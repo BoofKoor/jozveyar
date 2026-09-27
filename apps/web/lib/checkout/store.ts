@@ -16,9 +16,8 @@
 import type { Breakdown } from '@jozveyar/contracts';
 import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/checkout';
 import { toLatinDigits } from '@jozveyar/text';
-import { normalizeIranMobile } from '@jozveyar/text/input';
+import { checkRecipient, normalizeIranMobile, type RecipientField, type RecipientInput } from '@jozveyar/text/input';
 
-import { checkRecipient, type RecipientField, type RecipientInput } from '../recipient';
 import type { ApiFailure, ApiResult, CheckoutApi } from './api';
 import { newCheckoutKey, priceChange, type PriceChange } from './format';
 import type { Step } from './steps';
