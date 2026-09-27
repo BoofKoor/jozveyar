@@ -1012,3 +1012,30 @@ export const adminEvents = pgTable(
     index('admin_events_target').on(t.targetType, t.targetId, t.at),
   ],
 );
+
+/* ──────────────────────────── کلیدهای سرویس‌ها (برش ۴٫۶، ADR-041) ──────────────────────────── */
+
+/**
+ * کلید سرویس بیرونی که مالک از پنل گذاشته: کلید API کاوه‌نگار، قالب کد پیامکی، کد پذیرندهٔ زیبال. مقدار پنل بر همان نام در
+ * `.env` مقدم است؛ ردیف نبودن یعنی `.env` («برگرداندن به .env» ردیف را پاک می‌کند).
+ *
+ * - `sealed` مهروموم AES-256-GCM با `SECRETS_KEY` است (`sealed.ts`)، بسته به نام همین ردیف (AAD `service_secrets:<نام>`):
+ *   نشت پایگاه داده یا پشتیبانش بی `.env` کلیدی لو نمی‌دهد، و مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود. CHECK
+ *   `service_secrets_sealed` فقط شکل مهروموم را می‌پذیرد، پس مقدار خام اینجا نمی‌نشیند، حتی با کد اشتباه.
+ * - نام فقط همین سه (CHECK `service_secrets_name`): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و `PAYMENT_PROVIDER`، نه رمزهای خود
+ *   سرور. کلید تازه (برش ۷) مهاجرت تازهٔ همین CHECK را می‌خواهد.
+ * - `updated_by` بی کلید خارجی، مثل `price_lists.created_by`: ادمین پاک‌نشدنی است (`admin_users_no_delete`).
+ */
+export const serviceSecrets = pgTable(
+  'service_secrets',
+  {
+    name: text('name').primaryKey(),
+    sealed: text('sealed').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+    updatedBy: uuid('updated_by'),
+  },
+  (t) => [
+    check('service_secrets_name', sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'PAYMENT_MERCHANT_ID')`),
+    check('service_secrets_sealed', sql`${t.sealed} ~ '^v1[.][A-Za-z0-9_-]{16}[.][A-Za-z0-9_-]{22,}$'`),
+  ],
+);

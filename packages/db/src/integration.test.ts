@@ -79,6 +79,11 @@ import {
   shippingMethods,
 } from './schema.js';
 import { createTariffStore, type TariffActor } from './tariff.js';
+import { createSettingsStore, SETTING_TARGET, type SettingsActor } from './settings.js';
+import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TARGET } from './secrets.js';
+import { seal } from './sealed.js';
+import { serviceSecrets } from './schema.js';
+import { OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTING } from './reference.js';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -2486,6 +2491,215 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         { version: 1, isActive: true, draft: false, basedOn: null, by: null, orders: 2 },
       ]);
       expect(list[1]!.label).toBe(SEED_PRICE_LIST.label);
+    });
+  });
+
+  describe('تنظیمات و کلیدها در پنل روی پستگرس (برش ۴٫۶)', () => {
+    const NOW = new Date('2026-10-05T07:50:00Z');
+    const KEY = Buffer.from('00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff', 'hex');
+    let sara = '';
+    const actor = (): SettingsActor => ({ adminUserId: sara, ipHash: 'ip-hash' });
+
+    const valueOf = async (key: string) =>
+      (await conn.db.select({ value: settings.value }).from(settings).where(eq(settings.key, key)))[0]?.value;
+    const eventsOf = (targetType: string) =>
+      conn.db
+        .select({ action: adminEvents.action, targetId: adminEvents.targetId, detail: adminEvents.detail, adminUserId: adminEvents.adminUserId })
+        .from(adminEvents)
+        .where(eq(adminEvents.targetType, targetType))
+        .orderBy(adminEvents.id);
+
+    beforeAll(async () => {
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
+      sara = admin!.id;
+    });
+
+    beforeEach(async () => {
+      await conn.db.execute(sql`TRUNCATE admin_events`);
+      await conn.db.delete(serviceSecrets);
+      await conn.db.update(settings).set({ value: 2 }).where(eq(settings.key, SLA_DAYS_SETTING));
+      await conn.db.update(settings).set({ value: 300 }).where(eq(settings.key, OTP_SITE_LIMIT_SETTING));
+      await conn.db.update(settings).set({ value: OFFICIAL_HOLIDAYS }).where(eq(settings.key, HOLIDAYS_SETTING));
+      await conn.db.update(settings).set({ value: 1405 }).where(eq(settings.key, OFFICIAL_THROUGH_SETTING));
+    });
+
+    afterAll(async () => {
+      await conn.db.delete(serviceSecrets);
+      await conn.db.update(settings).set({ value: 2 }).where(eq(settings.key, SLA_DAYS_SETTING));
+      await conn.db.update(settings).set({ value: 300 }).where(eq(settings.key, OTP_SITE_LIMIT_SETTING));
+      await conn.db.update(settings).set({ value: OFFICIAL_HOLIDAYS }).where(eq(settings.key, HOLIDAYS_SETTING));
+      await conn.db.update(settings).set({ value: 1405 }).where(eq(settings.key, OFFICIAL_THROUGH_SETTING));
+    });
+
+    it('دادهٔ پایه «تطبیق‌داده‌شده تا» را ۱۴۰۵ می‌نشاند: تعطیلی‌های ۱۴۰۵ از تقویم رسمی‌اند و قمری ۱۴۰۶ پیش‌بینی', async () => {
+      await conn.db.delete(settings).where(eq(settings.key, OFFICIAL_THROUGH_SETTING));
+      const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      expect(seeded.settingsInserted).toEqual([OFFICIAL_THROUGH_SETTING]);
+      expect(await valueOf(OFFICIAL_THROUGH_SETTING)).toBe(1405);
+    });
+
+    it('تغییر تنظیم: نوشتن با رویدادش در یک تراکنش؛ «همان» بی نوشتن و بی رویداد؛ «رد» هیچ', async () => {
+      const store = createSettingsStore(conn);
+      const seen: unknown[] = [];
+      const write = await store.change({
+        key: SLA_DAYS_SETTING,
+        action: 'settings.update',
+        decide: (current) => {
+          seen.push(current);
+          return { kind: 'write', value: 3, detail: { key: SLA_DAYS_SETTING, from: 2, to: 3 } };
+        },
+        at: NOW,
+        actor: actor(),
+      });
+      expect(write).toEqual({ ok: true, written: true });
+      expect(seen).toEqual([2]);
+      expect(await valueOf(SLA_DAYS_SETTING)).toBe(3);
+      const [row] = await conn.db.select().from(settings).where(eq(settings.key, SLA_DAYS_SETTING));
+      expect(row!.updatedAt).toEqual(NOW);
+
+      expect(await store.change({ key: SLA_DAYS_SETTING, action: 'settings.update', decide: () => ({ kind: 'same' }), at: NOW, actor: actor() })).toEqual({
+        ok: true,
+        written: false,
+      });
+      expect(
+        await store.change({
+          key: SLA_DAYS_SETTING,
+          action: 'settings.update',
+          decide: () => ({ kind: 'reject', reason: 'changed', detail: { current: 3 } }),
+          at: NOW,
+          actor: actor(),
+        }),
+      ).toEqual({ ok: false, reason: 'changed', detail: { current: 3 } });
+      expect(await valueOf(SLA_DAYS_SETTING)).toBe(3);
+      expect(await eventsOf(SETTING_TARGET)).toEqual([
+        { action: 'settings.update', targetId: SLA_DAYS_SETTING, detail: { key: SLA_DAYS_SETTING, from: 2, to: 3 }, adminUserId: sara },
+      ]);
+      expect(await store.read(SLA_DAYS_SETTING)).toBe(3);
+      expect(await store.read('no.such.setting')).toBeUndefined();
+    });
+
+    it('تنظیمی که ردیفش نیست با اولین نوشتن ساخته می‌شود', async () => {
+      const store = createSettingsStore(conn);
+      await conn.db.delete(settings).where(eq(settings.key, OTP_SITE_LIMIT_SETTING));
+      const result = await store.change({
+        key: OTP_SITE_LIMIT_SETTING,
+        action: 'settings.update',
+        decide: (current) => (current === undefined ? { kind: 'write', value: 500, detail: { to: 500 } } : { kind: 'reject', reason: 'x' }),
+        at: NOW,
+        actor: actor(),
+      });
+      expect(result).toEqual({ ok: true, written: true });
+      expect(await valueOf(OTP_SITE_LIMIT_SETTING)).toBe(500);
+    });
+
+    it('هشت افزودن هم‌زمان تعطیلی، هر هشت می‌مانند: هر کدام فهرست تازه را زیر قفل می‌بیند، نه فهرست کهنه را', async () => {
+      const store = createSettingsStore(conn);
+      const dates = Array.from({ length: 8 }, (_, i) => `1406/09/${String(i + 1).padStart(2, '0')}`);
+      const results = await Promise.all(
+        dates.map((date) =>
+          store.change({
+            key: HOLIDAYS_SETTING,
+            action: 'settings.holiday_add',
+            decide: (current) => ({
+              kind: 'write',
+              value: [...(current as { date: string; title: string }[]), { date, title: 'آزمایش' }],
+              detail: { date },
+            }),
+            at: NOW,
+            actor: actor(),
+          }),
+        ),
+      );
+      expect(results.every((r) => r.ok && r.written)).toBe(true);
+      const list = (await valueOf(HOLIDAYS_SETTING)) as { date: string }[];
+      expect(list).toHaveLength(OFFICIAL_HOLIDAYS.length + 8);
+      expect(dates.every((date) => list.some((h) => h.date === date))).toBe(true);
+      expect(await eventsOf(SETTING_TARGET)).toHaveLength(8);
+    });
+
+    it('کلید پنل: مهروموم با نام، رویداد بی مقدار، و «همان که دیده شد» زیر قفل؛ برگرداندن به .env ردیف را پاک می‌کند', async () => {
+      const store = createSecretStore(conn);
+      const value = `kn-${randomUUID()}`;
+      const sealed = seal(KEY, value, serviceKeyContext('SMS_API_KEY'));
+      // دیده بود «مقدار پنلی نیست»، و نیست: نوشته می‌شود.
+      expect(await store.put({ name: 'SMS_API_KEY', sealed, verify: (current) => current === null, at: NOW, actor: actor(), detail: { from: 'env' } })).toBe('ok');
+      const [row] = await conn.db.select().from(serviceSecrets);
+      expect(row).toEqual({ name: 'SMS_API_KEY', sealed, updatedAt: NOW, updatedBy: sara });
+      expect(JSON.stringify(row)).not.toContain(value);
+      expect(await store.list()).toEqual([{ name: 'SMS_API_KEY', sealed, updatedAt: NOW, updatedBy: { id: sara, name: 'سارا رضایی' } }]);
+      expect(await store.read('PAYMENT_MERCHANT_ID')).toBeNull();
+
+      // باز کردن با همان SECRETS_KEY، و بی آن یا با کلید دیگر «خوانده نشد»، نه .env و نه خالی.
+      const logs: string[] = [];
+      const env = { SMS_API_KEY: 'env-value-1234' };
+      expect(resolveServiceKey('SMS_API_KEY', await store.read('SMS_API_KEY'), env, KEY, (m) => logs.push(m))).toMatchObject({ source: 'panel', value });
+      expect(resolveServiceKey('SMS_API_KEY', await store.read('SMS_API_KEY'), env, Buffer.alloc(32, 7), (m) => logs.push(m))).toMatchObject({
+        source: 'unreadable',
+        value: null,
+      });
+      expect(logs.join('\n')).not.toContain(value);
+
+      // دیده بود «مقدار پنلی نیست»، ولی حالا هست: نه نوشتن و نه رویداد.
+      const other = seal(KEY, 'other-value-5678', serviceKeyContext('SMS_API_KEY'));
+      expect(await store.put({ name: 'SMS_API_KEY', sealed: other, verify: (current) => current === null, at: NOW, actor: actor(), detail: {} })).toBe('changed');
+      expect((await store.read('SMS_API_KEY'))!.sealed).toBe(sealed);
+      expect(await store.remove({ name: 'SMS_API_KEY', verify: (current) => current === other, at: NOW, actor: actor(), detail: {} })).toBe('changed');
+
+      expect(await store.remove({ name: 'SMS_API_KEY', verify: (current) => current === sealed, at: NOW, actor: actor(), detail: {} })).toBe('ok');
+      expect(await store.list()).toEqual([]);
+      expect(resolveServiceKey('SMS_API_KEY', await store.read('SMS_API_KEY'), env, KEY)).toEqual({ source: 'env', value: 'env-value-1234' });
+      // دوباره پاک کردن چیزی را که نیست: «عوض شد»، بی رویداد.
+      expect(await store.remove({ name: 'SMS_API_KEY', verify: () => true, at: NOW, actor: actor(), detail: {} })).toBe('changed');
+
+      const events = await eventsOf(SERVICE_KEY_TARGET);
+      expect(events).toEqual([
+        { action: 'settings.key_set', targetId: 'SMS_API_KEY', detail: { from: 'env', name: 'SMS_API_KEY' }, adminUserId: sara },
+        { action: 'settings.key_revert', targetId: 'SMS_API_KEY', detail: { name: 'SMS_API_KEY' }, adminUserId: sara },
+      ]);
+      expect(JSON.stringify(events)).not.toContain(value);
+    });
+
+    it('هشت نوشتن هم‌زمان یک کلید از یک دیده («مقدار پنلی نیست»): یکی می‌نشیند و بقیه «عوض شد»', async () => {
+      const store = createSecretStore(conn);
+      // اتصال‌ها از پیش باز، تا هشت تراکنش واقعاً هم‌زمان باشند، نه پشت‌سرهم با ساختن اتصال.
+      await Promise.all(Array.from({ length: 8 }, () => conn.db.execute(sql`SELECT pg_sleep(0.02)`)));
+      const results = await Promise.all(
+        Array.from({ length: 8 }, (_, i) =>
+          store.put({
+            name: 'PAYMENT_MERCHANT_ID',
+            sealed: seal(KEY, `value-${i}-aaaa`, serviceKeyContext('PAYMENT_MERCHANT_ID')),
+            verify: (current) => current === null,
+            at: NOW,
+            actor: actor(),
+            detail: {},
+          }),
+        ),
+      );
+      expect(results.filter((r) => r === 'ok')).toHaveLength(1);
+      expect(results.filter((r) => r === 'changed')).toHaveLength(7);
+      expect(await eventsOf(SERVICE_KEY_TARGET)).toHaveLength(1);
+    });
+
+    it('پایگاه داده نام دیگری و مقدار خام را نمی‌پذیرد، و مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود', async () => {
+      const sealed = seal(KEY, 'value-1234', serviceKeyContext('SMS_API_KEY'));
+      for (const name of ['CHECKOUT_MODE', 'SMS_PROVIDER', 'PAYMENT_PROVIDER', 'SECRETS_KEY', 'SESSION_SECRET', 'sms_api_key']) {
+        expect(await rejectedConstraint(conn.db.insert(serviceSecrets).values({ name, sealed, updatedAt: NOW })), name).toBe('service_secrets_name');
+      }
+      for (const raw of ['kavenegar-api-key-1234', '', 'v1.short.x', `v2.${sealed.slice(3)}`]) {
+        expect(await rejectedConstraint(conn.db.insert(serviceSecrets).values({ name: 'SMS_API_KEY', sealed: raw, updatedAt: NOW })), raw).toBe(
+          'service_secrets_sealed',
+        );
+      }
+      // مقدار مهروموم‌شدهٔ کلید API در ردیف کد پذیرنده: شکلش درست است، ولی باز نمی‌شود.
+      await conn.db.insert(serviceSecrets).values({ name: 'PAYMENT_MERCHANT_ID', sealed, updatedAt: NOW });
+      const store = createSecretStore(conn);
+      expect(resolveServiceKey('PAYMENT_MERCHANT_ID', await store.read('PAYMENT_MERCHANT_ID'), {}, KEY, () => undefined)).toMatchObject({
+        source: 'unreadable',
+      });
     });
   });
 });

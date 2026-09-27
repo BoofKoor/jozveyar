@@ -99,6 +99,13 @@
       "when": 1790516782119,
       "tag": "0013_price_list_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790524318078,
+      "tag": "0014_service_secrets",
+      "breakpoints": true
     }
   ]
 }

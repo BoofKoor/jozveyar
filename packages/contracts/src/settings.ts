@@ -20,6 +20,11 @@ export const SETTING_SCHEMAS = {
   'order.sla_days': z.number().int().min(1).max(30),
   /** تعطیلی‌های رسمی؛ روز کاری تحویل به پست آنها را نمی‌شمارد (ADR-034). */
   'calendar.holidays': z.array(holidaySchema),
+  /**
+   * تعطیلی‌ها تا پایان این سال شمسی با تقویم رسمی منتشرشده تطبیق داده شده‌اند؛ تاریخ قمری سال‌های بعد پیش‌بینی است و پنل
+   * تا تطبیقشان هشدار می‌دهد (برش ۴٫۶).
+   */
+  'calendar.official_through': z.number().int().min(1400).max(1500),
   /** سقف کد پیامکی در ساعت برای کل سایت (ADR-033)؛ جلوی «پیامک‌سازی» با شماره‌ها و IPهای زیاد. */
   'otp.site_hourly_limit': z.number().int().min(1).max(100_000),
 } as const;
