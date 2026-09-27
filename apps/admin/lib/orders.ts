@@ -48,9 +48,14 @@ export type Seg = string | { num: string } | { ltr: string };
 
 const num = (value: number): Seg => ({ num: formatNumber(value) });
 
-/** تکه‌ها با جداکننده؛ `[[a], [b]]` ← `a · b`. */
-function joined(parts: Seg[][], separator = ' · '): Seg[] {
-  return parts.flatMap((part, i) => (i === 0 ? part : [separator, ...part]));
+const VOLUME_WORDS: Record<number, string> = { 1: 'یک', 2: 'دو', 3: 'سه', 4: 'چهار', 5: 'پنج' };
+
+/** شمار جلد، همان طرح: «دو جلد»؛ بیش از پنج با رقم. */
+export const volumesSegs = (volumes: number): Seg[] => [VOLUME_WORDS[volumes] ?? num(volumes), ' جلد'];
+
+/** تکه‌ها با جداکننده؛ `[[a], [b]]` ← `a · b`، و با `last` پیش از آخری: «413، 412 و 410». */
+function joined(parts: Seg[][], separator = ' · ', last = separator): Seg[] {
+  return parts.flatMap((part, i) => (i === 0 ? part : [i === parts.length - 1 ? last : separator, ...part]));
 }
 
 /* ───────────────────────── فهرست: پارامترها و جست‌وجو ───────────────────────── */
@@ -372,10 +377,18 @@ export interface Fact {
   value: Seg[];
 }
 
-/** مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو · تحریر ۸۰ گرم»، صحافی با صفحه و برگ و جلد، و تعداد. */
+/**
+ * مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو · تحریر ۸۰ گرم»، صحافی با صفحه و برگ و جلد («دو جلد (413 و 412 برگ)»، طرح برش ۵)، و
+ * تعداد.
+ */
 export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefined): Fact[] {
   const papers = [...new Set(item.rules.map((rule) => rule.paperName ?? rule.paperTypeId))];
   const volumes = priced?.volumes ?? 1;
+  const perVolume = priced?.sheetsPerVolume ?? [];
+  const sheetsOf: Seg[] =
+    volumes > 1 && perVolume.length === volumes
+      ? [' (', ...joined(perVolume.map((sheets) => [num(sheets)]), '، ', ' و '), ' برگ)']
+      : [];
   return [
     {
       label: 'چاپ',
@@ -390,7 +403,8 @@ export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefine
           ' صفحه',
           ...(priced ? ['، ', num(priced.sheets), ' برگ'] : []),
           '، ',
-          ...(volumes === 1 ? ['یک جلد'] : [num(volumes), ' جلد']),
+          ...volumesSegs(volumes),
+          ...sheetsOf,
         ],
       ]),
     },
@@ -596,7 +610,7 @@ export type PrintView =
   | { kind: 'unpaid' }
   | { kind: 'purged' }
   | { kind: 'closed' }
-  | { kind: 'ready'; volumes: VolumeView[]; reused: boolean; note: Seg[] }
+  | { kind: 'ready'; volumes: VolumeView[]; changed: boolean; note: Seg[] }
   | { kind: 'building'; retrying: boolean }
   | ({ kind: 'failed'; rebuild: { until: Date | null } | null } & JobFailure);
 
@@ -623,7 +637,9 @@ export function printView(details: PanelOrderDetails, item: PanelOrderItem, at: 
         bytes: file.sizeBytes,
         builtAt: file.createdAt,
       })),
-      reused: count === 1 && item.printFiles[0]!.storageKey === item.printPdfKey,
+      // صفحه‌ای اندازه گرفت، چرخید یا حاشیه‌نویسی‌اش جزو صفحه شد؛ فقط آن وقت «PDF اصلی جزوه» (طرح، سؤال ۳۹). تقسیم به جلد
+      // به‌تنهایی نه: جلدها پشت‌سرهم همان PDF جزوه‌اند.
+      changed: item.printFiles.some((file) => file.changes !== null),
       note: changesNote(item),
     };
   }
@@ -693,7 +709,7 @@ export function changesNote(item: PanelOrderItem): Seg[] {
   const rotated = mergedRuns(item.printFiles.flatMap((file) => file.changes?.rotated ?? []));
   const annotated = mergedRuns(item.printFiles.flatMap((file) => file.changes?.annotated ?? []));
   const volumes = item.printFiles.length;
-  const split: Seg[] = volumes > 1 ? [`به ${VOLUME_WORDS[volumes] ?? formatNumber(volumes)} جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده`] : [];
+  const split: Seg[] = volumes > 1 ? ['به ', ...volumesSegs(volumes), ' تقسیم شد، همان‌طور که صحافی‌اش حساب شده'] : [];
   const clauses: Seg[][] = [
     ...listed(resized, ([first, last, w, h]) => [...runRef(item, first!, last!), ` اندازهٔ ${sizeLabel(w!, h!)} داشت و روی A4 نشست`]),
     ...listed(rotated, ([first, last]) => [...runRef(item, first!, last!), ' افقی بود و چرخید، بالایش لبهٔ چپ کاغذ']),
@@ -708,7 +724,6 @@ export function changesNote(item: PanelOrderItem): Seg[] {
   return [...joined(clauses, '؛ '), ...rest, ...(split.length ? ['؛ ', ...split] : []), '.'];
 }
 
-const VOLUME_WORDS: Record<number, string> = { 2: 'دو', 3: 'سه', 4: 'چهار', 5: 'پنج' };
 
 export type TicketView =
   | { kind: 'unpaid' }

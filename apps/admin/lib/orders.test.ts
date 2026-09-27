@@ -53,6 +53,7 @@ import {
   timelineWhen,
   transitionOf,
   volumeFileName,
+  volumesSegs,
   type Seg,
 } from './orders';
 
@@ -454,7 +455,7 @@ describe('جزئیات سفارش', () => {
     expect(printView(ready, ready.items[0]!, NOW)).toEqual({
       kind: 'ready',
       volumes: [{ volume: 1, fileName: 'jozve-10027-1.pdf', firstPage: 1, lastPage: 120, sheets: 60, bytes: 40_265_318, builtAt: built }],
-      reused: true,
+      changed: false,
       note: ['همهٔ صفحه‌ها A4 عمودی بود؛ فایل چاپ همان PDF جزوه است.'],
     });
     const queued = details({ rest: { pdfJob: { ...details().pdfJob!, status: 'queued', attempts: 0 } } });
@@ -498,10 +499,21 @@ describe('جزئیات سفارش', () => {
       ['jozve-10027-1-jeld-1.pdf', 1, 60],
       ['jozve-10027-1-jeld-2.pdf', 61, 120],
     ]);
-    expect(view.kind === 'ready' && [view.reused, text(view.note)]).toEqual([
+    // فقط تقسیم: بی «PDF اصلی جزوه» (طرح، سؤال ۳۹)؛ جلدها پشت‌سرهم همان PDF جزوه‌اند.
+    expect(view.kind === 'ready' && [view.changed, text(view.note)]).toEqual([
       false,
       'همهٔ صفحه‌ها A4 عمودی بود؛ فقط به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.',
     ]);
+    // صفحه‌ای عوض شد: با «PDF اصلی جزوه».
+    const resized = details({ item: { ...d.items[0]!, printFiles: [volume(1, 1, 60, { changes: { resized: [[3, 3, 612, 792]] } }), volume(2, 61, 120)] } });
+    const changed = printView(resized, resized.items[0]!, NOW);
+    expect(changed.kind === 'ready' && changed.changed).toBe(true);
+    // صحافی و سر کارت همان طرح: «دو جلد (413 و 412 برگ)»، و سه جلد با «و» پیش از آخری.
+    const facts = (volumes: number, sheetsPerVolume: number[]) =>
+      text(specFacts({ ...d.items[0]!, pageCount: 1650 }, { ...BREAKDOWN.items[0]!, sheets: 825, volumes, sheetsPerVolume })[1]!.value);
+    expect(facts(2, [413, 412])).toBe('طلق و سیم · 1,650 صفحه، 825 برگ، دو جلد (413 و 412 برگ)');
+    expect(facts(3, [275, 275, 275])).toBe('طلق و سیم · 1,650 صفحه، 825 برگ، سه جلد (275، 275 و 275 برگ)');
+    expect(text(volumesSegs(7))).toBe('7 جلد');
     expect([volumeFileName(10040, 1, 1, 1), volumeFileName(10040, 1, 2, 2), pdfFileName(10040, 1)]).toEqual([
       'jozve-10040-1.pdf',
       'jozve-10040-1-jeld-2.pdf',

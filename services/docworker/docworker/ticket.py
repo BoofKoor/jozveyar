@@ -32,8 +32,9 @@ PREPARE_TICKET = "prepare_ticket"
 
 A4 = fitz.paper_rect("a4")
 MARGIN = 42  # حدود ۱۵ میلی‌متر
-# برچسب پست و خط بریدن در پایین برگه، همیشه همان‌جا.
-LABEL_HEIGHT = 250
+# برچسب پست و خط بریدن در پایین برگه، همیشه همان‌جا؛ بیشترین بلندی، با نشانی دوخطی در اندازهٔ طرح. نام و نشانی بلندتر
+# (تا ۱۰۰ و ۵۰۰ نویسه، `RECIPIENT_LIMITS`) کوچک می‌شوند تا جا شوند، نه اینکه برگه ساخته نشود.
+LABEL_HEIGHT = 290
 PREVIEW_DPI = 150
 # ویرایشی که وسط هر ساختن برسد، ساختن را از نو می‌کند؛ بیش از این یعنی چیزی غیرعادی است و کار بعداً دوباره امتحان می‌شود.
 MAX_REBUILDS = 3
@@ -50,7 +51,7 @@ SIDES = {"double": "دورو", "single": "یکرو"}
 # بیشترین فایلی که برگه نام می‌برد؛ بقیه با شمارشان. فایل چاپ همه را دارد، و برگه یک برگ است.
 MAX_LISTED_SECTIONS = 12
 # اندازهٔ قلم قاب «سیاه‌سفید · دورو»، همان `.mode` در CSS.
-MODE_SIZE = 13
+MODE_SIZE = 19
 
 
 def ticket_keys(order_number: int, stamp: str) -> tuple[str, str]:
@@ -109,6 +110,15 @@ def _ltr(text: str) -> str:
     return f"&#x202A;{html.escape(text)}&#x202C;"
 
 
+def _keep(text: str) -> str:
+    """یک تکه که روی یک خط می‌ماند: فاصله‌هایش نشکن. MuPDF در خواندن متن باز همان‌جا واژه‌ها را جدا می‌کند."""
+    return text.replace(" ", "&#160;")
+
+
+# فاصلهٔ میان تکه‌های ردیف برچسب (طرح: ۵cqi، حدود ۳۰ پوینت) با یک جای شکستن در آخرش.
+ROW_GAP = "&#160;" * 6 + " "
+
+
 def _phone(phone: str) -> str:
     """«0915 234 5678»، مثل `phoneText` پنل."""
     return f"{phone[:4]} {phone[4:7]} {phone[7:]}" if len(phone) == 11 and phone.isdigit() else phone
@@ -125,30 +135,32 @@ def _pages(first: int, last: int) -> str:
 
 
 # جدول‌های MuPDF ستون‌ها را همیشه از چپ به راست می‌چینند، پس هر ردیف به ترتیب دیداری نوشته شده: ستون راست آخر.
+# اندازه‌ها همان طرح (`m-ticket`، `docs/ui/mockups/admin.html`): آنجا بر حسب cqi، یک درصد پهنای برگ، که روی A4 ۵٫۹۵ پوینت است.
 CSS = """
 @font-face { font-family: vz; src: url(Vazirmatn-Regular.ttf); }
 @font-face { font-family: vz; src: url(Vazirmatn-SemiBold.ttf); font-weight: bold; }
 * { font-family: vz; color: #000000; } /* print-black برند: فقط چاپ تک‌رنگ */
-body { direction: rtl; font-size: 10.5pt; line-height: 1.55; margin: 0; }
+body { direction: rtl; font-size: 14pt; line-height: 1.6; margin: 0; }
 p { margin: 0; }
-.k { font-size: 9pt; }
-.no { font-size: 46pt; font-weight: bold; line-height: 1.05; margin-top: 2pt; }
-.due { font-size: 14pt; font-weight: bold; margin-top: 8pt; }
-.rule { border-top: 1.2pt solid #000000; margin: 12pt 0 10pt 0; }
-.item { margin-bottom: 12pt; }
-.title { font-size: 12.5pt; font-weight: bold; }
-.mode { font-size: 13pt; font-weight: bold; border: 1.4pt solid #000000; padding: 1pt 0; text-align: center; }
+.k { font-size: 13pt; }
+.no { font-size: 65pt; font-weight: bold; line-height: 1.05; }
+.due { font-size: 19pt; font-weight: bold; margin-top: 12pt; }
+.rule { border-top: 1.8pt solid #000000; margin: 18pt 0 14pt 0; }
+.item { margin-bottom: 18pt; }
+.title { font-size: 18pt; font-weight: bold; }
+.mode { font-size: 19pt; font-weight: bold; border: 2.1pt solid #000000; padding: 2pt 0; text-align: center; }
 table { border-collapse: collapse; width: 100%; }
-td { vertical-align: top; padding: 1.5pt 0; }
-td.dt { font-weight: bold; width: 62pt; }
+td { vertical-align: top; padding: 2pt 0; }
+td.dt { font-weight: bold; width: 95pt; }
 td.l { text-align: left; white-space: nowrap; }
-.cutline { border-top: 1pt dashed #000000; margin-bottom: 2pt; }
-.cut { font-size: 8.5pt; text-align: center; margin-bottom: 8pt; }
-.label { border: 1.6pt solid #000000; padding: 10pt 12pt; }
-.name { font-size: 17pt; font-weight: bold; line-height: 1.35; }
-.addr { font-size: 12pt; margin-top: 4pt; }
-.row { font-size: 12pt; margin-top: 6pt; }
-.foot { font-size: 8pt; margin-top: 6pt; }
+.cutline { border-top: 1.8pt dashed #000000; margin-bottom: 3pt; }
+.cut { font-size: 12pt; text-align: center; margin-bottom: 12pt; }
+.label { border: 2.4pt solid #000000; padding: 16pt 20pt; }
+.label .k { font-size: 12pt; }
+.name { font-size: 25pt; font-weight: bold; line-height: 1.4; }
+.addr { font-size: 18pt; margin-top: 6pt; }
+.row { font-size: 18pt; margin-top: 8pt; }
+.foot { font-size: 11pt; margin-top: 8pt; }
 """
 
 
@@ -164,22 +176,24 @@ def _item_html(data: TicketData, item: TicketItem, bold: fitz.Font) -> str:
         rows += f'<tr><td class="l">{_pages(rest[0][1], rest[-1][2])}</td><td>و {len(rest)} فایل دیگر</td></tr>'
     count = VOLUME_WORDS.get(volumes, str(volumes))
     binding = f"{html.escape(item.binding)} · {count} جلد"
+    parts = ""
     if volumes == 1:
         # یک جلد: فایل چاپ همان نام جزوه است، در سر.
         title = _ltr(jozve_file_name(data.order_number, item.seq, 1, 1))
     else:
-        # هر جلد ردیف خودش: دو نام لاتین در یک خط فارسی را MuPDF جابه‌جا می‌چید.
+        # هر جلد ردیف خودش در ردیف «جلدها»، هم‌تراز فایل‌ها: دو نام لاتین در یک خط فارسی را MuPDF جابه‌جا می‌چید.
         title = f"{count} جلد، هر جلد یک فایل"
-        binding += "<table>" + "".join(
+        volume_rows = "".join(
             f'<tr><td class="l">{_pages(first, last)} · {sheets:,} برگ</td>'
             f"<td>جلد {n} · {_ltr(jozve_file_name(data.order_number, item.seq, n, volumes))}</td></tr>"
             for n, (first, last, sheets) in enumerate(item.volumes, start=1)
-        ) + "</table>"
+        )
+        parts = f'<tr><td><table>{volume_rows}</table></td><td class="dt">جلدها</td></tr>'
     papers = "، ".join(html.escape(p) for p in item.papers)
     mode = f"{_color(item.color_modes)} · {SIDES.get(item.sides_mode, item.sides_mode)}"
     # قاب به اندازهٔ متن: جدول MuPDF پهنای خانه را از محتوا درست نمی‌گیرد، پس پهنا با خود قلم اندازه گرفته می‌شود (شکل
     # جداِ حرف‌ها، پس کمی گشادتر از متن پیوسته).
-    width = bold.text_length(mode, fontsize=MODE_SIZE) + 20
+    width = bold.text_length(mode, fontsize=MODE_SIZE) + 28
     return f"""
 <div class="item">
   <table><tr>
@@ -190,6 +204,7 @@ def _item_html(data: TicketData, item: TicketItem, bold: fitz.Font) -> str:
     <tr><td><table>{rows}</table></td><td class="dt">فایل‌ها</td></tr>
     <tr><td>{item.page_count:,} صفحه، {item.sheets:,} برگ · {papers}</td><td class="dt">چاپ</td></tr>
     <tr><td>{binding}</td><td class="dt">صحافی</td></tr>
+    {parts}
     <tr><td>{item.copies:,} نسخه</td><td class="dt">تعداد</td></tr>
   </table>
 </div>"""
@@ -206,8 +221,9 @@ def ticket_html(data: TicketData, fonts: str) -> tuple[str, str]:
 <p class="k">{paid}</p>
 <div class="rule"></div>
 {"".join(_item_html(data, item, bold) for item in data.items)}"""
-    row = [f"کد پستی {html.escape(data.postal_code)}"] if data.postal_code else []
-    row += [f"موبایل {_ltr(_phone(data.recipient_phone))}", html.escape(data.shipping)]
+    # هر تکه یکجا (فاصلهٔ نشکن) و شکستن فقط میان تکه‌ها، مثل ردیف flex-wrap طرح: «پست / پیشتاز» دو خط نمی‌شود.
+    row = [_keep(f"کد پستی {html.escape(data.postal_code)}")] if data.postal_code else []
+    row += [_keep(f"موبایل {_ltr(_phone(data.recipient_phone))}"), _keep(html.escape(data.shipping))]
     bottom = f"""
 <div class="cutline"></div>
 <p class="cut">برچسب پست: از اینجا ببر</p>
@@ -215,7 +231,7 @@ def ticket_html(data: TicketData, fonts: str) -> tuple[str, str]:
   <p class="k">گیرنده</p>
   <p class="name">{html.escape(data.recipient_name)} {data.order_number}</p>
   <p class="addr">{html.escape(data.address)}</p>
-  <p class="row">{"&#160;&#160;&#160;·&#160;&#160;&#160;".join(row)}</p>
+  <p class="row">{ROW_GAP.join(row)}</p>
 </div>
 <p class="foot">شمارهٔ کنار نام را متصدی پست در نام گیرنده می‌نویسد؛ کد رهگیری با همین پیدا می‌شود.</p>"""
     return top, bottom
@@ -227,18 +243,21 @@ def render_ticket(data: TicketData, pdf_path: str, png_path: str) -> None:
     archive = fitz.Archive(fonts)
     doc = fitz.open()
     try:
-        # برچسب همیشه پایین برگه و همان اندازه: اول روی سند جدا اندازه گرفته می‌شود، بعد جایش را از پایین می‌گیرد.
+        # برچسب همیشه پایین برگه: اول روی سند جدا اندازه گرفته می‌شود، بعد جایش را از پایین می‌گیرد. نام و نشانی بلند تا
+        # نصف کوچک می‌شوند (`scale`)، و روی برگه هم همان مقیاس.
         region = fitz.Rect(MARGIN, A4.height - MARGIN - LABEL_HEIGHT, A4.width - MARGIN, A4.height - MARGIN)
         with fitz.open() as scratch:
-            spare, _ = scratch.new_page(width=A4.width, height=A4.height).insert_htmlbox(
-                region, bottom, css=CSS, archive=archive, scale_low=1
+            spare, scale = scratch.new_page(width=A4.width, height=A4.height).insert_htmlbox(
+                region, bottom, css=CSS, archive=archive, scale_low=0.5
             )
         if spare < 0:
             raise PermanentFailure("ticket_overflow", "برچسب پست در جایش نشد")
-        # دو پوینت جای بیشتر: همان اندازهٔ درست گاهی با گرد کردن جا نمی‌شد و MuPDF هیچ چیز نمی‌نوشت.
+        # دو پوینت جای بیشتر: همان اندازهٔ درست گاهی با گرد کردن جا نمی‌شد و MuPDF هیچ چیز نمی‌نوشت. کوچک‌شده همهٔ جا را
+        # گرفته، پس به جای جای بیشتر، کمی کوچک‌تر.
         label = fitz.Rect(region.x0, region.y0 + max(spare - 2, 0), region.x1, region.y1)
         page = doc.new_page(width=A4.width, height=A4.height)
-        if page.insert_htmlbox(label, bottom, css=CSS, archive=archive, scale_low=1)[0] < 0:
+        low = 1 if scale >= 1 else max(scale - 0.02, 0.48)
+        if page.insert_htmlbox(label, bottom, css=CSS, archive=archive, scale_low=low)[0] < 0:
             raise PermanentFailure("ticket_overflow", "برچسب پست در جایش نشد")
         # سر و جزوه‌ها بالای آن؛ اگر جا نشدند (جزوه‌های زیاد) کوچک می‌شوند.
         page.insert_htmlbox(fitz.Rect(MARGIN, MARGIN, A4.width - MARGIN, label.y0 - 12), top, css=CSS, archive=archive)

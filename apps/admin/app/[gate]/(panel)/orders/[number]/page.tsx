@@ -40,6 +40,7 @@ import {
   ticketView,
   timelineWhen,
   volumeFileName,
+  volumesSegs,
   type JobFailure,
 } from '../../../../../lib/orders';
 import { can } from '../../../../../lib/server/auth';
@@ -200,7 +201,8 @@ function PrintRows({
               )}
               {' · '}
               <Size bytes={volume.bytes} />
-              {' · '}ساخته شد {whenText(volume.builtAt, now)}
+              {/* جلدها با هم ساخته می‌شوند؛ زمان فقط در ردیف یک‌جلدی، همان طرح */}
+              {many ? null : <> · ساخته شد {whenText(volume.builtAt, now)}</>}
             </p>
           </div>
           {canDownload ? (
@@ -216,7 +218,7 @@ function PrintRows({
           {i === view.volumes.length - 1 ? (
             <p className="ad-print__orig">
               <Segments segs={view.note} />
-              {!view.reused && canDownload && item.printPdfKey ? (
+              {view.changed && canDownload && item.printPdfKey ? (
                 <>
                   {' '}
                   <a
@@ -580,7 +582,7 @@ export default async function OrderPage({
                 </h2>
                 {(breakdown.items[i]?.volumes ?? 1) > 1 ? (
                   <span className="jy-card__meta">
-                    <span className="num">{formatNumber(breakdown.items[i]!.volumes)}</span> جلد، هر جلد یک فایل
+                    <Segments segs={[...volumesSegs(breakdown.items[i]!.volumes), '، هر جلد یک فایل']} />
                   </span>
                 ) : item.sections.length > 1 ? (
                   <span className="jy-card__meta">

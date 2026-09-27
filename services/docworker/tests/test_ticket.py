@@ -67,6 +67,25 @@ def test_a_ticket_is_one_a4_page_with_the_label_at_the_bottom(tmp_path):
         assert (image.size, image.mode) == ((1240, 1755), "L")
 
 
+def test_the_longest_name_and_address_shrink_into_the_label(tmp_path):
+    # بیشترین نام و نشانی مسیر خرید (`RECIPIENT_LIMITS`: ۱۰۰ و ۵۰۰ نویسه) با استان و شهر: برچسب کوچک می‌شود، نه اینکه برگه
+    # ساخته نشود (شاهد: بی کوچک شدن، همین برگه `ticket_overflow` بود)؛ هنوز پایین برگه، با شماره کنار نام و ردیف آخرش.
+    data = sample(
+        recipient_name=("صادقی‌نیا " * 10)[:100],
+        address="تهران، تهران، " + ("خیابان ولیعصر، کوچهٔ بهار، پلاک 12، " * 14)[:500],
+    )
+    pdf, png = str(tmp_path / "t.pdf"), str(tmp_path / "t.png")
+    render_ticket(data, pdf, png)
+    with fitz.open(pdf) as doc:
+        assert doc.page_count == 1
+        found = words(doc[0])
+        numbers = sorted(y for text, _, y in found if text == "10027")
+        assert len(numbers) == 2 and numbers[0] < 100 and numbers[1] > 450
+        last = {text: y for text, _, y in found if text in ("9187654321", "5678")}
+        assert last.keys() == {"9187654321", "5678"} and min(last.values()) > numbers[1]
+        assert max(last.values()) < 842 - ticket.MARGIN
+
+
 def test_every_string_from_a_person_is_escaped():
     data = sample(recipient_name='<img src="x">مریم', address="تهران & <b>شمال</b>", shipping="پست <i>")
     data.items[0].sections = [('<script>a</script>.pdf', 1, 120)]
