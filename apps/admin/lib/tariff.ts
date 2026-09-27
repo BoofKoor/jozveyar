@@ -15,7 +15,7 @@
 import type { PriceList, ShippingRate } from '@jozveyar/contracts';
 import { quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { formatJalali, formatNumber, rialsToTomans, toLatinDigits, tomansToRials } from '@jozveyar/text';
+import { formatJalali, formatJalaliNumeric, formatNumber, formatTehranTime, rialsToTomans, toLatinDigits, tomansToRials } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
 
 import type { Seg } from './orders';
@@ -100,6 +100,35 @@ export function draftFormOf(list: PriceList): DraftForm {
     bands: bands.map((band) => ({ from: String(band.minSheets), to: String(band.maxSheets), price: tomansField(band.priceRials) })),
     ship,
   };
+}
+
+/**
+ * فرم پیش‌نویس از فیلدهای فرم HTML (server action): `label`، `bw`، `color`، `band.<ردیف>.from|to|price` و
+ * `ship.<منطقه>:<آغاز وزن>`. هر چیز دیگر نادیده؛ هر مقدار کوتاه‌شده، و ردیف‌ها به ترتیب شماره‌شان. سنجش با `readDraft`.
+ */
+export function draftFormFromEntries(entries: Iterable<[string, unknown]>): DraftForm {
+  const form: DraftForm = { label: '', bw: '', color: '', bands: [], ship: {} };
+  const bands = new Map<number, BandInput>();
+  for (const [key, raw] of entries) {
+    if (typeof raw !== 'string') continue;
+    const value = raw.slice(0, 200);
+    if (key === 'label' || key === 'bw' || key === 'color') {
+      form[key] = value;
+      continue;
+    }
+    const band = /^band\.(\d{1,3})\.(from|to|price)$/.exec(key);
+    if (band) {
+      const index = Number(band[1]);
+      const row = bands.get(index) ?? { from: '', to: '', price: '' };
+      row[band[2] as keyof BandInput] = value;
+      bands.set(index, row);
+      continue;
+    }
+    const ship = /^ship\.([a-z_]{1,20}:\d{1,9})$/.exec(key);
+    if (ship) form.ship[ship[1]!] = value;
+  }
+  form.bands = [...bands.entries()].sort(([a], [b]) => a - b).map(([, row]) => row);
+  return form;
 }
 
 type Whole = { ok: true; value: number } | { ok: false; error: 'empty' | 'invalid' | 'too_big' };
@@ -589,4 +618,26 @@ export function activePeriods(moments: readonly { version: number; at: Date; adm
     periods.set(moment.version, list);
   });
   return periods;
+}
+
+/** «1405/06/20 تا 1405/07/05»؛ دوره‌ای که در یک روز باز و بسته شد با ساعت‌هایش: «1405/07/05، 10:48 تا 11:02». */
+function spanText(period: ActivePeriod & { to: Date }): Seg[] {
+  const from = formatJalaliNumeric(period.from);
+  const to = formatJalaliNumeric(period.to);
+  if (from !== to) return [{ num: from }, ' تا ', { num: to }];
+  return [{ num: from }, '، ', { num: formatTehranTime(period.from) }, ' تا ', { num: formatTehranTime(period.to) }];
+}
+
+/**
+ * دوره‌های فعال بودن یک نسخه در فهرست نسخه‌ها (طرح پنل `m-tariff`): «فعال از 1405/06/20» برای نسخهٔ فعال، «فعال بود
+ * 1405/06/20 تا 1405/07/05» برای نسخهٔ قبل؛ نسخه‌ای که دوباره فعال شد دوره‌های پیش‌ترش را پس از «و پیش‌تر» دارد. ورودی
+ * به ترتیب زمان (`activePeriods`)؛ تازه‌ترین دوره اول می‌آید.
+ */
+export function periodsText(periods: readonly ActivePeriod[]): Seg[] {
+  const [latest, ...earlier] = [...periods].reverse();
+  if (!latest) return [];
+  const closed = (period: ActivePeriod): Seg[] => (period.to ? spanText({ ...period, to: period.to }) : [{ num: formatJalaliNumeric(period.from) }]);
+  const head: Seg[] = latest.to === null ? ['فعال از ', { num: formatJalaliNumeric(latest.from) }] : ['فعال بود ', ...closed(latest)];
+  if (earlier.length === 0) return head;
+  return [...head, '، و پیش‌تر ', ...earlier.flatMap((period, i) => [...(i ? ['، '] : []), ...closed(period)])];
 }

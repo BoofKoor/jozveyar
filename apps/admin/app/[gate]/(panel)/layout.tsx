@@ -18,6 +18,7 @@ export default async function PanelLayout({ children, params }: { children: Reac
   const primary = [
     { href: home, label: 'پیشخوان' },
     ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
+    ...(can(session, 'tariff.read') ? [{ href: panelPath(gate, '/tariff'), label: 'تعرفه' }] : []),
   ];
   const owner = [
     ...(can(session, 'admins.manage') ? [{ href: panelPath(gate, '/admins'), label: 'ادمین‌ها' }] : []),

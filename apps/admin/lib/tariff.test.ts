@@ -16,9 +16,11 @@ import {
   canonicalJson,
   checkPriceList,
   diffText,
+  draftFormFromEntries,
   draftFormOf,
   draftLabel,
   parseWhole,
+  periodsText,
   previewRows,
   rateRows,
   readDraft,
@@ -58,6 +60,51 @@ describe('فرم پیش‌نویس', () => {
     expect(check.errors).toEqual([]);
     expect(check.warnings).toEqual([]);
     expect(check.list).toEqual({ ...V1, label: 'تعرفهٔ پایه — شهریور 1405' });
+  });
+
+  it('فرم از فیلدهای HTML: ردیف‌ها به ترتیب شماره، کرایه با کلید، بقیه نادیده', () => {
+    const entries: [string, unknown][] = [
+      ['gate', '/x'],
+      ['label', 'مهر'],
+      ['band.10.to', '800'],
+      ['band.2.from', '1'],
+      ['band.2.to', '300'],
+      ['band.2.price', '50,000'],
+      ['band.10.from', '301'],
+      ['band.10.price', '60,000'],
+      ['bw', '1,700'],
+      ['color', '2,200'],
+      ['ship.tehran:0', '130,000'],
+      ['ship.x;y:0', '1'],
+      ['band.1000.from', '1'],
+      ['file', new Blob(['x'])],
+      ['intent', 'save'],
+    ];
+    expect(draftFormFromEntries(entries)).toEqual({
+      label: 'مهر',
+      bw: '1,700',
+      color: '2,200',
+      bands: [
+        { from: '1', to: '300', price: '50,000' },
+        { from: '301', to: '800', price: '60,000' },
+      ],
+      ship: { 'tehran:0': '130,000' },
+    });
+    // فرم کامل ویرایشگر، رفت‌وبرگشت.
+    const f = draftFormOf(V1);
+    const fields: [string, string][] = [
+      ['label', f.label],
+      ['bw', f.bw],
+      ['color', f.color],
+      ...f.bands.flatMap((band, i): [string, string][] => [
+        [`band.${i}.from`, band.from],
+        [`band.${i}.to`, band.to],
+        [`band.${i}.price`, band.price],
+      ]),
+      ...Object.entries(f.ship).map(([key, value]): [string, string] => [`ship.${key}`, value]),
+    ];
+    expect(draftFormFromEntries(fields)).toEqual(f);
+    expect(draftFormFromEntries([['label', 'ا'.repeat(500)]]).label).toHaveLength(200);
   });
 
   it('عدد تومان: جداکنندهٔ لاتین و فارسی و فاصله، ارقام فارسی؛ اعشار و واحد نه؛ سقف', () => {
@@ -343,5 +390,21 @@ describe('دوره‌های فعال بودن', () => {
     ]);
     expect(periods.get(2)).toEqual([{ from: t(10), to: t(20), by: 'سارا' }]);
     expect(periods.get(3)).toBeUndefined();
+  });
+
+  it('متن فهرست نسخه‌ها: «فعال از» طرح، «فعال بود»، ساعت‌ها در یک روز، و «و پیش‌تر» برای نسخهٔ دوباره فعال‌شده', () => {
+    // 1405/06/20 ساعت 09:30 تهران، و 1405/07/05 ساعت‌های 10:48 و 11:02
+    const shahrivar20 = new Date('2026-09-11T06:00:00Z');
+    const at1048 = new Date('2026-09-27T07:18:00Z');
+    const at1102 = new Date('2026-09-27T07:32:00Z');
+    expect(text(periodsText([{ from: shahrivar20, to: null, by: null }]))).toBe('فعال از 1405/06/20');
+    const periods = activePeriods([
+      { version: 1, at: shahrivar20, adminName: null },
+      { version: 2, at: at1048, adminName: 'سارا' },
+      { version: 1, at: at1102, adminName: 'سارا' },
+    ]);
+    expect(text(periodsText(periods.get(2)!))).toBe('فعال بود 1405/07/05، 10:48 تا 11:02');
+    expect(text(periodsText(periods.get(1)!))).toBe('فعال از 1405/07/05، و پیش‌تر 1405/06/20 تا 1405/07/05');
+    expect(text(periodsText([]))).toBe('');
   });
 });

@@ -9,7 +9,7 @@ export function NoAccess({ gate }: { gate: string }) {
       <h1 id="t-noaccess" className="jy-card__title">
         این بخش فقط برای مالک است
       </h1>
-      <p className="ad-lead">ادمین‌ها و رویدادها با مالک پنل است.</p>
+      <p className="ad-lead">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، ادمین‌ها و رویدادها با مالک پنل است.</p>
       <div className="ad-actions">
         <Link href={panelPath(gate)} className="jy-btn jy-btn--secondary">
           پیشخوان

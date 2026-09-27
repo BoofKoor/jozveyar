@@ -13,6 +13,7 @@ import { redirect } from 'next/navigation';
 import { formatTehranTime } from '@jozveyar/text';
 
 import { panelPath } from '../../lib/gate';
+import { draftFormFromEntries, type DraftIssue } from '../../lib/tariff';
 import type { IssuedInvite } from '../../lib/server/auth';
 import {
   clearSessionCookie,
@@ -215,4 +216,79 @@ export async function editRecipientAction(_state: RecipientState, form: FormData
     return { error: result.error, fields: Array.isArray(result.fields) ? (result.fields as string[]) : [], values };
   }
   redirect(`${back}?e=${result.error}`);
+}
+
+/**
+ * «نسخهٔ تازه»ی تعرفه (۴٫۵): پیش‌نویسی که هست، یا تازه از روی نسخهٔ فعال؛ بعد ویرایشگرش. کد تازه نمی‌خواهد: پیش‌نویس
+ * روی سایت اثری ندارد. مجوز و رویدادش در سرویس.
+ */
+export async function newDraftAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { tariff } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await tariff.createDraft(session, await requestIp());
+  redirect(result.ok ? panelPath(gate, `/tariff/${result.value.version}`) : `${panelPath(gate, '/tariff')}?e=${result.error}`);
+}
+
+export interface DraftState {
+  error?: AdminErrorCode;
+  /** خطاهای سنجش سرور، با جایشان؛ همان که ویرایشگر مرورگر هم نشان می‌دهد. */
+  issues?: DraftIssue[];
+}
+
+/**
+ * ذخیرهٔ پیش‌نویس (۴٫۵)؛ «فعال کن…» پس از ذخیره به صفحهٔ فعال‌سازی می‌رود، و «ذخیرهٔ پیش‌نویس» به همان ویرایشگر. هر شکست
+ * همین‌جا برمی‌گردد و فرم نوشته‌شده در ویرایشگر می‌ماند.
+ */
+export async function saveDraftAction(_state: DraftState, form: FormData): Promise<DraftState> {
+  const gate = field(form, 'gate');
+  const { tariff } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await tariff.saveDraft(
+    session,
+    field(form, 'version'),
+    { form: draftFormFromEntries(form.entries()), fingerprint: field(form, 'fingerprint') },
+    await requestIp(),
+  );
+  if (result.ok) {
+    const version = result.value.version;
+    redirect(panelPath(gate, field(form, 'intent') === 'activate' ? `/tariff/${version}/activate` : `/tariff/${version}?saved=1`));
+  }
+  return { error: result.error, ...(Array.isArray(result.issues) ? { issues: result.issues as DraftIssue[] } : {}) };
+}
+
+/** پاک کردن پیش‌نویس (۴٫۵)، پس از «پاک شود؟» ویرایشگر. */
+export async function deleteDraftAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { tariff } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const version = field(form, 'version');
+  const result = await tariff.deleteDraft(session, version, await requestIp());
+  redirect(
+    result.ok
+      ? `${panelPath(gate, '/tariff')}?deleted=${encodeURIComponent(version)}`
+      : `${panelPath(gate, `/tariff/${encodeURIComponent(version)}`)}?e=${result.error}`,
+  );
+}
+
+/**
+ * فعال کردن یک نسخهٔ تعرفه با کد تازه (۴٫۵، کار حساس): پیش‌نویس، یا نسخهٔ قبل برای برگشت. خطای کد همین‌جا؛ تعرفه‌ای که
+ * همین حالا عوض شد به همان صفحه با پیامش، که تغییرها را از نو نشان می‌دهد.
+ */
+export async function activateTariffAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { tariff } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const version = field(form, 'version');
+  const result = await tariff.activate(
+    session,
+    version,
+    { active: field(form, 'active'), fingerprint: field(form, 'fingerprint'), code: form.get('code') },
+    await requestIp(),
+  );
+  if (result.ok) redirect(`${panelPath(gate, '/tariff')}?done=${result.value.version}`);
+  if (['tariff_changed', 'tariff_not_found', 'invalid_draft', 'forbidden'].includes(result.error)) {
+    redirect(`${panelPath(gate, `/tariff/${encodeURIComponent(version)}/activate`)}?e=${result.error}`);
+  }
+  return failure(result);
 }
