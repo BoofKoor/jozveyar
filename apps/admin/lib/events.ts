@@ -8,10 +8,24 @@
  *   (`bdi`) نشانش می‌دهد.
  */
 
-import type { AdminEventView } from '@jozveyar/db';
+import type { AdminEventView, OrderStatus } from '@jozveyar/db';
 
 import { tehranDay } from './format';
 import { ROLE_NAMES } from './messages';
+
+/** نام وضعیت‌های سفارش در رویدادها؛ همان `STATUS_LABELS` صفحهٔ سفارش (`orders.ts` پایگاه داده را با خودش می‌آورد). */
+const STATUS: Record<OrderStatus, string> = {
+  awaiting_payment: 'در انتظار پرداخت',
+  paid: 'در صف چاپ',
+  expired: 'رها شد',
+  printing: 'در حال چاپ',
+  handed_to_post: 'تحویل پست شد',
+  cancelled: 'لغو شد',
+};
+const statusOf = (value: unknown) => (typeof value === 'string' && value in STATUS ? STATUS[value as OrderStatus] : String(value ?? ''));
+
+/** نام فیلدهای گیرنده در رویداد ویرایش. */
+const RECIPIENT: Record<string, string> = { recipientName: 'نام', addressText: 'نشانی', postalCode: 'کد پستی' };
 
 /** تکهٔ متن؛ `{ ltr }` نام کاربری لاتین است و صفحه آن را جدا از جملهٔ فارسی نشان می‌دهد. */
 export type Segment = string | { ltr: string };
@@ -92,6 +106,14 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: ['PDF سفارش ', ...orderRef(detail), ' دانلود شد'] };
     case 'orders.pdf_rebuild':
       return { badge: null, text: ['ساختن دوبارهٔ PDF سفارش ', ...orderRef(detail)] };
+    case 'orders.status':
+      return detail.to === 'cancelled'
+        ? { badge: null, text: ['سفارش ', ...orderRef(detail), ' لغو شد'] }
+        : { badge: null, text: ['سفارش ', ...orderRef(detail), `: ${statusOf(detail.from)} ← ${statusOf(detail.to)}`] };
+    case 'orders.recipient': {
+      const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
+      return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
+    }
     default:
       return { badge: null, text: [event.action] };
   }

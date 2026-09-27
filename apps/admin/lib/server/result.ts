@@ -30,6 +30,14 @@ export type AdminErrorCode =
   | 'pdf_not_failed'
   | 'files_gone'
   | 'storage_unavailable'
+  /** وضعیت سفارش و گیرنده (۴٫۳). */
+  | 'invalid_transition'
+  | 'status_changed'
+  | 'print_needs_pdf'
+  | 'reason_required'
+  | 'reason_too_long'
+  | 'invalid_recipient'
+  | 'recipient_locked'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

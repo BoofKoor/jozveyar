@@ -5,13 +5,14 @@ import { formatTomans } from '@jozveyar/text';
 
 import { whenText } from '../lib/format';
 import { panelPath } from '../lib/gate';
-import { dueBadge, jozveSegs, rowState, type DayBounds } from '../lib/orders';
+import { dueBadge, isOpen, jozveSegs, rowState, type DayBounds } from '../lib/orders';
 import { DueBadge } from './OrderBadges';
 import { Segments } from './Segments';
 
 /**
  * ردیف‌های سفارش (طرح پنل): در دسکتاپ ردیف جدول، در گوشی کارت فشرده؛ هر ردیف پیوند جزئیات. ستون آخر مهلت تحویل
- * به پست است، و برای سفارش پرداخت‌نشده (فهرست «در انتظار» و «رهاشده») زمان ساختنش.
+ * به پست است، فقط برای سفارش باز (در صف و در حال چاپ)؛ در فهرست «تحویل پست شد» روزی که رسید، در «لغو شد» روز لغو، و
+ * برای سفارش پرداخت‌نشده (فهرست «در انتظار» و «رهاشده») زمان ساختنش.
  */
 export function OrderRows({
   gate,
@@ -22,14 +23,16 @@ export function OrderRows({
   gate: string;
   rows: readonly PanelOrderLine[];
   bounds: DayBounds;
-  /** `created`: ستون آخر زمان ساختن سفارش پرداخت‌نشده؛ `due`: فقط مهلت. */
-  dates: 'due' | 'created';
+  /** ستون آخر: `due` فقط مهلت؛ `created` زمان ساختن؛ `handed` رسیدن به پست؛ `cancelled` زمان لغو. */
+  dates: 'due' | 'created' | 'handed' | 'cancelled';
 }) {
   return (
     <ul className="ad-rows">
       {rows.map((row) => {
         const state = rowState(row);
-        const due = row.postHandoffDueAt ? dueBadge(row.postHandoffDueAt, bounds) : null;
+        const due = row.postHandoffDueAt && isOpen(row.status) ? dueBadge(row.postHandoffDueAt, bounds) : null;
+        const when =
+          dates === 'created' ? row.createdAt : dates === 'handed' ? row.handedToPostAt : dates === 'cancelled' ? row.cancelledAt : null;
         return (
           <li key={row.id}>
             <Link href={panelPath(gate, `/orders/${row.orderNumber}`)} className="ad-row" data-order={row.orderNumber}>
@@ -53,8 +56,8 @@ export function OrderRows({
               <span className="ad-row__due">
                 {due ? (
                   <DueBadge kind={due.kind}>{due.label}</DueBadge>
-                ) : dates === 'created' ? (
-                  <span className="ad-row__city">{whenText(row.createdAt, bounds.at)}</span>
+                ) : when ? (
+                  <span className="ad-row__city">{whenText(when, bounds.at)}</span>
                 ) : (
                   <span className="ad-row__none">
                     <span aria-hidden="true">—</span>

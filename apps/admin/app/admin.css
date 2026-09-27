@@ -2,7 +2,8 @@
  * ===== پنل ادمین، از طرح نمونهٔ تأییدشده (docs/ui/mockups/admin.html) =====
  * سربرگ سفید با ناوبری زبانه‌ای، صفحه green-50 با کارت‌های سفید (تصمیم ۲۴). چیدمان پنل است، نه جزء کیت؛
  * پس پیشوندش `ad-` است، نه `jy-`. رنگ فقط توکن، فقط logical properties. هر قدم بخش صفحه‌های خودش را
- * می‌آورد؛ ۴٫۱: پوسته، ورود و ثبت، ادمین‌ها و رویدادها؛ ۴٫۲: پیشخوان، سفارش‌ها و جزئیات سفارش.
+ * می‌آورد؛ ۴٫۱: پوسته، ورود و ثبت، ادمین‌ها و رویدادها؛ ۴٫۲: پیشخوان، سفارش‌ها و جزئیات سفارش؛ ۴٫۳: کار بعدی سفارش،
+ * لغو و برگرداندن در ستون کنار.
  */
 @layer components {
   body {
@@ -585,6 +586,22 @@
     flex-wrap: wrap;
     gap: 6px;
     margin-block-start: 8px;
+  }
+  /* کار بعدی (۴٫۳): یک دکمهٔ اصلی، راهنمایش، و پیوندهای متنی لغو و برگرداندن؛ فرم هر دکمه خودش جزء ستون نیست */
+  .ad-status__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block-start: 16px;
+  }
+  .ad-status__actions form {
+    display: contents;
+  }
+  .ad-status .ad-facts {
+    margin-block-start: 8px;
+  }
+  .ad-status .ad-facts > div {
+    grid-template-columns: minmax(0, 1fr);
   }
   .ad-facts > div {
     display: grid;

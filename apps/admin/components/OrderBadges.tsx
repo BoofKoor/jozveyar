@@ -22,8 +22,12 @@ export function DueBadge({ kind, children }: { kind: DueKind; children: React.Re
   );
 }
 
+/** طرح پنل: در صف و در حال چاپ اطلاع‌اند (چاپگر برای دومی)، رسیده به پست موفق، و لغوشده خطا. */
 const STATE: Record<OrderState, { badge: string; icon: string | null; label: string }> = {
   queued: { badge: 'jy-badge jy-badge--info', icon: 'jy-icon jy-icon-info', label: 'در صف چاپ' },
+  printing: { badge: 'jy-badge jy-badge--info', icon: 'jy-icon jy-icon-printer', label: 'در حال چاپ' },
+  handed: { badge: 'jy-badge jy-badge--success', icon: 'jy-icon jy-icon-success', label: 'تحویل پست شد' },
+  cancelled: { badge: 'jy-badge jy-badge--error', icon: 'jy-icon jy-icon-error', label: 'لغو شد' },
   awaiting: { badge: 'jy-badge jy-badge--warning', icon: 'jy-icon jy-icon-warning', label: 'در انتظار پرداخت' },
   abandoned: { badge: 'jy-badge jy-badge--neutral', icon: null, label: 'رهاشده' },
 };

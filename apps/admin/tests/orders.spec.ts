@@ -265,7 +265,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
   test('سفارش‌ها: چیپ‌ها با شمار، «باز» به ترتیب مهلت، جست‌وجوی شماره و موبایل و نام در همه', async () => {
     await ownerPage.goto(at('/orders'));
     const chips = ownerPage.getByRole('navigation', { name: 'وضعیت سفارش' }).getByRole('link');
-    await expect(chips).toHaveText(['باز 3', 'در انتظار پرداخت 1', 'رهاشده 1', 'همه 5']);
+    await expect(chips).toHaveText(['باز 3', 'تحویل پست شد 0', 'لغو شد 0', 'در انتظار پرداخت 1', 'رهاشده 1', 'همه 5']);
     await expect(chips.first()).toHaveAttribute('aria-current', 'page');
     expect(await rowNumbers(ownerPage)).toEqual([o.B.number, o.A.number, o.E.number]);
 
@@ -285,7 +285,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await search.press('Enter');
     await expect(ownerPage).toHaveURL(new RegExp(`q=${o.A.number}`));
     expect(await rowNumbers(ownerPage)).toEqual([o.A.number]);
-    await expect(chips).toHaveText(['باز 1', 'در انتظار پرداخت 0', 'رهاشده 0', 'همه 1']);
+    await expect(chips).toHaveText(['باز 1', 'تحویل پست شد 0', 'لغو شد 0', 'در انتظار پرداخت 0', 'رهاشده 0', 'همه 1']);
     await expect(chips.last()).toHaveAttribute('aria-current', 'page');
     // ته موبایل با ارقام فارسی، و نام.
     const persian = o.C.phone.slice(-7).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]!);

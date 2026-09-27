@@ -6,7 +6,9 @@ import { formatJalaliWeekday, formatNumber, formatTehranTime } from '@jozveyar/t
 
 import { DueBadge } from '../../../components/OrderBadges';
 import { OrderRows } from '../../../components/OrderRows';
+import { Segments } from '../../../components/Segments';
 import { panelPath } from '../../../lib/gate';
+import { statsSegs } from '../../../lib/orders';
 import { can } from '../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../lib/server/context';
 
@@ -25,8 +27,9 @@ function OrderLinks({ gate, numbers }: { gate: string; numbers: readonly number[
 }
 
 /**
- * پیشخوان (طرح پنل، ADR-039): چهار کاشی مهلت تحویل به پست به روز تهران، هشدارها (PDF جزوه‌ای که ساخته نشد،
- * پرداخت بی برگشت)، و صف تحویل به ترتیب مهلت. «در حال چاپ» و «به‌موقع به پست رسید» با وضعیت‌های ۴٫۳.
+ * پیشخوان (طرح پنل، ADR-039): چهار کاشی مهلت تحویل به پست به روز تهران (سفارش‌هایی که هنوز به پست نرسیده‌اند)، سطر آمار
+ * (چندتا در حال چاپ است، و هفتهٔ گذشته چندتا به‌موقع به پست رسید)، هشدارها (PDF جزوه‌ای که ساخته نشد، پرداخت بی برگشت)،
+ * و صف تحویل به ترتیب مهلت.
  */
 export default async function Dashboard({ params }: { params: Promise<{ gate: string }> }) {
   const { gate } = await params;
@@ -46,7 +49,8 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   if (!can(session, 'orders.read')) return head;
   const result = await orders.dashboard(session);
   if (!result.ok) return head;
-  const { tiles, alerts, queue, open, slaDays, bounds } = result.value;
+  const { tiles, alerts, queue, open, slaDays, bounds, stats } = result.value;
+  const statsLine = statsSegs(open, stats);
   const ordersHref = panelPath(gate, '/orders');
   const unreturned = alerts.unreturned.reduce((sum, u) => sum + u.attempts, 0);
   const oneFailed = alerts.failedPdf.length === 1;
@@ -73,6 +77,11 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
             </li>
           ))}
         </ul>
+        {statsLine ? (
+          <p className="ad-meta ad-gap" data-stats="">
+            <Segments segs={statsLine} />
+          </p>
+        ) : null}
       </section>
 
       {alerts.failedPdf.length > 0 || unreturned > 0 ? (

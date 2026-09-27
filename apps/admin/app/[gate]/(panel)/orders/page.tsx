@@ -15,17 +15,29 @@ export const metadata: Metadata = { title: 'سفارش‌ها' };
 
 const EMPTY: Record<PanelBucket, string> = {
   open: 'سفارش بازی نیست.',
+  handed: 'هنوز سفارشی به پست نرسیده است.',
+  cancelled: 'سفارش لغوشده‌ای نیست.',
   awaiting: 'سفارشی در انتظار پرداخت نیست.',
   abandoned: 'سفارش رهاشده‌ای نیست.',
   all: 'هنوز سفارشی نیست.',
 };
 
+/** ستون آخر هر فهرست: مهلت سفارش باز، زمان ساختن سفارش پرداخت‌نشده، روز رسیدن به پست، یا روز لغو. */
+const LAST_COLUMN: Record<PanelBucket, { head: string; dates: 'due' | 'created' | 'handed' | 'cancelled' }> = {
+  open: { head: 'تحویل به پست تا', dates: 'due' },
+  handed: { head: 'به پست رسید', dates: 'handed' },
+  cancelled: { head: 'لغو شد', dates: 'cancelled' },
+  awaiting: { head: 'ساخته شد', dates: 'created' },
+  abandoned: { head: 'ساخته شد', dates: 'created' },
+  all: { head: 'تحویل به پست تا', dates: 'due' },
+};
+
 const one = (value: string | string[] | undefined) => (typeof value === 'string' ? value : undefined);
 
 /**
- * سفارش‌ها (طرح پنل): جست‌وجو (شماره، موبایل یا نام گیرنده)، چیپ‌های وضعیت با شمار، و ردیف‌ها؛ صفحه‌ای ۵۰ تا.
- * همه در نشانی (`?q=&status=&page=`)، بی JS. جست‌وجو در همهٔ سفارش‌هاست و چیپ‌ها شمار همان جست‌وجو را می‌گویند.
- * چیپ‌های «تحویل پست شد» و «لغو شد» با وضعیت‌هایشان در ۴٫۳.
+ * سفارش‌ها (طرح پنل): جست‌وجو (شماره، موبایل یا نام گیرنده)، چیپ‌های وضعیت با شمار (باز، تحویل پست شد، لغو شد، در
+ * انتظار پرداخت، رهاشده، همه)، و ردیف‌ها؛ صفحه‌ای ۵۰ تا. همه در نشانی (`?q=&status=&page=`)، بی JS. جست‌وجو در همهٔ
+ * سفارش‌هاست و چیپ‌ها شمار همان جست‌وجو را می‌گویند.
  */
 export default async function OrdersPage({
   params,
@@ -49,7 +61,7 @@ export default async function OrdersPage({
     ).toString();
     return search ? `${base}?${search}` : base;
   };
-  const unpaid = bucket === 'awaiting' || bucket === 'abandoned';
+  const last = LAST_COLUMN[bucket];
 
   return (
     <>
@@ -85,9 +97,9 @@ export default async function OrdersPage({
               <span>جزوه</span>
               <span>مبلغ (تومان)</span>
               <span>وضعیت</span>
-              <span>{unpaid ? 'ساخته شد' : 'تحویل به پست تا'}</span>
+              <span>{last.head}</span>
             </div>
-            <OrderRows gate={gate} rows={rows} bounds={bounds} dates={unpaid ? 'created' : 'due'} />
+            <OrderRows gate={gate} rows={rows} bounds={bounds} dates={last.dates} />
           </>
         ) : (
           <p className="ad-empty">
