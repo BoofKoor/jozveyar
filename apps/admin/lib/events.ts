@@ -9,9 +9,11 @@
  */
 
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
+import { formatNumber } from '@jozveyar/text';
 
 import { tehranDay } from './format';
 import { ROLE_NAMES } from './messages';
+import { KEY_INFO } from './settings';
 
 /** نام وضعیت‌های سفارش در رویدادها؛ همان `STATUS_LABELS` صفحهٔ سفارش (`orders.ts` پایگاه داده را با خودش می‌آورد). */
 const STATUS: Record<OrderStatus, string> = {
@@ -68,6 +70,24 @@ function loginFailed(detail: Detail): Segment[] {
 
 /** شمارهٔ نسخهٔ تعرفه، جدا از جملهٔ فارسی. */
 const versionRef = (value: unknown): Segment[] => [{ ltr: typeof value === 'number' ? String(value) : '' }];
+
+/** نام تنظیم‌های عددی در رویدادها. */
+const SETTING_NAMES: Record<string, string> = {
+  'order.sla_days': 'روز کاری تحویل به پست',
+  'otp.site_hourly_limit': 'سقف ساعتی کد پیامکی کل سایت',
+};
+
+/** عدد یا تاریخ، جدا از جملهٔ فارسی. */
+const ltrOf = (value: unknown): Segment => ({ ltr: typeof value === 'number' || typeof value === 'string' ? String(value) : '' });
+
+/** نام کلید در صفحه («کد پذیرندهٔ زیبال»)؛ نام ناشناس همان نام خام. */
+const keyName = (value: unknown) => (typeof value === 'string' && value in KEY_INFO ? KEY_INFO[value as keyof typeof KEY_INFO].label : String(value ?? ''));
+
+function settingUpdate(detail: Detail): Segment[] {
+  if (detail.key === 'calendar.official_through') return ['تعطیلی‌های ', ltrOf(detail.to), ' با تقویم رسمی تطبیق داده شد'];
+  const amount = (value: unknown): Segment => ({ ltr: typeof value === 'number' ? formatNumber(value) : String(value ?? '') });
+  return [`${SETTING_NAMES[str(detail.key)] ?? str(detail.key)}: `, amount(detail.from), ' ← ', amount(detail.to)];
+}
 
 /** «10027»، و اگر سفارش چند جزوه دارد «10027 (جزوهٔ 2)»؛ عدد جدا از جملهٔ فارسی. */
 function orderRef(detail: Detail): Segment[] {
@@ -129,6 +149,16 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
           ...(typeof detail.previous === 'number' ? ['، به جای نسخهٔ ', ...versionRef(detail.previous)] : []),
         ],
       };
+    case 'settings.update':
+      return { badge: null, text: settingUpdate(detail) };
+    case 'settings.holiday_add':
+      return { badge: null, text: ['تعطیلی ', ltrOf(detail.date), ` افزوده شد: ${str(detail.title)}`] };
+    case 'settings.holiday_remove':
+      return { badge: null, text: ['تعطیلی ', ltrOf(detail.date), ` حذف شد: ${str(detail.title)}`] };
+    case 'settings.key_set':
+      return { badge: null, text: [`کلید «${keyName(detail.name)}» ${detail.from === 'empty' ? 'وارد شد' : 'عوض شد'}`] };
+    case 'settings.key_revert':
+      return { badge: null, text: [`کلید «${keyName(detail.name)}» به `, { ltr: '.env' }, ' برگشت'] };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -176,11 +206,12 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
   return days;
 }
 
-/** چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات ۴٫۶). */
+/** چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶). */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
   { kind: 'auth', label: 'ورود' },
   { kind: 'orders', label: 'سفارش' },
   { kind: 'tariff', label: 'تعرفه' },
+  { kind: 'settings', label: 'تنظیمات و کلیدها' },
   { kind: 'admins', label: 'ادمین‌ها' },
 ] as const;

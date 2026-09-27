@@ -7,7 +7,7 @@ import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
-import { createAdminStore, createPanelOrderStore, createTariffStore, getDb } from '@jozveyar/db';
+import { createAdminStore, createPanelOrderStore, createSecretStore, createSettingsStore, createTariffStore, getDb } from '@jozveyar/db';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
@@ -16,6 +16,7 @@ import { adminConfig, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { argon2Passwords } from './password';
+import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelTariff, type PanelTariff } from './tariff';
 
 interface Panel {
@@ -23,6 +24,7 @@ interface Panel {
   auth: AdminAuth;
   orders: PanelOrders;
   tariff: PanelTariff;
+  settings: PanelSettings;
 }
 
 let cached: Panel | null | undefined;
@@ -45,6 +47,15 @@ function build(config: AdminConfig): Panel {
     }),
     // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
     tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
+    // کلیدها کار حساس‌اند (کد تازه)؛ مقدار `.env` هر کلید از همان `.env` کانتینر، با هر درخواست (ADR-041).
+    settings: createPanelSettings({
+      settings: createSettingsStore(getDb()),
+      secrets: createSecretStore(getDb()),
+      stepUp: auth.stepUp,
+      secretsKey: config.secretsKey,
+      env: process.env,
+      secret: config.secret,
+    }),
   };
 }
 

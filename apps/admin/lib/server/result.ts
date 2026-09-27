@@ -45,6 +45,16 @@ export type AdminErrorCode =
   | 'draft_changed'
   | 'tariff_changed'
   | 'already_active'
+  /** تنظیمات و کلیدها (۴٫۶). */
+  | 'setting_not_found'
+  | 'invalid_setting'
+  | 'setting_changed'
+  | 'invalid_holiday'
+  | 'holiday_exists'
+  | 'holiday_missing'
+  | 'key_not_found'
+  | 'invalid_key_value'
+  | 'key_changed'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 
