@@ -299,6 +299,8 @@ jobs:
       # داخلی دانلودش می‌کند. وضعیت سفارش (برش ۴٫۳، `status.spec.ts`) با همان پایگاه داده، استوریج و کارگر.
       # تعرفه در پنل (برش ۴٫۵، ADR-040، `tariff.spec.ts`) آخر، به ترتیب نام: تعرفهٔ فعال را عوض می‌کند و صفحهٔ اصلی همان
       # وب ۳۱۰۱ را تا ISR یک دقیقه‌ای می‌پاید (`E2E_WEB_BASE_URL`)؛ در پایان نسخهٔ ۱ دوباره فعال است.
+      # تنظیمات و کلیدها (برش ۴٫۶، ADR-041، `settings.spec.ts`): `SMS_API_KEY` پنل تصادفی است (کلید «از .env»)، و مقداری
+      # که تست از پنل وارد می‌کند `E2E_KEY_PROBE`؛ پس از اجرا هیچ‌کدام نباید در لاگ پنل یا وب باشد (`grep -q`، بی چاپ).
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
@@ -320,14 +322,22 @@ jobs:
           SESSION_SECRET="$(openssl rand -hex 32)"
           SECRETS_KEY="$(openssl rand -hex 32)"
           ADMIN_BASE_PATH="/$(openssl rand -hex 8)"
-          export SESSION_SECRET SECRETS_KEY ADMIN_BASE_PATH
+          SMS_API_KEY="$(openssl rand -hex 20)"
+          E2E_KEY_PROBE="$(openssl rand -hex 20)"
+          export SESSION_SECRET SECRETS_KEY ADMIN_BASE_PATH SMS_API_KEY E2E_KEY_PROBE
           node apps/admin/scripts/serve-standalone.mjs 3200 > "$RUNNER_TEMP/admin.log" 2>&1 &
           timeout 120 sh -c 'until curl -sf http://127.0.0.1:3200/api/health > /dev/null; do sleep 1; done'
           timeout 30 sh -c 'until grep -qF "⚠ پنل ادمین: هنوز هیچ ادمینی" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
           grep -F '✓ پنل ادمین: آماده' "$RUNNER_TEMP/admin.log"
           if grep -F "$ADMIN_BASE_PATH" "$RUNNER_TEMP/admin.log"; then echo 'مسیر محرمانه در لاگ پنل آمد' >&2; exit 1; fi
+          timeout 30 sh -c 'until grep -qF "✓ پنل ادمین: کلیدهای سرویس‌ها — SMS_API_KEY از .env" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
           cd apps/admin
           pnpm exec playwright test
+          for secret in "$SMS_API_KEY" "$E2E_KEY_PROBE"; do
+            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/web-admin.log"; do
+              if grep -qF "$secret" "$log"; then echo "مقدار کلید در $(basename "$log") آمد" >&2; exit 1; fi
+            done
+          done
 
       - name: لاگ پنل، اگر افتاد
         if: failure()
