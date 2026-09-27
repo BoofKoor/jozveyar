@@ -29,6 +29,12 @@ from .storage import S3Storage
 PREPARE_ORDER = "prepare_order"
 ORDERS_PREFIX = "orders/"
 
+# وضعیت‌هایی که چاپشان هنوز پیش روست (برش ۴٫۳، ADR-039): «در صف چاپ» و «در حال چاپ». پنل «شروع چاپ» را پیش از
+# آماده شدن PDF نمی‌زند، ولی اگر کار دیرتر برسد (تلاش دوباره، «دوباره بساز») سفارشِ در حال چاپ هم PDF می‌گیرد.
+PRINTABLE = ("paid", "printing")
+# پیش از پرداخت: کار فقط با پرداخت در صف می‌رود.
+UNPAID = ("awaiting_payment", "expired")
+
 
 def print_key(order_number: int, item_seq: int) -> str:
     return f"{ORDERS_PREFIX}{order_number}/jozve-{item_seq}.pdf"
@@ -91,9 +97,13 @@ def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -
     if order is None:
         raise PermanentFailure("order_missing")
     number, status = order
-    if status != "paid":
+    if status in UNPAID:
         # کار فقط با پرداخت در صف می‌رود؛ رسیدن به اینجا یعنی چیزی جای دیگر غلط است.
         raise PermanentFailure("order_not_paid")
+    if status not in PRINTABLE:
+        # لغو شد یا به پست رسید: جزوه‌ای چاپ نمی‌شود، پس فایل مشتری هم زیر `orders/` کپی نمی‌شود. اگر لغو برگردانده
+        # شود، «دوباره بساز» پنل همین کار را از نو در صف می‌گذارد.
+        raise PermanentFailure("order_closed", status)
     items = conn.execute(
         """SELECT id::text, seq, page_count, print_pdf_ready_at IS NOT NULL
              FROM order_items WHERE order_id = %s ORDER BY seq""",
