@@ -1,9 +1,17 @@
-import { Faq, FAQ } from '../components/Faq';
+import { Faq, faqItems } from '../components/Faq';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
 import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
+import { siteTariff } from '../lib/server/tariff';
+import { TARIFF_ELEMENT_ID, tariffJson } from '../lib/tariff';
+
+/**
+ * ISR (برش ۴٫۴، ADR-040): صفحه ایستا می‌ماند و دست‌بالا هر ۶۰ ثانیه یک بار با تعرفهٔ فعال پایگاه داده و روز کاری تحویل
+ * به پست دوباره ساخته می‌شود (`lib/server/tariff.ts`)؛ تعرفهٔ تازه حداکثر یک دقیقه بعد همه‌جای صفحه است.
+ */
+export const revalidate = 60;
 
 /**
  * پیش از رسم (۳د، ADR-036): اگر این زبانه پیش‌نویس سفارش دارد، صفحه از همان اولین رسم حالت سفارش است و کارت
@@ -24,8 +32,13 @@ const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})
  * پیش از فایل: نوار بالای green-50 (سربرگ و قهرمان)، و روی سفید سه قدم، تعرفه و سؤال‌ها. پس از فایل
  * کل صفحه green-50 است: قدم‌های سفارش، کارت‌ها، خلاصهٔ سفارش در کنار (در موبایل نوار پایین) و
  * سؤال‌ها در همان شبکه. قهرمان و بخش‌ها با CSS و نشانهٔ `data-jozve` جزیره کنار می‌روند.
+ *
+ * تعرفه و روز کاری تحویل به پست از پایگاه داده‌اند (برش ۴٫۴): در جدول تعرفه، سؤال‌ها و «روز کاری»ها، و به JSON درون HTML
+ * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است.
  */
-export default function HomePage() {
+export default async function HomePage() {
+  const tariff = await siteTariff();
+  const faq = faqItems(tariff);
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -45,7 +58,7 @@ export default function HomePage() {
       },
       {
         '@type': 'FAQPage',
-        mainEntity: FAQ.map((item) => ({
+        mainEntity: faq.map((item) => ({
           '@type': 'Question',
           name: item.q,
           acceptedAnswer: { '@type': 'Answer', text: item.a },
@@ -98,7 +111,7 @@ export default function HomePage() {
                 </span>
                 <span className="home-trust__t">
                   <b>
-                    تحویل پست تا <span className="num">2</span> روز کاری
+                    تحویل پست تا <span className="num">{tariff.slaDays}</span> روز کاری
                   </b>
                   <span>با کد رهگیری، به سراسر ایران</span>
                 </span>
@@ -118,14 +131,21 @@ export default function HomePage() {
           }
           more={
             <>
-              <HowItWorks />
-              <Tariff />
+              <HowItWorks slaDays={tariff.slaDays} />
+              <Tariff priceList={tariff.priceList} />
             </>
           }
         >
-          <Faq />
+          <Faq items={faq} />
         </OrderFlow>
       </main>
+      {/* تعرفهٔ `quote()` مرورگر؛ داده است و اجرا نمی‌شود. */}
+      <script
+        id={TARIFF_ELEMENT_ID}
+        type="application/json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: tariffJson(tariff) }}
+      />
     </>
   );
 }

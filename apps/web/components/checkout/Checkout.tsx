@@ -55,9 +55,6 @@ export function restoreCheckout(draft: CheckoutDraft) {
   checkoutStore().hydrate({ ...draft, place: place && placeIsValid(place.provinceId, place.cityId) ? place : null });
 }
 
-/** «تحویل به پست تا 2 روز کاری» (ADR-013)؛ عدد سفارش واقعی را صفحهٔ سفارش از خود سفارش می‌گیرد. */
-const SLA_DAYS = 2;
-
 interface Destination {
   provinceName: string;
   cityName: string | null;
@@ -669,6 +666,7 @@ function ReviewStep({
   place,
   jozve,
   method,
+  slaDays,
   onDesk,
   onAddress,
   onRestart,
@@ -677,6 +675,7 @@ function ReviewStep({
   place: Place;
   jozve: Parameters<typeof RecapJozveValue>[0]['jozve'];
   method: string;
+  slaDays: number;
   onDesk: () => void;
   onAddress: () => void;
   onRestart: () => void;
@@ -786,7 +785,7 @@ function ReviewStep({
               </button>
             ),
           },
-          { label: 'تحویل', value: <RecapDelivery method={method} slaDays={SLA_DAYS} /> },
+          { label: 'تحویل', value: <RecapDelivery method={method} slaDays={slaDays} /> },
         ]}
       />
     </section>
@@ -838,7 +837,13 @@ interface Props {
   items: CheckoutItem[];
   view: JozveView;
   config: OrderConfig;
+  /** تعرفهٔ صفحه، همان «جزوه و قیمت» (برش ۴٫۴): نام صحافی و روش ارسال. عددها از سرور است. */
   priceList: PriceList;
+  /**
+   * «تحویل به پست تا N روز کاری» (ADR-013)، از `settings` صفحه، همان عددی که سفارش با آن ساخته می‌شود؛ صفحهٔ سفارش عدد
+   * خود سفارش را نشان می‌دهد.
+   */
+  slaDays: number;
   /** موبایلی که همین مرورگر تأیید کرده، از `GET /api/checkout`. */
   auth: { mobile: string } | null;
   onAuth: (auth: { mobile: string } | null) => void;
@@ -846,7 +851,7 @@ interface Props {
   onRestart: () => void;
 }
 
-export function Checkout({ step, go, items, view, config, priceList, auth, onAuth, onRestart }: Props) {
+export function Checkout({ step, go, items, view, config, priceList, slaDays, auth, onAuth, onRestart }: Props) {
   const store = checkoutStore();
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const withPlace = step !== 'city';
@@ -962,6 +967,7 @@ export function Checkout({ step, go, items, view, config, priceList, auth, onAut
         place={place}
         jozve={{ files, pageCount: view.pageCount, print, bindingName, copies: config.copies }}
         method={method}
+        slaDays={slaDays}
         onDesk={() => go('desk')}
         onAddress={() => go('address')}
         onRestart={onRestart}
@@ -1032,7 +1038,7 @@ export function Checkout({ step, go, items, view, config, priceList, auth, onAut
             <p className="home-sum__ship">
               <span className="jy-icon jy-icon-truck" aria-hidden="true" />
               <span>
-                تحویل به پست تا <span className="num">{formatNumber(SLA_DAYS)}</span> روز کاری بعد از پرداخت.
+                تحویل به پست تا <span className="num">{formatNumber(slaDays)}</span> روز کاری بعد از پرداخت.
               </span>
             </p>
           ) : breakdown?.shippingFromRials != null ? (

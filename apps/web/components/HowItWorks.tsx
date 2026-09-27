@@ -1,8 +1,9 @@
 /**
  * «سه قدم تا جزوهٔ چاپ‌شده»، مقصد «چطور کار می‌کند» در سربرگ؛ از طرح ز (docs/UI.md، ۴الف).
- * کامپوننت سرور. رقم دایره‌ها با `--jy-digit-rise` دقیق وسط است (home.css، و tests/digits.spec.ts).
+ * کامپوننت سرور. رقم دایره‌ها با `--jy-digit-rise` دقیق وسط است (home.css، و tests/digits.spec.ts). روز کاری تحویل به پست
+ * از `settings` (`order.sla_days`، برش ۴٫۴).
  */
-export function HowItWorks() {
+export function HowItWorks({ slaDays }: { slaDays: number }) {
   return (
     <section id="how" className="home-sec" aria-labelledby="how-title">
       <h2 id="how-title" className="home-sec__title">
@@ -30,7 +31,7 @@ export function HowItWorks() {
           <div>
             <h3>آدرس بده و پرداخت کن</h3>
             <p>
-              شمارهٔ موبایل فقط همین‌جا لازم است. تا <span className="num">2</span> روز کاری بعد، جزوه تحویل پست
+              شمارهٔ موبایل فقط همین‌جا لازم است. تا <span className="num">{slaDays}</span> روز کاری بعد، جزوه تحویل پست
               می‌شود.
             </p>
           </div>
