@@ -26,6 +26,9 @@ importers:
       '@jozveyar/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@jozveyar/pricing':
+        specifier: workspace:*
+        version: link:../../packages/pricing
       '@jozveyar/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -51,9 +54,9 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
-      '@jozveyar/pricing':
+      '@jozveyar/geo':
         specifier: workspace:*
-        version: link:../../packages/pricing
+        version: link:../../packages/geo
       '@tailwindcss/postcss':
         specifier: 4.3.3
         version: 4.3.3

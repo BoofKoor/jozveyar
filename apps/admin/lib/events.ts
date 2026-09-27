@@ -66,6 +66,9 @@ function loginFailed(detail: Detail): Segment[] {
   }
 }
 
+/** شمارهٔ نسخهٔ تعرفه، جدا از جملهٔ فارسی. */
+const versionRef = (value: unknown): Segment[] => [{ ltr: typeof value === 'number' ? String(value) : '' }];
+
 /** «10027»، و اگر سفارش چند جزوه دارد «10027 (جزوهٔ 2)»؛ عدد جدا از جملهٔ فارسی. */
 function orderRef(detail: Detail): Segment[] {
   const number = typeof detail.orderNumber === 'number' ? String(detail.orderNumber) : '';
@@ -110,6 +113,22 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return detail.to === 'cancelled'
         ? { badge: null, text: ['سفارش ', ...orderRef(detail), ' لغو شد'] }
         : { badge: null, text: ['سفارش ', ...orderRef(detail), `: ${statusOf(detail.from)} ← ${statusOf(detail.to)}`] };
+    case 'tariff.draft':
+      return { badge: null, text: ['پیش‌نویس نسخهٔ ', ...versionRef(detail.version), ' تعرفه ساخته شد، از روی نسخهٔ ', ...versionRef(detail.from)] };
+    case 'tariff.draft_save':
+      return { badge: null, text: ['پیش‌نویس نسخهٔ ', ...versionRef(detail.version), ' تعرفه ذخیره شد'] };
+    case 'tariff.draft_delete':
+      return { badge: null, text: ['پیش‌نویس نسخهٔ ', ...versionRef(detail.version), ' تعرفه پاک شد'] };
+    case 'tariff.activate':
+      return {
+        badge: null,
+        text: [
+          'نسخهٔ ',
+          ...versionRef(detail.version),
+          detail.again === true ? ' تعرفه دوباره فعال شد' : ' تعرفه فعال شد',
+          ...(typeof detail.previous === 'number' ? ['، به جای نسخهٔ ', ...versionRef(detail.previous)] : []),
+        ],
+      };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -162,5 +181,6 @@ export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
   { kind: 'auth', label: 'ورود' },
   { kind: 'orders', label: 'سفارش' },
+  { kind: 'tariff', label: 'تعرفه' },
   { kind: 'admins', label: 'ادمین‌ها' },
 ] as const;

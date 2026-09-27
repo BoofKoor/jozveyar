@@ -125,7 +125,7 @@ test.describe.serial('پنل ادمین', () => {
     await context.close();
   });
 
-  test('افزودن متصدی با کد تازه؛ متصدی پیشخوان و سفارش‌ها را دارد، نه بخش‌های مالک', async ({ browser }) => {
+  test('افزودن متصدی با کد تازه؛ متصدی پیشخوان، سفارش‌ها و تعرفه را دارد، نه بخش‌های مالک', async ({ browser }) => {
     await ownerPage.goto(at('/admins'));
     await ownerPage.getByRole('link', { name: 'افزودن متصدی' }).click();
     await ownerPage.getByLabel('نام', { exact: true }).fill('علی محمدی');
@@ -143,7 +143,7 @@ test.describe.serial('پنل ادمین', () => {
     await expect(page.getByText('سارا رضایی تو را متصدی پنل جزوه‌یار کرده است.')).toBeVisible();
     await enroll(page, link);
     await expect(page.locator('.ad-user')).toContainText('علی محمدی · متصدی');
-    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها']);
+    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'تعرفه']);
     for (const path of ['/admins', '/events', '/admins/new']) {
       await page.goto(at(path));
       await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();

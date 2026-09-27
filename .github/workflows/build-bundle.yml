@@ -297,11 +297,14 @@ jobs:
       # سفارش‌ها (برش ۴٫۲، ADR-039، `orders.spec.ts`): تست سفارش‌ها را با SQL می‌نشاند و فایل‌ها را به همین Garage
       # می‌برد؛ PDF جزوه را کارگر دومی از همان ایمیج (`docworker-admin`) روی `jy_admin` می‌سازد، و پنل از استوریج
       # داخلی دانلودش می‌کند. وضعیت سفارش (برش ۴٫۳، `status.spec.ts`) با همان پایگاه داده، استوریج و کارگر.
+      # تعرفه در پنل (برش ۴٫۵، ADR-040، `tariff.spec.ts`) آخر، به ترتیب نام: تعرفهٔ فعال را عوض می‌کند و صفحهٔ اصلی همان
+      # وب ۳۱۰۱ را تا ISR یک دقیقه‌ای می‌پاید (`E2E_WEB_BASE_URL`)؛ در پایان نسخهٔ ۱ دوباره فعال است.
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
           ADMIN_ORIGIN: http://127.0.0.1:3200
           E2E_ADMIN_BASE_URL: http://127.0.0.1:3200
+          E2E_WEB_BASE_URL: http://127.0.0.1:3101
           S3_ENDPOINT: http://127.0.0.1:3900
           S3_BUCKET: jozveyar
           DOCWORKER_POLL_SECONDS: '0.5'

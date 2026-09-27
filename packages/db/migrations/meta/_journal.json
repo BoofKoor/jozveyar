@@ -85,6 +85,20 @@
       "when": 1790465382217,
       "tag": "0011_order_status_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790516775571,
+      "tag": "0012_price_list_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790516782119,
+      "tag": "0013_price_list_guards",
+      "breakpoints": true
     }
   ]
 }

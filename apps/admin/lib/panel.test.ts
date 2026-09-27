@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AdminEventView } from '@jozveyar/db';
 
-import { byDay, eventLines } from './events';
+import { byDay, EVENT_KINDS, eventLines } from './events';
 import { dayHeading, whenText } from './format';
 import { gateOf, panelPath } from './gate';
 import { contentSecurityPolicy, originOf, sameOrigin } from './security';
@@ -226,6 +226,25 @@ describe('رویدادها', () => {
       ['سارا', ['گیرندهٔ سفارش ', { ltr: '10027' }, ' ویرایش شد: نشانی، کد پستی']],
     ]);
     expect(JSON.stringify(lines)).not.toContain('پلاک 12');
+  });
+
+  it('تعرفه (۴٫۵): پیش‌نویس ساخته، ذخیره و پاک شد؛ فعال شدن و برگشت، با شمارهٔ نسخه جدا از جملهٔ فارسی', () => {
+    const tariff = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'price_list', detail });
+    const lines = eventLines([
+      tariff('tariff.draft', { version: 2, from: 1 }),
+      tariff('tariff.draft_save', { version: 2 }),
+      tariff('tariff.activate', { version: 2, previous: 1, again: false }),
+      tariff('tariff.activate', { version: 1, previous: 2, again: true }),
+      tariff('tariff.draft_delete', { version: 3 }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['پیش‌نویس نسخهٔ ', { ltr: '2' }, ' تعرفه ساخته شد، از روی نسخهٔ ', { ltr: '1' }],
+      ['پیش‌نویس نسخهٔ ', { ltr: '2' }, ' تعرفه ذخیره شد'],
+      ['نسخهٔ ', { ltr: '2' }, ' تعرفه فعال شد', '، به جای نسخهٔ ', { ltr: '1' }],
+      ['نسخهٔ ', { ltr: '1' }, ' تعرفه دوباره فعال شد', '، به جای نسخهٔ ', { ltr: '2' }],
+      ['پیش‌نویس نسخهٔ ', { ltr: '3' }, ' تعرفه پاک شد'],
+    ]);
+    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'تعرفه', 'ادمین‌ها']);
   });
 });
 
