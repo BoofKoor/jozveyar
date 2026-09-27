@@ -10,8 +10,9 @@ import { alertOf, at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, s
 
 /**
  * تنظیمات و کلیدها در پنل، سرتاسری (برش ۴٫۶؛ طرح `docs/ui/mockups/admin.html` حالت‌های `m-settings` و `m-key-edit`، ADR-041):
- * فقط مالک؛ روز کاری تحویل به پست با شمارنده و سایت (وب روی ۳۱۰۱) با ISR تا یک دقیقه؛ سقف ساعتی کد پیامکی؛ تعطیلی‌ها با
- * افزودن و حذف و «با تقویم رسمی تطبیق دادم»؛ و کلیدهای سرویس‌ها با کد تازه، فقط ۴ نویسهٔ آخر، و «برگرداندن به .env».
+ * فقط مالک؛ روز کاری تحویل به پست با شمارنده و سایت (وب روی ۳۱۰۱) با ISR تا یک دقیقه؛ سقف ساعتی کد پیامکی؛ روزهای نگهداری
+ * فایل‌های سفارش (برش ۵٫۱، ADR-044)؛ تعطیلی‌ها با افزودن و حذف و «با تقویم رسمی تطبیق دادم»؛ و کلیدهای سرویس‌ها با کد تازه،
+ * فقط ۴ نویسهٔ آخر، و «برگرداندن به .env».
  *
  * همان پنل و پایگاه دادهٔ `admin.spec.ts` (طرز اجرا بالای همان)، و برای سایت `E2E_WEB_BASE_URL=http://127.0.0.1:3101`. کلید
  * `.env` پنل همان `SMS_API_KEY` محیط همین اجراست (CI تصادفی می‌سازد)، و مقداری که تست از پنل وارد می‌کند `E2E_KEY_PROBE`
@@ -31,7 +32,7 @@ const NO_ACCESS = 'این بخش فقط برای مالک است';
 const PROBE = env.E2E_KEY_PROBE?.trim() || randomBytes(20).toString('hex');
 /** همان `.env` پنل. */
 const ENV_KEY = env.SMS_API_KEY?.trim() ?? '';
-const SETTING_KEYS = ['order.sla_days', 'otp.site_hourly_limit', 'calendar.holidays', 'calendar.official_through'];
+const SETTING_KEYS = ['order.sla_days', 'otp.site_hourly_limit', 'order.files_retention_days', 'calendar.holidays', 'calendar.official_through'];
 
 let sql: postgres.Sql;
 /** رویدادهای پیش از این اجرا (رویدادها فقط افزودنی‌اند؛ اجرای دوباره روی همان پایگاه داده). */
@@ -59,6 +60,7 @@ async function siteSlaDays(): Promise<number | null> {
 const card = (page: Page, key: string) => page.locator(`section[data-setting="${key}"]`);
 /** فیلد عدد شمارنده (گروه شمارنده هم همین نام را دارد). */
 const slaField = (page: Page) => page.getByRole('spinbutton', { name: 'روز کاری بعد از پرداخت' });
+const keepField = (page: Page) => page.getByRole('spinbutton', { name: 'روز نگهداری بعد از «تحویل پست شد» یا «لغو شد»' });
 const keyRow = (page: Page, name: string) => page.locator(`li[data-key="${name}"]`);
 const successIn = (page: Page, where: string) => page.locator(`${where} .jy-note--success`);
 const html = async (page: Page) => page.content();
@@ -93,6 +95,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     // اجرای قبلی که وسط کار افتاد: پیش‌فرض‌های عددی دوباره (تعطیلی‌ها همان که هست).
     await sql`UPDATE settings SET value = '2' WHERE key = 'order.sla_days'`;
     await sql`UPDATE settings SET value = '300' WHERE key = 'otp.site_hourly_limit'`;
+    await sql`UPDATE settings SET value = '30' WHERE key = 'order.files_retention_days'`;
     await sql`UPDATE settings SET value = '1405' WHERE key = 'calendar.official_through'`;
     before = await sql<{ key: string; value: unknown }[]>`SELECT key, value FROM settings WHERE key IN ${sql(SETTING_KEYS)}`;
     eventsBefore = Number((await sql<{ id: string | null }[]>`SELECT max(id) AS id FROM admin_events`)[0]!.id ?? 0);
@@ -116,7 +119,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     }
   });
 
-  test('متصدی نه زبانه دارد، نه صفحه («فقط مالک» با متن طرح)؛ مالک چهار کارت با عددهای پایگاه داده، و کلید .env فقط با ۴ نویسهٔ آخر', async () => {
+  test('متصدی نه زبانه دارد، نه صفحه («فقط مالک» با متن طرح)؛ مالک پنج کارت با عددهای پایگاه داده، و کلید .env فقط با ۴ نویسهٔ آخر', async () => {
     await operatorPage.goto(at());
     await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'تعرفه']);
     await operatorPage.goto(at('/settings'));
@@ -143,6 +146,12 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(page.getByLabel('کد در ساعت، برای کل سایت')).toHaveValue('300');
     await expect(card(page, 'otp.site_hourly_limit').locator('.jy-hint')).toHaveText(
       'جلوی رباتی که با شماره‌ها و اینترنت‌های زیاد پیامک می‌فرستد. سقف هر شماره (5) و هر اینترنت (20) ثابت است.',
+    );
+    // نگهداری فایل‌های سفارش (۵٫۱): پیش‌فرض ۳۰ روز.
+    await expect(card(page, 'order.files_retention_days').getByRole('heading')).toHaveText('فایل‌های سفارش');
+    await expect(keepField(page)).toHaveValue('30');
+    await expect(card(page, 'order.files_retention_days').locator('.jy-hint')).toHaveText(
+      'PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند.',
     );
 
     // تعطیلی‌ها: پنج روز نزدیک، «همه را ببین»، و هشدار پیش‌بینی قمری؛ همه از فهرست پایگاه داده و امروزِ تهران.
@@ -264,6 +273,38 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await card(page, 'otp.site_hourly_limit').getByRole('button', { name: 'ذخیره' }).click();
     await expect(successIn(page, '.ad-flash')).toContainText('300 کد در ساعت.');
     expect(await settingOf('otp.site_hourly_limit')).toBe(300);
+  });
+
+  test('فایل‌های سفارش: شمارنده، خطای بازهٔ ۷ تا ۳۶۵، و رویداد با قبل و بعد (برش ۵٫۱، ADR-044)', async () => {
+    const page = ownerPage;
+    await page.goto(at('/settings'));
+    const keep = card(page, 'order.files_retention_days');
+    await keep.getByRole('button', { name: 'یکی بیشتر' }).click();
+    await expect(keepField(page)).toHaveValue('31');
+    await keep.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(successIn(page, '.ad-flash')).toHaveText('روزهای نگهداری فایل‌های سفارش ذخیره شد: 31 روز. کارگر در دور بعدش با همین پاک می‌کند.');
+    expect(await settingOf('order.files_retention_days')).toBe(31);
+    // بیرون از بازه، هر دو سو: خطا زیر همان فیلد، با عدد نوشته‌شده؛ چیزی ذخیره نمی‌شود. پایین‌تر از ۷ روز فایل سفارشی را
+    // که تازه به پست رسیده و شاید گم شود، زود می‌برد.
+    for (const bad of ['6', '366']) {
+      await page.goto(at('/settings'));
+      await keepField(page).fill(bad);
+      await keep.getByRole('button', { name: 'ذخیره' }).click();
+      await expect(keep.locator('.jy-error'), bad).toHaveText('روز نگهداری عدد صحیح 7 تا 365 باشد.');
+      await expect(keepField(page), bad).toHaveAttribute('aria-invalid', 'true');
+      await expect(keepField(page), bad).toHaveValue(bad);
+    }
+    expect(await settingOf('order.files_retention_days')).toBe(31);
+    await page.goto(at('/settings'));
+    await keep.getByRole('button', { name: 'یکی کمتر' }).click();
+    await keep.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(successIn(page, '.ad-flash')).toContainText('ذخیره شد: 30 روز.');
+    expect(await settingOf('order.files_retention_days')).toBe(30);
+    expect((await settingEvents()).filter((e) => e.target === 'order.files_retention_days').map((e) => e.detail)).toEqual([
+      { key: 'order.files_retention_days', from: 30, to: 31 },
+      { key: 'order.files_retention_days', from: 31, to: 30 },
+    ]);
+    expect(ownerProblems).toEqual([]);
   });
 
   test('تعطیلی‌ها: افزودن با ارقام فارسی، خطا با جایش، تکراری با مناسبت، حذف (گذشته هم) بی اثر بر مهلت سفارش‌ها، و تطبیق با تقویم رسمی', async () => {
@@ -437,6 +478,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(log.first()).toContainText('کلید «قالب کد پیامکی کاوه‌نگار» وارد شد');
     await expect(log.first()).toContainText('روز کاری تحویل به پست: 3 ← 4');
     await expect(log.first()).toContainText('سقف ساعتی کد پیامکی کل سایت: 300 ← 1,000');
+    await expect(log.first()).toContainText('روزهای نگهداری فایل‌های سفارش: 30 ← 31');
     expect((await html(page)).includes(PROBE)).toBe(false);
     expect(ownerProblems).toEqual([]);
   });

@@ -401,8 +401,8 @@ export function createCheckoutService(deps: CheckoutDeps) {
 
     /**
      * برگشت از درگاه (`/pay/callback`). سنجش سمت سرور، زیر قفل پرداخت و سفارش؛ برگشت تکراری همان نتیجهٔ
-     * قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد و کار
-     * `prepare_order`؛ بعد پیامک شمارهٔ سفارش. ناموفق: سفارش `awaiting_payment` با همان قیمت می‌ماند.
+     * قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد و کارهای
+     * `prepare_order` و `prepare_ticket` (برش ۵٫۱)؛ بعد پیامک شمارهٔ سفارش. ناموفق: سفارش `awaiting_payment` با همان قیمت می‌ماند.
      */
     async settle(
       authority: string,

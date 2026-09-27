@@ -368,7 +368,7 @@ describe('مسیر خرید روی سرور', () => {
   });
 
   describe('پرداخت و برگشت از درگاه', () => {
-    it('موفق: پرداخت‌شده، مهلت تحویل به پست دوشنبه ۶ مهر، رویداد، کار prepare_order و پیامک', async () => {
+    it('موفق: پرداخت‌شده، مهلت تحویل به پست دوشنبه ۶ مهر، رویداد، کارهای prepare_order و prepare_ticket و پیامک', async () => {
       const { order, payment } = await placed([doc(120)]);
       const result = await pay(payment!.redirectUrl, 'success');
       expect(result).toEqual({ ok: true, value: { token: order.token, payment: 'succeeded' } });
@@ -379,7 +379,10 @@ describe('مسیر خرید روی سرور', () => {
       expect(row!.postHandoffDueAt!.toISOString()).toBe('2026-09-28T20:30:00.000Z');
       expect(orders.payments[0]).toMatchObject({ status: 'succeeded', refId: '803114', verifiedAt: clock });
       expect(orders.events.at(-1)).toMatchObject({ fromStatus: 'awaiting_payment', toStatus: 'paid', actor: 'gateway' });
-      expect(orders.jobs).toEqual([{ kind: 'prepare_order', orderId: row!.id }]);
+      expect(orders.jobs).toEqual([
+        { kind: 'prepare_order', orderId: row!.id },
+        { kind: 'prepare_ticket', orderId: row!.id },
+      ]);
       expect(sms.messages).toEqual([
         expect.objectContaining({ toMobile: SARA.mobile, purpose: 'order_paid' }),
       ]);
@@ -392,7 +395,7 @@ describe('مسیر خرید روی سرور', () => {
       await pay(payment!.redirectUrl, 'success');
       const authority = payment!.redirectUrl.split('/').at(-1)!;
       expect(await service.settle(authority, 'OK')).toMatchObject({ ok: true, value: { payment: 'succeeded' } });
-      expect(orders.jobs).toHaveLength(1);
+      expect(orders.jobs).toHaveLength(2);
       expect(sms.messages).toHaveLength(1);
     });
 

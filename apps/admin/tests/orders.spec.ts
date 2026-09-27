@@ -14,7 +14,8 @@ import { at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch
 
 /**
  * سفارش‌ها در پنل، سرتاسری (برش ۴٫۲؛ طرح `docs/ui/mockups/admin.html`، ADR-039): پیشخوان با کاشی‌های مهلت و
- * هشدارها، فهرست با چیپ و جست‌وجو، جزئیات، دانلود PDF جزوه از استوریج داخلی، و «دوباره بساز» وقتی کارگر نتوانست.
+ * هشدارها، فهرست با چیپ و جست‌وجو، جزئیات، دانلود فایل چاپ (از ۵٫۱) و PDF اصلی جزوه از استوریج داخلی، و «دوباره بساز» وقتی
+ * کارگر نتوانست. خود فایل چاپ چندجلدی، برگهٔ سفارش و فایل‌های پاک‌شده در `print.spec.ts`.
  *
  * سفارش‌ها را خود تست می‌نشاند، با همان ردیف‌هایی که سرور می‌نویسد (سفارش در یک تراکنش، و برگشت موفق درگاه با
  * رویداد و کار `prepare_order`)، با SQL مثل تست‌های مسیر خرید سایت: Playwright ماژول ESM `@jozveyar/db` را بار
@@ -128,7 +129,7 @@ async function attempt(o: Seeded, createdAt: Date) {
             VALUES (${o.id}, 'mock', ${o.totalRials}, ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`}, ${createdAt})`;
 }
 
-/** پرداخت موفق، مثل برگشت درگاه (`settlePayment`): در یک تراکنش پرداخت، سفارش با مهلت، رویداد و کار `prepare_order`. */
+/** پرداخت موفق، مثل برگشت درگاه (`settlePayment`): در یک تراکنش پرداخت، سفارش با مهلت، رویداد، و کارهای `prepare_order` و `prepare_ticket`. */
 async function pay(o: Seeded, due: Date) {
   const paidAt = new Date(Date.now() - 60 * MINUTE);
   await sql.begin(async (tx) => {
@@ -140,7 +141,7 @@ async function pay(o: Seeded, due: Date) {
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${due} WHERE id = ${o.id}`;
     await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor, note)
              VALUES (${o.id}, 'awaiting_payment', 'paid', ${paidAt}, 'gateway', ${tx.json({ paymentId: payment!.id })})`;
-    await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${o.id})`;
+    await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${o.id}), ('prepare_ticket', ${o.id})`;
   });
 }
 
@@ -301,7 +302,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     expect(ownerProblems).toEqual([]);
   });
 
-  test('جزئیات و دانلود PDF جزوه از استوریج داخلی، با رویدادش', async () => {
+  test('جزئیات و دانلود فایل چاپ و PDF اصلی جزوه از استوریج داخلی، با رویدادشان', async () => {
     await ownerPage.goto(at('/orders'));
     await ownerPage.locator(`.ad-row[data-order="${o.A.number}"]`).click();
     await expect(ownerPage.getByRole('heading', { name: `سفارش ${o.A.number}` })).toBeVisible();
@@ -314,24 +315,28 @@ test.describe.serial('سفارش‌ها در پنل', () => {
       'خراسان رضوی، مشهد، بلوار سجاد، سجاد 18، پلاک 42، واحد 6',
     );
 
-    const pdf = ownerPage.locator('[data-pdf="ready"]');
-    await expect(pdf.locator('.ad-pdf__name')).toHaveText(`jozve-${o.A.number}-1.pdf`);
-    await expect(pdf.locator('.ad-pdf__meta')).toContainText('20 صفحه');
-    const [download] = await Promise.all([ownerPage.waitForEvent('download'), pdf.getByRole('link', { name: 'دانلود PDF' }).click()]);
+    // دو PDF همه A4 عمودی، یک جلد: فایل چاپ خود PDF جزوه است (ADR-043)، بی «PDF اصلی» جدا.
+    const print = ownerPage.locator('[data-print="ready"]');
+    await expect(print.locator('.ad-pdf__name')).toHaveText(`jozve-${o.A.number}-1.pdf`);
+    await expect(print.locator('.ad-print__meta')).toContainText('فایل چاپ · 20 صفحه، A4 عمودی، یک جلد');
+    await expect(print.locator('.ad-print__orig')).toHaveText('همهٔ صفحه‌ها A4 عمودی بود؛ فایل چاپ همان PDF جزوه است.');
+    const [download] = await Promise.all([ownerPage.waitForEvent('download'), print.getByRole('link', { name: 'دانلود' }).click()]);
     expect(download.suggestedFilename()).toBe(`jozve-${o.A.number}-1.pdf`);
     const bytes = readFileSync((await download.path())!);
-    const [item] = await sql<{ sha: string; bytes: string }[]>`
-      SELECT i.print_pdf_sha256 AS sha, i.print_pdf_bytes::text AS bytes FROM order_items i WHERE i.order_id = ${o.A.id}`;
-    // همان بایت‌هایی که کارگر ساخت و اثر انگشتش را نوشت.
+    const [item] = await sql<{ sha: string; bytes: string; printSha: string }[]>`
+      SELECT i.print_pdf_sha256 AS sha, i.print_pdf_bytes::text AS bytes, f.sha256 AS "printSha"
+        FROM order_items i JOIN order_print_files f ON f.order_item_id = i.id WHERE i.order_id = ${o.A.id}`;
+    // همان بایت‌هایی که کارگر ساخت و اثر انگشتش را نوشت؛ فایل چاپ و PDF جزوه یکی.
     expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-    expect(sha256(bytes)).toBe(item!.sha);
+    expect(sha256(bytes)).toBe(item!.printSha);
+    expect(item!.printSha).toBe(item!.sha);
     expect(String(bytes.length)).toBe(item!.bytes);
 
-    // سرآیندها: پیوست، بی کش، بی بافر Nginx؛ و بی نشست به صفحهٔ ورود، نه فایل.
+    // PDF اصلی جزوه از راه خودش، با نام خودش. سرآیندها: پیوست، بی کش، بی بافر Nginx؛ و بی نشست به صفحهٔ ورود، نه فایل.
     const direct = await ownerContext.request.get(at(`/orders/${o.A.number}/pdf/1`));
     expect(direct.headers()).toMatchObject({
       'content-type': 'application/pdf',
-      'content-disposition': `attachment; filename="jozve-${o.A.number}-1.pdf"; filename*=UTF-8''jozve-${o.A.number}-1.pdf`,
+      'content-disposition': `attachment; filename="jozve-${o.A.number}-1-asli.pdf"; filename*=UTF-8''jozve-${o.A.number}-1-asli.pdf`,
       'x-accel-buffering': 'no',
     });
     expect(direct.headers()['cache-control']).toContain('no-store');
@@ -344,31 +349,34 @@ test.describe.serial('سفارش‌ها در پنل', () => {
 
     await ownerPage.reload();
     const log = ownerPage.locator('.ad-log');
-    await expect(log.locator('li').filter({ hasText: 'PDF جزوه دانلود شد' })).toHaveCount(2);
-    await expect(log.locator('li').filter({ hasText: 'PDF جزوه دانلود شد' }).first()).toContainText('· سارا رضایی');
+    await expect(log.locator('li').filter({ hasText: 'فایل چاپ دانلود شد' })).toContainText('· سارا رضایی');
+    await expect(log.locator('li').filter({ hasText: 'PDF اصلی جزوه دانلود شد' })).toContainText('· سارا رضایی');
+    await expect(log.locator('li').filter({ hasText: 'PDF جزوه و فایل چاپ ساخته شد' })).toContainText('· سیستم');
     await expect(log.locator('li').first()).toContainText('سفارش ساخته شد · مشتری');
     await expect(log.locator('li').nth(1)).toContainText('پرداخت شد · درگاه');
 
     await ownerPage.goto(at('/events?kind=orders'));
     await expect(ownerPage.getByRole('link', { name: 'سفارش', exact: true })).toHaveAttribute('aria-current', 'page');
-    await expect(ownerPage.locator('.ad-log').getByText(`PDF سفارش ${o.A.number} دانلود شد`).first()).toBeVisible();
+    await expect(ownerPage.locator('.ad-log').getByText(`فایل چاپ سفارش ${o.A.number} دانلود شد`).first()).toBeVisible();
+    await expect(ownerPage.locator('.ad-log').getByText(`PDF اصلی سفارش ${o.A.number} دانلود شد`).first()).toBeVisible();
     expect(ownerProblems).toEqual([]);
   });
 
-  test('PDF ساخته نشد: دلیل روشن، «دوباره بساز»، و بعد دانلود', async () => {
+  test('فایل چاپ ساخته نشد: دلیل روشن، «دوباره بساز»، و بعد دانلود', async () => {
     await ownerPage.goto(at(`/orders/${o.B.number}`));
     await expect(ownerPage.locator('.ad-status .jy-card__title')).toHaveText('مهلت تحویل به پست گذشت');
-    const failed = ownerPage.locator('[data-pdf="failed"]');
+    const failed = ownerPage.locator('[data-print="failed"]');
+    await expect(failed.locator('.ad-print__meta')).toHaveText('فایل چاپ ساخته نشد');
     await expect(failed.locator('.jy-note')).toContainText('1 تلاش ناموفق: فایل مشتری روی استوریج پیدا نشد');
     await expect(failed.locator('.jy-note')).toContainText('روی سرورند؛ دوباره بساز.');
     // فایلی که نرسیده بود حالا به استوریج می‌رسد؛ کارگر دوباره می‌سازد.
     await upload(missing.key, missing.body);
     await failed.getByRole('button', { name: 'دوباره بساز' }).click();
-    await expect(ownerPage.locator('[data-pdf="failed"]')).toHaveCount(0);
+    await expect(ownerPage.locator('[data-print="failed"]')).toHaveCount(0);
     await expect.poll(() => jobStatus(o.B), { timeout: 60_000 }).toBe('done');
     await ownerPage.reload();
-    await expect(ownerPage.locator('[data-pdf="ready"] .ad-pdf__meta')).toContainText('4 صفحه');
-    await expect(ownerPage.locator('.ad-log li').filter({ hasText: 'ساختن دوبارهٔ PDF جزوه' })).toContainText('· سارا رضایی');
+    await expect(ownerPage.locator('[data-print="ready"] .ad-print__meta')).toContainText('4 صفحه');
+    await expect(ownerPage.locator('.ad-log li').filter({ hasText: 'ساختن دوبارهٔ فایل چاپ' })).toContainText('· سارا رضایی');
     await ownerPage.goto(at());
     await expect(ownerPage.locator('[data-alert="pdf"]')).toHaveCount(0);
     expect(ownerProblems).toEqual([]);
@@ -378,7 +386,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await ownerPage.goto(at(`/orders/${o.C.number}`));
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('در انتظار پرداخت');
     await expect(ownerPage.locator('.ad-status .jy-card__title')).toHaveText('هنوز پرداخت نشده');
-    await expect(ownerPage.getByText('PDF جزوه بعد از پرداخت ساخته می‌شود.')).toBeVisible();
+    await expect(ownerPage.getByText('فایل چاپ و برگهٔ سفارش بعد از پرداخت ساخته می‌شوند.')).toBeVisible();
     const payment = ownerPage.locator('[data-payment="unreturned"]');
     await expect(payment.locator('.jy-badge')).toHaveText('بی برگشت');
     await expect(payment.locator('.ad-pay__meta')).toHaveText(
@@ -388,7 +396,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
 
     await ownerPage.goto(at(`/orders/${o.C.number}/pdf/1`));
     await expect(ownerPage).toHaveURL(new RegExp(`/orders/${o.C.number}\\?e=pdf_not_ready$`));
-    await expect(ownerPage.locator('main').getByRole('alert')).toHaveText('PDF این جزوه هنوز ساخته نشده است.');
+    await expect(ownerPage.locator('main').getByRole('alert')).toHaveText('این فایل هنوز ساخته نشده است.');
 
     await ownerPage.goto(at(`/orders/${o.D.number}`));
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('رهاشده');
@@ -400,7 +408,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     expect(ownerProblems).toEqual([]);
   });
 
-  test('متصدی: زبانهٔ سفارش‌ها و دانلود PDF، با مجوز خودش', async ({ browser }) => {
+  test('متصدی: زبانهٔ سفارش‌ها و دانلود فایل چاپ، با مجوز خودش', async ({ browser }) => {
     const context = await newContext(browser);
     const page = await context.newPage();
     const problems = watch(page);
@@ -412,10 +420,13 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await expect(page.getByRole('heading', { name: `سفارش ${o.E.number}` })).toBeVisible();
     await expect.poll(() => jobStatus(o.E), { timeout: 60_000 }).toBe('done');
     await page.reload();
-    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'دانلود PDF' }).click()]);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('[data-print="ready"]').getByRole('link', { name: 'دانلود' }).click(),
+    ]);
     expect(download.suggestedFilename()).toBe(`jozve-${o.E.number}-1.pdf`);
     await page.reload();
-    await expect(page.locator('.ad-log li').filter({ hasText: 'PDF جزوه دانلود شد' })).toContainText('· علی محمدی');
+    await expect(page.locator('.ad-log li').filter({ hasText: 'فایل چاپ دانلود شد' })).toContainText('· علی محمدی');
     expect(problems).toEqual([]);
     await context.close();
   });

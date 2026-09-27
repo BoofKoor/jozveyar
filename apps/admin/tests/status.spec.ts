@@ -13,12 +13,12 @@ import { formatTomans, tehranDayStart } from '@jozveyar/text';
 import { alertOf, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
- * وضعیت سفارش در پنل، سرتاسری (برش ۴٫۳؛ طرح `docs/ui/mockups/admin.html`، ADR-039): «شروع چاپ» (بسته تا PDF جزوه ساخته
- * نشده)، «تحویل پست شد»، لغو با دلیل و هشدار پول، برگرداندن یک قدم فقط با مالک، ویرایش نام و نشانی و کد پستی، چیپ‌های
+ * وضعیت سفارش در پنل، سرتاسری (برش ۴٫۳؛ طرح `docs/ui/mockups/admin.html`، ADR-039): «شروع چاپ» (بسته تا فایل چاپ ساخته
+ * نشده، برش ۵٫۱)، «تحویل پست شد»، لغو با دلیل و هشدار پول، برگرداندن یک قدم فقط با مالک، ویرایش نام و نشانی و کد پستی، چیپ‌های
  * «تحویل پست شد» و «لغو شد»، و سطر آمار پیشخوان. هر کار از همان راه مرورگر؛ پایگاه داده گذار را خودش هم می‌سنجد
  * (`orders_status_flow`).
  *
- * سفارش‌ها را مثل `orders.spec.ts` خود تست با SQL می‌نشاند و PDF جزوه را کارگر واقعی می‌سازد؛ همان متغیرها و همان
+ * سفارش‌ها را مثل `orders.spec.ts` خود تست با SQL می‌نشاند و فایل چاپ را کارگر واقعی می‌سازد؛ همان متغیرها و همان
  * کارگر لازم است (طرز اجرا بالای `orders.spec.ts`). پایگاه داده دور‌ریختنی است: تست اول سفارش‌های قبلی را پاک می‌کند.
  */
 
@@ -54,8 +54,8 @@ interface Seeded {
 }
 
 /**
- * سفارش پرداخت‌شده، همان ردیف‌هایی که سرور می‌نویسد (سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد و کار
- * `prepare_order`)؛ ۱۰ صفحهٔ سیاه‌سفید، فایلش در Garage تا کارگر PDF جزوه را بسازد، یا بی فایل تا نسازد.
+ * سفارش پرداخت‌شده، همان ردیف‌هایی که سرور می‌نویسد (سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد و کارهای
+ * `prepare_order` و `prepare_ticket`)؛ ۱۰ صفحهٔ سیاه‌سفید، فایلش در Garage تا کارگر فایل چاپ را بسازد، یا بی فایل تا نسازد.
  */
 async function paidOrder(name: string, phone: string, due: Date, withFile = true): Promise<Seeded> {
   const docId = randomUUID();
@@ -104,7 +104,7 @@ async function paidOrder(name: string, phone: string, due: Date, withFile = true
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${due} WHERE id = ${row!.id}`;
     await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor, note)
              VALUES (${row!.id}, 'awaiting_payment', 'paid', ${paidAt}, 'gateway', ${tx.json({ paymentId: payment!.id })})`;
-    await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${row!.id})`;
+    await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${row!.id}), ('prepare_ticket', ${row!.id})`;
     return { number: row!.order_number, id: row!.id, totalRials: Number(row!.total_rials) };
   });
 }
@@ -119,7 +119,7 @@ test.describe.serial('وضعیت سفارش در پنل', () => {
   let ownerContext: BrowserContext;
   let ownerPage: Page;
   let ownerProblems: string[] = [];
-  // A: کل مسیر تا پست و برگرداندن. B: لغو و برگرداندن لغو. C: بی فایل، پس بی PDF: «شروع چاپ» بسته. D: ویرایش گیرنده.
+  // A: کل مسیر تا پست و برگرداندن. B: لغو و برگرداندن لغو. C: بی فایل، پس بی فایل چاپ: «شروع چاپ» بسته. D: ویرایش گیرنده.
   const o = {} as Record<'A' | 'B' | 'C' | 'D', Seeded>;
 
   test.beforeAll(async ({ browser }) => {
@@ -161,10 +161,10 @@ test.describe.serial('وضعیت سفارش در پنل', () => {
     await sql?.end();
   });
 
-  test('«شروع چاپ» بسته تا PDF جزوه ساخته نشده؛ بعد «در حال چاپ» با کننده، و «تحویل پست شد» به‌موقع', async () => {
-    // C: بی PDF، دکمهٔ اصلی فقط وضعیت را می‌گوید.
+  test('«شروع چاپ» بسته تا فایل چاپ ساخته نشده؛ بعد «در حال چاپ» با کننده، و «تحویل پست شد» به‌موقع', async () => {
+    // C: بی فایل چاپ، دکمهٔ اصلی فقط وضعیت را می‌گوید.
     await ownerPage.goto(at(`/orders/${o.C.number}`));
-    const blocked = side(ownerPage).getByRole('button', { name: 'اول PDF جزوه ساخته شود' });
+    const blocked = side(ownerPage).getByRole('button', { name: 'اول فایل چاپ ساخته شود' });
     await expect(blocked).toHaveAttribute('aria-disabled', 'true');
     await expect(side(ownerPage).getByRole('button', { name: 'شروع چاپ' })).toHaveCount(0);
 
@@ -303,13 +303,13 @@ test.describe.serial('وضعیت سفارش در پنل', () => {
   });
 
   test('فهرست و پیشخوان: چیپ‌های تحویل پست شد و لغو شد، «باز» یعنی در صف و در حال چاپ، و سطر آمار', async () => {
-    // A دوباره به پست رفت (متصدی)؛ B در صف است؛ C در صف (بی PDF)؛ D در صف. یکی را لغو کن تا چیپش شمار داشته باشد.
+    // A دوباره به پست رفت (متصدی)؛ B در صف است؛ C در صف (بی فایل چاپ)؛ D در صف. یکی را لغو کن تا چیپش شمار داشته باشد.
     await ownerPage.goto(at(`/orders/${o.C.number}?do=cancel`));
     await side(ownerPage).locator('form').getByLabel('دلیل لغو').fill('فایل مشتری نرسید؛ مبلغ برگشت');
     await side(ownerPage).locator('form').getByRole('button', { name: 'سفارش را لغو کن' }).click();
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('لغو شد');
-    // PDF ساخته‌نشدهٔ سفارش لغوشده دیگر لازم نیست: نه «دوباره بساز»، نه هشدار پیشخوان.
-    await expect(ownerPage.getByText('PDF جزوه ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.')).toBeVisible();
+    // فایل چاپ ساخته‌نشدهٔ سفارش لغوشده دیگر لازم نیست: نه «دوباره بساز»، نه هشدار پیشخوان.
+    await expect(ownerPage.getByText('فایل چاپ ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.')).toBeVisible();
     await expect(ownerPage.getByRole('button', { name: 'دوباره بساز' })).toHaveCount(0);
 
     await ownerPage.goto(at('/orders'));

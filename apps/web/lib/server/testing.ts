@@ -437,8 +437,9 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         actor: 'gateway',
         note: { paymentId: payment.id, provider, refId: outcome.refId },
       });
-      if (!jobs.some((j) => j.orderId === order.id && j.kind === 'prepare_order')) {
-        jobs.push({ kind: 'prepare_order', orderId: order.id });
+      // PDF جزوه و فایل چاپ، و برگهٔ سفارش (برش ۵٫۱)؛ هر کدام یک بار، مثل `jobs_order_kind`.
+      for (const kind of ['prepare_order', 'prepare_ticket']) {
+        if (!jobs.some((j) => j.orderId === order.id && j.kind === kind)) jobs.push({ kind, orderId: order.id });
       }
       return { payment: { ...payment }, order: { ...order }, settled: true };
     },

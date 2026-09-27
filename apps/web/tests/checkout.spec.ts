@@ -255,9 +255,9 @@ test.describe.serial('سفارش کامل', () => {
     await expect(page).toHaveTitle(/سفارش/);
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
     await plainNumbers(page, 6);
-    // کارگر PDF جزوه را می‌سازد (`prepare_order`).
-    const [job] = await sql()`select kind from jobs where order_id = ${order!.id}`;
-    expect(job?.kind).toBe('prepare_order');
+    // کارگر PDF جزوه و فایل چاپ (`prepare_order`) و برگهٔ سفارش (`prepare_ticket`، برش ۵٫۱) را می‌سازد.
+    const jobs = await sql()`select kind from jobs where order_id = ${order!.id} order by kind`;
+    expect(jobs.map((job) => job.kind)).toEqual(['prepare_order', 'prepare_ticket']);
   });
 
   test('غریبه فقط شماره، وضعیت و روز تحویل را می‌بیند', async ({ browser }) => {
