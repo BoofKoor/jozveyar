@@ -180,7 +180,7 @@ export function clearAuthCookie(response: NextResponse, request: NextRequest) {
 
 /**
  * IP کاربر برای سقف کد پیامکی. پشت Nginx از `X-Real-IP`، که Nginx خودش می‌گذارد و مقدار کاربر را
- * بازنویسی می‌کند (`infra/nginx/jozveyar.conf`)؛ کانتینر وب پورتی بیرون باز نکرده. بی Nginx (توسعه و
+ * بازنویسی می‌کند (`infra/nginx/conf.d/jozveyar.conf`)؛ کانتینر وب پورتی بیرون باز نکرده. بی Nginx (توسعه و
  * CI) آخرین حلقهٔ `X-Forwarded-For`، و اگر نبود `unknown`.
  */
 export function clientIp(request: NextRequest): string {

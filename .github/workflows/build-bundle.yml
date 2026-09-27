@@ -55,6 +55,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # پیکربندی Nginx پیش از ادغام، نه هنگام استقرار: همان ایمیج و همان دو پوشه‌ای که compose تولید وصل می‌کند، با
+      # گواهی خودامضا و نام سرویس‌ها روی 127.0.0.1. روی سرور nginx-apply.sh باز هم پیش از به کار انداختن می‌سنجد.
+      - name: پیکربندی Nginx
+        run: |
+          set -eux
+          C="$RUNNER_TEMP/certs/live/jozveyar.com"
+          mkdir -p "$C"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=jozveyar.com \
+            -keyout "$C/privkey.pem" -out "$C/fullchain.pem"
+          docker run --rm --add-host web:127.0.0.1 --add-host garage:127.0.0.1 --add-host admin:127.0.0.1 \
+            -v "$PWD/infra/nginx/conf.d:/etc/nginx/conf.d:ro" -v "$PWD/infra/nginx/snippets:/etc/nginx/snippets:ro" \
+            -v "$RUNNER_TEMP/certs:/etc/nginx/certs:ro" nginx:1.27-alpine nginx -t
+
       # نسخه عمداً اینجا نوشته نمی‌شود: اکشن آن را از فیلد `packageManager`
       # در package.json می‌خواند. اگر هر دو جا نوشته شود و روزی یکی به‌روز
       # شود و دیگری نه، اکشن با خطای «چند نسخه» می‌افتد.
