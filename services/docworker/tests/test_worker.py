@@ -5,20 +5,24 @@ import math
 import psycopg
 import pytest
 
+import docworker.__main__ as main
 from docworker import fonts
 from docworker.__main__ import KINDS, Worker, kinds_from_env
+
+ENV = {
+    "DATABASE_URL": "postgresql://x", "S3_ENDPOINT": "http://s3", "S3_BUCKET": "b",
+    "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s",
+}
 
 
 @pytest.fixture
 def worker(monkeypatch):
-    for key, value in {
-        "DATABASE_URL": "postgresql://x", "S3_ENDPOINT": "http://s3", "S3_BUCKET": "b",
-        "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s",
-    }.items():
+    for key, value in ENV.items():
         monkeypatch.setenv(key, value)
     w = Worker()
     w.retry_seconds = 0
     w.fonts_due = math.inf  # استوریج ساختگی است؛ هم‌گام‌سازی فونت جدا تست می‌شود
+    w.retention_due = math.inf  # نگهداری هم
     return w
 
 
@@ -79,9 +83,41 @@ def test_unreachable_database_waits(worker, monkeypatch):
 
 
 def test_worker_takes_every_kind_by_default(monkeypatch):
-    """از برش ۳ب، ساختن PDF جزوهٔ سفارش پرداخت‌شده هم (`prepare_order`)."""
+    """از برش ۳ب ساختن PDF جزوهٔ سفارش پرداخت‌شده (`prepare_order`)، و از ۵٫۱ برگهٔ سفارش (`prepare_ticket`)."""
     monkeypatch.delenv("DOCWORKER_KINDS", raising=False)
-    assert kinds_from_env() == ["convert_document", "analyze_document", "prepare_order"] == list(KINDS)
+    assert kinds_from_env() == ["convert_document", "analyze_document", "prepare_order", "prepare_ticket"] == list(KINDS)
+
+
+def test_only_a_node_that_takes_order_jobs_deletes_order_files(monkeypatch):
+    """نگهداری (ADR-044) کار نود سفارش است؛ نود فقط‌تحلیل فایل سفارشی پاک نمی‌کند."""
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("DOCWORKER_KINDS", "analyze_document")
+    assert Worker().retention_due == math.inf
+    monkeypatch.delenv("DOCWORKER_KINDS")
+    assert Worker().retention_due == 0.0
+
+
+def test_a_retention_failure_never_stops_the_worker(worker, monkeypatch):
+    """استوریج یا پایگاه داده در دسترس نیست ← هشدار، نه کرش؛ و دور بعد دوباره."""
+    calls = []
+
+    def broken(conn, storage):
+        calls.append(conn)
+        raise OSError("storage down")
+
+    class Conn:
+        rolled_back = 0
+
+        def rollback(self):
+            Conn.rolled_back += 1
+
+    monkeypatch.setattr(main, "sweep", broken)
+    worker.retention_due = 0.0
+    worker.sweep_if_due(Conn())
+    worker.sweep_if_due(Conn())  # هنوز وقتش نشده
+    assert len(calls) == 1 and Conn.rolled_back == 1
+    assert worker.retention_due > 0
 
 
 def test_a_node_can_take_only_analysis(monkeypatch):

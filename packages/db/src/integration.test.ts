@@ -55,7 +55,7 @@ import {
 } from './documents.js';
 import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
-import { PREPARE_ORDER_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
+import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
 import { createSmsLog } from './sms.js';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
 import {
@@ -83,7 +83,8 @@ import { createSettingsStore, SETTING_TARGET, type SettingsActor } from './setti
 import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TARGET } from './secrets.js';
 import { seal } from './sealed.js';
 import { serviceSecrets } from './schema.js';
-import { OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTING } from './reference.js';
+import { FILES_RETENTION_SETTING, OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTING } from './reference.js';
+import { orderPrintFiles } from './schema.js';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -934,7 +935,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await documentsStore.inOrder(randomUUID())).toBe(false);
     });
 
-    it('برگشت از درگاه: موفق در یک تراکنش — پرداخت، سفارش، رویداد و کار prepare_order', async () => {
+    it('برگشت از درگاه: موفق در یک تراکنش — پرداخت، سفارش، رویداد، و کارهای prepare_order و prepare_ticket', async () => {
       const store = createOrderStore(conn);
       const { order } = await store.createOrder(await newOrder());
       const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
@@ -956,8 +957,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       }));
       expect(settled).toMatchObject({ settled: true, payment: { status: 'succeeded', refId: '803114' }, order: { status: 'paid' } });
       expect(settled!.order.postHandoffDueAt).toEqual(due);
-      const queued = await conn.db.select().from(jobs).where(eq(jobs.orderId, order.id));
-      expect(queued).toEqual([expect.objectContaining({ kind: PREPARE_ORDER_JOB, status: 'queued', documentId: null })]);
+      const queued = await conn.db.select().from(jobs).where(eq(jobs.orderId, order.id)).orderBy(jobs.kind);
+      // برگهٔ سفارش کار جدای خودش را دارد (برش ۵٫۱، ADR-043): شکستش PDF جزوه را «ساخته نشد» نمی‌کند.
+      expect(queued).toEqual([
+        expect.objectContaining({ kind: PREPARE_ORDER_JOB, status: 'queued', documentId: null }),
+        expect.objectContaining({ kind: PREPARE_TICKET_JOB, status: 'queued', documentId: null }),
+      ]);
       const events = await conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, order.id));
       expect(events.map((e) => [e.fromStatus, e.toStatus, e.actor])).toEqual([
         [null, 'awaiting_payment', 'user'],
@@ -1474,11 +1479,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       await pay('tomorrow', tehran('2026-10-04 12:00'), END_TUESDAY);
       await pay('wed', tehran('2026-10-05 09:00'), END_WEDNESDAY);
       await pay('sat', tehran('2026-10-07 18:00'), END_SATURDAY);
-      // PDF جزوهٔ «فردا» ساخته نشد: شکست قطعی کارگر، با همان شکل `last_error`.
+      // PDF جزوهٔ «فردا» ساخته نشد: شکست قطعی کارگر، با همان شکل `last_error`. برگه‌اش جداست و دست نمی‌خورد.
       await conn.db
         .update(jobs)
         .set({ status: 'failed', attempts: 1, lastError: 'file_missing: file_missing', finishedAt: NOW })
-        .where(eq(jobs.orderId, ids.tomorrow!));
+        .where(and(eq(jobs.orderId, ids.tomorrow!), eq(jobs.kind, PREPARE_ORDER_JOB)));
 
       // در انتظار پرداخت: یک تلاش بی برگشت (۴۰ دقیقه)، یکی هنوز در درگاه (۱۰ دقیقه)، یکی ناموفق.
       await place('waiting', { name: 'کیان رستمی', phone: '09141110030' });
@@ -1617,8 +1622,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         cityName: 'مشهد',
         zoneName: 'بقیهٔ کشور',
         shippingMethodName: 'پست پیشتاز',
-        order: { orderNumber: num.today2, status: 'paid', postHandoffDueAt: END_MONDAY, priceListVersion: 1 },
+        order: { orderNumber: num.today2, status: 'paid', postHandoffDueAt: END_MONDAY, priceListVersion: 1, filesDeletedAt: null },
         pdfJob: { status: 'queued', attempts: 0, maxAttempts: 3, lastError: null, finishedAt: null },
+        ticketJob: { status: 'queued', attempts: 0, maxAttempts: 3, lastError: null, finishedAt: null },
+        ticket: null,
       });
       expect(details!.items).toEqual([
         expect.objectContaining({
@@ -1631,6 +1638,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
             expect.objectContaining({ seq: 2, documentId: docs.b.id, pageCount: 54, originalName: 'ریاضی ۲ - جلسه 54.pdf' }),
           ],
           rules: [{ seq: 1, pageRanges: [[1, 102]], colorMode: 'bw', paperTypeId: 'tahrir80', paperName: 'تحریر ۸۰ گرم' }],
+          printFiles: [],
         }),
       ]);
       expect(details!.payments.map((p) => p.status)).toEqual(['succeeded']);
@@ -1643,11 +1651,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
       const waiting = await panel.details(num.waiting!);
       expect(waiting!.pdfJob).toBeNull();
+      expect(waiting!.ticketJob).toBeNull();
       // تازه‌ترین تلاش اول.
       expect(waiting!.payments.map((p) => p.status)).toEqual(['pending', 'pending', 'failed']);
     });
 
-    it('دوباره بساز: فقط کار شکست‌خورده، با رویداد و شکست قبلی در یک تراکنش؛ دو کلیک هم‌زمان یک بار', async () => {
+    it('دوباره بساز: کاری که در صف یا زیر دست کارگر نیست، با رویداد و کار قبلی در یک تراکنش؛ دو کلیک هم‌زمان یک بار', async () => {
       const panel = createPanelOrderStore(conn);
       const event = (at: Date): AdminEventInput => ({
         adminUserId: adminId,
@@ -1658,10 +1667,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         detail: { orderNumber: num.tomorrow },
         at,
       });
-      expect(await panel.rebuildPdf(ids.today2!, { ...event(NOW), targetId: ids.today2! })).toBe('not_failed');
-      const results = await Promise.all([panel.rebuildPdf(ids.tomorrow!, event(NOW)), panel.rebuildPdf(ids.tomorrow!, event(NOW))]);
-      expect(results.sort()).toEqual(['not_failed', 'ok']);
-      const [job] = await conn.db.select().from(jobs).where(eq(jobs.orderId, ids.tomorrow!));
+      // کار «امروز» هنوز در صف است: دوباره در صف رفتنش معنایی ندارد (شاهد: «فردا»ی شکست‌خورده می‌رود).
+      expect(await panel.requeue(ids.today2!, PREPARE_ORDER_JOB, { ...event(NOW), targetId: ids.today2! })).toBe('busy');
+      const results = await Promise.all([
+        panel.requeue(ids.tomorrow!, PREPARE_ORDER_JOB, event(NOW)),
+        panel.requeue(ids.tomorrow!, PREPARE_ORDER_JOB, event(NOW)),
+      ]);
+      expect(results.sort()).toEqual(['busy', 'ok']);
+      const [job] = await conn.db
+        .select()
+        .from(jobs)
+        .where(and(eq(jobs.orderId, ids.tomorrow!), eq(jobs.kind, PREPARE_ORDER_JOB)));
       expect(job).toMatchObject({ status: 'queued', attempts: 0, lastError: null, finishedAt: null, lockedBy: null });
       expect(job!.runAfter.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
       const details = await panel.details(num.tomorrow!);
@@ -1669,7 +1685,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect.objectContaining({
           action: 'orders.pdf_rebuild',
           adminName: 'علی محمدی',
-          detail: { orderNumber: num.tomorrow, previous: { attempts: 1, error: 'file_missing' } },
+          detail: { orderNumber: num.tomorrow, previous: { status: 'failed', attempts: 1, error: 'file_missing' } },
         }),
       ]);
       // دانلود با همان راه رویداد، در صفحهٔ همان سفارش؛ سفارش دیگر رویدادی ندارد.
@@ -1680,14 +1696,21 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('PDF جزوه برای دانلود: کلید و حجم فقط وقتی کارگر ساخته', async () => {
       const panel = createPanelOrderStore(conn);
-      expect(await panel.printFile(num.late!, 1)).toMatchObject({ orderId: ids.late, status: 'paid', itemSeq: 1, key: null, readyAt: null });
-      expect(await panel.printFile(num.late!, 2)).toBeNull();
+      expect(await panel.jozveFile(num.late!, 1)).toMatchObject({
+        orderId: ids.late,
+        status: 'paid',
+        filesDeletedAt: null,
+        itemSeq: 1,
+        key: null,
+        readyAt: null,
+      });
+      expect(await panel.jozveFile(num.late!, 2)).toBeNull();
       const [item] = await conn.db.select().from(orderItems).where(eq(orderItems.orderId, ids.late!));
       await conn.db
         .update(orderItems)
         .set({ printPdfKey: `orders/${num.late}/jozve-1.pdf`, printPdfBytes: 40_265_318, printPdfSha256: 'a'.repeat(64), printPdfReadyAt: NOW })
         .where(eq(orderItems.id, item!.id));
-      expect(await panel.printFile(num.late!, 1)).toMatchObject({ key: `orders/${num.late}/jozve-1.pdf`, bytes: 40_265_318, readyAt: NOW });
+      expect(await panel.jozveFile(num.late!, 1)).toMatchObject({ key: `orders/${num.late}/jozve-1.pdf`, bytes: 40_265_318, readyAt: NOW });
     });
 
     it('کد خطای کار از last_error کارگر: شکست قطعی با کد، بقیه گذرا', () => {
@@ -2121,6 +2144,373 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await panel.stats({ since: new Date(since.getTime() - 1), at: END_MONDAY })).toEqual({ printing: 2, handed: 3, onTime: 2 });
       expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 1) })).toEqual({ printing: 2, handed: 2, onTime: 1 });
       expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 2) })).toEqual({ printing: 2, handed: 1, onTime: 0 });
+    });
+  });
+
+  // فایل چاپ، برگه و نگهداری (برش ۵٫۱، ADR-043 و ADR-044): محافظ‌ها، اثر انگشت برگه، و ذخیره‌گاه پنل. ساختن فایل‌ها و پاک
+  // کردنشان کار کارگر است و روی همین پستگرس در `services/docworker/tests` سنجیده می‌شود.
+  describe('فایل چاپ، برگه و نگهداری روی پستگرس (برش ۵٫۱)', () => {
+    const NOW = new Date('2026-10-05T07:50:00Z');
+    const MINUTE = 60_000;
+    const DAY = 86_400_000;
+    const END_MONDAY = new Date('2026-10-06T00:00:00+03:30');
+    const SHA = 'a'.repeat(64);
+    let admin = '';
+    /** سند آماده به‌ازای شمار صفحه. */
+    const docOf: Record<number, string> = {};
+
+    /** سفارش پرداخت‌شده همان‌طور که سرور می‌سازد؛ ریز قیمت از همان `quote()`، پس ۱۶۵۰ صفحهٔ دورو دو جلد است. */
+    async function paidOrder(pages: number, name = 'مریم کاظمی') {
+      const sections = [{ documentId: docOf[pages]!, pageCount: pages }];
+      const rules = [{ pageRanges: [[1, pages]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
+      const breakdown = quote(
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
+        SEED_PRICE_LIST,
+      );
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: '09152345678' })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+        .returning();
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder({
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        breakdown,
+        quoteSnapshot: null,
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: 'tehran',
+        provinceId: 8,
+        cityId: 394,
+        recipientName: name,
+        recipientPhone: '09152345678',
+        addressText: 'بلوار سجاد، سجاد 18، پلاک 42',
+        postalCode: null,
+        items: [{ pageCount: pages, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+      });
+      const payment = await store.insertPayment({
+        orderId: order.id,
+        provider: 'mock',
+        amountRials: order.totalRials,
+        authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
+        raw: null,
+      });
+      await store.settlePayment('mock', payment.authority, async () => ({
+        kind: 'succeeded',
+        refId: '803114',
+        cardMask: null,
+        raw: null,
+        paidAt: NOW,
+        postHandoffDueAt: END_MONDAY,
+      }));
+      const [item] = await conn.db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+      return { id: order.id, orderNumber: order.orderNumber, itemId: item!.id };
+    }
+
+    const volume = (itemId: string, n: number, first: number, last: number, over: Partial<typeof orderPrintFiles.$inferInsert> = {}) => ({
+      orderItemId: itemId,
+      volume: n,
+      firstPage: first,
+      lastPage: last,
+      storageKey: `orders/10001/print-1-${n}.pdf`,
+      sizeBytes: 1_000,
+      sha256: SHA,
+      ...over,
+    });
+    /** همهٔ جلدهای یک جزوه در یک تراکنش، مثل کارگر؛ محافظ پوشش در COMMIT. */
+    const writeVolumes = (rows: (typeof orderPrintFiles.$inferInsert)[]) =>
+      rejectedConstraint(conn.db.transaction(async (tx) => void (await tx.insert(orderPrintFiles).values(rows))));
+    const move = (id: string, set: Partial<typeof orders.$inferInsert>) =>
+      rejectedConstraint(conn.db.update(orders).set(set).where(eq(orders.id, id)));
+    const stampOf = async (id: string) =>
+      (await conn.db.execute<{ stamp: string }>(sql`SELECT order_ticket_stamp(o) AS stamp FROM orders o WHERE o.id = ${id}`))[0]!.stamp;
+    const ticketJobOf = async (id: string) =>
+      (await conn.db.select().from(jobs).where(and(eq(jobs.orderId, id), eq(jobs.kind, PREPARE_TICKET_JOB))))[0];
+    /** برگه همان‌طور که کارگر می‌نویسد: اثر انگشت دادهٔ همان لحظه، و کار تمام. */
+    async function builtTicket(id: string) {
+      await conn.db.execute(sql`
+        INSERT INTO order_tickets (order_id, storage_key, size_bytes, sha256, preview_key, stamp)
+        SELECT o.id, 'orders/' || o.order_number || '/ticket.pdf', 2400, ${'b'.repeat(64)},
+               'orders/' || o.order_number || '/ticket.png', order_ticket_stamp(o)
+          FROM orders o WHERE o.id = ${id}
+        ON CONFLICT (order_id) DO UPDATE SET stamp = excluded.stamp, built_at = now()`);
+      await conn.db
+        .update(jobs)
+        .set({ status: 'done', finishedAt: NOW })
+        .where(and(eq(jobs.orderId, id), eq(jobs.kind, PREPARE_TICKET_JOB)));
+    }
+    const recipientEvent = (id: string): AdminEventInput => ({ adminUserId: admin, action: 'orders.recipient', targetType: 'order', targetId: id, at: NOW });
+    const edit = (id: string, recipient: { recipientName: string; addressText: string; postalCode: string | null }) =>
+      createPanelOrderStore(conn).editRecipient({ orderId: id, editable: ['paid', 'printing'], recipient, event: recipientEvent(id) });
+
+    beforeAll(async () => {
+      await clearOrders(conn);
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const created = await createAdminStore(conn).createInvite({
+        inviteId: randomUUID(),
+        newUserId: randomUUID(),
+        username: 'sara',
+        displayName: 'سارا رضایی',
+        role: 'owner',
+        tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+        totpSealed: 'v1.sealed',
+        at: NOW,
+        expiresAt: new Date(NOW.getTime() + 15 * MINUTE),
+        createdBy: null,
+        allowExisting: false,
+        event: { adminUserId: null, action: 'admins.invite', targetType: 'admin' },
+      });
+      admin = created.ok ? created.userId : '';
+      const store = createDocumentStore(conn);
+      for (const pages of [20, 1650]) {
+        const id = randomUUID();
+        await store.insertUpload({
+          id,
+          sessionHash: 'e'.repeat(64),
+          originalName: `آمار ${pages}.pdf`,
+          sourceKind: 'pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1_000,
+          storageKey: `uploads/${id}.pdf`,
+          uploadId: 'u',
+          partSizeBytes: 8 * 1024 * 1024,
+        });
+        await store.markUploaded(id, NOW, new Date(NOW.getTime() + 2 * DAY), null);
+        await conn.db.update(documents).set({ status: 'ready', pageCount: pages }).where(eq(documents.id, id));
+        docOf[pages] = id;
+      }
+    });
+
+    beforeEach(async () => {
+      await clearOrders(conn);
+    });
+
+    afterAll(async () => {
+      await clearOrders(conn);
+    });
+
+    it('جلدها صفحه‌های ۱ تا آخر را پشت‌سرهم و دقیقاً به شمار ریز قیمت می‌پوشانند؛ فایل ثبت‌شده عوض نمی‌شود', async () => {
+      // ۱۶۵۰ صفحهٔ دورو = ۸۲۵ برگ؛ سقف جلد ۸۰۰، پس دو جلد ۴۱۳ و ۴۱۲ برگی: صفحهٔ ۱ تا ۸۲۶ و ۸۲۷ تا ۱۶۵۰ (ADR-043). صریح.
+      const big = await paidOrder(1650);
+      const breakdown = (await conn.db.select().from(orders).where(eq(orders.id, big.id)))[0]!.priceBreakdown as Breakdown;
+      expect(breakdown.items[0]).toMatchObject({ sheets: 825, volumes: 2, sheetsPerVolume: [413, 412] });
+      // یک جلد از دو، شکاف، همپوشانی، کوتاه، و شمارهٔ جلد جاافتاده: هیچ‌کدام.
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826)])).toBe('order_print_files_cover');
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826), volume(big.itemId, 2, 828, 1650)])).toBe('order_print_files_cover');
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826), volume(big.itemId, 2, 826, 1650)])).toBe('order_print_files_cover');
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826), volume(big.itemId, 2, 827, 1649)])).toBe('order_print_files_cover');
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826), volume(big.itemId, 3, 827, 1650)])).toBe('order_print_files_cover');
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 1650)])).toBe('order_print_files_cover');
+      // شکل هر ردیف: صفحهٔ صفر، بازهٔ وارونه، کلید بیرون از `orders/`، و sha256 نادرست.
+      expect(await writeVolumes([volume(big.itemId, 1, 0, 826), volume(big.itemId, 2, 827, 1650)])).toBe('order_print_files_pages');
+      expect(await writeVolumes([volume(big.itemId, 1, 826, 1), volume(big.itemId, 2, 827, 1650)])).toBe('order_print_files_pages');
+      expect(
+        await writeVolumes([volume(big.itemId, 1, 1, 826, { storageKey: 'uploads/x.pdf' }), volume(big.itemId, 2, 827, 1650)]),
+      ).toBe('order_print_files_file');
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826, { sha256: 'A'.repeat(64) }), volume(big.itemId, 2, 827, 1650)])).toBe(
+        'order_print_files_file',
+      );
+      expect(await conn.db.select().from(orderPrintFiles)).toEqual([]);
+      // شاهد: همان دو جلد درست، با هم.
+      expect(await writeVolumes([volume(big.itemId, 1, 1, 826), volume(big.itemId, 2, 827, 1650)])).toBeUndefined();
+      expect(
+        await rejectedConstraint(conn.db.update(orderPrintFiles).set({ sizeBytes: 2_000 }).where(eq(orderPrintFiles.orderItemId, big.itemId))),
+      ).toBe('order_print_files_frozen');
+      // پاک کردن یک جلد پوشش را می‌شکند.
+      expect(
+        await rejectedConstraint(
+          conn.db.delete(orderPrintFiles).where(and(eq(orderPrintFiles.orderItemId, big.itemId), eq(orderPrintFiles.volume, 2))),
+        ),
+      ).toBe('order_print_files_cover');
+
+      // جزوهٔ یک‌جلدی: فایل چاپش همان PDF جزوه است، با همان کلید.
+      const small = await paidOrder(20);
+      expect(
+        await writeVolumes([volume(small.itemId, 1, 1, 20, { storageKey: `orders/${small.orderNumber}/jozve-1.pdf`, changes: null })]),
+      ).toBeUndefined();
+      // سفارش با فایل‌هایش پاک می‌شود (cascade)، و محافظ معوق قلمِ رفته را نمی‌سنجد.
+      await clearOrders(conn);
+      expect(await conn.db.select().from(orderPrintFiles)).toEqual([]);
+    });
+
+    it('فایل‌ها فقط از سفارش بسته و یک بار پاک می‌شوند؛ پس از آن وضعیت برنمی‌گردد', async () => {
+      const open = await paidOrder(20);
+      expect(await move(open.id, { filesDeletedAt: NOW })).toBe('orders_files_deleted_closed');
+      expect(await move(open.id, { status: 'printing' })).toBeUndefined();
+      expect(await move(open.id, { filesDeletedAt: NOW })).toBe('orders_files_deleted_closed');
+      expect(await move(open.id, { status: 'handed_to_post', handedToPostAt: NOW })).toBeUndefined();
+      // شاهد: رسیده به پست پاک می‌شود.
+      expect(await move(open.id, { filesDeletedAt: NOW })).toBeUndefined();
+      expect(await move(open.id, { filesDeletedAt: new Date(NOW.getTime() + DAY) })).toBe('orders_files_deleted');
+      expect(await move(open.id, { filesDeletedAt: null })).toBe('orders_files_deleted');
+      expect(await move(open.id, { status: 'printing', handedToPostAt: null })).toBe('orders_files_deleted');
+      // شاهد: سفارش دیگری که فایلش هست یک قدم برمی‌گردد.
+      const kept = await paidOrder(20);
+      await move(kept.id, { status: 'printing' });
+      await move(kept.id, { status: 'handed_to_post', handedToPostAt: NOW });
+      expect(await move(kept.id, { status: 'printing', handedToPostAt: null })).toBeUndefined();
+
+      // لغوشده هم؛ برگرداندنش به صف چاپ نه.
+      const cancelled = await paidOrder(20);
+      expect(await move(cancelled.id, { status: 'cancelled' })).toBeUndefined();
+      expect(await move(cancelled.id, { filesDeletedAt: NOW })).toBeUndefined();
+      expect(await move(cancelled.id, { status: 'paid' })).toBe('orders_files_deleted');
+
+      // ذخیره‌گاه پنل: همان شرط، بی خطا؛ «پاک شد» را می‌گوید، نه «وضعیت عوض شد».
+      const panel = createPanelOrderStore(conn);
+      const change: PanelStatusChange = {
+        orderId: cancelled.id,
+        from: 'cancelled',
+        to: 'paid',
+        at: NOW,
+        adminUserId: admin,
+        note: { reason: 'مشتری پشیمان شد' },
+        event: { adminUserId: admin, action: 'orders.status', targetType: 'order', targetId: cancelled.id, at: NOW },
+      };
+      expect(await panel.changeStatus(change)).toEqual({ ok: false, current: 'cancelled', filesDeleted: true });
+      expect((await conn.db.select().from(orders).where(eq(orders.id, cancelled.id)))[0]!.status).toBe('cancelled');
+      // شاهد: وضعیتی که دیگر نیست «پاک شد» نیست.
+      expect(await panel.changeStatus({ ...change, orderId: kept.id, from: 'handed_to_post', to: 'printing' })).toEqual({
+        ok: false,
+        current: 'printing',
+      });
+    });
+
+    it('اثر انگشت برگه: نام، موبایل، نشانی و کد پستی؛ وضعیت نه', async () => {
+      const order = await paidOrder(20);
+      const first = await stampOf(order.id);
+      expect(first).toMatch(/^[0-9a-f]{32}$/);
+      // شاهد: وضعیت و زمان‌ها روی برگه نیستند.
+      await move(order.id, { status: 'printing' });
+      expect(await stampOf(order.id)).toBe(first);
+      await move(order.id, { recipientName: 'مریم کاظمی‌نژاد' });
+      const renamed = await stampOf(order.id);
+      expect(renamed).not.toBe(first);
+      await move(order.id, { addressText: 'بلوار سجاد، سجاد 20' });
+      const moved = await stampOf(order.id);
+      expect(moved).not.toBe(renamed);
+      await move(order.id, { postalCode: '9187654321' });
+      const coded = await stampOf(order.id);
+      expect(coded).not.toBe(moved);
+      await move(order.id, { recipientPhone: '09152345679' });
+      expect(await stampOf(order.id)).not.toBe(coded);
+      // مرز فیلدها مبهم نیست: «ab»+«c» همان «a»+«bc» نیست.
+      await move(order.id, { recipientName: 'مریم', addressText: 'کاظمی بلوار سجاد' });
+      const split1 = await stampOf(order.id);
+      await move(order.id, { recipientName: 'مریم کاظمی', addressText: 'بلوار سجاد' });
+      expect(await stampOf(order.id)).not.toBe(split1);
+    });
+
+    it('برگه در پنل: تازه فقط با دادهٔ امروز؛ ویرایش گیرنده کار برگه را در همان تراکنش دوباره در صف می‌گذارد', async () => {
+      const panel = createPanelOrderStore(conn);
+      const order = await paidOrder(20);
+      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({ key: null, previewKey: null, fresh: false, filesDeletedAt: null });
+      expect((await panel.details(order.orderNumber))!.ticket).toBeNull();
+      await builtTicket(order.id);
+      expect((await panel.details(order.orderNumber))!).toMatchObject({
+        ticket: { sizeBytes: 2400, fresh: true },
+        ticketJob: { status: 'done' },
+      });
+      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({
+        orderId: order.id,
+        status: 'paid',
+        key: `orders/${order.orderNumber}/ticket.pdf`,
+        previewKey: `orders/${order.orderNumber}/ticket.png`,
+        bytes: 2400,
+        fresh: true,
+      });
+
+      // بی تغییر: نه ویرایش، نه کار تازه (شاهد).
+      const same = { recipientName: 'مریم کاظمی', addressText: 'بلوار سجاد، سجاد 18، پلاک 42', postalCode: null };
+      expect(await edit(order.id, same)).toMatchObject({ ok: true, changed: [] });
+      expect(await ticketJobOf(order.id)).toMatchObject({ status: 'done' });
+      // نام تازه: برگهٔ ساخته‌شده کهنه است، و کارش در صف.
+      expect(await edit(order.id, { ...same, recipientName: 'مریم کاظمی‌نژاد' })).toMatchObject({ ok: true, changed: ['recipientName'] });
+      expect(await ticketJobOf(order.id)).toMatchObject({ status: 'queued', attempts: 0, finishedAt: null });
+      expect((await panel.details(order.orderNumber))!.ticket).toMatchObject({ fresh: false });
+      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({ fresh: false });
+      // کارگر با دادهٔ تازه ساخت: دوباره تازه.
+      await builtTicket(order.id);
+      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({ fresh: true });
+
+      // کار شکست‌خورده هم با ویرایش دوباره می‌رود؛ کاری که کارگر رویش است دست نمی‌خورد (کارگر پیش از ثبت اثر انگشت را زیر
+      // قفل ردیف سفارش دوباره می‌سنجد).
+      await conn.db.update(jobs).set({ status: 'failed', attempts: 3, lastError: 'font_missing: x' }).where(eq(jobs.id, (await ticketJobOf(order.id))!.id));
+      await edit(order.id, { ...same, postalCode: '9187654321' });
+      expect(await ticketJobOf(order.id)).toMatchObject({ status: 'queued', attempts: 0, lastError: null });
+      await conn.db.update(jobs).set({ status: 'running', attempts: 1, lockedBy: 'w1' }).where(eq(jobs.id, (await ticketJobOf(order.id))!.id));
+      await edit(order.id, { ...same, postalCode: '9187654322' });
+      expect(await ticketJobOf(order.id)).toMatchObject({ status: 'running', attempts: 1, lockedBy: 'w1' });
+    });
+
+    it('دوباره بساز برگه: کاری که نبود تازه، تمام‌شده دوباره؛ در صف یا زیر دست کارگر نه', async () => {
+      const panel = createPanelOrderStore(conn);
+      const order = await paidOrder(20);
+      const event: AdminEventInput = {
+        adminUserId: admin,
+        action: 'orders.ticket_rebuild',
+        targetType: 'order',
+        targetId: order.id,
+        detail: { orderNumber: order.orderNumber },
+        at: NOW,
+      };
+      expect(await panel.requeue(order.id, PREPARE_TICKET_JOB, event)).toBe('busy');
+      // سفارش پیش از ۵٫۱ کار برگه نداشت.
+      await conn.db.delete(jobs).where(and(eq(jobs.orderId, order.id), eq(jobs.kind, PREPARE_TICKET_JOB)));
+      const [ok, second] = await Promise.all([
+        panel.requeue(order.id, PREPARE_TICKET_JOB, event),
+        panel.requeue(order.id, PREPARE_TICKET_JOB, event),
+      ]);
+      expect([ok, second].sort()).toEqual(['busy', 'ok']);
+      expect(await ticketJobOf(order.id)).toMatchObject({ status: 'queued', attempts: 0 });
+      await builtTicket(order.id);
+      expect(await panel.requeue(order.id, PREPARE_TICKET_JOB, event)).toBe('ok');
+      const events = await conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, order.id)).orderBy(adminEvents.id);
+      expect(events.map((e) => [e.action, (e.detail as { previous: unknown }).previous])).toEqual([
+        ['orders.ticket_rebuild', null],
+        ['orders.ticket_rebuild', { status: 'done', attempts: 0, error: null }],
+      ]);
+      // PDF جزوهٔ همان سفارش دست نخورد.
+      expect((await panel.details(order.orderNumber))!.pdfJob).toMatchObject({ status: 'queued' });
+    });
+
+    it('فایل چاپ در پنل: جلدهای ساخته‌شده با «چه عوض شد»؛ جلد نساخته کلید ندارد؛ جزوه‌ای که نیست null', async () => {
+      const panel = createPanelOrderStore(conn);
+      const big = await paidOrder(1650);
+      expect(await panel.printVolume(big.orderNumber, 1, 1)).toMatchObject({ itemSeq: 1, volume: 1, volumes: 0, key: null, bytes: null });
+      expect(await panel.printVolume(big.orderNumber, 2, 1)).toBeNull();
+      expect(await panel.printVolume(1, 1, 1)).toBeNull();
+      const changes = { resized: [[103, 120, 612, 792]], rotated: [[5, 9]] };
+      await writeVolumes([
+        volume(big.itemId, 1, 1, 826, { storageKey: `orders/${big.orderNumber}/print-1-1.pdf`, sizeBytes: 212_400_000, changes }),
+        volume(big.itemId, 2, 827, 1650, { storageKey: `orders/${big.orderNumber}/print-1-2.pdf`, sizeBytes: 208_900_000 }),
+      ]);
+      expect(await panel.printVolume(big.orderNumber, 1, 2)).toMatchObject({
+        orderId: big.id,
+        status: 'paid',
+        filesDeletedAt: null,
+        volume: 2,
+        volumes: 2,
+        key: `orders/${big.orderNumber}/print-1-2.pdf`,
+        bytes: 208_900_000,
+      });
+      expect(await panel.printVolume(big.orderNumber, 1, 3)).toMatchObject({ volumes: 2, key: null });
+      const [item] = (await panel.details(big.orderNumber))!.items;
+      expect(item!.printFiles).toEqual([
+        expect.objectContaining({ volume: 1, firstPage: 1, lastPage: 826, sizeBytes: 212_400_000, changes }),
+        expect.objectContaining({ volume: 2, firstPage: 827, lastPage: 1650, changes: null }),
+      ]);
+    });
+
+    it('دادهٔ پایه نگهداری فایل‌ها را ۳۰ روز می‌نشاند', async () => {
+      await conn.db.delete(settings).where(eq(settings.key, FILES_RETENTION_SETTING));
+      const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      expect(seeded.settingsInserted).toEqual([FILES_RETENTION_SETTING]);
+      expect((await conn.db.select().from(settings).where(eq(settings.key, FILES_RETENTION_SETTING)))[0]!.value).toBe(30);
     });
   });
   // در همین فایل، به همان دلیل «سند و آپلود». سنجش پیش‌نویس، متن‌ها، مجوز و کد تازه در سرویس تعرفهٔ پنل با ذخیره‌گاه ساختگی

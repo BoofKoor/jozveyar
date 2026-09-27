@@ -29,8 +29,16 @@ import {
 } from './schema.js';
 import { loadActivePriceList, loadPriceList } from './seed.js';
 
-/** کار کارگر اسناد بعد از پرداخت: PDF جزوه زیر `orders/` (ADR-030). همین رشته در services/docworker. */
+/**
+ * کار کارگر اسناد بعد از پرداخت: PDF جزوه زیر `orders/` (ADR-030)، و از برش ۵٫۱ فایل چاپ هر جلد از روی همان (ADR-043).
+ * همین رشته در services/docworker.
+ */
 export const PREPARE_ORDER_JOB = 'prepare_order';
+/**
+ * برگهٔ سفارش (برش ۵٫۱، ADR-043): کار جدای خودش، تا شکستش PDF جزوه را «ساخته نشد» نکند. با پرداخت در صف می‌رود، و با هر
+ * تغییر داده‌اش (ویرایش گیرنده) دوباره. همین رشته در services/docworker.
+ */
+export const PREPARE_TICKET_JOB = 'prepare_ticket';
 
 /**
  * پرداخت شروع نمی‌شود اگر کمتر از این تا پاک شدن فایلی مانده باشد (ADR-034). مسیر خرید سایت با همین
@@ -425,7 +433,13 @@ export function createOrderStore({ db }: Database): OrderStore {
           note: { paymentId: payment.id, provider, refId: outcome.refId },
         });
         // برگشت دوباره از درگاه کار دوم نمی‌سازد: شاخص یکتای (سفارش، نوع) جلویش را می‌گیرد.
-        await tx.insert(jobs).values({ kind: PREPARE_ORDER_JOB, orderId: order!.id }).onConflictDoNothing();
+        await tx
+          .insert(jobs)
+          .values([
+            { kind: PREPARE_ORDER_JOB, orderId: order!.id },
+            { kind: PREPARE_TICKET_JOB, orderId: order!.id },
+          ])
+          .onConflictDoNothing();
         return { payment: succeeded!, order: paid, settled: true };
       });
     },

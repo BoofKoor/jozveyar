@@ -36,6 +36,8 @@ export const HOLIDAYS_SETTING = 'calendar.holidays';
 export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
 /** سالی که تعطیلی‌ها تا پایانش با تقویم رسمی منتشرشده تطبیق داده شده‌اند (برش ۴٫۶). */
 export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
+/** فایل‌های سفارش چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (برش ۵٫۱، ADR-044). */
+export const FILES_RETENTION_SETTING = 'order.files_retention_days';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -46,12 +48,16 @@ export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
  * به ۳۰۰ پیامک در ساعت می‌بندد. در `settings` است تا در حمله یا رشد، بی استقرار عوض شود.
  *
  * تعطیلی‌های ۱۴۰۵ از تقویم رسمی منتشرشده‌اند و تاریخ قمری ۱۴۰۶ پیش‌بینی (`holidays.ts`)؛ پس «تطبیق‌داده‌شده تا» ۱۴۰۵.
+ *
+ * فایل‌های سفارش ۳۰ روز پس از پست یا لغو پاک می‌شوند (سؤال ۳۶): چاپ دوباره برای بستهٔ گم‌شده یا آسیب‌دیده در همین چند
+ * هفته پیش می‌آید، و بیشتر از آن فقط دیسک است.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
   [HOLIDAYS_SETTING]: OFFICIAL_HOLIDAYS,
   [OFFICIAL_THROUGH_SETTING]: 1405,
   [OTP_SITE_LIMIT_SETTING]: 300,
+  [FILES_RETENTION_SETTING]: 30,
 };
 
 /**
