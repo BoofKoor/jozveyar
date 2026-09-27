@@ -514,10 +514,21 @@ export const sessions = pgTable(
 
 /**
  * `awaiting_payment` از لحظهٔ «پرداخت» تا تأیید درگاه؛ پرداخت ناموفق همین را نگه می‌دارد، با همان
- * قیمت. `expired`: سفارش پرداخت‌نشده‌ای که فایل‌هایش پاک شده‌اند. بقیهٔ چرخه (چاپ، تحویل به پست)
- * با برش‌های ۴ تا ۶ اضافه می‌شود.
+ * قیمت. `expired`: سفارش پرداخت‌نشده‌ای که فایل‌هایش پاک شده‌اند.
+ *
+ * پس از پرداخت (برش ۴٫۳، ADR-039): `paid` «در صف چاپ» ← `printing` «در حال چاپ» ← `handed_to_post` «تحویل پست
+ * شد»، و `cancelled` «لغو شد» از دو وضعیت اول. کدام به کدام می‌رود را تریگر `orders_status_flow` می‌سنجد
+ * (0011)؛ برگرداندن یک قدم هم همان‌جاست. سه مقدار تازه در 0010 آمدند و در همان اجرای مهاجرت در هیچ محدودیت و
+ * نمایه‌ای به کار نمی‌روند (پایینِ `orders`).
  */
-export const orderStatus = pgEnum('order_status', ['awaiting_payment', 'paid', 'expired']);
+export const orderStatus = pgEnum('order_status', [
+  'awaiting_payment',
+  'paid',
+  'expired',
+  'printing',
+  'handed_to_post',
+  'cancelled',
+]);
 export const sidesMode = pgEnum('sides_mode', ['single', 'double']);
 export const colorMode = pgEnum('color_mode', ['color', 'bw']);
 
@@ -569,6 +580,11 @@ export const orders = pgTable(
     paidAt: timestamp('paid_at', { withTimezone: true }),
     /** پایان انحصاری آخرین روز کاری تعهد (`postHandoffDue`)؛ با پرداخت پر می‌شود. */
     postHandoffDueAt: timestamp('post_handoff_due_at', { withTimezone: true }),
+    /**
+     * «تحویل پست شد» (برش ۴٫۳)، و فقط در همان وضعیت: برگرداندن به «در حال چاپ» پاکش می‌کند. به‌موقع یعنی پیش از
+     * `post_handoff_due_at`؛ آمار پیشخوان و صفحهٔ سفارش مشتری از همین.
+     */
+    handedToPostAt: timestamp('handed_to_post_at', { withTimezone: true }),
 
     shippingMethodId: text('shipping_method_id').notNull(),
     /** منطقهٔ کرایه در لحظهٔ سفارش؛ کرایه با همین منجمد شده. */
@@ -593,6 +609,8 @@ export const orders = pgTable(
     index('orders_user').on(t.userId, t.createdAt),
     /** برای پنل (برش ۴): سفارش‌های پرداخت‌شده به ترتیب نزدیکی مهلت. */
     index('orders_due').on(t.status, t.postHandoffDueAt),
+    /** آمار پیشخوان (برش ۴٫۳): سفارش‌هایی که در هفتهٔ گذشته به پست رسیدند. */
+    index('orders_handed').on(t.handedToPostAt),
     foreignKey({
       columns: [t.cityId, t.provinceId],
       foreignColumns: [cities.id, cities.provinceId],
@@ -609,7 +627,15 @@ export const orders = pgTable(
       sql`${t.totalRials} = ${t.subtotalRials} - ${t.discountRials} + ${t.shippingRials} + ${t.vatRials} + ${t.roundingRials}`,
     ),
     check('orders_total_positive', sql`${t.totalRials} > 0`),
-    check('orders_paid_has_dates', sql`${t.status} <> 'paid' OR (${t.paidAt} IS NOT NULL AND ${t.postHandoffDueAt} IS NOT NULL)`),
+    // هر وضعیت پس از پرداخت (در صف چاپ، در حال چاپ، تحویل پست شد، لغو شد) تاریخ پرداخت و مهلت دارد. با دو
+    // مقدار پیش از پرداخت نوشته شده، نه با مقدارهای تازه: مقداری که `ALTER TYPE … ADD VALUE` در همان تراکنش
+    // افزوده، در محدودیت به کار نمی‌رود («unsafe use of new value»)، و مهاجرت‌های یک اجرا یک تراکنش‌اند.
+    check(
+      'orders_paid_has_dates',
+      sql`${t.status} IN ('awaiting_payment', 'expired') OR (${t.paidAt} IS NOT NULL AND ${t.postHandoffDueAt} IS NOT NULL)`,
+    ),
+    // زمان تحویل به پست فقط در همان وضعیت. `::text`، به همان دلیل: مقایسهٔ متن، نه مقدار تازهٔ enum.
+    check('orders_handed_at', sql`(${t.status}::text = 'handed_to_post') = (${t.handedToPostAt} IS NOT NULL)`),
     check('orders_sla_positive', sql`${t.slaDays} > 0`),
     check('orders_phone_normalized', sql`${t.recipientPhone} ~ '^09[0-9]{9}$'`),
     check('orders_postal_code', sql`${t.postalCode} IS NULL OR ${t.postalCode} ~ '^[0-9]{10}$'`),
@@ -716,11 +742,17 @@ export const orderStatusEvents = pgTable(
     fromStatus: orderStatus('from_status'),
     toStatus: orderStatus('to_status').notNull(),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
-    /** `user`، `gateway` یا `system`؛ ادمین از برش ۴. */
+    /** `user`، `gateway`، `system`، یا از برش ۴٫۳ `admin` با `admin_user_id`. */
     actor: text('actor').notNull(),
+    /** ادمینی که وضعیت را عوض کرد (برش ۴٫۳)؛ فقط و همیشه برای `admin`. */
+    adminUserId: uuid('admin_user_id').references(() => adminUsers.id),
+    /** لغو و برگرداندن: `{ reason }`، دلیلی که فقط در پنل دیده می‌شود. */
     note: jsonb('note'),
   },
-  (t) => [index('order_status_events_order').on(t.orderId, t.at)],
+  (t) => [
+    index('order_status_events_order').on(t.orderId, t.at),
+    check('order_status_events_admin', sql`(${t.actor} = 'admin') = (${t.adminUserId} IS NOT NULL)`),
+  ],
 );
 
 /**

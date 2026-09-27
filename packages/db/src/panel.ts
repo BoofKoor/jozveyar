@@ -1,25 +1,28 @@
 /**
- * سفارش‌ها در پنل ادمین (برش ۴٫۲؛ ADR-039): پیشخوان با ساعت تحویل به پست، فهرست با جست‌وجو و چیپ وضعیت،
- * جزئیات سفارش، فایل PDF جزوه برای دانلود، و «دوباره بساز» آن.
+ * سفارش‌ها در پنل ادمین (برش ۴٫۲ و ۴٫۳؛ ADR-039): پیشخوان با ساعت تحویل به پست، فهرست با جست‌وجو و چیپ وضعیت،
+ * جزئیات سفارش، فایل PDF جزوه برای دانلود، «دوباره بساز» آن، و از ۴٫۳ وضعیت سفارش (شروع چاپ، تحویل پست، لغو،
+ * برگرداندن) و ویرایش گیرنده.
  *
- * مثل بقیهٔ این پکیج فقط خواندن و نوشتن است: روز تهران، متن‌ها و مجوز در سرویس سفارش پنل
- * (`apps/admin/lib/server/orders.ts`) گرفته می‌شوند و مرزها اینجا عدد می‌رسند. آنچه اینجاست همان است که
+ * مثل بقیهٔ این پکیج فقط خواندن و نوشتن است: روز تهران، متن‌ها، مجوز و اینکه کدام گذار مجاز است در سرویس سفارش
+ * پنل (`apps/admin/lib/server/orders.ts`) گرفته می‌شوند و مرزها اینجا عدد می‌رسند. آنچه اینجاست همان است که
  * درستی‌اش فقط با پستگرس معلوم می‌شود:
  *
- *  - **سطل‌ها با یک شرط:** «باز» (پرداخت‌شده؛ چاپ و تحویل پست با ۴٫۳)، «در انتظار پرداخت»، «رهاشده» و «همه»،
- *    هم برای فهرست و هم برای شمارش چیپ‌ها. رهاشده یعنی منقضی، یا در انتظاری که فایلی از جزوه‌اش پاک شده یا
- *    تا حاشیهٔ پرداخت پاک می‌شود: همان قاعدهٔ «دوباره پرداخت کن» سایت (ADR-034).
+ *  - **سطل‌ها با یک شرط:** «باز» (در صف چاپ و در حال چاپ)، «تحویل پست شد»، «لغو شد»، «در انتظار پرداخت»، «رهاشده»
+ *    و «همه»، هم برای فهرست و هم برای شمارش چیپ‌ها. رهاشده یعنی منقضی، یا در انتظاری که فایلی از جزوه‌اش پاک شده
+ *    یا تا حاشیهٔ پرداخت پاک می‌شود: همان قاعدهٔ «دوباره پرداخت کن» سایت (ADR-034).
  *  - **مرز روز:** مهلت تحویل به پست پایان انحصاری روز است (`postHandoffDue`)، پس مهلتِ «امروز» خودِ آغاز فرداست.
  *    شمارش با مرزهایی است که سرویس از روز تهران می‌سازد.
  *  - **یک تراکنش:** «دوباره بساز» کار شکست‌خوردهٔ `prepare_order` را با رویداد ادمین در همان تراکنش به صف
- *    برمی‌گرداند، زیر قفل ردیف کار؛ دو کلیک هم‌زمان یک بار.
+ *    برمی‌گرداند، زیر قفل ردیف کار؛ دو کلیک هم‌زمان یک بار. تغییر وضعیت هم: سفارش فقط اگر هنوز همان وضعیتی را دارد
+ *    که ادمین دید، با ردیف `order_status_events` و رویداد ادمین در همان تراکنش؛ ویرایش گیرنده زیر قفل ردیف سفارش.
+ *    کدام وضعیت به کدام می‌رود را تریگر `orders_status_flow` هم می‌سنجد (0011).
  */
 
 import { and, asc, desc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
 import type { Database } from './index.js';
-import { PREPARE_ORDER_JOB, type OrderItemRow, type OrderRow, type PaymentRow } from './orders.js';
+import { PREPARE_ORDER_JOB, type OrderItemRow, type OrderRow, type OrderStatus, type PaymentRow } from './orders.js';
 import {
   adminEvents,
   adminUsers,
@@ -40,9 +43,19 @@ import {
   shippingZones,
 } from './schema.js';
 
-/** چیپ‌های فهرست سفارش‌ها در ۴٫۲. «تحویل پست شد» و «لغو شد» با وضعیت‌هایشان در ۴٫۳. */
-export const PANEL_BUCKETS = ['open', 'awaiting', 'abandoned', 'all'] as const;
+/** چیپ‌های فهرست سفارش‌ها، به ترتیب طرح پنل. */
+export const PANEL_BUCKETS = ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] as const;
 export type PanelBucket = (typeof PANEL_BUCKETS)[number];
+
+/** «باز»: پرداخت‌شده و هنوز نه به پست رسیده، نه لغو شده. کاشی‌ها، صف تحویل و هشدار PDF فقط همین‌ها. */
+export const OPEN_STATUSES = ['paid', 'printing'] as const satisfies readonly OrderStatus[];
+
+/** گیرندهٔ سفارش، همان سه چیزی که پنل ویرایش می‌کند (نه موبایل، نه استان و شهر؛ ADR-034). */
+export interface PanelRecipient {
+  recipientName: string;
+  addressText: string;
+  postalCode: string | null;
+}
 
 /**
  * جست‌وجوی سفارش، تجزیه‌شده در سرویس: شماره (و ته شمارهٔ موبایل)، موبایل کامل، یا نام گیرنده.
@@ -75,6 +88,9 @@ export interface PanelOrderLine {
   createdAt: Date;
   paidAt: Date | null;
   postHandoffDueAt: Date | null;
+  handedToPostAt: Date | null;
+  /** آخرین «لغو شد» (برش ۴٫۳)؛ فقط برای سفارشی که هنوز لغوشده است. */
+  cancelledAt: Date | null;
   /** صفحه‌های جزوه‌ها، یک نسخه. */
   pageCount: number;
   itemCount: number;
@@ -104,8 +120,16 @@ export interface PanelDueSummary {
   laterRange: { earliest: Date; latest: Date } | null;
 }
 
+/** سطر آمار پیشخوان (طرح پنل): چندتا از سفارش‌های باز در حال چاپ‌اند، و تحویل‌های پست از `since` تا «حالا». */
+export interface PanelDashboardStats {
+  printing: number;
+  handed: number;
+  /** به‌موقع: پیش از پایان مهلت (`handed_to_post_at < post_handoff_due_at`). */
+  onTime: number;
+}
+
 export interface PanelAlerts {
-  /** سفارش‌های پرداخت‌شده‌ای که PDF جزوه‌شان ساخته نشد، به ترتیب مهلت. */
+  /** سفارش‌های باز (در صف چاپ یا در حال چاپ) که PDF جزوه‌شان ساخته نشد، به ترتیب مهلت. */
   failedPdf: number[];
   /** تلاش‌های بی برگشتِ سفارش‌هایی که هنوز پرداختنی‌اند، هر سفارش یک بار؛ تازه‌ترین سفارش اول. */
   unreturned: { orderNumber: number; attempts: number }[];
@@ -147,7 +171,8 @@ export interface PanelPdfJob {
   finishedAt: Date | null;
 }
 
-export type PanelStatusEvent = typeof orderStatusEvents.$inferSelect;
+/** یک تغییر وضعیت، با نام ادمینی که عوضش کرد (از ۴٫۳). */
+export type PanelStatusEvent = typeof orderStatusEvents.$inferSelect & { adminName: string | null };
 
 /** رویداد ادمینِ یک سفارش (دانلود، «دوباره بساز»)، با نام ادمین. */
 export interface PanelOrderEvent {
@@ -186,8 +211,27 @@ export interface PanelPrintFile {
   readyAt: Date | null;
 }
 
+/**
+ * تغییر وضعیت از پنل: از `from`، که ادمین دید، به `to`. `note` دلیل لغو یا برگرداندن است و فقط در پنل دیده می‌شود.
+ * رویداد ادمین در همان تراکنش.
+ */
+export interface PanelStatusChange {
+  orderId: string;
+  from: OrderStatus;
+  to: OrderStatus;
+  at: Date;
+  adminUserId: string;
+  note: { reason: string } | null;
+  event: AdminEventInput;
+}
+
+/** نتیجهٔ تغییر وضعیت یا ویرایش: انجام شد، یا سفارش دیگر آن وضعیت را نداشت (`current`؛ null یعنی سفارشی نیست). */
+export type PanelWrite = { ok: true; order: OrderRow } | { ok: false; current: OrderStatus | null };
+
 export interface PanelOrderStore {
   dueSummary(bounds: { at: Date; tomorrowStart: Date; dayAfterStart: Date }): Promise<PanelDueSummary>;
+  /** در حال چاپ‌ها، و تحویل‌های پست از `since` تا `at`. */
+  stats(window: { since: Date; at: Date }): Promise<PanelDashboardStats>;
   alerts(clock: PanelClock): Promise<PanelAlerts>;
   /** یک صفحه از یک سطل؛ «باز» به ترتیب مهلت، بقیه تازه‌ترین اول. */
   list(query: { bucket: PanelBucket; search: PanelSearch | null; clock: PanelClock; limit: number; offset: number }): Promise<
@@ -203,6 +247,22 @@ export interface PanelOrderStore {
    * شکست‌خورده نبود (دو کلیک: دومی).
    */
   rebuildPdf(orderId: string, event: AdminEventInput): Promise<'ok' | 'not_failed'>;
+  /**
+   * تغییر وضعیت در یک تراکنش: `UPDATE … WHERE status = from` (دو کلیک هم‌زمان یک بار؛ دومی `ok: false` با وضعیت
+   * تازه)، زمان تحویل به پست فقط در «تحویل پست شد»، یک ردیف `order_status_events` با ادمین و یادداشت، و رویداد
+   * ادمین.
+   */
+  changeStatus(change: PanelStatusChange): Promise<PanelWrite>;
+  /**
+   * گیرندهٔ تازه، زیر قفل ردیف سفارش و فقط اگر وضعیت سفارش هنوز در `editable` است. رویداد ادمین با نام فیلدهای
+   * عوض‌شده و مقدار پیشینشان (سابقه‌ای که بعداً بگوید پیش از ویرایش چه بود)؛ بی تغییر، بی رویداد.
+   */
+  editRecipient(input: {
+    orderId: string;
+    editable: readonly OrderStatus[];
+    recipient: PanelRecipient;
+    event: AdminEventInput;
+  }): Promise<PanelWrite & { changed?: (keyof PanelRecipient)[] }>;
   logEvent(event: AdminEventInput): Promise<void>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
@@ -229,10 +289,16 @@ function staleFiles(staleBefore: Date): SQL {
        AND (d.file_deleted_at IS NOT NULL OR d.file_expires_at IS NULL OR d.file_expires_at < ${ts(staleBefore)}))`;
 }
 
+const openOrder = () => inArray(orders.status, [...OPEN_STATUSES]);
+
 function bucketWhere(bucket: PanelBucket, staleBefore: Date): SQL | undefined {
   switch (bucket) {
     case 'open':
-      return sql`${orders.status} = 'paid'`;
+      return openOrder();
+    case 'handed':
+      return sql`${orders.status} = 'handed_to_post'`;
+    case 'cancelled':
+      return sql`${orders.status} = 'cancelled'`;
     case 'awaiting':
       return sql`(${orders.status} = 'awaiting_payment' AND NOT ${staleFiles(staleBefore)})`;
     case 'abandoned':
@@ -276,6 +342,9 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       createdAt: orders.createdAt,
       paidAt: orders.paidAt,
       postHandoffDueAt: orders.postHandoffDueAt,
+      handedToPostAt: orders.handedToPostAt,
+      cancelledAt: sql<Date | null>`CASE WHEN ${orders.status} = 'cancelled' THEN (SELECT max(e.at) FROM order_status_events e
+        WHERE e.order_id = ${orders.id} AND e.to_status = 'cancelled') END`.mapWith(orders.createdAt),
       pageCount: sql<number>`(SELECT coalesce(sum(i.page_count), 0)::int FROM order_items i WHERE i.order_id = ${orders.id})`,
       itemCount: sql<number>`(SELECT count(*)::int FROM order_items i WHERE i.order_id = ${orders.id})`,
       fileCount: sql<number>`(SELECT count(*)::int FROM order_items i
@@ -316,7 +385,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           laterLatest: sql<Date | null>`max(${due}) FILTER (WHERE ${later})`.mapWith(due),
         })
         .from(orders)
-        .where(eq(orders.status, 'paid'));
+        .where(openOrder());
       const range = (earliest: Date | null, latest: Date | null) => (earliest && latest ? { earliest, latest } : null);
       return {
         overdue: row?.overdue ?? 0,
@@ -328,13 +397,28 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       };
     },
 
+    async stats({ since, at }) {
+      // «تحویل پست شد» همیشه زمانش را دارد و فقط همان (`orders_handed_at`)؛ برگشته از پست دیگر شمرده نمی‌شود.
+      const handedIn = sql`(${orders.handedToPostAt} > ${ts(since)} AND ${orders.handedToPostAt} <= ${ts(at)})`;
+      const printing = eq(orders.status, 'printing');
+      const [row] = await db
+        .select({
+          printing: sql<number>`count(*) FILTER (WHERE ${printing})::int`,
+          handed: sql<number>`count(*) FILTER (WHERE ${handedIn})::int`,
+          onTime: sql<number>`count(*) FILTER (WHERE ${handedIn} AND ${orders.handedToPostAt} < ${orders.postHandoffDueAt})::int`,
+        })
+        .from(orders)
+        .where(or(printing, handedIn));
+      return { printing: row?.printing ?? 0, handed: row?.handed ?? 0, onTime: row?.onTime ?? 0 };
+    },
+
     async alerts(clock) {
       const [failed, unreturned] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
           .innerJoin(jobs, pdfJobJoin)
-          .where(and(eq(orders.status, 'paid'), eq(jobs.status, 'failed')))
+          .where(and(openOrder(), eq(jobs.status, 'failed')))
           .orderBy(asc(orders.postHandoffDueAt), asc(orders.orderNumber)),
         db
           .select({ orderNumber: orders.orderNumber, attempts: sql<number>`count(*)::int` })
@@ -373,18 +457,27 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     },
 
     async counts({ search, clock }) {
-      const stale = staleFiles(clock.staleBefore);
+      const staleBefore = clock.staleBefore;
+      const filtered = (bucket: PanelBucket) => sql<number>`count(*) FILTER (WHERE ${bucketWhere(bucket, staleBefore)})::int`;
       const [row] = await db
         .select({
-          open: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'paid')::int`,
-          awaiting: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'awaiting_payment' AND NOT ${stale})::int`,
-          abandoned: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'expired'
-            OR (${orders.status} = 'awaiting_payment' AND ${stale}))::int`,
+          open: filtered('open'),
+          handed: filtered('handed'),
+          cancelled: filtered('cancelled'),
+          awaiting: filtered('awaiting'),
+          abandoned: filtered('abandoned'),
           all: sql<number>`count(*)::int`,
         })
         .from(orders)
         .where(searchWhere(search));
-      return { open: row?.open ?? 0, awaiting: row?.awaiting ?? 0, abandoned: row?.abandoned ?? 0, all: row?.all ?? 0 };
+      return {
+        open: row?.open ?? 0,
+        handed: row?.handed ?? 0,
+        cancelled: row?.cancelled ?? 0,
+        awaiting: row?.awaiting ?? 0,
+        abandoned: row?.abandoned ?? 0,
+        all: row?.all ?? 0,
+      };
     },
 
     async details(orderNumber) {
@@ -451,8 +544,9 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
               .orderBy(printRules.orderItemId, printRules.seq),
         db.select().from(payments).where(eq(payments.orderId, order.id)).orderBy(desc(payments.createdAt)),
         db
-          .select()
+          .select({ event: orderStatusEvents, adminName: adminUsers.displayName })
           .from(orderStatusEvents)
+          .leftJoin(adminUsers, eq(adminUsers.id, orderStatusEvents.adminUserId))
           .where(eq(orderStatusEvents.orderId, order.id))
           .orderBy(asc(orderStatusEvents.at), asc(orderStatusEvents.id)),
         db
@@ -498,7 +592,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             })),
         })),
         payments: paymentRows,
-        statusEvents: statusRows,
+        statusEvents: statusRows.map(({ event, adminName }) => ({ ...event, adminName })),
         pdfJob: job
           ? {
               status: job.status,
@@ -565,6 +659,54 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           }),
         );
         return 'ok' as const;
+      });
+    },
+
+    async changeStatus(change) {
+      return db.transaction(async (tx): Promise<PanelWrite> => {
+        // دو کلیک هم‌زمان: دومی پشت قفل ردیف می‌ماند و بعد شرط `status = from` را دوباره می‌سنجد، که دیگر نمی‌خواند.
+        const [order] = await tx
+          .update(orders)
+          .set({ status: change.to, handedToPostAt: change.to === 'handed_to_post' ? change.at : null })
+          .where(and(eq(orders.id, change.orderId), eq(orders.status, change.from)))
+          .returning();
+        if (!order) {
+          const [current] = await tx.select({ status: orders.status }).from(orders).where(eq(orders.id, change.orderId)).limit(1);
+          return { ok: false, current: current?.status ?? null };
+        }
+        await tx.insert(orderStatusEvents).values({
+          orderId: change.orderId,
+          fromStatus: change.from,
+          toStatus: change.to,
+          at: change.at,
+          actor: 'admin',
+          adminUserId: change.adminUserId,
+          note: change.note,
+        });
+        await tx.insert(adminEvents).values(adminEventRow(change.event));
+        return { ok: true, order };
+      });
+    },
+
+    async editRecipient({ orderId, editable, recipient, event }) {
+      return db.transaction(async (tx) => {
+        const [order] = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for('update');
+        if (!order) return { ok: false as const, current: null };
+        if (!editable.includes(order.status)) return { ok: false as const, current: order.status };
+        const changed = (['recipientName', 'addressText', 'postalCode'] as const).filter((key) => order[key] !== recipient[key]);
+        if (changed.length === 0) return { ok: true as const, order, changed };
+        const [updated] = await tx.update(orders).set(recipient).where(eq(orders.id, orderId)).returning();
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...event,
+            detail: {
+              ...(event.detail as Record<string, unknown> | undefined),
+              changed,
+              previous: Object.fromEntries(changed.map((key) => [key, order[key]])),
+            },
+          }),
+        );
+        return { ok: true as const, order: updated!, changed };
       });
     },
 

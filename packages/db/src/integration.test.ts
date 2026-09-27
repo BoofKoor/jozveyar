@@ -14,7 +14,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { priceListSchema, type PriceList } from '@jozveyar/contracts';
+import { priceListSchema, type Breakdown, type PriceList } from '@jozveyar/contracts';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
@@ -55,10 +55,17 @@ import {
 } from './documents.js';
 import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
-import { PREPARE_ORDER_JOB, createOrderStore, type NewOrder } from './orders.js';
+import { PREPARE_ORDER_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
 import { createSmsLog } from './sms.js';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
-import { createPanelOrderStore, pdfErrorCode, type PanelBucket, type PanelClock, type PanelSearch } from './panel.js';
+import {
+  createPanelOrderStore,
+  pdfErrorCode,
+  type PanelBucket,
+  type PanelClock,
+  type PanelSearch,
+  type PanelStatusChange,
+} from './panel.js';
 import {
   adminEvents,
   adminInvites,
@@ -1007,10 +1014,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     const later = (ms: number) => new Date(at.getTime() + ms);
     const event = (action: string, adminUserId: string | null = null): AdminEventInput => ({ adminUserId, action, at });
 
-    /** رویداد فقط افزودنی است و ادمین پاک‌نشدنی؛ تست از صفر با TRUNCATE، که تریگر ردیفی ندارد. */
+    /**
+     * رویداد فقط افزودنی است و ادمین پاک‌نشدنی؛ تست از صفر با TRUNCATE، که تریگر ردیفی ندارد. تغییر وضعیت سفارش به
+     * ادمین اشاره می‌کند (۴٫۳)، پس همان‌جا.
+     */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events`,
       );
     }
 
@@ -1380,7 +1390,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -1488,10 +1498,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('چیپ‌ها: باز، در انتظار پرداخت، رهاشده و همه، با همان جست‌وجو', async () => {
       const panel = createPanelOrderStore(conn);
-      expect(await panel.counts({ search: null, clock })).toEqual({ open: 6, awaiting: 1, abandoned: 3, all: 10 });
+      expect(await panel.counts({ search: null, clock })).toEqual({ open: 6, handed: 0, cancelled: 0, awaiting: 1, abandoned: 3, all: 10 });
       // شاهد حاشیه: یک ساعت دیرتر نه، همین حالا فایل ۵۹ دقیقه‌ای هنوز پرداختنی بود.
       expect(await panel.counts({ search: null, clock: { ...clock, staleBefore: NOW } })).toMatchObject({ awaiting: 2, abandoned: 2 });
-      expect(await panel.counts({ search: { kind: 'name', text: 'محمد' }, clock })).toEqual({ open: 1, awaiting: 0, abandoned: 1, all: 2 });
+      expect(await panel.counts({ search: { kind: 'name', text: 'محمد' }, clock })).toEqual({
+        open: 1,
+        handed: 0,
+        cancelled: 0,
+        awaiting: 0,
+        abandoned: 1,
+        all: 2,
+      });
     });
 
     it('فهرست باز به ترتیب مهلت؛ هم‌مهلت‌ها به ترتیب پرداخت؛ بقیه تازه‌ترین اول', async () => {
@@ -1654,6 +1671,432 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(pdfErrorCode('page_count_mismatch: بخش 1: 47 صفحه، سرور 48 شمرده بود')).toBe('page_count_mismatch');
       expect(pdfErrorCode("StorageError('GET … → 503')")).toBe('transient');
       expect(pdfErrorCode(null)).toBeNull();
+    });
+  });
+
+  describe('پنل: وضعیت سفارش روی پستگرس (برش ۴٫۳)', () => {
+    /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
+    const NOW = new Date('2026-10-05T07:50:00Z');
+    const MINUTE = 60_000;
+    const DAY = 86_400_000;
+    const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
+    // مهلت پایان انحصاری روز است: «تا پایان دوشنبه» یعنی نیمه‌شب آغاز سه‌شنبه. صریح، نه از کد.
+    const END_SATURDAY = tehran('2026-10-04 00:00');
+    const END_MONDAY = tehran('2026-10-06 00:00');
+    let docId = '';
+    let owner = '';
+    let operator = '';
+
+    /** سفارش پرداخت‌شده همان‌طور که سرور می‌سازد: سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد و کار PDF. */
+    async function paidOrder(due = END_MONDAY, name = 'سارا احمدی') {
+      const sections = [{ documentId: docId, pageCount: 20 }];
+      const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
+      const breakdown = quote(
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
+        SEED_PRICE_LIST,
+      );
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: '09121234567' })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+        .returning();
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder({
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        breakdown,
+        quoteSnapshot: null,
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: 'tehran',
+        provinceId: 8,
+        cityId: 394,
+        recipientName: name,
+        recipientPhone: '09121234567',
+        addressText: 'خیابان ولیعصر، پلاک 12',
+        postalCode: null,
+        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+      });
+      const payment = await store.insertPayment({
+        orderId: order.id,
+        provider: 'mock',
+        amountRials: order.totalRials,
+        authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
+        raw: null,
+      });
+      const settled = await store.settlePayment('mock', payment.authority, async () => ({
+        kind: 'succeeded',
+        refId: '803114',
+        cardMask: null,
+        raw: null,
+        paidAt: tehran('2026-10-04 10:00'),
+        postHandoffDueAt: due,
+      }));
+      return settled!.order;
+    }
+
+    /** تغییر وضعیت ادمین، با رویداد ادمینش. */
+    function change(
+      order: { id: string; orderNumber: number },
+      from: OrderStatus,
+      to: OrderStatus,
+      over: { at?: Date; adminUserId?: string; reason?: string } = {},
+    ): PanelStatusChange {
+      const at = over.at ?? NOW;
+      const adminUserId = over.adminUserId ?? owner;
+      return {
+        orderId: order.id,
+        from,
+        to,
+        at,
+        adminUserId,
+        note: over.reason ? { reason: over.reason } : null,
+        event: {
+          adminUserId,
+          action: 'orders.status',
+          targetType: 'order',
+          targetId: order.id,
+          ipHash: 'ip',
+          detail: { orderNumber: order.orderNumber, from, to },
+          at,
+        },
+      };
+    }
+
+    const statusOf = async (id: string) => (await conn.db.select().from(orders).where(eq(orders.id, id)))[0]!;
+    const statusRows = (id: string) =>
+      conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, id)).orderBy(orderStatusEvents.id);
+    const eventsOf = (id: string) => conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, id)).orderBy(adminEvents.id);
+
+    beforeAll(async () => {
+      await clearOrders(conn);
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const admins = createAdminStore(conn);
+      const make = async (username: string, displayName: string, role: 'owner' | 'operator') => {
+        const created = await admins.createInvite({
+          inviteId: randomUUID(),
+          newUserId: randomUUID(),
+          username,
+          displayName,
+          role,
+          tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+          totpSealed: 'v1.sealed',
+          at: NOW,
+          expiresAt: new Date(NOW.getTime() + 15 * MINUTE),
+          createdBy: null,
+          allowExisting: false,
+          event: { adminUserId: null, action: 'admins.invite', targetType: 'admin' },
+        });
+        if (!created.ok) throw new Error(created.reason);
+        return created.userId;
+      };
+      owner = await make('sara', 'سارا رضایی', 'owner');
+      operator = await make('ali', 'علی محمدی', 'operator');
+
+      const store = createDocumentStore(conn);
+      docId = randomUUID();
+      await store.insertUpload({
+        id: docId,
+        sessionHash: 'd'.repeat(64),
+        originalName: 'ریاضی ۲.pdf',
+        sourceKind: 'pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 1_000,
+        storageKey: `uploads/${docId}.pdf`,
+        uploadId: 'u',
+        partSizeBytes: 8 * 1024 * 1024,
+      });
+      await store.markUploaded(docId, NOW, new Date(NOW.getTime() + 2 * DAY), null);
+      await conn.db.update(documents).set({ status: 'ready', pageCount: 20 }).where(eq(documents.id, docId));
+    });
+
+    beforeEach(async () => {
+      await clearOrders(conn);
+    });
+
+    afterAll(async () => {
+      await clearOrders(conn);
+    });
+
+    it('جریان وضعیت در خود پایگاه داده: فقط گذارهای طرح و برگرداندن یک قدم؛ پرداخت برنمی‌گردد', async () => {
+      const order = await paidOrder();
+      const byId = eq(orders.id, order.id);
+      const to = (status: OrderStatus, handedToPostAt: Date | null = null) =>
+        rejectedConstraint(conn.db.update(orders).set({ status, handedToPostAt }).where(byId));
+      // در صف چاپ: نه یکراست به پست، نه برگشت به «در انتظار».
+      expect(await to('handed_to_post', NOW)).toBe('orders_status_flow');
+      expect(await to('awaiting_payment')).toBe('orders_payment_final');
+      expect(await to('printing')).toBeUndefined();
+      // زمان تحویل به پست فقط و همیشه با «تحویل پست شد».
+      expect(await to('handed_to_post')).toBe('orders_handed_at');
+      expect(await to('printing', NOW)).toBe('orders_handed_at');
+      expect(await to('handed_to_post', NOW)).toBeUndefined();
+      // بسته‌ای که به پست رسید لغو نمی‌شود، و فقط یک قدم برمی‌گردد.
+      expect(await to('cancelled')).toBe('orders_status_flow');
+      expect(await to('paid')).toBe('orders_status_flow');
+      expect(await to('printing', NOW)).toBe('orders_handed_at');
+      expect(await to('printing')).toBeUndefined();
+      expect(await to('paid')).toBeUndefined();
+      // لغو از «در صف چاپ» و «در حال چاپ»، و برگرداندنش به همان‌ها؛ لغوشده هم پرداخت‌شده است.
+      expect(await to('cancelled')).toBeUndefined();
+      expect(await to('expired')).toBe('orders_payment_final');
+      expect(await to('handed_to_post', NOW)).toBe('orders_status_flow');
+      expect(await to('printing')).toBeUndefined();
+      expect(await to('cancelled')).toBeUndefined();
+      expect(await to('paid')).toBeUndefined();
+      expect((await statusOf(order.id)).status).toBe('paid');
+
+      // سفارش پرداخت‌نشده چاپ نمی‌شود؛ منقضی زنده نمی‌شود.
+      const unpaid = await createOrderStore(conn).createOrder({
+        ...(await (async () => {
+          const [row] = await conn.db.select().from(orders).where(byId);
+          return {
+            checkoutKey: randomUUID(),
+            userId: row!.userId,
+            breakdown: row!.priceBreakdown as Breakdown,
+            quoteSnapshot: null,
+            slaDays: 2,
+            shippingMethodId: 'post',
+            shippingZoneId: 'tehran',
+            provinceId: 8,
+            cityId: 394,
+            recipientName: 'کیان رستمی',
+            recipientPhone: '09121234567',
+            addressText: 'تبریز، خیابان ولیعصر، پلاک 7',
+            postalCode: null,
+            items: [
+              {
+                pageCount: 20,
+                copies: 1,
+                sidesMode: 'double' as const,
+                bindingTypeId: 'spiral_clear',
+                sections: [{ documentId: docId, pageCount: 20 }],
+                rules: [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }],
+              },
+            ],
+          };
+        })()),
+      });
+      const unpaidTo = (status: OrderStatus) =>
+        rejectedConstraint(conn.db.update(orders).set({ status }).where(eq(orders.id, unpaid.order.id)));
+      expect(await unpaidTo('printing')).toBe('orders_status_flow');
+      expect(await unpaidTo('cancelled')).toBe('orders_status_flow');
+      expect(await createOrderStore(conn).expireOrder(unpaid.order.id, NOW)).toBe(true);
+      expect(await unpaidTo('awaiting_payment')).toBe('orders_status_flow');
+      expect(await unpaidTo('paid')).toBe('orders_status_flow');
+
+      // سفارشی که یکراست با وضعیت پس از پرداخت درج شود هم تاریخ پرداخت و مهلت می‌خواهد، و «تحویل پست شد» زمانش را.
+      const { id: _id, orderNumber: _number, publicToken: _token, ...copy } = await statusOf(order.id);
+      const insert = (patch: Partial<typeof orders.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(orders).values({ ...copy, checkoutKey: randomUUID(), ...patch }));
+      for (const status of ['printing', 'handed_to_post', 'cancelled'] as const) {
+        expect(await insert({ status, paidAt: null, postHandoffDueAt: null, handedToPostAt: status === 'handed_to_post' ? NOW : null })).toBe(
+          'orders_paid_has_dates',
+        );
+      }
+      expect(await insert({ status: 'handed_to_post', handedToPostAt: null })).toBe('orders_handed_at');
+
+      // ردیف وضعیت ادمین همیشه ادمینش را دارد، و فقط ادمین.
+      const row = (actor: string, adminUserId: string | null) =>
+        rejectedConstraint(conn.db.insert(orderStatusEvents).values({ orderId: order.id, fromStatus: 'paid', toStatus: 'printing', actor, adminUserId }));
+      expect(await row('admin', null)).toBe('order_status_events_admin');
+      expect(await row('gateway', owner)).toBe('order_status_events_admin');
+      expect(await row('admin', owner)).toBeUndefined();
+    });
+
+    it('تغییر وضعیت در یک تراکنش: سفارش، ردیف وضعیت با ادمین و دلیل، و رویداد ادمین؛ زمان تحویل پست و برگرداندنش', async () => {
+      const panel = createPanelOrderStore(conn);
+      const order = await paidOrder();
+      const started = await panel.changeStatus(change(order, 'paid', 'printing', { adminUserId: operator }));
+      expect(started).toMatchObject({ ok: true, order: { status: 'printing', handedToPostAt: null } });
+      const handedAt = new Date(NOW.getTime() + 5 * 3_600_000);
+      expect(await panel.changeStatus(change(order, 'printing', 'handed_to_post', { at: handedAt, adminUserId: operator }))).toMatchObject({
+        ok: true,
+        order: { status: 'handed_to_post', handedToPostAt: handedAt },
+      });
+      const reverted = await panel.changeStatus(
+        change(order, 'handed_to_post', 'printing', { at: new Date(NOW.getTime() + 6 * 3_600_000), reason: 'اشتباه زدم؛ هنوز صحافی نشده' }),
+      );
+      expect(reverted).toMatchObject({ ok: true, order: { status: 'printing', handedToPostAt: null } });
+      expect(
+        await panel.changeStatus(change(order, 'printing', 'cancelled', { at: new Date(NOW.getTime() + 7 * 3_600_000), reason: 'مشتری خواست' })),
+      ).toMatchObject({ ok: true });
+
+      expect((await statusRows(order.id)).map((e) => [e.fromStatus, e.toStatus, e.actor, e.adminUserId, e.note])).toEqual([
+        [null, 'awaiting_payment', 'user', null, null],
+        ['awaiting_payment', 'paid', 'gateway', null, expect.anything()],
+        ['paid', 'printing', 'admin', operator, null],
+        ['printing', 'handed_to_post', 'admin', operator, null],
+        ['handed_to_post', 'printing', 'admin', owner, { reason: 'اشتباه زدم؛ هنوز صحافی نشده' }],
+        ['printing', 'cancelled', 'admin', owner, { reason: 'مشتری خواست' }],
+      ]);
+      expect((await statusRows(order.id)).at(3)!.at).toEqual(handedAt);
+      expect((await eventsOf(order.id)).map((e) => [e.adminUserId, e.action, e.detail])).toEqual([
+        [operator, 'orders.status', { orderNumber: order.orderNumber, from: 'paid', to: 'printing' }],
+        [operator, 'orders.status', { orderNumber: order.orderNumber, from: 'printing', to: 'handed_to_post' }],
+        [owner, 'orders.status', { orderNumber: order.orderNumber, from: 'handed_to_post', to: 'printing' }],
+        [owner, 'orders.status', { orderNumber: order.orderNumber, from: 'printing', to: 'cancelled' }],
+      ]);
+      // قیمت و مهلت همان که بود.
+      const after = await statusOf(order.id);
+      expect([after.totalRials, after.postHandoffDueAt, after.paidAt]).toEqual([order.totalRials, order.postHandoffDueAt, order.paidAt]);
+
+      // جزئیات پنل: رویدادهای وضعیت با نام ادمین و دلیل.
+      const details = await panel.details(order.orderNumber);
+      expect(details!.statusEvents.slice(2).map((e) => [e.toStatus, e.adminName, e.note])).toEqual([
+        ['printing', 'علی محمدی', null],
+        ['handed_to_post', 'علی محمدی', null],
+        ['printing', 'سارا رضایی', { reason: 'اشتباه زدم؛ هنوز صحافی نشده' }],
+        ['cancelled', 'سارا رضایی', { reason: 'مشتری خواست' }],
+      ]);
+    });
+
+    it('دو کلیک هم‌زمان یک بار؛ وضعیتی که دیگر نیست رد می‌شود و وضعیت امروز برمی‌گردد', async () => {
+      const panel = createPanelOrderStore(conn);
+      const order = await paidOrder();
+      const results = await Promise.all([
+        panel.changeStatus(change(order, 'paid', 'printing')),
+        panel.changeStatus(change(order, 'paid', 'printing')),
+      ]);
+      expect(results.map((r) => (r.ok ? 'ok' : r.current)).sort()).toEqual(['ok', 'printing']);
+      expect((await statusRows(order.id)).filter((e) => e.actor === 'admin')).toHaveLength(1);
+      expect(await eventsOf(order.id)).toHaveLength(1);
+      // لغو و «تحویل پست شد» هم‌زمان: فقط یکی.
+      const race = await Promise.all([
+        panel.changeStatus(change(order, 'printing', 'cancelled', { reason: 'مشتری خواست' })),
+        panel.changeStatus(change(order, 'printing', 'handed_to_post')),
+      ]);
+      expect(race.filter((r) => r.ok)).toHaveLength(1);
+      expect((await statusRows(order.id)).filter((e) => e.actor === 'admin')).toHaveLength(2);
+      // وضعیتی که ادمین دید دیگر نیست: هیچ ردی نمی‌ماند.
+      const current = (await statusOf(order.id)).status;
+      expect(await panel.changeStatus(change(order, 'paid', 'printing'))).toEqual({ ok: false, current });
+      expect(await panel.changeStatus(change({ id: randomUUID(), orderNumber: 1 }, 'paid', 'printing'))).toEqual({ ok: false, current: null });
+      expect(await eventsOf(order.id)).toHaveLength(2);
+      // گذاری که پایگاه داده نمی‌پذیرد، با رویدادش برمی‌گردد (همه یا هیچ).
+      const other = await paidOrder();
+      expect(await rejectedConstraint(panel.changeStatus(change(other, 'paid', 'handed_to_post')))).toBe('orders_status_flow');
+      expect(await eventsOf(other.id)).toEqual([]);
+      expect((await statusRows(other.id)).filter((e) => e.actor === 'admin')).toEqual([]);
+    });
+
+    it('ویرایش گیرنده زیر قفل و فقط تا پیش از پست؛ رویداد با فیلدهای عوض‌شده و مقدار پیشین؛ قیمت و جای ارسال دست نمی‌خورند', async () => {
+      const panel = createPanelOrderStore(conn);
+      const order = await paidOrder();
+      const event = (at: Date): AdminEventInput => ({
+        adminUserId: operator,
+        action: 'orders.recipient',
+        targetType: 'order',
+        targetId: order.id,
+        ipHash: 'ip',
+        detail: { orderNumber: order.orderNumber },
+        at,
+      });
+      const editable = ['paid', 'printing'] as const;
+      const fixed = { recipientName: 'سارا احمدی', addressText: 'خیابان ولیعصر، کوچهٔ نسترن، پلاک 12', postalCode: '9187654321' };
+      const edited = await panel.editRecipient({ orderId: order.id, editable, recipient: fixed, event: event(NOW) });
+      expect(edited).toMatchObject({ ok: true, changed: ['addressText', 'postalCode'], order: fixed });
+      // دوباره همان: چیزی عوض نشد، رویدادی هم نه.
+      expect(await panel.editRecipient({ orderId: order.id, editable, recipient: fixed, event: event(NOW) })).toMatchObject({ ok: true, changed: [] });
+      expect((await eventsOf(order.id)).map((e) => [e.action, e.detail])).toEqual([
+        [
+          'orders.recipient',
+          {
+            orderNumber: order.orderNumber,
+            changed: ['addressText', 'postalCode'],
+            previous: { addressText: 'خیابان ولیعصر، پلاک 12', postalCode: null },
+          },
+        ],
+      ]);
+      const after = await statusOf(order.id);
+      expect(after).toMatchObject({
+        recipientPhone: '09121234567',
+        provinceId: 8,
+        cityId: 394,
+        shippingZoneId: 'tehran',
+        totalRials: order.totalRials,
+        shippingRials: order.shippingRials,
+        status: 'paid',
+      });
+      // پایگاه داده هم کد پستی بد را نمی‌پذیرد.
+      expect(
+        await rejectedConstraint(panel.editRecipient({ orderId: order.id, editable, recipient: { ...fixed, postalCode: '123' }, event: event(NOW) })),
+      ).toBe('orders_postal_code');
+      // به پست رسید: دیگر نه.
+      await panel.changeStatus(change(order, 'paid', 'printing'));
+      await panel.changeStatus(change(order, 'printing', 'handed_to_post'));
+      expect(
+        await panel.editRecipient({ orderId: order.id, editable, recipient: { ...fixed, recipientName: 'سارا' }, event: event(NOW) }),
+      ).toEqual({ ok: false, current: 'handed_to_post' });
+      expect((await statusOf(order.id)).recipientName).toBe('سارا احمدی');
+      expect(await panel.editRecipient({ orderId: randomUUID(), editable, recipient: fixed, event: event(NOW) })).toEqual({ ok: false, current: null });
+    });
+
+    it('سطل‌ها، کاشی‌ها و هشدار: «باز» یعنی در صف و در حال چاپ؛ تحویل پست شد و لغو شد جدا', async () => {
+      const panel = createPanelOrderStore(conn);
+      const queued = await paidOrder(END_MONDAY, 'در صف');
+      const printing = await paidOrder(END_SATURDAY, 'در حال چاپ');
+      const handed = await paidOrder(END_SATURDAY, 'به پست رسید');
+      const cancelled = await paidOrder(END_MONDAY, 'لغو شد');
+      await panel.changeStatus(change(printing, 'paid', 'printing'));
+      await panel.changeStatus(change(handed, 'paid', 'printing'));
+      await panel.changeStatus(change(handed, 'printing', 'handed_to_post'));
+      await panel.changeStatus(change(cancelled, 'paid', 'cancelled', { reason: 'مشتری خواست' }));
+      const clock: PanelClock = { at: NOW, staleBefore: new Date(NOW.getTime() + 60 * MINUTE), unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE) };
+      expect(await panel.counts({ search: null, clock })).toEqual({ open: 2, handed: 1, cancelled: 1, awaiting: 0, abandoned: 0, all: 4 });
+      const numbers = async (bucket: PanelBucket) =>
+        (await panel.list({ bucket, search: null, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber);
+      // «باز» به ترتیب مهلت: در حال چاپِ دیرشده اول.
+      expect(await numbers('open')).toEqual([printing.orderNumber, queued.orderNumber]);
+      expect(await numbers('handed')).toEqual([handed.orderNumber]);
+      expect(await numbers('cancelled')).toEqual([cancelled.orderNumber]);
+      const [line] = await panel.list({ bucket: 'handed', search: null, clock, limit: 50, offset: 0 });
+      expect(line).toMatchObject({ status: 'handed_to_post', handedToPostAt: NOW, cancelledAt: null });
+      const [gone] = await panel.list({ bucket: 'cancelled', search: null, clock, limit: 50, offset: 0 });
+      expect(gone).toMatchObject({ status: 'cancelled', cancelledAt: NOW, handedToPostAt: null });
+      // کاشی‌ها فقط سفارش‌هایی که هنوز به پست نرسیده‌اند: دیرشدهٔ «در حال چاپ» و امروزِ «در صف».
+      expect(await panel.dueSummary({ at: NOW, tomorrowStart: END_MONDAY, dayAfterStart: tehran('2026-10-07 00:00') })).toMatchObject({
+        overdue: 1,
+        today: 1,
+        tomorrow: 0,
+        later: 0,
+      });
+      // PDF ساخته‌نشده فقط برای سفارش باز هشدار است.
+      for (const o of [printing, cancelled]) {
+        await conn.db.update(jobs).set({ status: 'failed', attempts: 1, lastError: 'file_missing: file_missing', finishedAt: NOW }).where(eq(jobs.orderId, o.id));
+      }
+      expect((await panel.alerts(clock)).failedPdf).toEqual([printing.orderNumber]);
+    });
+
+    it('آمار پیشخوان: در حال چاپ، و تحویل‌های پست از مرز تا «حالا»، به‌موقع و دیر؛ برگشته از پست نه', async () => {
+      const panel = createPanelOrderStore(conn);
+      const since = new Date(NOW.getTime() - 7 * DAY);
+      const onTime = await paidOrder(END_MONDAY);
+      const late = await paidOrder(END_SATURDAY);
+      const old = await paidOrder(END_SATURDAY);
+      const back = await paidOrder(END_MONDAY);
+      const printing = await paidOrder(END_MONDAY);
+      await paidOrder(END_MONDAY); // در صف چاپ: نه «در حال چاپ»، نه تحویل
+      const hand = async (o: typeof onTime, at: Date) => {
+        await panel.changeStatus(change(o, 'paid', 'printing', { at }));
+        await panel.changeStatus(change(o, 'printing', 'handed_to_post', { at }));
+      };
+      await hand(onTime, new Date(END_MONDAY.getTime() - 1));
+      // خودِ پایان مهلت دیگر دیر است (پایان انحصاری).
+      await hand(late, END_SATURDAY);
+      await hand(old, since);
+      await hand(back, NOW);
+      await panel.changeStatus(change(back, 'handed_to_post', 'printing', { reason: 'اشتباه' }));
+      await panel.changeStatus(change(printing, 'paid', 'printing'));
+      // «در حال چاپ»: خودِ آن و برگشته از پست. تحویل‌ها: به‌موقع و دیر؛ درست روی مرز بیرون است.
+      expect(await panel.stats({ since, at: END_MONDAY })).toEqual({ printing: 2, handed: 2, onTime: 1 });
+      // یک میلی‌ثانیه پیش‌تر، مرز هم درون است (شاهد `>`)؛ تحویلی درست در «حالا» شمرده می‌شود (شاهد `<=`)، و بعدش نه.
+      expect(await panel.stats({ since: new Date(since.getTime() - 1), at: END_MONDAY })).toEqual({ printing: 2, handed: 3, onTime: 2 });
+      expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 1) })).toEqual({ printing: 2, handed: 2, onTime: 1 });
+      expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 2) })).toEqual({ printing: 2, handed: 1, onTime: 0 });
     });
   });
 });
