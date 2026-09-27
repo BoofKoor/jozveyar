@@ -11,10 +11,13 @@
   صفحه‌ها: ورود (رمز و کد برنامهٔ تأیید)، ثبت ادمین با پیوند یک‌باره و QR، پیشخوان با ساعت تحویل به پست، فهرست و
   جزئیات سفارش (دانلود PDF، وضعیت، لغو، ویرایش نشانی)، تعرفه (نسخهٔ تازه، سنجش، پیش‌نمایش، فعال‌سازی)، تنظیمات و
   کلیدهای سرویس‌ها، ادمین‌ها، رویدادها؛ و صفحهٔ سفارش مشتری با وضعیت‌های تازه (۴٫۳).
+  برش ۵ (docs/UI.md، بخش ۸؛ ADR-042 تا ۰۴۴): فایل چاپ هر جلد و برگهٔ سفارش با برچسب پست در جزئیات سفارش، پیش‌نمایش برگه،
+  جزوهٔ دو جلدی، فایل‌های پاک‌شده، چاپخانهٔ سفارش و جابه‌جایی، زبانهٔ «چاپخانه‌ها»، کاربر با نقش «چاپخانه»، نگهداری فایل‌ها در
+  تنظیمات، و نقش سوم «چاپخانه» در منوی طرح: پیشخوان و سفارش‌های خودش، بی مبلغ و بی لغو.
   به زبان کیت: packages/ui/src/base.css و components.css مستقیم بار می‌شوند و توکن‌ها از docs/brand/jozveyar-colors.css
   می‌آیند؛ اینجا هیچ کد رنگی نیست. اجزای تازهٔ کیت نام jy- دارند (دکمهٔ کار برگشت‌ناپذیر، نشان خنثی، آیکون دانلود)؛
   چیدمان پنل ad- است، و صفحهٔ مشتری همان site- و ck- طرح مسیر خرید.
-  حالت‌ها و نقش (مالک یا متصدی): فهرست «طرح نمونه» گوشهٔ صفحه؛ دکمه‌های خود صفحه هم به حالت بعد می‌روند. «امروز» در طرح
+  حالت‌ها و نقش (مالک، متصدی یا چاپخانه): فهرست «طرح نمونه» گوشهٔ صفحه؛ دکمه‌های خود صفحه هم به حالت بعد می‌روند. «امروز» در طرح
   دوشنبه 13 مهر 1405، ساعت 11:20 است. نام‌ها، شماره‌ها و کلیدها نمونه‌اند؛ مبلغ‌ها از خود quote() با تعرفهٔ پایه.
   دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/admin.html
 -->
@@ -367,6 +370,66 @@
   .ad-mask { direction: ltr; unicode-bidi: isolate; letter-spacing: .08em; color: var(--color-ink); }
   .ad-src { font-weight: 600; }
 
+  /* ===== برش ۵: فایل چاپ و برگهٔ سفارش در جزئیات سفارش ===== */
+  .ad-print { margin-block-start: 16px; padding: 4px 16px; background: var(--color-green-50); border-radius: var(--radius-md); }
+  .ad-print > li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding-block: 12px; }
+  .ad-print > li + li { border-block-start: 1px solid var(--color-green-200); }
+  .ad-print .ad-pdf__icon { flex: none; }
+  .ad-print__body { flex: 1; min-width: 12rem; }
+  .ad-print__meta { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-print__meta .jy-icon { width: 16px; height: 16px; vertical-align: -3px; }
+  .ad-print__orig { flex-basis: 100%; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-print .jy-note { flex-basis: 100%; }
+  .ad-partner { display: flex; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; }
+  .ad-partner b { overflow-wrap: anywhere; }
+
+  /* ===== برش ۵: چاپخانه‌ها ===== */
+  .ad-partners > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding-block: 14px; }
+  .ad-partners > li + li { border-block-start: 1px solid var(--color-green-100); }
+  .ad-partners__name { font-weight: 600; overflow-wrap: anywhere; }
+  .ad-partners__meta { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-partners .jy-badge { margin-inline-start: 4px; vertical-align: 1px; }
+  @media (max-width: 520px) {
+    .ad-partners > li { grid-template-columns: minmax(0, 1fr); }
+    .ad-partners > li > .jy-btn { justify-self: start; margin-inline-start: -12px; }
+  }
+  .ad-select { max-width: 22rem; }
+  /* نقش «چاپخانه» در فرم افزودن ادمین: انتخاب چاپخانه فقط با همین نقش */
+  .ad-if-partner { display: none; }
+  .ad-roles-form:has(.ad-role-partner:checked) .ad-if-partner { display: flex; }
+
+  /* ===== برش ۵: برگهٔ سفارش، پیش‌نمایش A4 همان PDF کارگر (سیاه روی سفید، برای چاپگر لیزری) ===== */
+  .ad-sheet-wrap { display: flex; justify-content: center; margin-block-start: 16px; }
+  /* ظرف cqi خود برگ است؛ اندازه‌ها روی فرزندش (cqi روی خود ظرف به پنجره برمی‌گردد) */
+  .ad-sheet {
+    container-type: inline-size; width: 100%; max-width: 640px; aspect-ratio: 210 / 297;
+    background: var(--jy-paper); color: var(--jy-print-black); box-shadow: var(--shadow-md);
+  }
+  .tk { display: flex; flex-direction: column; height: 100%; padding: 7.5cqi 7.5cqi 5cqi; font-size: 2.35cqi; line-height: 1.6; }
+  .tk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 4cqi; }
+  .tk-head__k { font-size: 2.2cqi; }
+  .tk-no { font-size: 11cqi; font-weight: 600; line-height: 1; letter-spacing: .02em; }
+  .tk-due { margin-block-start: 2.5cqi; font-size: 3.2cqi; font-weight: 600; }
+  .tk-sub { font-size: 2.2cqi; }
+  .tk-rule { margin-block: 3cqi; border-block-start: .3cqi solid var(--jy-print-black); }
+  .tk-item__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 1cqi 3cqi; }
+  .tk-item__title { font-size: 3cqi; font-weight: 600; }
+  .tk-mode { padding: .4cqi 2cqi; border: .35cqi solid var(--jy-print-black); border-radius: 1cqi; font-size: 3.2cqi; font-weight: 600; }
+  .tk-grid { display: grid; grid-template-columns: 16cqi minmax(0, 1fr); gap: .8cqi 3cqi; margin-block-start: 2cqi; }
+  .tk-grid dt { font-weight: 600; }
+  .tk-files { margin-block-start: .5cqi; }
+  .tk-files li { display: flex; gap: 2cqi; }
+  .tk-files li span:last-child { margin-inline-start: auto; white-space: nowrap; }
+  .tk-grow { flex: 1; }
+  .tk-cut { display: flex; align-items: center; gap: 2cqi; margin-block: 3cqi 2.5cqi; font-size: 2cqi; }
+  .tk-cut::before, .tk-cut::after { content: ''; flex: 1; border-block-start: .3cqi dashed var(--jy-print-black); }
+  .tk-label { padding: 3cqi 3.5cqi; border: .4cqi solid var(--jy-print-black); border-radius: 1.5cqi; }
+  .tk-label__k { font-size: 2cqi; }
+  .tk-label__name { font-size: 4.2cqi; font-weight: 600; line-height: 1.4; }
+  .tk-label__addr { margin-block-start: 1cqi; font-size: 3cqi; line-height: 1.6; }
+  .tk-label__row { display: flex; flex-wrap: wrap; gap: 1cqi 5cqi; margin-block-start: 1.5cqi; font-size: 3cqi; }
+  .tk-foot { margin-block-start: 2cqi; font-size: 1.9cqi; }
+
   /* ===== ادمین‌ها و پیوند یک‌باره ===== */
   .ad-people > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding-block: 14px; }
   .ad-people > li + li { border-block-start: 1px solid var(--color-green-100); }
@@ -446,7 +509,7 @@
 .scr, .st { display: none; }
 /* سه پوسته: ورود و ثبت، پنل، صفحهٔ مشتری */
 body:has(:is(#m-login, #m-login-error, #m-login-locked, #m-invite, #m-invite-expired):checked) .scr-auth { display: block; }
-body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .scr-shell { display: block; }
+body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .scr-shell { display: block; }
 body:has(:is(#m-c-print, #m-c-handed, #m-c-cancelled):checked) .scr-site { display: block; }
 
 body:has(#m-login:checked) :is(.st-login, .st-login-any),
@@ -456,14 +519,20 @@ body:has(#m-invite:checked) .st-invite,
 body:has(#m-invite-expired:checked) .st-invite-expired,
 body:has(#m-dash:checked) .st-dash,
 body:has(#m-orders:checked) .st-orders,
-body:has(#m-order:checked) :is(.st-order, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid),
-body:has(#m-order-edit:checked) :is(.st-order-edit, .st-o27, .st-pdf-ok, .st-open, .st-paid),
-body:has(#m-order-pdf:checked) :is(.st-order-pdf, .st-o27, .st-rcpt, .st-open, .st-paid),
-body:has(#m-order-print:checked) :is(.st-order-print, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-printed),
-body:has(#m-order-handed:checked) :is(.st-order-handed, .st-o27, .st-pdf-ok, .st-rcpt, .st-printed),
-body:has(#m-order-cancel:checked) :is(.st-order-cancel, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid),
-body:has(#m-order-cancelled:checked) :is(.st-order-cancelled, .st-o27, .st-pdf-ok, .st-rcpt),
+body:has(#m-order:checked) :is(.st-order, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid, .st-prt-card),
+body:has(#m-order-edit:checked) :is(.st-order-edit, .st-o27, .st-pdf-ok, .st-open, .st-paid, .st-prt-card),
+body:has(#m-order-pdf:checked) :is(.st-order-pdf, .st-o27, .st-rcpt, .st-open, .st-paid, .st-prt-card),
+body:has(#m-order-print:checked) :is(.st-order-print, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-printed, .st-prt-card),
+body:has(#m-order-handed:checked) :is(.st-order-handed, .st-o27, .st-pdf-ok, .st-rcpt, .st-printed, .st-prt-card),
+body:has(#m-order-cancel:checked) :is(.st-order-cancel, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid, .st-prt-card),
+body:has(#m-order-cancelled:checked) :is(.st-order-cancelled, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
 body:has(#m-order-unpaid:checked) .st-order-unpaid,
+body:has(#m-order-assign:checked) :is(.st-order-assign, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid),
+body:has(#m-ticket:checked) .st-ticket,
+body:has(#m-order-vols:checked) .st-order-vols,
+body:has(#m-order-purged:checked) .st-order-purged,
+body:has(#m-partners:checked) .st-partners,
+body:has(#m-partner-edit:checked) .st-partner-edit,
 body:has(#m-tariff:checked) .st-tariff,
 body:has(#m-tariff-draft:checked) :is(.st-tariff-draft, .st-editor),
 body:has(#m-tariff-invalid:checked) :is(.st-tariff-invalid, .st-editor),
@@ -487,20 +556,31 @@ body:has(#m-order-cancelled:checked) .ad-log > li.st-order-cancelled { display: 
 
 /* زبانهٔ جاری (در سایت aria-current، اینجا فقط ظاهر) */
 body:has(#m-dash:checked) .ad-nav [data-tab='dash'],
-body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid):checked) .ad-nav [data-tab='orders'],
+body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged):checked) .ad-nav [data-tab='orders'],
 body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-nav [data-tab='tariff'],
 body:has(:is(#m-settings, #m-key-edit):checked) .ad-nav [data-tab='settings'],
+body:has(:is(#m-partners, #m-partner-edit):checked) .ad-nav [data-tab='partners'],
 body:has(:is(#m-admins, #m-admin-invite, #m-admin-link):checked) .ad-nav [data-tab='admins'],
 body:has(#m-events:checked) .ad-nav [data-tab='events'],
-body:has(:is(#m-settings, #m-key-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
+body:has(:is(#m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
 
-/* نقش: متصدی تعرفه را فقط می‌بیند، و تنظیمات، ادمین‌ها و رویدادها را ندارد */
-.own { display: contents; }
-.opr { display: none; }
-body:has(#r-operator:checked) .own { display: none; }
+/*
+ * نقش: متصدی تعرفه را فقط می‌بیند، و تنظیمات، چاپخانه‌ها، ادمین‌ها و رویدادها را ندارد. چاپخانه (برش ۵، ADR-042) فقط پیشخوان و
+ * سفارش‌های خودش را دارد، بی مبلغ و بی لغو؛ سفارش چاپخانهٔ دیگر برایش «پیدا نشد» است، مثل شماره‌ای که نیست (۴۰۴).
+ */
+.own, .staff { display: contents; }
+.opr, .prt { display: none; }
+body:has(:is(#r-operator, #r-partner):checked) .own { display: none; }
 body:has(#r-operator:checked) .opr { display: contents; }
-body:has(#r-operator:checked) .st-ownpage { display: none !important; }
-body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-noaccess { display: block; }
+body:has(#r-partner:checked) .staff { display: none; }
+body:has(#r-partner:checked) .prt { display: contents; }
+body:has(:is(#r-operator, #r-partner):checked) .st-ownpage { display: none !important; }
+body:has(#r-partner:checked) .st-staffpage { display: none !important; }
+body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-noaccess { display: block; }
+.ad-noaccess-prt, .ad-notfound { display: none; max-width: 32rem; }
+body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign):checked) .ad-noaccess-prt { display: block; }
+body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged):checked) .ad-notfound { display: block; }
+body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged, #m-order-edit, #m-order-cancel, #m-order-assign):checked) :is(.st-o27, .st-order-unpaid, .st-order-vols, .st-order-purged) { display: none; }
 
 body:has(#m-login:checked) .mock [for='m-login'],
 body:has(#m-login-error:checked) .mock [for='m-login-error'],
@@ -530,8 +610,22 @@ body:has(#m-events:checked) .mock [for='m-events'],
 body:has(#m-c-print:checked) .mock [for='m-c-print'],
 body:has(#m-c-handed:checked) .mock [for='m-c-handed'],
 body:has(#m-c-cancelled:checked) .mock [for='m-c-cancelled'],
+body:has(#m-order-assign:checked) .mock [for='m-order-assign'],
+body:has(#m-ticket:checked) .mock [for='m-ticket'],
+body:has(#m-order-vols:checked) .mock [for='m-order-vols'],
+body:has(#m-order-purged:checked) .mock [for='m-order-purged'],
+body:has(#m-partners:checked) .mock [for='m-partners'],
+body:has(#m-partner-edit:checked) .mock [for='m-partner-edit'],
 body:has(#r-owner:checked) .mock [for='r-owner'],
-body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-green-700); }
+body:has(#r-operator:checked) .mock [for='r-operator'],
+body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-green-700); }
+
+/* فهرست سفارش چاپخانه: بی ستون مبلغ */
+.ad-list--nosum :is(.ad-cols, .ad-row) { grid-template-columns: 64px minmax(0, 1.2fr) minmax(0, 1.4fr) 112px 156px; grid-template-areas: 'id who what state due'; }
+@media (width <= 860px) {
+  .ad-list--nosum .ad-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'id who due' 'what what what' 'state state state'; }
+  .ad-list--nosum .ad-row__state { justify-self: start; text-align: start; }
+}
 </style>
 </head>
 <body>
@@ -564,8 +658,15 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
   <input type="radio" name="m" id="m-c-print" tabindex="-1">
   <input type="radio" name="m" id="m-c-handed" tabindex="-1">
   <input type="radio" name="m" id="m-c-cancelled" tabindex="-1">
+  <input type="radio" name="m" id="m-order-assign" tabindex="-1">
+  <input type="radio" name="m" id="m-ticket" tabindex="-1">
+  <input type="radio" name="m" id="m-order-vols" tabindex="-1">
+  <input type="radio" name="m" id="m-order-purged" tabindex="-1">
+  <input type="radio" name="m" id="m-partners" tabindex="-1">
+  <input type="radio" name="m" id="m-partner-edit" tabindex="-1">
   <input type="radio" name="r" id="r-owner" checked tabindex="-1">
   <input type="radio" name="r" id="r-operator" tabindex="-1">
+  <input type="radio" name="r" id="r-partner" tabindex="-1">
 </div>
 <details class="mock">
   <summary>طرح نمونه · حالت‌ها</summary>
@@ -587,6 +688,13 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <label for="m-order-cancel">لغو</label>
     <label for="m-order-cancelled">لغو شد</label>
     <label for="m-order-unpaid">در انتظار پرداخت</label>
+    <hr><p>چاپخانه و خروجی چاپ (برش ۵)</p>
+    <label for="m-ticket">برگهٔ سفارش</label>
+    <label for="m-order-vols">دو جلد</label>
+    <label for="m-order-purged">فایل‌ها پاک شد</label>
+    <label for="m-order-assign">جابه‌جایی چاپخانه</label>
+    <label for="m-partners">چاپخانه‌ها</label>
+    <label for="m-partner-edit">افزودن چاپخانه</label>
     <hr><p>تعرفه و تنظیمات</p>
     <label for="m-tariff">تعرفه</label>
     <label for="m-tariff-draft">نسخهٔ تازه</label>
@@ -595,8 +703,8 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <label for="m-settings">تنظیمات</label>
     <label for="m-key-edit">تغییر کلید</label>
     <label for="m-admins">ادمین‌ها</label>
-    <label for="m-admin-invite">افزودن متصدی</label>
-    <label for="m-admin-link">پیوند متصدی</label>
+    <label for="m-admin-invite">افزودن ادمین</label>
+    <label for="m-admin-link">پیوند ثبت</label>
     <label for="m-events">رویدادها</label>
     <hr><p>صفحهٔ سفارش مشتری</p>
     <label for="m-c-print">در حال چاپ</label>
@@ -605,6 +713,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <hr><p>نقش</p>
     <label for="r-owner">مالک</label>
     <label for="r-operator">متصدی</label>
+    <label for="r-partner">چاپخانه</label>
   </div>
 </details>
 
@@ -705,6 +814,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
       <div class="ad-user">
         <span class="own"><span>سارا · مالک</span></span>
         <span class="opr"><span>علی · متصدی</span></span>
+        <span class="prt"><span>حسن · چاپ نور</span></span>
         <label for="m-login" class="jy-btn jy-btn--text">خروج</label>
       </div>
     </div>
@@ -712,16 +822,18 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <nav class="ad-wrap ad-nav" aria-label="بخش‌های پنل">
       <label for="m-dash" data-tab="dash">پیشخوان</label>
       <label for="m-orders" data-tab="orders">سفارش‌ها</label>
-      <label for="m-tariff" data-tab="tariff">تعرفه</label>
+      <span class="staff"><label for="m-tariff" data-tab="tariff">تعرفه</label></span>
       <span class="own">
         <label for="m-settings" data-tab="settings" class="ad-nav__wide">تنظیمات</label>
+        <label for="m-partners" data-tab="partners" class="ad-nav__wide">چاپخانه‌ها</label>
         <label for="m-admins" data-tab="admins" class="ad-nav__wide">ادمین‌ها</label>
         <label for="m-events" data-tab="events" class="ad-nav__wide">رویدادها</label>
-        <!-- گوشی: سه بخش مالک زیر «بیشتر»، تا زبانهٔ جاری همیشه دیده شود -->
+        <!-- گوشی: بخش‌های مالک زیر «بیشتر»، تا زبانهٔ جاری همیشه دیده شود -->
         <details class="ad-more">
           <summary data-tab="more">بیشتر<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
           <div class="ad-more__list">
             <label for="m-settings">تنظیمات</label>
+            <label for="m-partners">چاپخانه‌ها</label>
             <label for="m-admins">ادمین‌ها</label>
             <label for="m-events">رویدادها</label>
           </div>
@@ -734,8 +846,20 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <!-- متصدی به بخش‌های مالک نمی‌رسد -->
     <section class="jy-card ad-noaccess" aria-labelledby="t-noaccess">
       <h1 id="t-noaccess" class="jy-card__title">این بخش فقط برای مالک است</h1>
-      <p class="ck-sub">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، ادمین‌ها و رویدادها با مالک پنل است.</p>
+      <p class="ck-sub">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها و رویدادها با مالک پنل است.</p>
       <div class="ad-actions"><label for="m-dash" class="jy-btn jy-btn--secondary">پیشخوان</label></div>
+    </section>
+
+    <!-- چاپخانه (برش ۵) فقط سفارش‌های خودش را دارد -->
+    <section class="jy-card ad-noaccess-prt" aria-labelledby="t-noaccess-prt">
+      <h1 id="t-noaccess-prt" class="jy-card__title">این بخش برای چاپخانه باز نیست</h1>
+      <p class="ck-sub">سفارش‌هایی که به چاپ نور سپرده شده‌اند در «سفارش‌ها»ست. لغو، ویرایش نشانی، تعرفه و بقیه با جزوه‌یار است.</p>
+      <div class="ad-actions"><label for="m-orders" class="jy-btn jy-btn--secondary">سفارش‌ها</label></div>
+    </section>
+    <section class="jy-card ad-notfound" aria-labelledby="t-notfound">
+      <h1 id="t-notfound" class="jy-card__title">این سفارش پیدا نشد</h1>
+      <p class="ck-sub">شماره را درست زدی؟ از فهرست سفارش‌ها پیدایش کن.</p>
+      <div class="ad-actions"><label for="m-orders" class="jy-btn jy-btn--secondary">سفارش‌ها</label></div>
     </section>
 
     <!-- ===================== پیشخوان ===================== -->
@@ -747,6 +871,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
         </div>
       </div>
 
+      <div class="staff">
       <section aria-labelledby="t-due">
         <h2 id="t-due" class="ad-h2">تحویل به پست</h2>
         <p class="ad-meta">سفارش‌های پرداخت‌شده‌ای که هنوز به پست نرسیده‌اند، به ترتیب مهلت. تعهد: <span class="num">2</span> روز کاری بعد از پرداخت.</p>
@@ -762,6 +887,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
       <div class="ad-alerts">
         <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>PDF جزوهٔ <label for="m-order-pdf" class="jy-link">سفارش <span class="num">10031</span></label> ساخته نشد؛ پیش از چاپ دوباره بسازش.</span></p>
         <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><label for="m-order-unpaid" class="jy-link"><span class="num">2</span> تلاش پرداخت</label> از درگاه برنگشت.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-order-assign" class="jy-link">سفارش <span class="num">10037</span></label> چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.</span></p>
       </div>
 
       <section class="jy-card ad-list" aria-labelledby="t-queue">
@@ -778,6 +904,29 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
         </ul>
         <div class="ad-pager"><span><span class="num">5</span> سفارش اول از <span class="num">10</span></span><label for="m-orders" class="jy-btn jy-btn--text">همه</label></div>
       </section>
+      </div>
+
+      <!-- چاپخانه: همان پیشخوان، فقط سفارش‌های خودش و بی مبلغ -->
+      <div class="prt">
+        <section aria-labelledby="t-due-p">
+          <h2 id="t-due-p" class="ad-h2">تحویل به پست</h2>
+          <p class="ad-meta">سفارش‌هایی که به چاپ نور سپرده شده‌اند و هنوز به پست نرسیده‌اند، به ترتیب مهلت. تعهد: <span class="num">2</span> روز کاری بعد از پرداخت.</p>
+          <ul class="ad-tiles">
+            <li><label for="m-orders" class="ad-tile"><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>دیر شده</span><span class="ad-tile__n num">0</span><span class="ad-tile__t">هیچ سفارشی دیر نشده</span></label></li>
+            <li><label for="m-orders" class="ad-tile"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>امروز</span><span class="ad-tile__n num">1</span><span class="ad-tile__t">تا پایان امروز، دوشنبه</span></label></li>
+            <li><label for="m-orders" class="ad-tile"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>فردا</span><span class="ad-tile__n num">1</span><span class="ad-tile__t">تا پایان سه‌شنبه <span class="num">14</span> مهر</span></label></li>
+            <li><label for="m-orders" class="ad-tile"><span class="jy-badge jy-badge--neutral">بعدتر</span><span class="ad-tile__n num">0</span><span class="ad-tile__t">سفارشی نیست</span></label></li>
+          </ul>
+          <p class="ad-meta ad-gap">از این <span class="num">2</span> سفارش، هنوز هیچ‌کدام در حال چاپ نیست.</p>
+        </section>
+        <section class="jy-card ad-list ad-list--nosum ad-gap" aria-labelledby="t-queue-p">
+          <div class="jy-card__head"><h2 id="t-queue-p" class="jy-card__title">صف تحویل به پست</h2></div>
+          <ul class="ad-rows">
+            <li><label for="m-order" class="ad-row"><span class="ad-row__id num">10027</span><span class="ad-row__who"><b>مریم کاظمی</b> <span class="ad-row__city">مشهد</span></span><span class="ad-row__what"><span class="num">3</span> فایل · <span class="num">120</span> صفحه · سیاه‌سفید</span><span class="ad-row__state">در صف چاپ</span><span class="ad-row__due"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>امروز</span></span></label></li>
+            <li><label for="m-order" class="ad-row"><span class="ad-row__id num">10039</span><span class="ad-row__who"><b>کیوان احمدی</b> <span class="ad-row__city">نیشابور</span></span><span class="ad-row__what"><span class="num">96</span> صفحه · رنگی</span><span class="ad-row__state">در صف چاپ</span><span class="ad-row__due"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>فردا</span></span></label></li>
+          </ul>
+        </section>
+      </div>
     </div>
 
     <!-- ===================== سفارش‌ها ===================== -->
@@ -787,6 +936,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
         <span class="jy-icon jy-icon-search" aria-hidden="true"></span>
         <input class="jy-input" type="search" placeholder="شمارهٔ سفارش، موبایل یا نام گیرنده" aria-label="جست‌وجوی سفارش">
       </div>
+      <div class="staff">
       <nav class="ad-chips" aria-label="وضعیت سفارش">
         <a class="ad-chip is-current" href="#" aria-current="page">باز <span class="num">10</span></a>
         <a class="ad-chip" href="#">تحویل پست شد <span class="num">38</span></a>
@@ -795,6 +945,24 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
         <a class="ad-chip" href="#">رهاشده <span class="num">9</span></a>
         <a class="ad-chip" href="#">همه <span class="num">61</span></a>
       </nav>
+      </div>
+      <!-- چاپخانه: فقط سفارش‌های خودش؛ پرداخت‌نشده هرگز به چاپخانه نمی‌رسد، پس «در انتظار» و «رهاشده» نیست -->
+      <div class="prt">
+        <nav class="ad-chips" aria-label="وضعیت سفارش">
+          <a class="ad-chip is-current" href="#" aria-current="page">باز <span class="num">2</span></a>
+          <a class="ad-chip" href="#">تحویل پست شد <span class="num">5</span></a>
+          <a class="ad-chip" href="#">لغو شد <span class="num">0</span></a>
+          <a class="ad-chip" href="#">همه <span class="num">7</span></a>
+        </nav>
+        <section class="jy-card ad-list ad-list--nosum" aria-label="سفارش‌های باز">
+          <div class="ad-cols" aria-hidden="true"><span>سفارش</span><span>گیرنده</span><span>جزوه</span><span>وضعیت</span><span>تحویل به پست تا</span></div>
+          <ul class="ad-rows">
+            <li><label for="m-order" class="ad-row"><span class="ad-row__id num">10027</span><span class="ad-row__who"><b>مریم کاظمی</b> <span class="ad-row__city">مشهد</span></span><span class="ad-row__what"><span class="num">3</span> فایل · <span class="num">120</span> صفحه · سیاه‌سفید</span><span class="ad-row__state">در صف چاپ</span><span class="ad-row__due"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>امروز</span></span></label></li>
+            <li><label for="m-order" class="ad-row"><span class="ad-row__id num">10039</span><span class="ad-row__who"><b>کیوان احمدی</b> <span class="ad-row__city">نیشابور</span></span><span class="ad-row__what"><span class="num">96</span> صفحه · رنگی</span><span class="ad-row__state">در صف چاپ</span><span class="ad-row__due"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>فردا</span></span></label></li>
+          </ul>
+        </section>
+      </div>
+      <div class="staff">
       <section class="jy-card ad-list" aria-label="سفارش‌های باز">
         <div class="ad-cols" aria-hidden="true"><span>سفارش</span><span>گیرنده</span><span>جزوه</span><span>مبلغ (تومان)</span><span>وضعیت</span><span>تحویل به پست تا</span></div>
         <ul class="ad-rows">
@@ -811,6 +979,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
         </ul>
       </section>
       <p class="ad-meta ad-gap">«رهاشده»: سفارشی که پرداخت نشد و فایل‌هایش دیگر روی سرور نیست؛ از فهرست باز جداست.</p>
+      </div>
     </div>
 
     <!-- ===================== سفارش 10027 ===================== -->
@@ -839,13 +1008,13 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
                 <div class="ad-status__actions">
                   <label for="m-order-print" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block"><span class="jy-icon jy-icon-printer" aria-hidden="true"></span>شروع چاپ</label>
                   <p class="ad-hint">وقتی چاپ را شروع کردی بزن؛ مشتری در صفحهٔ سفارشش «در حال چاپ» می‌بیند.</p>
-                  <label for="m-order-cancel" class="jy-btn jy-btn--text jy-btn--block">لغو سفارش</label>
+                  <span class="staff"><label for="m-order-cancel" class="jy-btn jy-btn--text jy-btn--block">لغو سفارش</label></span>
                 </div>
               </div>
               <div class="st st-order-pdf">
                 <div class="ad-status__actions">
-                  <button type="button" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block is-status" aria-disabled="true">اول PDF جزوه ساخته شود</button>
-                  <label for="m-order-cancel" class="jy-btn jy-btn--text jy-btn--block">لغو سفارش</label>
+                  <button type="button" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block is-status" aria-disabled="true">اول فایل چاپ ساخته شود</button>
+                  <span class="staff"><label for="m-order-cancel" class="jy-btn jy-btn--text jy-btn--block">لغو سفارش</label></span>
                 </div>
               </div>
               <div class="st st-order-print">
@@ -853,7 +1022,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
                 <div class="ad-status__actions">
                   <label for="m-order-handed" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span>تحویل پست شد</label>
                   <p class="ad-hint">وقتی بسته را به پست دادی بزن. کد رهگیری را بعداً فایل پست می‌آورد.</p>
-                  <label for="m-order-cancel" class="jy-btn jy-btn--text jy-btn--block">لغو سفارش</label>
+                  <span class="staff"><label for="m-order-cancel" class="jy-btn jy-btn--text jy-btn--block">لغو سفارش</label></span>
                 </div>
               </div>
               <div class="st st-order-cancel">
@@ -889,7 +1058,46 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
             <section class="jy-card ad-status" aria-labelledby="t-st3">
               <h2 id="t-st3" class="jy-card__title">لغو شد</h2>
               <p class="ad-meta">دوشنبه <span class="num">13</span> مهر، <span class="num">11:24</span>، سارا</p>
-              <dl class="ad-facts"><div><dt>دلیل</dt><dd>مشتری خواست. <span class="num">374,750</span> تومان کارت‌به‌کارت برگشت، پیگیری <span class="num">552190</span>.</dd></div></dl>
+              <div class="staff"><dl class="ad-facts"><div><dt>دلیل</dt><dd>مشتری خواست. <span class="num">374,750</span> تومان کارت‌به‌کارت برگشت، پیگیری <span class="num">552190</span>.</dd></div></dl></div>
+              <div class="prt"><p class="jy-note ad-gap">این سفارش چاپ نمی‌شود؛ اگر چاپش کرده‌ای، کنار بگذار.</p></div>
+            </section>
+          </div>
+
+          <!-- چاپخانهٔ سفارش (برش ۵): خودکار هنگام پرداخت؛ جابه‌جایی فقط در «در صف چاپ»، با مالک و متصدی -->
+          <div class="st st-prt-card">
+            <div class="staff">
+              <section class="jy-card" aria-labelledby="t-prt">
+                <div class="jy-card__head">
+                  <h2 id="t-prt" class="jy-card__title">چاپخانه</h2>
+                  <div class="st st-paid"><label for="m-order-assign" class="jy-btn jy-btn--text ad-card-head-btn">جابه‌جایی</label></div>
+                </div>
+                <p class="ad-partner"><b>چاپ نور</b><span class="ad-meta">مشهد</span></p>
+                <p class="ad-meta">خودکار، هنگام پرداخت: هم‌شهر مشتری.</p>
+              </section>
+            </div>
+          </div>
+          <div class="st st-order-assign">
+            <section class="jy-card" aria-labelledby="t-assign">
+              <h2 id="t-assign" class="jy-card__title">جابه‌جایی چاپخانه</h2>
+              <p class="ad-meta">امروز: <b>چاپ نور</b>، مشهد</p>
+              <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>فقط پیش از «شروع چاپ». از همین لحظه چاپ نور این سفارش را نمی‌بیند و چاپخانهٔ تازه آن را در صفش می‌بیند. کرایهٔ مشتری عوض نمی‌شود.</span></p>
+              <div class="ad-form">
+                <fieldset class="jy-field">
+                  <legend class="jy-label">چاپخانهٔ تازه</legend>
+                  <div class="jy-tiles ad-roles">
+                    <label class="jy-tile"><input class="jy-radio" type="radio" name="to-partner" checked><span class="jy-tile__title">چاپخانهٔ جزوه‌یار</span><span class="jy-tile__note">تهران · پیش‌فرض · <span class="num">8</span> سفارش باز</span></label>
+                  </div>
+                </fieldset>
+                <div class="jy-field">
+                  <label class="jy-label" for="as-why">دلیل</label>
+                  <textarea id="as-why" class="jy-input" rows="3" aria-describedby="as-why-hint">دستگاه چاپ نور تا فردا خراب است.</textarea>
+                  <p id="as-why-hint" class="jy-hint">در رویدادهای سفارش می‌ماند؛ مشتری نمی‌بیند.</p>
+                </div>
+              </div>
+              <div class="ad-status__actions">
+                <label for="m-order" class="jy-btn jy-btn--primary jy-btn--block">جابه‌جا کن</label>
+                <label for="m-order" class="jy-btn jy-btn--text jy-btn--block">انصراف</label>
+              </div>
             </section>
           </div>
         </aside>
@@ -911,17 +1119,30 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
               <div><dt>صحافی</dt><dd>طلق و سیم · <span class="num">120</span> صفحه، <span class="num">60</span> برگ، یک جلد</dd></div>
               <div><dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd></div>
             </dl>
-            <div class="ad-pdf">
-              <span class="jy-icon jy-icon-file ad-pdf__icon" aria-hidden="true"></span>
-              <div class="ad-pdf__body">
-                <p class="ad-pdf__name ltr">jozve-10027-1.pdf</p>
-                <div class="st st-pdf-ok"><p class="ad-pdf__meta"><span class="num">120</span> صفحه · <span class="num">38.4</span> مگابایت · ساخته شد شنبه <span class="num">14:06</span></p></div>
-                <div class="st st-order-pdf"><p class="ad-pdf__meta">ساخته نشد</p></div>
-              </div>
-              <div class="st st-pdf-ok"><a class="jy-btn jy-btn--secondary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود PDF</a></div>
-              <div class="st st-order-pdf"><button type="button" class="jy-btn jy-btn--secondary">دوباره بساز</button></div>
-              <div class="st st-order-pdf"><p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>سه تلاش ناموفق: استوریج جواب نداد (شنبه <span class="num">14:06</span> تا <span class="num">14:21</span>). فایل‌های مشتری هنوز روی سرورند؛ دوباره بساز.</span></p></div>
-            </div>
+            <!-- برش ۵ (ADR-043): فایل چاپ هر جلد، A4 عمودی؛ و برگهٔ سفارش، کار جدای کارگر -->
+            <ul class="ad-print" aria-label="فایل‌های چاپ">
+              <li>
+                <span class="jy-icon jy-icon-file ad-pdf__icon" aria-hidden="true"></span>
+                <div class="ad-print__body">
+                  <p class="ad-pdf__name ltr">jozve-10027-1.pdf</p>
+                  <div class="st st-pdf-ok"><p class="ad-print__meta">فایل چاپ · <span class="num">120</span> صفحه، A4 عمودی، یک جلد · <span class="num">38.6</span> مگابایت · ساخته شد شنبه <span class="num">14:06</span></p></div>
+                  <div class="st st-order-pdf"><p class="ad-print__meta">فایل چاپ ساخته نشد</p></div>
+                </div>
+                <div class="st st-pdf-ok"><a class="jy-btn jy-btn--secondary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود</a></div>
+                <div class="st st-order-pdf"><button type="button" class="jy-btn jy-btn--secondary">دوباره بساز</button></div>
+                <div class="st st-pdf-ok"><p class="ad-print__orig">صفحهٔ <span class="num">103</span> تا <span class="num">120</span> (فایل <bdi>حل تمرین فصل ۱.docx</bdi>) اندازهٔ Letter داشت و روی A4 نشست؛ بقیه بی تغییر. <a class="jy-link" href="#">PDF اصلی جزوه</a>، بی تغییر.</p></div>
+                <div class="st st-order-pdf"><p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>سه تلاش ناموفق: استوریج جواب نداد (شنبه <span class="num">14:06</span> تا <span class="num">14:21</span>). فایل‌های مشتری هنوز روی سرورند؛ دوباره بساز.</span></p></div>
+              </li>
+              <li>
+                <span class="jy-icon jy-icon-tag ad-pdf__icon" aria-hidden="true"></span>
+                <div class="ad-print__body">
+                  <p class="ad-pdf__name">برگهٔ سفارش</p>
+                  <p class="ad-print__meta">شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه</p>
+                </div>
+                <label for="m-ticket" class="jy-btn jy-btn--text">دیدن</label>
+                <a class="jy-btn jy-btn--secondary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود</a>
+              </li>
+            </ul>
           </section>
 
           <!-- ارسال به: دیدن، یا ویرایش اشتباه تایپی -->
@@ -929,7 +1150,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
             <section class="jy-card" aria-labelledby="t-to">
               <div class="jy-card__head">
                 <h2 id="t-to" class="jy-card__title">ارسال به</h2>
-                <label for="m-order-edit" class="jy-btn jy-btn--text ad-card-head-btn">ویرایش</label>
+                <span class="staff"><label for="m-order-edit" class="jy-btn jy-btn--text ad-card-head-btn">ویرایش</label></span>
               </div>
               <dl class="ad-facts">
                 <div><dt>گیرنده</dt><dd>مریم کاظمی</dd></div>
@@ -969,7 +1190,8 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
             </section>
           </div>
 
-          <!-- مبلغ منجمد -->
+          <!-- مبلغ منجمد و پرداخت‌ها: فقط مالک و متصدی (orders.money)؛ چاپخانه نمی‌بیند -->
+          <div class="staff">
           <section class="jy-card" aria-labelledby="t-sum">
             <div class="jy-card__head">
               <h2 id="t-sum" class="jy-card__title">مبلغ</h2>
@@ -992,6 +1214,7 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
               <li><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>ناموفق</span><span>شنبه <span class="num">11</span> مهر، <span class="num">13:58</span></span><span class="ad-pay__meta">زیبال · بانک پرداخت را نپذیرفت</span></li>
             </ol>
           </section>
+          </div>
 
           <!-- رویدادها -->
           <section class="jy-card" aria-labelledby="t-log">
@@ -999,7 +1222,8 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
             <ol class="ad-log">
               <li><span class="ad-log__when">شنبه <span class="num">11</span> مهر <span class="num">13:57</span></span><span>سفارش ساخته شد <span class="ad-log__who">· مشتری</span></span></li>
               <li><span class="ad-log__when"><span class="num">14:05</span></span><span>پرداخت شد <span class="ad-log__who">· درگاه</span></span></li>
-              <li><span class="ad-log__when"><span class="num">14:06</span></span><span><span class="st st-pdf-ok">PDF جزوه ساخته شد </span><span class="st st-order-pdf">ساختن PDF جزوه، سه تلاش ناموفق </span><span class="ad-log__who">· سیستم</span></span></li>
+              <li><span class="ad-log__when"><span class="num">14:05</span></span><span>به چاپ نور سپرده شد، هم‌شهر مشتری <span class="ad-log__who">· سیستم</span></span></li>
+              <li><span class="ad-log__when"><span class="num">14:06</span></span><span><span class="st st-pdf-ok">PDF جزوه و فایل چاپ ساخته شد </span><span class="st st-order-pdf">ساختن فایل چاپ، سه تلاش ناموفق </span><span class="ad-log__who">· سیستم</span></span></li>
               <li class="st st-pdf-ok"><span class="ad-log__when">دوشنبه <span class="num">13</span> مهر <span class="num">09:40</span></span><span>PDF دانلود شد <span class="ad-log__who">· علی</span></span></li>
               <li class="st st-printed"><span class="ad-log__when"><span class="num">10:05</span></span><span>در صف چاپ ← در حال چاپ <span class="ad-log__who">· سارا</span></span></li>
               <li class="st st-order-handed"><span class="ad-log__when"><span class="num">16:40</span></span><span>در حال چاپ ← تحویل پست شد <span class="ad-log__who">· سارا</span></span></li>
@@ -1055,8 +1279,195 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
       </div>
     </div>
 
+    <!-- ===================== برش ۵: برگهٔ سفارش (PDF کارگر؛ پیش‌نمایش همان A4) ===================== -->
+    <div class="st st-ticket">
+      <label for="m-order" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>سفارش <span class="num">10027</span></label>
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">برگهٔ سفارش <span class="num">10027</span></h1>
+          <p class="ad-sub">یک برگ A4، سیاه روی سفید، جدا از جزوه. با جزوه چاپش کن؛ برچسب پایینش را ببر و روی بسته بچسبان.</p>
+        </div>
+        <a class="jy-btn jy-btn--primary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود PDF</a>
+      </div>
+      <div class="ad-sheet-wrap">
+        <article class="ad-sheet" aria-label="برگهٔ سفارش 10027، پیش‌نمایش">
+          <div class="tk">
+          <div class="tk-head">
+            <div>
+              <p class="tk-head__k">جزوه‌یار · برگهٔ سفارش</p>
+              <p class="tk-no num">10027</p>
+              <p class="tk-due">تحویل به پست تا دوشنبه <span class="num">13</span> مهر <span class="num">1405</span></p>
+              <p class="tk-sub">چاپ نور، مشهد · پرداخت شنبه <span class="num">11</span> مهر، <span class="num">14:05</span></p>
+            </div>
+          </div>
+          <div class="tk-rule"></div>
+          <section>
+            <div class="tk-item__head">
+              <p class="tk-item__title">جزوهٔ <span class="num">1</span> از <span class="num">1</span> · <span class="ltr">jozve-10027-1.pdf</span></p>
+              <p class="tk-mode">سیاه‌سفید · دورو</p>
+            </div>
+            <dl class="tk-grid">
+              <dt>فایل‌ها</dt>
+              <dd>
+                <ol class="tk-files">
+                  <li><span><span class="num">1</span>. <bdi>ریاضی ۲ - جلسه ۱.pdf</bdi></span><span>صفحهٔ <span class="num">1</span> تا <span class="num">48</span></span></li>
+                  <li><span><span class="num">2</span>. <bdi>ریاضی ۲ - جلسه ۲.pdf</bdi></span><span>صفحهٔ <span class="num">49</span> تا <span class="num">102</span></span></li>
+                  <li><span><span class="num">3</span>. <bdi>حل تمرین فصل ۱.docx</bdi></span><span>صفحهٔ <span class="num">103</span> تا <span class="num">120</span></span></li>
+                </ol>
+              </dd>
+              <dt>چاپ</dt><dd><span class="num">120</span> صفحه، <span class="num">60</span> برگ · تحریر ۸۰ گرم</dd>
+              <dt>صحافی</dt><dd>طلق و سیم · یک جلد</dd>
+              <dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd>
+            </dl>
+          </section>
+          <div class="tk-grow"></div>
+          <p class="tk-cut">برچسب پست: از اینجا ببر</p>
+          <div class="tk-label">
+            <p class="tk-label__k">گیرنده</p>
+            <p class="tk-label__name">مریم کاظمی <span class="num">10027</span></p>
+            <p class="tk-label__addr">خراسان رضوی، مشهد، بلوار سجاد، سجاد 18، پلاک 42، واحد 6</p>
+            <p class="tk-label__row"><span>کد پستی <span class="num">9187654321</span></span><span>موبایل <span class="num">0915 234 5678</span></span><span>پست پیشتاز</span></p>
+          </div>
+          <p class="tk-foot">شمارهٔ کنار نام را متصدی پست در نام گیرنده می‌نویسد؛ کد رهگیری با همین پیدا می‌شود.</p>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <!-- ===================== برش ۵: جزوهٔ دو جلدی (بالای ۸۰۰ برگ) ===================== -->
+    <div class="st st-order-vols">
+      <label for="m-orders" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>سفارش‌ها</label>
+      <div class="ad-pagehead">
+        <div class="ad-title-row">
+          <h1 class="ad-title">سفارش <span class="num">10040</span></h1>
+          <span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>در صف چاپ</span>
+        </div>
+      </div>
+      <section class="jy-card" aria-labelledby="t-jozve-v">
+        <div class="jy-card__head">
+          <h2 id="t-jozve-v" class="jy-card__title">جزوه</h2>
+          <span class="jy-card__meta">دو جلد، هر جلد یک فایل</span>
+        </div>
+        <ol class="ad-files"><li><span class="ad-files__n num">1</span><span class="ad-files__name" dir="auto">آمار و احتمال - کل ترم.pdf</span><span class="ad-files__pages"><span class="num">1,650</span> صفحه</span></li></ol>
+        <dl class="ad-facts ad-spec">
+          <div><dt>چاپ</dt><dd>سیاه‌سفید، دورو · تحریر ۸۰ گرم</dd></div>
+          <div><dt>صحافی</dt><dd>طلق و سیم · <span class="num">1,650</span> صفحه، <span class="num">825</span> برگ، دو جلد (<span class="num">413</span> و <span class="num">412</span> برگ)</dd></div>
+          <div><dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd></div>
+        </dl>
+        <ul class="ad-print" aria-label="فایل‌های چاپ">
+          <li>
+            <span class="jy-icon jy-icon-file ad-pdf__icon" aria-hidden="true"></span>
+            <div class="ad-print__body">
+              <p class="ad-pdf__name ltr">jozve-10040-1-jeld-1.pdf</p>
+              <p class="ad-print__meta">جلد <span class="num">1</span> · صفحهٔ <span class="num">1</span> تا <span class="num">826</span> · <span class="num">413</span> برگ · <span class="num">212.4</span> مگابایت</p>
+            </div>
+            <a class="jy-btn jy-btn--secondary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود</a>
+          </li>
+          <li>
+            <span class="jy-icon jy-icon-file ad-pdf__icon" aria-hidden="true"></span>
+            <div class="ad-print__body">
+              <p class="ad-pdf__name ltr">jozve-10040-1-jeld-2.pdf</p>
+              <p class="ad-print__meta">جلد <span class="num">2</span> · صفحهٔ <span class="num">827</span> تا <span class="num">1,650</span> · <span class="num">412</span> برگ · <span class="num">208.9</span> مگابایت</p>
+            </div>
+            <a class="jy-btn jy-btn--secondary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود</a>
+            <p class="ad-print__orig">همهٔ صفحه‌ها A4 عمودی بود؛ فقط به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.</p>
+          </li>
+          <li>
+            <span class="jy-icon jy-icon-tag ad-pdf__icon" aria-hidden="true"></span>
+            <div class="ad-print__body">
+              <p class="ad-pdf__name">برگهٔ سفارش</p>
+              <p class="ad-print__meta">شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه</p>
+            </div>
+            <label for="m-ticket" class="jy-btn jy-btn--text">دیدن</label>
+            <a class="jy-btn jy-btn--secondary" href="#"><span class="jy-icon jy-icon-download" aria-hidden="true"></span>دانلود</a>
+          </li>
+        </ul>
+      </section>
+    </div>
+
+    <!-- ===================== برش ۵: فایل‌های سفارش پاک شد (ADR-044) ===================== -->
+    <div class="st st-order-purged">
+      <label for="m-orders" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>سفارش‌ها</label>
+      <div class="ad-pagehead">
+        <div class="ad-title-row">
+          <h1 class="ad-title">سفارش <span class="num">10004</span></h1>
+          <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>تحویل پست شد</span>
+        </div>
+      </div>
+      <section class="jy-card" aria-labelledby="t-jozve-g">
+        <h2 id="t-jozve-g" class="jy-card__title">جزوه</h2>
+        <ol class="ad-files"><li><span class="ad-files__n num">1</span><span class="ad-files__name" dir="auto">حقوق مدنی ۳ - خلاصه.pdf</span><span class="ad-files__pages"><span class="num">84</span> صفحه</span></li></ol>
+        <dl class="ad-facts ad-spec">
+          <div><dt>چاپ</dt><dd>سیاه‌سفید، دورو · تحریر ۸۰ گرم</dd></div>
+          <div><dt>صحافی</dt><dd>طلق و سیم · <span class="num">42</span> برگ، یک جلد · <span class="num">1</span> نسخه</dd></div>
+        </dl>
+        <p class="jy-note ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>فایل‌های این سفارش (PDF جزوه، فایل چاپ و برگه) سه‌شنبه <span class="num">7</span> مهر پاک شد: <span class="num">30</span> روز پس از تحویل پست. مشخصات، مبلغ و رویدادها می‌مانند.</span></p>
+      </section>
+    </div>
+
+    <!-- ===================== برش ۵: چاپخانه‌ها (فقط مالک) ===================== -->
+    <div class="st st-partners st-ownpage">
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">چاپخانه‌ها</h1>
+          <p class="ad-sub">هر سفارش هنگام پرداخت به چاپخانهٔ همان شهر می‌رود، وگرنه همان استان، وگرنه پیش‌فرض.</p>
+        </div>
+        <label for="m-partner-edit" class="jy-btn jy-btn--primary"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span>افزودن چاپخانه</label>
+      </div>
+      <section class="jy-card" aria-labelledby="t-partners">
+        <h2 id="t-partners" class="jy-card__title">سه چاپخانه</h2>
+        <ul class="ad-partners">
+          <li>
+            <div>
+              <p><span class="ad-partners__name">چاپخانهٔ جزوه‌یار</span><span class="jy-badge jy-badge--neutral">پیش‌فرض</span></p>
+              <p class="ad-partners__meta">تهران · <span class="num">8</span> سفارش باز · کاربرها: همان مالک و متصدی</p>
+            </div>
+            <button type="button" class="jy-btn jy-btn--text">ویرایش</button>
+          </li>
+          <li>
+            <div>
+              <p><span class="ad-partners__name">چاپ نور</span></p>
+              <p class="ad-partners__meta">مشهد · <span class="num">2</span> سفارش باز · کاربر: حسن نوری</p>
+            </div>
+            <div class="ad-people__btns"><button type="button" class="jy-btn jy-btn--text">ویرایش</button><button type="button" class="jy-btn jy-btn--text">پیش‌فرض کن</button></div>
+          </li>
+          <li>
+            <div>
+              <p><span class="ad-partners__name">چاپ آفتاب</span><span class="jy-badge jy-badge--neutral">غیرفعال</span></p>
+              <p class="ad-partners__meta">اصفهان · از <span class="num">1405/07/01</span> سفارش تازه نمی‌گیرد</p>
+            </div>
+            <button type="button" class="jy-btn jy-btn--text">فعال کن</button>
+          </li>
+        </ul>
+        <p class="ad-hint ad-gap">چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد. کاربر چاپخانه را از «ادمین‌ها» بساز.</p>
+      </section>
+    </div>
+
+    <div class="st st-partner-edit st-ownpage">
+      <label for="m-partners" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>چاپخانه‌ها</label>
+      <section class="jy-card" style="max-width: 36rem" aria-labelledby="t-pedit">
+        <h1 id="t-pedit" class="jy-card__title">افزودن چاپخانه</h1>
+        <p class="ck-sub">چاپخانه به‌تنهایی به کسی دسترسی نمی‌دهد؛ کاربرش را بعد از «ادمین‌ها» می‌سازی.</p>
+        <div class="ad-form">
+          <div class="jy-field"><label class="jy-label" for="p-name">نام</label><input id="p-name" class="jy-input" value="چاپ نور"></div>
+          <div class="jy-field">
+            <label class="jy-label" for="p-city">شهر</label>
+            <div class="ad-search ad-select">
+              <span class="jy-icon jy-icon-search" aria-hidden="true"></span>
+              <input id="p-city" class="jy-input" value="مشهد، خراسان رضوی" aria-describedby="p-city-hint">
+            </div>
+            <p id="p-city-hint" class="jy-hint">همان فهرست شهرهای سایت. سفارش‌های همین شهر، و بعد همین استان، به این چاپخانه می‌روند.</p>
+          </div>
+        </div>
+        <div class="ad-actions">
+          <label for="m-partners" class="jy-btn jy-btn--primary">افزودن</label>
+          <label for="m-partners" class="jy-btn jy-btn--text">انصراف</label>
+        </div>
+      </section>
+    </div>
+
     <!-- ===================== تعرفه ===================== -->
-    <div class="st st-tariff">
+    <div class="st st-tariff st-staffpage">
       <div class="ad-pagehead">
         <div>
           <h1 class="ad-title">تعرفه</h1>
@@ -1279,6 +1690,22 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
             </div>
             <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
           </section>
+          <!-- برش ۵ (ADR-044): فایل‌های سفارش چند روز پس از پست یا لغو پاک می‌شوند -->
+          <section class="jy-card" aria-labelledby="t-keep">
+            <h2 id="t-keep" class="jy-card__title">فایل‌های سفارش</h2>
+            <div class="ad-form">
+              <div class="jy-field">
+                <label class="jy-label" for="s-keep">روز نگهداری بعد از «تحویل پست شد» یا «لغو شد»</label>
+                <div class="jy-stepper">
+                  <button type="button" aria-label="کمتر"><span class="jy-icon jy-icon-minus" aria-hidden="true"></span></button>
+                  <input id="s-keep" type="number" value="30" aria-describedby="s-keep-hint">
+                  <button type="button" aria-label="بیشتر"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span></button>
+                </div>
+                <p id="s-keep-hint" class="jy-hint">PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند.</p>
+              </div>
+            </div>
+            <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
+          </section>
         </div>
 
         <section class="jy-card" aria-labelledby="t-hol">
@@ -1358,10 +1785,10 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <div class="st st-admins-any st-ownpage">
       <div class="ad-pagehead">
         <h1 class="ad-title">ادمین‌ها</h1>
-        <label for="m-admin-invite" class="jy-btn jy-btn--primary"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span>افزودن متصدی</label>
+        <label for="m-admin-invite" class="jy-btn jy-btn--primary"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span>افزودن ادمین</label>
       </div>
       <section class="jy-card" aria-labelledby="t-people">
-        <h2 id="t-people" class="jy-card__title">سه نفر</h2>
+        <h2 id="t-people" class="jy-card__title">چهار نفر</h2>
         <ul class="ad-people">
           <li>
             <div><b>سارا رضایی</b> <span class="jy-badge jy-badge--neutral">مالک</span><p class="ad-people__meta">sara · آخرین ورود امروز <span class="num">10:02</span> · تو</p></div>
@@ -1374,6 +1801,10 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
             <div><b>رضا کریمی</b> <span class="jy-badge jy-badge--neutral">متصدی</span><p class="ad-people__meta">reza · دعوت شده؛ پیوند تا <span class="num">11:35</span></p></div>
             <div class="ad-people__btns"><button type="button" class="jy-btn jy-btn--text">لغو دعوت</button></div>
           </li>
+          <li>
+            <div><b>حسن نوری</b> <span class="jy-badge jy-badge--neutral">چاپخانه · چاپ نور</span><p class="ad-people__meta">hasan.noor · آخرین ورود امروز <span class="num">08:30</span> · فقط سفارش‌های چاپ نور</p></div>
+            <div class="ad-people__btns"><button type="button" class="jy-btn jy-btn--text">کد ورود تازه</button><button type="button" class="jy-btn jy-btn--text">غیرفعال کن</button></div>
+          </li>
         </ul>
         <p class="ad-hint ad-gap">«کد ورود تازه» پیوند ثبت تازه می‌سازد، برای وقتی که گوشی کسی گم شد. کد ورود خود مالک با دستور روی سرور.</p>
       </section>
@@ -1382,16 +1813,24 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
     <div class="st st-admin-invite st-ownpage">
       <label for="m-admins" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>ادمین‌ها</label>
       <section class="jy-card" style="max-width: 36rem" aria-labelledby="t-inv">
-        <h1 id="t-inv" class="jy-card__title">افزودن متصدی</h1>
+        <h1 id="t-inv" class="jy-card__title">افزودن ادمین</h1>
         <p class="ck-sub">یک پیوند ثبت یک‌باره می‌سازی و برایش می‌فرستی؛ رمز و برنامهٔ تأیید را خودش می‌گذارد.</p>
-        <div class="ad-form">
+        <div class="ad-form ad-roles-form">
           <div class="jy-field"><label class="jy-label" for="v-name">نام</label><input id="v-name" class="jy-input" value="رضا کریمی"></div>
           <div class="jy-field"><label class="jy-label" for="v-user">نام کاربری</label><input id="v-user" class="jy-input jy-input--ltr ad-short" value="reza" aria-describedby="v-user-hint"><p id="v-user-hint" class="jy-hint">حرف لاتین کوچک و رقم.</p></div>
           <fieldset class="jy-field">
             <legend class="jy-label">نقش</legend>
             <div class="jy-tiles ad-roles">
-              <label class="jy-tile"><input class="jy-radio" type="radio" name="role" checked><span class="jy-tile__title">متصدی</span><span class="jy-tile__note">سفارش‌ها، وضعیت، نشانی و دانلود</span></label>
-              <label class="jy-tile"><input class="jy-radio" type="radio" name="role"><span class="jy-tile__title">مالک</span><span class="jy-tile__note">همه‌چیز، با تعرفه، کلیدها و ادمین‌ها</span></label>
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="role" checked><span class="jy-tile__title">متصدی</span><span class="jy-tile__note">همهٔ سفارش‌ها، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه و دانلود</span></label>
+              <label class="jy-tile"><input class="jy-radio ad-role-partner" type="radio" name="role"><span class="jy-tile__title">چاپخانه</span><span class="jy-tile__note">فقط سفارش‌های یک چاپخانه: دانلود، شروع چاپ و تحویل پست؛ بی مبلغ</span></label>
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="role"><span class="jy-tile__title">مالک</span><span class="jy-tile__note">همه‌چیز، با تعرفه، کلیدها، چاپخانه‌ها و ادمین‌ها</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="jy-field ad-if-partner">
+            <legend class="jy-label">کدام چاپخانه</legend>
+            <div class="jy-tiles ad-roles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="partner" checked><span class="jy-tile__title">چاپ نور</span><span class="jy-tile__note">مشهد</span></label>
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="partner"><span class="jy-tile__title">چاپخانهٔ جزوه‌یار</span><span class="jy-tile__note">تهران · پیش‌فرض</span></label>
             </div>
           </fieldset>
           <div class="jy-field"><label class="jy-label" for="v-code">کد برنامهٔ تأیید تو</label><input id="v-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></div>
@@ -1425,12 +1864,16 @@ body:has(#r-operator:checked) .mock [for='r-operator'] { background: var(--jy-gr
         <a class="ad-chip" href="#">سفارش</a>
         <a class="ad-chip" href="#">تعرفه</a>
         <a class="ad-chip" href="#">تنظیمات و کلیدها</a>
+        <a class="ad-chip" href="#">چاپخانه‌ها</a>
         <a class="ad-chip" href="#">ادمین‌ها</a>
       </nav>
       <section class="jy-card" aria-label="رویدادهای امروز">
         <h2 class="jy-card__title">امروز، دوشنبه <span class="num">13</span> مهر</h2>
         <ol class="ad-log">
+          <li><span class="ad-log__when"><span class="num">11:19</span> · علی</span><span>سفارش <span class="num">10041</span> از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه چاپ نور تا فردا خراب است</span></li>
           <li><span class="ad-log__when"><span class="num">11:18</span> · سارا</span><span>کلید «کد پذیرندهٔ زیبال» عوض شد</span></li>
+          <li><span class="ad-log__when"><span class="num">10:44</span> · سارا</span><span>پیوند ثبت برای حسن (چاپخانه، چاپ نور) ساخته شد</span></li>
+          <li><span class="ad-log__when"><span class="num">10:40</span> · سارا</span><span>چاپخانهٔ «چاپ نور» در مشهد افزوده شد</span></li>
           <li><span class="ad-log__when"><span class="num">11:02</span> · سارا</span><span>نسخهٔ <span class="num">2</span> تعرفه فعال شد</span></li>
           <li><span class="ad-log__when"><span class="num">10:31</span> · سارا</span><span>پیوند ثبت برای رضا (متصدی) ساخته شد</span></li>
           <li><span class="ad-log__when"><span class="num">10:02</span> · سارا</span><span>ورود</span></li>
