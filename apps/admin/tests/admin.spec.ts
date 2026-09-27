@@ -144,7 +144,7 @@ test.describe.serial('پنل ادمین', () => {
     await enroll(page, link);
     await expect(page.locator('.ad-user')).toContainText('علی محمدی · متصدی');
     await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'تعرفه']);
-    for (const path of ['/admins', '/events', '/admins/new']) {
+    for (const path of ['/admins', '/events', '/admins/new', '/settings']) {
       await page.goto(at(path));
       await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
     }

@@ -244,7 +244,33 @@ describe('رویدادها', () => {
       ['نسخهٔ ', { ltr: '1' }, ' تعرفه دوباره فعال شد', '، به جای نسخهٔ ', { ltr: '2' }],
       ['پیش‌نویس نسخهٔ ', { ltr: '3' }, ' تعرفه پاک شد'],
     ]);
-    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'تعرفه', 'ادمین‌ها']);
+  });
+
+  it('تنظیمات و کلیدها (۴٫۶): عددها و تاریخ جدا از جملهٔ فارسی؛ کلید با نامش، هرگز مقدارش؛ چیپ به ترتیب طرح', () => {
+    const setting = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'setting', detail });
+    const key = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'service_key', detail });
+    const lines = eventLines([
+      setting('settings.update', { key: 'order.sla_days', from: 2, to: 3 }),
+      setting('settings.update', { key: 'otp.site_hourly_limit', from: 300, to: 1500 }),
+      setting('settings.update', { key: 'calendar.official_through', from: 1405, to: 1406 }),
+      setting('settings.holiday_add', { date: '1406/04/01', title: 'آزمایش' }),
+      setting('settings.holiday_remove', { date: '1405/10/02', title: 'ولادت امام علی (ع) / روز پدر' }),
+      key('settings.key_set', { name: 'PAYMENT_MERCHANT_ID', from: 'env' }),
+      key('settings.key_set', { name: 'SMS_OTP_TEMPLATE', from: 'empty' }),
+      key('settings.key_revert', { name: 'SMS_API_KEY', to: 'env' }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['روز کاری تحویل به پست: ', { ltr: '2' }, ' ← ', { ltr: '3' }],
+      ['سقف ساعتی کد پیامکی کل سایت: ', { ltr: '300' }, ' ← ', { ltr: '1,500' }],
+      ['تعطیلی‌های ', { ltr: '1406' }, ' با تقویم رسمی تطبیق داده شد'],
+      ['تعطیلی ', { ltr: '1406/04/01' }, ' افزوده شد: آزمایش'],
+      ['تعطیلی ', { ltr: '1405/10/02' }, ' حذف شد: ولادت امام علی (ع) / روز پدر'],
+      ['کلید «کد پذیرندهٔ زیبال» عوض شد'],
+      ['کلید «قالب کد پیامکی کاوه‌نگار» وارد شد'],
+      ['کلید «کلید API کاوه‌نگار» به ', { ltr: '.env' }, ' برگشت'],
+    ]);
+    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'تعرفه', 'تنظیمات و کلیدها', 'ادمین‌ها']);
+    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'tariff', 'settings', 'admins']);
   });
 });
 

@@ -34,6 +34,8 @@ export const SLA_DAYS_SETTING = 'order.sla_days';
 export const HOLIDAYS_SETTING = 'calendar.holidays';
 /** سقف کد پیامکی کل سایت در ساعت (ADR-033). */
 export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
+/** سالی که تعطیلی‌ها تا پایانش با تقویم رسمی منتشرشده تطبیق داده شده‌اند (برش ۴٫۶). */
+export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -42,10 +44,13 @@ export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
  * سقف کد پیامکی کل سایت ۳۰۰ در ساعت است (۳ب): دو برابر اوج خوش‌بینانهٔ سفارش (حدود ۱۰۰ سفارش در ساعت
  * شب امتحان، هر کدام کمی بیش از یک کد)، و بدترین هزینهٔ حملهٔ «پیامک‌سازی» با هزار IP و هزار شماره را
  * به ۳۰۰ پیامک در ساعت می‌بندد. در `settings` است تا در حمله یا رشد، بی استقرار عوض شود.
+ *
+ * تعطیلی‌های ۱۴۰۵ از تقویم رسمی منتشرشده‌اند و تاریخ قمری ۱۴۰۶ پیش‌بینی (`holidays.ts`)؛ پس «تطبیق‌داده‌شده تا» ۱۴۰۵.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
   [HOLIDAYS_SETTING]: OFFICIAL_HOLIDAYS,
+  [OFFICIAL_THROUGH_SETTING]: 1405,
   [OTP_SITE_LIMIT_SETTING]: 300,
 };
 
