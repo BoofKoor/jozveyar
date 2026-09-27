@@ -87,7 +87,7 @@ function VersionRow({
           </>
         ) : (
           <>
-            <Segments segs={periodsText(periods)} /> · <span className="num">{formatNumber(version.orders)}</span> سفارش با این نسخه
+            <Segments segs={periodsText(periods, version.isActive)} /> · <span className="num">{formatNumber(version.orders)}</span> سفارش با این نسخه
           </>
         )}
       </span>

@@ -397,14 +397,24 @@ describe('دوره‌های فعال بودن', () => {
     const shahrivar20 = new Date('2026-09-11T06:00:00Z');
     const at1048 = new Date('2026-09-27T07:18:00Z');
     const at1102 = new Date('2026-09-27T07:32:00Z');
-    expect(text(periodsText([{ from: shahrivar20, to: null, by: null }]))).toBe('فعال از 1405/06/20');
+    expect(text(periodsText([{ from: shahrivar20, to: null, by: null }], true))).toBe('فعال از 1405/06/20');
     const periods = activePeriods([
       { version: 1, at: shahrivar20, adminName: null },
       { version: 2, at: at1048, adminName: 'سارا' },
       { version: 1, at: at1102, adminName: 'سارا' },
     ]);
-    expect(text(periodsText(periods.get(2)!))).toBe('فعال بود 1405/07/05، 10:48 تا 11:02');
-    expect(text(periodsText(periods.get(1)!))).toBe('فعال از 1405/07/05، و پیش‌تر 1405/06/20 تا 1405/07/05');
-    expect(text(periodsText([]))).toBe('');
+    expect(text(periodsText(periods.get(2)!, false))).toBe('فعال بود 1405/07/05، 10:48 تا 11:02');
+    expect(text(periodsText(periods.get(1)!, true))).toBe('فعال از 1405/07/05، و پیش‌تر 1405/06/20 تا 1405/07/05');
+    expect(text(periodsText([], false))).toBe('');
+  });
+
+  it('is_active بر دوره‌ها مقدم است: فعال کردن بیرون از پنل (SQL) رویداد ندارد', () => {
+    const at1048 = new Date('2026-09-27T07:18:00Z');
+    const at1102 = new Date('2026-09-27T07:32:00Z');
+    // نسخهٔ ۱ با SQL دوباره فعال شد: آخرین دورهٔ ثبت‌شده‌اش بسته است، ولی فعال است.
+    expect(text(periodsText([{ from: at1048, to: at1102, by: null }], true))).toBe('فعال، و پیش‌تر 1405/07/05، 10:48 تا 11:02');
+    // و نسخه‌ای که همان SQL خاموشش کرد: پایانش ثبت نشده.
+    expect(text(periodsText([{ from: at1102, to: null, by: 'سارا' }], false))).toBe('فعال بود از 1405/07/05');
+    expect(text(periodsText([], true))).toBe('فعال');
   });
 });

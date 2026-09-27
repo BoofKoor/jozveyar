@@ -31,6 +31,8 @@ const NO_ACCESS = 'این بخش فقط برای مالک است';
 let sql: postgres.Sql;
 /** رویدادهای پیش از این اجرا (رویدادها فقط افزودنی‌اند؛ اجرای دوباره روی همان پایگاه داده). */
 let eventsBefore = 0;
+/** فقط تعرفهٔ پایه هست (CI، پایگاه دادهٔ تازه). */
+let fresh = false;
 
 /** نسخهٔ فعال، و نسخهٔ ۱ دوباره فعال (پایان تست، یا اجرای قبلی که وسط کار افتاد)؛ پیش‌نویس‌ها پاک. */
 async function restoreBase() {
@@ -93,6 +95,7 @@ test.describe.serial('تعرفه در پنل', () => {
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     await restoreBase();
     eventsBefore = Number((await sql<{ id: string | null }[]>`SELECT max(id) AS id FROM admin_events`)[0]!.id ?? 0);
+    fresh = (await sql`SELECT 1 FROM price_lists`).length === 1;
 
     ownerContext = await newContext(browser);
     ownerPage = await ownerContext.newPage();
@@ -123,7 +126,12 @@ test.describe.serial('تعرفه در پنل', () => {
       const row = rowOf(page, 1);
       await expect(row.locator('.ad-versions__name')).toHaveText('نسخهٔ 1 · تعرفهٔ پایه — شهریور ۱۴۰۵');
       await expect(row.locator('.jy-badge')).toHaveText('فعال');
-      await expect(row.locator('.ad-versions__meta')).toHaveText(`فعال از ${formatJalaliNumeric(v1!.at)} · ${orders} سفارش با این نسخه`);
+      // پایگاه دادهٔ تازه (CI): فقط تعرفهٔ پایه، از زمان نشاندنش. اجرای دوباره روی همان پایگاه داده دوره‌های پیش‌تر هم دارد.
+      await expect(row.locator('.ad-versions__meta')).toHaveText(
+        fresh
+          ? `فعال از ${formatJalaliNumeric(v1!.at)} · ${orders} سفارش با این نسخه`
+          : new RegExp(`^فعال( از \\d{4}/\\d\\d/\\d\\d)?(، و پیش‌تر [^·]+)? · ${orders} سفارش با این نسخه$`),
+      );
       // همان عددهای طرح پنل (`m-tariff`)، از نسخهٔ فعال پایگاه داده.
       expect(await cells(page, '[data-tariff="print"]')).toEqual([
         ['سیاه‌سفید', '1,600 تومان'],
@@ -386,7 +394,7 @@ test.describe.serial('تعرفه در پنل', () => {
     await expect(ownerPage).toHaveURL(/\/tariff\?done=1$/);
     expect(await activeVersion()).toBe(1);
     await expect(rowOf(ownerPage, 1).locator('.ad-versions__meta')).toHaveText(
-      /^فعال از \d{4}\/\d\d\/\d\d، و پیش‌تر \d{4}\/\d\d\/\d\d(، \d\d:\d\d)? تا (\d{4}\/\d\d\/\d\d|\d\d:\d\d) · \d+ سفارش با این نسخه$/,
+      /^فعال از \d{4}\/\d\d\/\d\d، و پیش‌تر \d{4}\/\d\d\/\d\d(، \d\d:\d\d)? تا (\d{4}\/\d\d\/\d\d|\d\d:\d\d)(، [^·]+)? · \d+ سفارش با این نسخه$/,
     );
     await expect(rowOf(ownerPage, first).locator('.ad-versions__meta')).toHaveText(
       /^فعال بود \d{4}\/\d\d\/\d\d(، \d\d:\d\d تا \d\d:\d\d| تا \d{4}\/\d\d\/\d\d) · 0 سفارش با این نسخه$/,
@@ -513,8 +521,9 @@ test.describe.serial('تعرفه در پنل', () => {
     await ownerPage.getByRole('button', { name: 'نسخهٔ تازه' }).click();
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('پیش‌نویس');
     const draft = await versionIn(ownerPage);
-    // نام هرچه ادمین نوشت است: بلندترین بی فاصله، و نشانه‌گذاری HTML که فقط متن است.
-    const long = `<b>${'تعرفه‌آزمایشی'.repeat(4)}</b>`.slice(0, 60);
+    // نام هرچه ادمین نوشت است: بلندترین (۶۰ نویسه، LABEL_MAX) بی فاصله، و نشانه‌گذاری HTML که فقط متن است.
+    const long = `<b>${'تعرفه‌آزمایشی'.repeat(5)}`.slice(0, 56) + '</b>';
+    expect([...long]).toHaveLength(60);
     await ownerPage.getByLabel('نام نسخه').fill(long);
     await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');

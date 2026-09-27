@@ -632,12 +632,22 @@ function spanText(period: ActivePeriod & { to: Date }): Seg[] {
  * دوره‌های فعال بودن یک نسخه در فهرست نسخه‌ها (طرح پنل `m-tariff`): «فعال از 1405/06/20» برای نسخهٔ فعال، «فعال بود
  * 1405/06/20 تا 1405/07/05» برای نسخهٔ قبل؛ نسخه‌ای که دوباره فعال شد دوره‌های پیش‌ترش را پس از «و پیش‌تر» دارد. ورودی
  * به ترتیب زمان (`activePeriods`)؛ تازه‌ترین دوره اول می‌آید.
+ *
+ * `active` همان `is_active` امروز است، و بر دوره‌ها مقدم: فعال کردنی که بیرون از پنل بوده (SQL دستی) رویداد ندارد، پس نسخهٔ
+ * فعال «فعال» است حتی اگر آخرین دورهٔ ثبت‌شده‌اش بسته باشد، و نسخهٔ خاموش «فعال بود از …» اگر پایانش ثبت نشده.
  */
-export function periodsText(periods: readonly ActivePeriod[]): Seg[] {
-  const [latest, ...earlier] = [...periods].reverse();
-  if (!latest) return [];
-  const closed = (period: ActivePeriod): Seg[] => (period.to ? spanText({ ...period, to: period.to }) : [{ num: formatJalaliNumeric(period.from) }]);
-  const head: Seg[] = latest.to === null ? ['فعال از ', { num: formatJalaliNumeric(latest.from) }] : ['فعال بود ', ...closed(latest)];
+export function periodsText(periods: readonly ActivePeriod[], active: boolean): Seg[] {
+  const spans = [...periods].reverse();
+  const [latest] = spans;
+  if (!latest) return active ? ['فعال'] : [];
+  const date = (at: Date): Seg => ({ num: formatJalaliNumeric(at) });
+  const closed = (period: ActivePeriod): Seg[] => (period.to ? spanText({ ...period, to: period.to }) : [date(period.from)]);
+  const [head, earlier]: [Seg[], ActivePeriod[]] =
+    latest.to === null
+      ? [[active ? 'فعال از ' : 'فعال بود از ', date(latest.from)], spans.slice(1)]
+      : active
+        ? [['فعال'], spans]
+        : [['فعال بود ', ...closed(latest)], spans.slice(1)];
   if (earlier.length === 0) return head;
   return [...head, '، و پیش‌تر ', ...earlier.flatMap((period, i) => [...(i ? ['، '] : []), ...closed(period)])];
 }

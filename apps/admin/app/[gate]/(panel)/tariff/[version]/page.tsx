@@ -77,7 +77,7 @@ export default async function TariffVersionPage({
               نسخهٔ <span className="num">{version.version}</span> · {version.label}
             </h1>
             <p className="ad-sub">
-              <Segments segs={periodsText(periods)} /> · <span className="num">{formatNumber(version.orders)}</span> سفارش با این
+              <Segments segs={periodsText(periods, false)} /> · <span className="num">{formatNumber(version.orders)}</span> سفارش با این
               نسخه
             </p>
           </div>
