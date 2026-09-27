@@ -106,7 +106,11 @@ export interface CheckoutQuote {
   shippingByZone: { zoneId: string; name: string; shippingRials: number | null }[];
 }
 
-export type OrderStatus = 'awaiting_payment' | 'paid' | 'expired';
+/**
+ * وضعیت سفارش؛ از برش ۴٫۳ پس از پرداخت هم (ADR-039): «در صف چاپ» (`paid`)، «در حال چاپ»، «تحویل پست شد» و
+ * «لغو شد». همان مقدارهای `order_status` پایگاه داده.
+ */
+export type OrderStatus = 'awaiting_payment' | 'paid' | 'expired' | 'printing' | 'handed_to_post' | 'cancelled';
 
 export interface OrderSummary {
   number: number;
@@ -175,6 +179,8 @@ export interface OrderView {
   postHandoffDueAt: string | null;
   /** «دوشنبه 6 مهر». */
   postHandoffDay: string | null;
+  /** «تحویل پست شد» (برش ۴٫۳): روزش («دوشنبه 13 مهر»)، و اینکه در مهلت بود؛ فقط در همان وضعیت. */
+  handedToPost: { day: string; onTime: boolean } | null;
   slaDays: number;
   owner: boolean;
   details: OrderViewDetails | null;

@@ -27,6 +27,7 @@ import type { Breakdown, OrderSpec, PriceList } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
   PAYMENT_ATTEMPT_TTL_MS,
+  isPaidStatus,
   type CheckoutDocument,
   type OrderDetails,
   type OrderRow,
@@ -35,9 +36,9 @@ import {
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { formatDeadlineDay, postHandoffDue } from '@jozveyar/text';
+import { formatDeadlineDay, formatJalaliWeekday, postHandoffDue } from '@jozveyar/text';
+import { checkRecipient } from '@jozveyar/text/input';
 
-import { checkRecipient } from '../recipient';
 import type { AuthUser } from './auth';
 import type { PaymentGateway } from './payments';
 import { fail, ok, type Result } from './result';
@@ -102,7 +103,8 @@ function expiring(file: { fileExpiresAt: Date | null; fileDeletedAt: Date | null
 
 /**
  * گیرنده، فارسی‌نرمال و سنجیده؛ `fields` می‌گوید رابط کدام فیلد را قرمز کند. همان قاعده‌ای که مرورگر
- * پیش از قدم پرداخت می‌سنجد (`lib/recipient.ts`)؛ اینجا دوباره، چون سرور منبع حقیقت است.
+ * پیش از قدم پرداخت می‌سنجد و پنل در ویرایش نشانی (`checkRecipient` در `@jozveyar/text/input`)؛ اینجا دوباره، چون
+ * سرور منبع حقیقت است.
  */
 function recipientOf(input: Recipient): Result<{ name: string; addressText: string; postalCode: string | null }> {
   const { value, fields } = checkRecipient(input);
@@ -121,7 +123,8 @@ function issuePaths(issues: readonly { path: readonly PropertyKey[] }[]): string
 /**
  * صفحهٔ سفارش (ADR-033): شماره، وضعیت و روز تحویل به پست برای همه؛ نشانی، موبایل، فایل‌ها و مبلغ فقط
  * برای نشست صاحب سفارش. جدا از سرویس خرید است و درگاه نمی‌خواهد: صفحهٔ سفارش با خاموش شدن مسیر خرید
- * خاموش نمی‌شود.
+ * خاموش نمی‌شود. از برش ۴٫۳ وضعیت‌های پنل هم (ADR-039)، با روز «تحویل پست شد»؛ دلیل لغو فقط در پنل است و اینجا
+ * نمی‌آید.
  */
 export async function orderView(
   orders: OrderStore,
@@ -135,11 +138,15 @@ export async function orderView(
   const { order } = found;
   const owner = user !== null && user.userId === order.userId;
   const due = order.postHandoffDueAt;
+  // فقط و همیشه در «تحویل پست شد» (محدودیت `orders_handed_at`).
+  const handed = order.handedToPostAt;
   const view: OrderView = {
     number: order.orderNumber,
     status: order.status,
     postHandoffDueAt: due?.toISOString() ?? null,
     postHandoffDay: due ? formatDeadlineDay(due) : null,
+    // مهلت پایان انحصاری روز است: تحویل پیش از آن، در مهلت.
+    handedToPost: handed ? { day: formatJalaliWeekday(handed), onTime: due !== null && handed.getTime() < due.getTime() } : null,
     slaDays: order.slaDays,
     owner,
     details: null,
@@ -276,7 +283,8 @@ export function createCheckoutService(deps: CheckoutDeps) {
     const found = await deps.orders.details(token);
     if (!found || found.order.userId !== user.userId) return fail(404, 'not_found');
     const { order } = found;
-    if (order.status === 'paid') return ok({ order: summary(order), payment: null });
+    // پرداخت‌شده، هر وضعیتی که پنل بعدش داده (در حال چاپ، تحویل پست شد، لغو شد): پول دوم نه.
+    if (isPaidStatus(order.status)) return ok({ order: summary(order), payment: null });
     if (order.status === 'expired') return fail(409, 'order_expired', { order: summary(order) });
     const at = now();
     if (!payable(found, at)) {
