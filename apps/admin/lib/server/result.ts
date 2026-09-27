@@ -38,6 +38,13 @@ export type AdminErrorCode =
   | 'reason_too_long'
   | 'invalid_recipient'
   | 'recipient_locked'
+  /** تعرفه (۴٫۵). */
+  | 'tariff_not_found'
+  | 'not_draft'
+  | 'invalid_draft'
+  | 'draft_changed'
+  | 'tariff_changed'
+  | 'already_active'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

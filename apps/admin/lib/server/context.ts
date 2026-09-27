@@ -7,7 +7,7 @@ import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
-import { createAdminStore, createPanelOrderStore, getDb } from '@jozveyar/db';
+import { createAdminStore, createPanelOrderStore, createTariffStore, getDb } from '@jozveyar/db';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
@@ -16,36 +16,43 @@ import { adminConfig, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { argon2Passwords } from './password';
+import { createPanelTariff, type PanelTariff } from './tariff';
 
 interface Panel {
   config: AdminConfig;
   auth: AdminAuth;
   orders: PanelOrders;
+  tariff: PanelTariff;
 }
 
 let cached: Panel | null | undefined;
+
+function build(config: AdminConfig): Panel {
+  const auth = createAdminAuth({
+    store: createAdminStore(getDb()),
+    passwords: argon2Passwords(),
+    secretsKey: config.secretsKey,
+    secret: config.secret,
+  });
+  return {
+    config,
+    auth,
+    // بی استوریج (`S3_*` در `.env` نیست) فقط دانلود PDF جزوه بسته است؛ لاگ بالا آمدن همین را می‌گوید.
+    orders: createPanelOrders({
+      store: createPanelOrderStore(getDb()),
+      storage: storageFromEnv(process.env)?.driver ?? null,
+      secret: config.secret,
+    }),
+    // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
+    tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
+  };
+}
 
 /** سرویس‌ها، یا null اگر پیکربندی کامل نیست (پنل بسته؛ لاگ بالا آمدن گفته چرا). */
 export function panel(): Panel | null {
   if (cached !== undefined) return cached;
   const config = adminConfig(process.env);
-  cached = config
-    ? {
-        config,
-        auth: createAdminAuth({
-          store: createAdminStore(getDb()),
-          passwords: argon2Passwords(),
-          secretsKey: config.secretsKey,
-          secret: config.secret,
-        }),
-        // بی استوریج (`S3_*` در `.env` نیست) فقط دانلود PDF جزوه بسته است؛ لاگ بالا آمدن همین را می‌گوید.
-        orders: createPanelOrders({
-          store: createPanelOrderStore(getDb()),
-          storage: storageFromEnv(process.env)?.driver ?? null,
-          secret: config.secret,
-        }),
-      }
-    : null;
+  cached = config ? build(config) : null;
   return cached;
 }
 

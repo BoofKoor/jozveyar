@@ -16,9 +16,17 @@ const config: NextConfig = {
   outputFileTracingExcludes: {
     '*': ['**/node_modules/sharp/**', '**/node_modules/@img/**', '**/node_modules/typescript/**'],
   },
-  // پکیج‌های workspace به‌صورت TypeScript خام مصرف می‌شوند؛ geo و contracts از راه db، و استوریج برای دانلود PDF
-  // جزوه (۴٫۲).
-  transpilePackages: ['@jozveyar/contracts', '@jozveyar/db', '@jozveyar/geo', '@jozveyar/storage', '@jozveyar/text', '@jozveyar/ui'],
+  // پکیج‌های workspace به‌صورت TypeScript خام مصرف می‌شوند؛ geo و contracts از راه db، استوریج برای دانلود PDF جزوه
+  // (۴٫۲)، و موتور قیمت برای پیش‌نمایش پیش‌نویس تعرفه (۴٫۵).
+  transpilePackages: [
+    '@jozveyar/contracts',
+    '@jozveyar/db',
+    '@jozveyar/geo',
+    '@jozveyar/pricing',
+    '@jozveyar/storage',
+    '@jozveyar/text',
+    '@jozveyar/ui',
+  ],
   // `./schema.js` برای فایل `schema.ts`، مثل سایت.
   webpack(config) {
     config.resolve.extensionAlias = { '.js': ['.ts', '.tsx', '.js'] };
