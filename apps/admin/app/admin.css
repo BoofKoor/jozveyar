@@ -3,7 +3,7 @@
  * سربرگ سفید با ناوبری زبانه‌ای، صفحه green-50 با کارت‌های سفید (تصمیم ۲۴). چیدمان پنل است، نه جزء کیت؛
  * پس پیشوندش `ad-` است، نه `jy-`. رنگ فقط توکن، فقط logical properties. هر قدم بخش صفحه‌های خودش را
  * می‌آورد؛ ۴٫۱: پوسته، ورود و ثبت، ادمین‌ها و رویدادها؛ ۴٫۲: پیشخوان، سفارش‌ها و جزئیات سفارش؛ ۴٫۳: کار بعدی سفارش،
- * لغو و برگرداندن در ستون کنار؛ ۴٫۵: تعرفه، پیش‌نویس و فعال کردن.
+ * لغو و برگرداندن در ستون کنار؛ ۴٫۵: تعرفه، پیش‌نویس و فعال کردن؛ ۴٫۶: تنظیمات، تعطیلی‌ها و کلیدها.
  */
 @layer components {
   body {
@@ -248,6 +248,10 @@
   }
   .ad-form fieldset {
     border: 0;
+  }
+  /* شمارنده (روز کاری، ۴٫۶) به اندازهٔ خودش، نه پهنای فیلد */
+  .jy-field > .jy-stepper {
+    align-self: flex-start;
   }
 
   /* ===== چیپ‌های فیلتر ===== */
@@ -1049,5 +1053,126 @@
   }
   .ad-changes__k {
     color: var(--color-muted);
+  }
+
+  /* ===== تنظیمات و کلیدها (۴٫۶): تعطیلی‌ها با افزودن و حذف، کلیدها با منبع و ۴ نویسهٔ آخر ===== */
+  .ad-days > li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+  }
+  .ad-days > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-days__date {
+    flex: none;
+    width: 6.5em;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-days__title {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .ad-days .jy-btn {
+    margin-inline-end: -8px;
+  }
+  /* «همه را ببین» و «روزهای گذشته»: details بی JS؛ متن دکمه با باز و بسته شدن عوض می‌شود */
+  .ad-more-days > summary {
+    list-style: none;
+  }
+  .ad-more-days > summary::-webkit-details-marker {
+    display: none;
+  }
+  .ad-more-days[open] > summary .jy-icon {
+    rotate: 180deg;
+  }
+  .ad-more-days__close,
+  .ad-more-days[open] .ad-more-days__open {
+    display: none;
+  }
+  .ad-more-days[open] .ad-more-days__close {
+    display: inline;
+  }
+  .ad-more-days > .ad-hint {
+    margin-block: 4px 8px;
+  }
+  .ad-addday {
+    display: grid;
+    grid-template-columns: 8.5em minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    margin-block-start: 12px;
+  }
+  /* دکمه هم‌تراز فیلدها، نه برچسب‌ها؛ خطای زیر فیلد آن را پایین نمی‌برد */
+  .ad-addday > .jy-btn {
+    margin-block-start: calc(1lh + 6px);
+  }
+  @media (max-width: 520px) {
+    .ad-addday {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .ad-addday > .jy-btn {
+      justify-self: start;
+      margin-block-start: 0;
+    }
+  }
+  .ad-note-form {
+    margin-block-start: 2px;
+    margin-inline-start: -12px;
+  }
+  .ad-keys > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding-block: 14px;
+  }
+  .ad-keys > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-keys__name {
+    font-weight: 600;
+  }
+  .ad-keys__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-keys__btns {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .ad-keys__form {
+    grid-column: 1 / -1;
+    margin-block-start: 8px;
+    padding: 16px;
+    background: var(--color-green-50);
+    border-radius: var(--radius-md);
+  }
+  .ad-keys__form .ad-form {
+    margin-block-start: 0;
+  }
+  .ad-mask {
+    direction: ltr;
+    unicode-bidi: isolate;
+    letter-spacing: 0.08em;
+    color: var(--color-ink);
+  }
+  @media (max-width: 520px) {
+    .ad-keys > li {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .ad-keys__btns {
+      justify-content: flex-start;
+      margin-inline-start: -12px;
+    }
   }
 }

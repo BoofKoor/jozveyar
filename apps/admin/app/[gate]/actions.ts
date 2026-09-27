@@ -292,3 +292,98 @@ export async function activateTariffAction(_state: FormState, form: FormData): P
   }
   return failure(result);
 }
+
+/* ───────────────────────── تنظیمات و کلیدها (۴٫۶) ───────────────────────── */
+
+/** نشان هر ذخیرهٔ موفق در نشانی: فرم صفحه با آن از نو سوار می‌شود، پس خطای قبلی (حالت فرم) با کار موفق بعدی نمی‌ماند. */
+const doneMark = () => `n=${Date.now().toString(36)}`;
+
+export interface SettingState {
+  error?: AdminErrorCode;
+  /** عددی که نوشته شد، تا پس از خطا بماند (راز نیست). */
+  value?: string;
+}
+
+/**
+ * روز کاری تحویل به پست و سقف ساعتی کد پیامکی (۴٫۶). خطای مقدار همین‌جا با عدد نوشته‌شده؛ «همین حالا جای دیگری عوض شد» به
+ * صفحه با پیامش، که مقدار تازه را نشان می‌دهد؛ موفق به صفحه با پیام، فقط اگر هنوز راست است (`v`). کد تازه نمی‌خواهد: چیزی
+ * پاک نمی‌کند و پولی جابه‌جا نمی‌کند، و رویدادش می‌ماند.
+ */
+export async function saveSettingAction(_state: SettingState, form: FormData): Promise<SettingState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const value = field(form, 'value').slice(0, 50);
+  const result = await settings.saveNumber(session, { key: field(form, 'key'), value, seen: field(form, 'seen') }, await requestIp());
+  const home = panelPath(gate, '/settings');
+  if (result.ok) redirect(`${home}?done=${encodeURIComponent(result.value.key)}&v=${result.value.value}&${doneMark()}`);
+  if (result.error === 'setting_changed') redirect(`${home}?e=setting_changed&${doneMark()}`);
+  return { error: result.error, value };
+}
+
+export interface HolidayState {
+  error?: AdminErrorCode;
+  /** خطای هر فیلد، و مناسبت روزی که همین حالا در فهرست است. */
+  errors?: { date?: string; title?: string };
+  exists?: { date: string; title: string };
+  values?: { date: string; title: string };
+}
+
+/** تعطیلی تازه (۴٫۶): خطای هر فیلد همین‌جا با نوشته‌ها؛ موفق به صفحه با پیام. */
+export async function addHolidayAction(_state: HolidayState, form: FormData): Promise<HolidayState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const values = { date: field(form, 'date').slice(0, 40), title: field(form, 'title').slice(0, 400) };
+  const result = await settings.addHoliday(session, values, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, '/settings')}?done=holiday_add&d=${encodeURIComponent(result.value.date)}&${doneMark()}#holidays`);
+  if (result.error === 'holiday_exists') {
+    return { error: result.error, exists: { date: String(result.date ?? ''), title: String(result.title ?? '') }, values };
+  }
+  const errors = result.errors && typeof result.errors === 'object' ? (result.errors as HolidayState['errors']) : undefined;
+  return { error: result.error, ...(errors ? { errors } : {}), values };
+}
+
+/** حذف یک تعطیلی (۴٫۶)، بی پرسش: برگشت‌پذیر است (دوباره افزودن)، و مهلت سفارش‌های ثبت‌شده عوض نمی‌شود. */
+export async function removeHolidayAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await settings.removeHoliday(session, { date: field(form, 'date') }, await requestIp());
+  const home = panelPath(gate, '/settings');
+  const date = encodeURIComponent(field(form, 'date').slice(0, 20));
+  redirect(result.ok ? `${home}?done=holiday_remove&d=${date}&${doneMark()}#holidays` : `${home}?e=${result.error}&d=${date}&${doneMark()}#holidays`);
+}
+
+/** «با تقویم رسمی تطبیق دادم» (۴٫۶). */
+export async function confirmHolidaysAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await settings.confirmOfficial(session, { year: field(form, 'year') }, await requestIp());
+  const home = panelPath(gate, '/settings');
+  redirect(result.ok ? `${home}?done=official&y=${result.value.year}&${doneMark()}#holidays` : `${home}?e=${result.error}&${doneMark()}#holidays`);
+}
+
+/**
+ * مقدار پنل یک کلید، یا «برگرداندن به .env»، با کد تازه (۴٫۶، کار حساس). مقدار کلید هرگز در حالت فرم برنمی‌گردد: خطای کد یا
+ * مقدار همین‌جا، و فیلد خالی (فرم پس از هر پاسخ از نو). کلیدی که همین حالا جای دیگری عوض شد به صفحه با پیامش، با وضعیت تازه.
+ */
+export async function keyAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const name = field(form, 'name');
+  const input = { name, seen: field(form, 'seen'), code: form.get('code') };
+  const revert = field(form, 'intent') === 'revert';
+  const result = revert
+    ? await settings.revertKey(session, input, await requestIp())
+    : await settings.setKey(session, { ...input, value: form.get('value') }, await requestIp());
+  const home = panelPath(gate, '/settings');
+  const anchor = /^[A-Z_]{1,40}$/.test(name) ? `#key-${name}` : '';
+  if (result.ok) redirect(`${home}?done=${revert ? 'key_revert' : 'key_set'}&k=${result.value.name}&${doneMark()}${anchor}`);
+  if (result.error === 'key_changed' || result.error === 'key_not_found' || result.error === 'forbidden') {
+    redirect(`${home}?e=${result.error}&${doneMark()}${anchor}`);
+  }
+  return failure(result);
+}
