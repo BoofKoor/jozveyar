@@ -257,6 +257,8 @@ jobs:
       # ADR-036): رفرش در هر قدم، «پرداخت» دوباره بعد از رفرش، سندی که دیگر روی سرور نیست، و زمان رفرش تا قیمت.
       # سرور روی پورت ۳۱۰۰ پیکربندی Playwright، تا Playwright سرور دومی بالا نیاورد (`reuseExistingServer`).
       # وب مهاجرت‌ها را پیش از اولین پاسخ اعمال می‌کند، پس کارگر بعد از «وب سالم» می‌آید (مثل compose تولید).
+      # تعرفه از پایگاه داده (برش ۴٫۴، ADR-040، `tariff.spec.ts`) آخر و جدا: تعرفهٔ فعال را عوض می‌کند، و ISR صفحهٔ اصلی را
+      # تا یک دقیقه با همان نگه می‌دارد؛ عددهای انتظار بقیه از تعرفهٔ پایه‌اند.
       - name: مسیر خرید، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_e2e
@@ -280,6 +282,7 @@ jobs:
           cd apps/web
           E2E_CHECKOUT_BASE_URL=http://127.0.0.1:3100 E2E_UPLOAD_BASE_URL=http://127.0.0.1:3100 \
             pnpm exec playwright test tests/checkout.spec.ts tests/upload.spec.ts tests/restore.spec.ts
+          E2E_TARIFF_BASE_URL=http://127.0.0.1:3100 pnpm exec playwright test tests/tariff.spec.ts
 
       - name: لاگ مسیر خرید، اگر افتاد
         if: failure()

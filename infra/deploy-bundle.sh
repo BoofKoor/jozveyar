@@ -314,6 +314,25 @@ startup_lines() {
 info "بالا آمدن وب:"
 startup_lines web 'مسیر خرید|مهاجرت|دادهٔ پایه'
 
+# صفحهٔ اصلی (برش ۴٫۴، ADR-040): صفحهٔ build تعرفهٔ پایه را دارد تا اولین بازسازی (ISR ۶۰ ثانیه). اولین درخواست همین‌جاست، نه
+# با اولین بازدیدکننده، و بعد سنجیده می‌شود که صفحه همان نسخهٔ فعال پایگاه داده را دارد (JSON درون HTML، `#jy-tariff`).
+ACTIVE_TARIFF=$($COMPOSE exec -T postgres psql -U jozveyar -d jozveyar -tAc 'select version from price_lists where is_active' 2>/dev/null \
+  | tr -d '[:space:]' || true)
+PAGE_TARIFF=""
+for _ in $(seq 1 15); do
+  PAGE_TARIFF=$($COMPOSE exec -T web node -e \
+      "fetch('http://127.0.0.1:3000/').then(r=>r.text()).then(t=>process.stdout.write(t)).catch(()=>{})" 2>/dev/null \
+    | grep -o '"jy-tariff" type="application/json">{"priceList":{"version":[0-9]*' | grep -o '[0-9]*$' || true)
+  [[ -n "$ACTIVE_TARIFF" && "$PAGE_TARIFF" == "$ACTIVE_TARIFF" ]] && break
+  sleep 1
+done
+if [[ -n "$ACTIVE_TARIFF" && "$PAGE_TARIFF" == "$ACTIVE_TARIFF" ]]; then
+  ok "صفحهٔ اصلی با تعرفهٔ فعال پایگاه داده (نسخهٔ ${ACTIVE_TARIFF})"
+else
+  printf '\033[0;33m⚠ صفحهٔ اصلی تعرفهٔ نسخهٔ %s را دارد، نه نسخهٔ فعال %s؛ بازسازی (ISR) با درخواست بعدی دوباره امتحان می‌شود. لاگ: %s logs web\033[0m\n' \
+    "${PAGE_TARIFF:-؟}" "${ACTIVE_TARIFF:-؟}" "$COMPOSE" >&2
+fi
+
 info "انتظار برای سلامت پنل…"
 ADMIN_OK=0
 for _ in $(seq 1 30); do

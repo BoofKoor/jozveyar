@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
 import { quote } from '@jozveyar/pricing';
-import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
+import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import type { ApiFailure } from '../lib/checkout/api';
 import { orderGate, retryable } from '../lib/checkout/gate';
 import { isStep, type Step } from '../lib/checkout/steps';
@@ -15,6 +15,7 @@ import { colorHint } from '../lib/fileCard';
 import { jozveSpec, jozveView, matchAwaited } from '../lib/jozveView';
 import type { OrderConfig } from '../lib/orderConfig';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
+import { pageTariff } from '../lib/tariff';
 import type { JozveHandle } from '../lib/useJozve';
 import { Names, Note, SingleFileCard } from './AnalysisCard';
 import { ConfigPanel } from './ConfigPanel';
@@ -129,8 +130,9 @@ export function primeStep(mark: HistoryMark | null) {
  */
 export function restoredOrder(sections: readonly RestoredSection[], config: OrderConfig | null) {
   const has = (table: object, id: string) => Object.prototype.hasOwnProperty.call(table, id);
+  const { priceList } = pageTariff();
   // خود جدول، نه نام‌های ارث‌رسیده («constructor» پیش‌نویس دستکاری‌شده)
-  const known = config && has(SEED_PRICE_LIST.bindingTypes, config.bindingTypeId) && has(SEED_PRICE_LIST.paperTypes, config.paperTypeId) ? config : null;
+  const known = config && has(priceList.bindingTypes, config.bindingTypeId) && has(priceList.paperTypes, config.paperTypeId) ? config : null;
   const gate = orderGate(jozveView(sections.map((section, i) => ({ ...section, key: `r${i}` }))), known ?? INITIAL_CONFIG);
   return { config: known, items: gate.kind === 'ready' ? gate.items : null };
 }
@@ -196,17 +198,21 @@ interface Props {
  *
  * «ادامه» مسیر خرید را در همان صفحه باز می‌کند (ADR-034، برش ۳ج): قدم‌های آدرس و پرداخت در تکهٔ جدای
  * `checkout/Checkout`، هر کدام یک خانه در تاریخچهٔ مرورگر؛ جزوه، آپلود و کارگر تحلیل همین‌جا زنده می‌مانند.
+ *
+ * تعرفه همان تعرفهٔ فعال پایگاه داده است که سرور با آن قیمت قطعی می‌دهد، از JSON درون HTML صفحه (برش ۴٫۴، `lib/tariff.ts`)؛
+ * یک بار در هر بار سوار شدن خوانده می‌شود.
  */
 export function OrderDesk({ jozve, config, onConfig }: Props) {
   const current = config ?? INITIAL_CONFIG;
   const view = useMemo(() => jozveView(jozve.sections), [jozve.sections]);
+  const [{ priceList, slaDays }] = useState(pageTariff);
 
   const quoteFor = useCallback(
     (next: OrderConfig) => {
       const spec = jozveSpec(view, next);
-      return spec ? quote(spec, SEED_PRICE_LIST) : null;
+      return spec ? quote(spec, priceList) : null;
     },
-    [view],
+    [view, priceList],
   );
   const breakdown = useMemo(() => quoteFor(current), [quoteFor, current]);
 
@@ -403,7 +409,8 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
         items={gate.items}
         view={view}
         config={current}
-        priceList={SEED_PRICE_LIST}
+        priceList={priceList}
+        slaDays={slaDays}
         auth={status !== null && status !== 'error' ? status.auth : null}
         onAuth={(auth) => {
           if (statusCache) statusCache = { ...statusCache, auth };
@@ -497,7 +504,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           <ConfigPanel
             config={current}
             onChange={onConfig}
-            priceList={SEED_PRICE_LIST}
+            priceList={priceList}
             quoteFor={quoteFor}
             // صفحه‌های رنگی جای خودشان را دارند، کنار انتخاب رنگ؛ حکم «تماماً» فقط بعد از بررسی همه.
             colorHint={colorHint({
@@ -517,7 +524,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
             <OrderSummary
               breakdown={breakdown}
               config={current}
-              priceList={SEED_PRICE_LIST}
+              priceList={priceList}
               provisional={view.provisional}
               pending={pending}
               blocked={blocked}
