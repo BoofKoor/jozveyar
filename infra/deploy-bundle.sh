@@ -188,6 +188,10 @@ if (( DW_BUILD == 0 )) && [[ -f .bundle-sha256 ]] && [[ "$(cat .bundle-sha256)" 
   info "همین نسخه از قبل مستقر است."
   RUNNING=$($COMPOSE ps --services --filter status=running 2>/dev/null || true)
   if grep -qx web <<<"$RUNNING" && grep -qx docworker <<<"$RUNNING" && grep -qx admin <<<"$RUNNING"; then
+    # Nginx هم، بی قطع: اجرای قبلی شاید پیکربندی مخزن را به آن نرسانده بود.
+    if [[ -f "infra/certs/live/${DOMAIN}/fullchain.pem" ]]; then
+      APP_DIR="$APP_DIR" ./infra/nginx-apply.sh || die "Nginx پیکربندی مخزن را ندارد (بالا)."
+    fi
     ok "سرویس‌ها در حال اجرا هستند — کاری لازم نیست."
     exit 0
   fi
@@ -267,22 +271,17 @@ step "بالا آوردن سرویس‌ها"
 HAS_CERT=0
 [[ -f "infra/certs/live/${DOMAIN}/fullchain.pem" ]] && HAS_CERT=1
 
+# Nginx جدا (پایین): `up -d` همهٔ سرویس‌ها Nginx را هم، اگر تعریفش عوض شده بود، بی سنجش از نو می‌ساخت.
+TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans postgres redis garage web docworker admin
+
+# پیکربندی Nginx مخزن اول سنجیده می‌شود و فقط درستش جای پیکربندی کارکن را می‌گیرد: بی قطع با reload، یا با ساختن
+# دوبارهٔ کانتینر اگر فایل‌های کهنه می‌بیند یا تعریفش عوض شده (nginx-apply.sh). reload نام `web` را هم دوباره حل
+# می‌کند، که همین حالا از نو ساخته شد. پیش از این رفع، «✓ خواند» اینجا چاپ می‌شد و Nginx همان فایل قدیم را داشت.
+NGINX_OK=1
 if (( HAS_CERT )); then
-  TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans
+  APP_DIR="$APP_DIR" ./infra/nginx-apply.sh || NGINX_OK=0
 else
   info "گواهی TLS هنوز نیست — nginx فعلاً بالا نمی‌آید."
-  TAG="$IMAGE_TAG" $COMPOSE up -d --remove-orphans postgres redis garage web docworker admin
-fi
-
-# Nginx پیکربندی را فقط هنگام بالا آمدن می‌خواند؛ فایلش با git pull عوض شده باشد (مثل بلوک پنل در برش ۴)،
-# اینجا دوباره خوانده می‌شود، بی قطع سرویس. اول سنجش: پیکربندی نادرست جای پیکربندی کارکن فعلی را نمی‌گیرد.
-if (( HAS_CERT )) && $COMPOSE ps --services --filter status=running 2>/dev/null | grep -qx nginx; then
-  if $COMPOSE exec -T nginx nginx -t >/dev/null 2>&1; then
-    $COMPOSE exec -T nginx nginx -s reload >/dev/null 2>&1 && ok "Nginx پیکربندی تازه را خواند"
-  else
-    printf '\033[0;31m✗ پیکربندی Nginx نادرست است — همان قبلی می‌ماند:\033[0m\n' >&2
-    $COMPOSE exec -T nginx nginx -t >&2 || true
-  fi
 fi
 
 info "انتظار برای سلامت اپ…"
@@ -355,7 +354,11 @@ ok "ایمیج‌های کهنه پاک شدند"
 step "وضعیت"
 $COMPOSE ps
 echo ""
-ok "تمام شد."
+if (( NGINX_OK )); then
+  ok "تمام شد."
+else
+  printf '\033[0;31m✗ تمام شد، جز Nginx: پیکربندی مخزن را ندارد (پیام بالا). پس از رفع: ./infra/nginx-apply.sh\033[0m\n' >&2
+fi
 echo ""
 if (( HAS_CERT )); then
   echo "سایت: https://${DOMAIN}"
@@ -365,3 +368,5 @@ else
   echo "  ./infra/setup-tls.sh ایمیل-شما@example.com"
 fi
 echo "به‌روزرسانی بعدی: cd ${APP_DIR} && git pull && ./infra/deploy-bundle.sh"
+# Nginx جا ماند: استقرار کامل نیست، پس خروج ۱ (پیامش بالاتر).
+(( NGINX_OK )) || exit 1

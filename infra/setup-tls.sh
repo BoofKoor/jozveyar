@@ -111,18 +111,15 @@ fi
 ok "گواهی صادر شد برای ${DOMAIN} و www.${DOMAIN}$( (( ${#NAMES[@]} > 4 )) && echo " و ${ADMIN_DOMAIN}")"
 
 # ── ۳. بالا آوردن Nginx (یا بارگذاری مجدد) ───────────────────────────────
-if (( NGINX_UP )); then
-  $COMPOSE exec -T nginx nginx -s reload
-  ok "Nginx گواهی جدید را بارگذاری کرد"
-else
-  info "بالا آوردن Nginx…"
-  $COMPOSE up -d nginx
-  for _ in $(seq 1 30); do
-    $COMPOSE exec -T nginx wget -qO- http://127.0.0.1/nginx-health >/dev/null 2>&1 && break
-    sleep 2
-  done
-  ok "Nginx بالا آمد"
+# با nginx-apply.sh، مثل استقرار: پیکربندی مخزن اول سنجیده می‌شود؛ بعد Nginx بالا می‌آید، یا بی قطع دوباره می‌خواند (گواهی
+# تازه هم با همین)، یا اگر فایل‌های کهنه می‌بیند از نو ساخته می‌شود. «✓» فقط وقتی راست است. web و garage پیش از آن بالا:
+# Nginx نامشان را هنگام خواندن پیکربندی حل می‌کند.
+if (( ! NGINX_UP )); then
+  $COMPOSE up -d web garage
 fi
+APP_DIR="$APP_DIR" ./infra/nginx-apply.sh \
+  || die "Nginx گواهی تازه را نگرفت (بالا). گواهی صادر شده و سر جایش است؛ پس از رفع: ./infra/nginx-apply.sh"
+ok "Nginx گواهی تازه را دارد"
 
 # ── ۴. تمدید خودکار ──────────────────────────────────────────────────────
 # از این به بعد Nginx بالاست، پس تمدید با webroot و بدون قطع سرویس انجام

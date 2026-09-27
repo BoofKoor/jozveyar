@@ -10,8 +10,10 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports: ['80:80', '443:443']
+    # پیکربندی پوشه‌ای وصل می‌شود، نه تک‌فایل: `git pull` فایل را با فایل تازه عوض می‌کند و وصل تک‌فایل همان فایل
+    # قدیم را نگه می‌داشت، تا ساختن دوبارهٔ کانتینر (باگ ۴٫۱). به کار انداختنش با infra/nginx-apply.sh است.
     volumes:
-      - ./nginx/jozveyar.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./certs:/etc/nginx/certs:ro
       - ./certbot-webroot:/var/www/certbot
