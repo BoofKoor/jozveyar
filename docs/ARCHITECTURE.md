@@ -168,13 +168,15 @@ CREATE TABLE print_rules (
 
 -- سفارش (✅ جدول‌ها در ۳الف): قیمت برای همیشه منجمد می‌شود، هیچ‌وقت بازمحاسبه
 -- نمی‌شود — تریگر `orders_price_frozen` عوض کردنش را رد می‌کند (ADR-034).
+-- ✅ ۴٫۳ (ADR-039): پس از پرداخت paid ← printing ← handed_to_post، و cancelled از paid یا printing؛
+-- برگرداندن فقط یک قدم. همان تریگر هر گذار دیگری را با `orders_status_flow` رد می‌کند (0011_order_status_guards).
 CREATE TABLE orders (
   id                  uuid PRIMARY KEY,
   order_number        integer UNIQUE NOT NULL,  -- از 10001؛ همین در پیامک، درگاه و فایل پست
   public_token        uuid UNIQUE NOT NULL,     -- برای URL، غیرقابل شمارش
   checkout_key        uuid UNIQUE NOT NULL,     -- دو کلیک «پرداخت»، یک سفارش
   user_id             uuid NOT NULL REFERENCES users(id),
-  status              order_status NOT NULL,    -- awaiting_payment | paid | expired
+  status              order_status NOT NULL,    -- awaiting_payment | paid | expired | printing | handed_to_post | cancelled
   price_list_version  integer NOT NULL,
   price_breakdown     jsonb NOT NULL,           -- عکس کامل محاسبه
   quote_snapshot      jsonb,                    -- آنچه مرورگر نشان داده بود
@@ -188,6 +190,7 @@ CREATE TABLE orders (
   sla_days            smallint NOT NULL,
   paid_at             timestamptz,
   post_handoff_due_at timestamptz,              -- پایان روز کاری تعهد تحویل به پست (ADR-013)
+  handed_to_post_at   timestamptz,              -- ۴٫۳: فقط و همیشه در handed_to_post (CHECK `orders_handed_at`)
   shipping_method_id  text NOT NULL,            -- (نسخهٔ تعرفه، روش) ← shipping_methods
   shipping_zone_id    text NOT NULL,            -- منطقهٔ کرایه در لحظهٔ سفارش
   province_id         smallint NOT NULL,
@@ -208,7 +211,7 @@ CREATE TABLE orders (
 |---|---|---|
 | تعرفه | `price_lists` `paper_types` `binding_types` `binding_rate_bands` `shipping_methods` `shipping_rates` | ✅ ساخته شد. نسخه‌دار با `version` و دقیقاً یکی فعال. بازه‌های صحافی و وزن با `EXCLUDE` — دیتابیس اجازهٔ همپوشانی نمی‌دهد. `print_rates` و `pricing_settings` جدول جدا نشدند؛ دلیل در ADR-021. `discount_tiers` هنوز ساخته نشده |
 | سند | `documents` `document_analyses` `document_pages` | ✅ ساخته شد. سند = فایل آپلودشده، قبل از اینکه سفارشی باشد. مالکش هش کوکی نشست ناشناس است (`session_hash`) و شناسهٔ آپلود چندتکه کنارش می‌ماند. تحلیل مرورگر و سرور **هر دو** ذخیره می‌شوند تا واگرایی قابل اندازه‌گیری باشد. `document_pages` اعداد خام رنگ را نگه می‌دارد، نه فقط بولین |
-| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش. ✅ سرور در ۳ب: ساختن در یک تراکنش، برگشت از درگاه زیر قفل پرداخت و سفارش، و `prepare_order` کارگر (پایین، «۳ب») |
+| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش. ✅ سرور در ۳ب: ساختن در یک تراکنش، برگشت از درگاه زیر قفل پرداخت و سفارش، و `prepare_order` کارگر (پایین، «۳ب»). ✅ ۴٫۳: `order_status_events.admin_user_id` برای گذار ادمین (CHECK `order_status_events_admin`: actor ادمین یعنی شناسهٔ ادمین)، و دلیل لغو و برگرداندن در `note` |
 | ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن). ✅ منطقه‌ها، استان‌ها و شهرها در ۳الف، از `@jozveyar/geo` (۳۱ استان، ۱۳۲۳ شهر)؛ منطقه مال استان است: استان تهران `tehran`، بقیه `other`. `shipments` با برش ۶ |
 | رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود |
 | دسترسی | `admin_users` `admin_invites` `admin_sessions` `admin_login_attempts` `roles` `permissions` `role_permissions` `admin_user_roles` `admin_events` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` (ADR-007). ✅ در ۴٫۱ (ADR-037، ADR-038): ادمین با رمز argon2id و رمز برنامهٔ تأیید مهروموم‌شده، پیوند ثبت یک‌باره، نشست و تلاش ورود فقط با هش؛ نقش‌ها از کد؛ رویداد فقط افزودنی، ادمین پاک‌نشدنی و پیوند مصرف‌شده دست‌نخوردنی با تریگر (`0008_admin_guards.sql`)؛ در ۴٫۲ نمایهٔ رویدادهای یک هدف، برای رویدادهای هر سفارش (`0009_admin_events_target.sql`). `scope` تا برش ۵ فقط `NULL`؛ `print_partners` و `order_assignments` با برش ۵ |
@@ -389,7 +392,7 @@ detection.sample_dpi                    = 40
 | `components/OrderDesk.tsx`، `OrderSummary.tsx` | «ادامه»ی «جزوه و قیمت»: حالت خرید (`GET /api/checkout`، وقتی قیمت نهایی شد)، آمادگی جزوه روی سرور (`lib/checkout/gate.ts`)، تاریخچهٔ مرورگر، و بار تکهٔ مسیر خرید |
 | `components/checkout/Checkout.tsx` | تکهٔ جدای JS با دادهٔ شهرها: قدم‌های شهر، نشانی، موبایل، کد و مرور؛ کار بعدی یک دکمه در خلاصه و نوار (`<button form>`) |
 | `lib/checkout/store.ts`، `api.ts`، `format.ts`، `steps.ts` | حالت و کارهای مسیر خرید بی React، با تست واحد؛ کلید «پرداخت»، ۴۰۹ و همهٔ کدهای شکست |
-| `lib/recipient.ts` | سنجش گیرنده، یکی برای مرورگر و سرور (`checkRecipient`) |
+| `lib/recipient.ts` | سنجش گیرنده، یکی برای مرورگر و سرور (`checkRecipient`)؛ از ۴٫۳ در `@jozveyar/text/input`، برای پنل هم |
 | `components/checkout/parts.tsx`، `recap.tsx` | قدم‌ها، جمع و ریز قیمت (در راه اولین قیمت)؛ و مرور (فقط مسیر خرید و صفحهٔ سفارش) |
 | `app/pay/mock/[authority]/page.tsx` | درگاه نمونه، بی پوستهٔ سایت؛ بیرون از `mock` ۴۰۴ |
 | `app/order/[token]/page.tsx` | صفحهٔ سفارش، کامپوننت سرور و `noindex`: پرداخت‌شده، در انتظار با «دوباره پرداخت کن»، منقضی، غریبه |
@@ -425,9 +428,9 @@ detection.sample_dpi                    = 40
 
 | PR | دامنه | وضعیت |
 |---|---|---|
-| ۴٫۱ | پایه و ورود: اپ `apps/admin`، زیردامنه و مسیر محرمانه، ورود با رمز و برنامهٔ تأیید، پیوند ثبت یک‌باره و دستور سرور، نقش‌ها، ادمین‌ها و رویدادها؛ Nginx، TLS، استقرار و مرحلهٔ CI «پنل، سرتاسری» | #40، ادغام شد (پایین) |
-| ۴٫۲ | سفارش‌ها: پیشخوان با ساعت تحویل به پست، فهرست با جست‌وجو و فیلتر، جزئیات، دانلود PDF جزوه، وضعیت و «دوباره بساز» `prepare_order` | #41، باز (پایین) |
-| ۴٫۳ | وضعیت سفارش: شروع چاپ ← تحویل پست شد، لغو با دلیل، برگرداندن یک قدم (مالک)، ویرایش نام و نشانی و کد پستی؛ صفحهٔ سفارش مشتری با وضعیت‌های تازه | مانده |
+| ۴٫۱ | پایه و ورود: اپ `apps/admin`، زیردامنه و مسیر محرمانه، ورود با رمز و برنامهٔ تأیید، پیوند ثبت یک‌باره و دستور سرور، نقش‌ها، ادمین‌ها و رویدادها؛ Nginx، TLS، استقرار و مرحلهٔ CI «پنل، سرتاسری» | #40، ادغام و مستقر شد (پایین) |
+| ۴٫۲ | سفارش‌ها: پیشخوان با ساعت تحویل به پست، فهرست با جست‌وجو و فیلتر، جزئیات، دانلود PDF جزوه، وضعیت و «دوباره بساز» `prepare_order` | #41، ادغام و مستقر شد (پایین) |
+| ۴٫۳ | وضعیت سفارش: شروع چاپ ← تحویل پست شد، لغو با دلیل، برگرداندن یک قدم (مالک)، ویرایش نام و نشانی و کد پستی؛ صفحهٔ سفارش مشتری با وضعیت‌های تازه | #42، باز (پایین) |
 | ۴٫۴ | تعرفه از پایگاه داده در سایت: ISR ۶۰ ثانیه و تعرفهٔ فعال به JSON درون HTML؛ جدول تعرفه، سؤال‌ها و «۲ روز کاری» از پایگاه داده و `settings` | مانده |
 | ۴٫۵ | ویرایش تعرفه: پیش‌نویس از نسخهٔ فعال، سنجش، پیش‌نمایش با `quote()`، فعال‌سازی با کد تازه، برگشت با فعال کردن نسخهٔ قبل؛ نسخهٔ فعال‌شده تغییرناپذیر | مانده |
 | ۴٫۶ | تنظیمات و کلیدها: تعطیلی‌ها (با تطبیق قمری ۱۴۰۶)، سقف ساعتی کد پیامکی، روز کاری تحویل؛ کلیدهای سرویس‌ها مهروموم‌شده (ADR-041) | مانده |
@@ -455,7 +458,7 @@ detection.sample_dpi                    = 40
 **کار دستی صاحب پروژه:** رکورد DNS `admin` (همان IP)؛ بعد از استقرار ۴٫۱ یک بار `./infra/setup-tls.sh <ایمیل>` و بعد
 `./infra/admin-invite.sh <نام کاربری>`؛ از ۴٫۶ نسخهٔ پشتیبان `.env`.
 
-#### ۴٫۱: پایه و ورود (#40، ادغام شد)
+#### ۴٫۱: پایه و ورود (#40، ادغام و مستقر شد)
 
 | جا | کار |
 |---|---|
@@ -472,7 +475,7 @@ detection.sample_dpi                    = 40
 
 - تصمیم‌های اجرا و سنجش‌ها در ADR-037 و ADR-038، بخش «اجرا در ۴٫۱»؛ رابط و فرق‌ها با طرح در `docs/UI.md`، «۴٫۱».
 
-#### ۴٫۲: سفارش‌ها (#41، باز)
+#### ۴٫۲: سفارش‌ها (#41، ادغام و مستقر شد)
 
 | جا | کار |
 |---|---|
@@ -488,6 +491,26 @@ detection.sample_dpi                    = 40
 
 - وضعیت فقط دیدنی است؛ «شروع چاپ»، «تحویل پست شد»، لغو و ویرایش نشانی با ۴٫۳.
 - تصمیم‌های اجرا و سنجش‌ها در ADR-037، ADR-038 و ADR-039، بخش «اجرا در ۴٫۲»؛ رابط و فرق‌ها با طرح در `docs/UI.md`، «۴٫۲».
+
+#### ۴٫۳: وضعیت سفارش (#42، باز)
+
+| جا | کار |
+|---|---|
+| `packages/db`: `schema.ts`، `0010_order_status.sql`، `0011_order_status_guards.sql` | سه وضعیت تازه (`printing`، `handed_to_post`، `cancelled`)، `handed_to_post_at`، `order_status_events.admin_user_id` و سه CHECK؛ تریگر `orders_price_frozen` حالا گذارها را هم می‌سنجد (`orders_status_flow`). مقدار تازهٔ enum در همان اجرای مهاجرت در هیچ DDL نیامده (پایین) |
+| `packages/db/src/panel.ts` | `changeStatus`: به‌روزرسانی شرطی از وضعیتی که ادمین دید، رویداد سفارش و رویداد ادمین در یک تراکنش؛ `editRecipient` زیر قفل سطر با فیلدهای عوض‌شده و مقدار قبلی در رویداد؛ `stats` برای سطر آمار پیشخوان؛ سطل‌های «تحویل پست شد» و «لغو شد»، و «باز» = در صف چاپ و در حال چاپ |
+| `packages/db`: `orders.ts`، `admin.ts` | `PAID_STATUSES` و `isPaidStatus` (سایت و پنل)؛ مجوز تازهٔ `orders.revert` فقط برای مالک |
+| `packages/text/src/input.ts` | `checkRecipient` از `apps/web/lib/recipient.ts` به اینجا آمد، تا مسیر خرید و ویرایش پنل یک قاعده داشته باشند (ADR-034، افزوده) |
+| `apps/admin/lib/orders.ts`، `lib/server/orders.ts` | گذارها (`transitionOf`)، برگرداندن یک قدم (لغو به همان وضعیت پیش از لغو)، مجوز در سرور (`orders.status`، `orders.revert`، `orders.address`)، دلیل ۱ تا ۵۰۰ نویسه، «شروع چاپ» فقط با PDF همهٔ جزوه‌ها، و کلیک هم‌زمان: یک گذار، و دومی اگر به همان مقصد است موفق |
+| `apps/admin/app/[gate]/…`، `components/` | ستون کنار با یک دکمهٔ اصلی، و لغو و برگرداندن و ویرایش در همان صفحه با `?do=` (بی JS)؛ `ReasonForm`، `RecipientForm`، `StatusButton`؛ چیپ‌ها، ستون آخر هر سطل، سطر آمار پیشخوان و متن رویدادها |
+| `apps/web`: `app/order/[token]`، `lib/server/checkout.ts` | صفحهٔ سفارش مشتری با «در حال چاپ»، «به پست رسید» (روز و «در مهلت») و «لغو شد … برمی‌گردد»؛ پرداخت دوباره برای هیچ وضعیت پس از پرداخت |
+| `services/docworker/docworker/orders.py` | `prepare_order` برای «در حال چاپ» هم؛ لغوشده یا به پست رسیده `order_closed` |
+| CI، مرحلهٔ «پنل، سرتاسری» | `status.spec.ts` هم، با همان پایگاه داده و کارگر `orders.spec.ts` |
+
+- مهاجرت enum: Drizzle همهٔ مهاجرت‌های مانده را در **یک تراکنش** اجرا می‌کند و پستگرس مقدار تازه‌ای را که `ALTER TYPE …
+  ADD VALUE` افزوده در همان تراکنش نمی‌پذیرد («unsafe use of new value»)؛ پس `0010` و `0011` مقدار تازه را در DDL
+  نمی‌آورند (CHECKها با `status::text` یا مقدارهای قدیم)، و فقط بدنهٔ تابع plpgsql، که هنگام اجرا حل می‌شود، آن‌ها را دارد.
+  هر سه راه سنجیده شد: پایگاه دادهٔ تازه، ارتقا از `0009`، و ارتقا با دادهٔ موجود.
+- تصمیم‌های اجرا و سنجش‌ها در ADR-038 و ADR-039، بخش «اجرا در ۴٫۳»؛ رابط و فرق‌ها با طرح در `docs/UI.md`، «۴٫۳».
 
 ---
 

@@ -49,6 +49,15 @@ export type OrderRow = typeof orders.$inferSelect;
 export type OrderItemRow = typeof orderItems.$inferSelect;
 export type PrintRuleRow = typeof printRules.$inferSelect;
 export type PaymentRow = typeof payments.$inferSelect;
+export type OrderStatus = OrderRow['status'];
+
+/**
+ * وضعیت‌های پس از پرداخت (برش ۴٫۳، ADR-039): در صف چاپ، در حال چاپ، تحویل پست شد، و لغو شد. پول گرفته شده، حتی
+ * اگر سفارش بعد لغو شد؛ پس نه دوباره پرداخت می‌شود و نه منقضی (تریگر `orders_payment_final`).
+ */
+export const PAID_STATUSES = ['paid', 'printing', 'handed_to_post', 'cancelled'] as const satisfies readonly OrderStatus[];
+
+export const isPaidStatus = (status: OrderStatus): boolean => (PAID_STATUSES as readonly OrderStatus[]).includes(status);
 
 /** سندی که به سفارش می‌رود: آنچه سرور برای مالکیت، قیمت و زنده بودن فایل لازم دارد. */
 export interface CheckoutDocument {

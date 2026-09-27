@@ -1,7 +1,7 @@
 /**
- * سفارش‌ها به زبان پنل (طرح پنل، برش ۴٫۲؛ ADR-039): کاشی‌های مهلت، ردیف فهرست، وضعیت و مهلت، مشخصات و ریز قیمت
- * منجمد، پرداخت‌ها، PDF جزوه و رویدادهای سفارش. خالص و بی JSX، مثل `events.ts`: تست بی مرورگر و بی ساعت واقعی
- * می‌سنجدش و صفحه فقط می‌چیندش.
+ * سفارش‌ها به زبان پنل (طرح پنل، برش ۴٫۲ و ۴٫۳؛ ADR-039): کاشی‌های مهلت، ردیف فهرست، وضعیت و مهلت، کار بعدی و
+ * گذار هر وضعیت، مشخصات و ریز قیمت منجمد، پرداخت‌ها، PDF جزوه و رویدادهای سفارش. خالص و بی JSX، مثل `events.ts`: تست
+ * بی مرورگر و بی ساعت واقعی می‌سنجدش و صفحه فقط می‌چیندش.
  *
  * متن تکه‌تکه است (`Seg`): عدد در `.num` خودش و نام لاتین در `bdi`، تا ترتیب واژه‌ها در متن فارسی به‌هم نریزد
  * (قاعدهٔ «`.num` فقط روی خود عدد»). روزها به وقت تهران‌اند، و مهلت تحویل به پست پایان انحصاری روز است
@@ -11,11 +11,15 @@
 import type { Breakdown, ItemBreakdown } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
+  OPEN_STATUSES,
   PANEL_BUCKETS,
   PAYMENT_ATTEMPT_TTL_MS,
+  isPaidStatus,
   pdfErrorCode,
   type OrderRow,
+  type OrderStatus,
   type PanelBucket,
+  type PanelDashboardStats,
   type PanelDueSummary,
   type PanelOrderDetails,
   type PanelOrderItem,
@@ -23,6 +27,7 @@ import {
   type PanelPdfJob,
   type PanelSearch,
   type PanelSection,
+  type PanelStatusEvent,
   type PaymentRow,
 } from '@jozveyar/db';
 import {
@@ -51,6 +56,8 @@ function joined(parts: Seg[][], separator = ' · '): Seg[] {
 
 export const BUCKET_LABELS: Record<PanelBucket, string> = {
   open: 'باز',
+  handed: 'تحویل پست شد',
+  cancelled: 'لغو شد',
   awaiting: 'در انتظار پرداخت',
   abandoned: 'رهاشده',
   all: 'همه',
@@ -163,6 +170,23 @@ export function dueTiles(summary: PanelDueSummary, bounds: DayBounds): DueTile[]
   ];
 }
 
+/**
+ * سطر آمار پیشخوان (طرح پنل): «از این 10 سفارش، 2 در حال چاپ است. هفتهٔ گذشته 41 از 42 سفارش به‌موقع به پست رسید.» هر
+ * جمله فقط وقتی چیزی برای گفتن دارد؛ هیچ‌کدام یعنی null.
+ */
+export function statsSegs(open: number, stats: PanelDashboardStats): Seg[] | null {
+  const parts: Seg[][] = [];
+  if (open > 0) {
+    parts.push(
+      stats.printing > 0
+        ? ['از این ', num(open), ' سفارش، ', num(stats.printing), ' در حال چاپ است.']
+        : ['از این ', num(open), ' سفارش، هنوز هیچ‌کدام در حال چاپ نیست.'],
+    );
+  }
+  if (stats.handed > 0) parts.push(['هفتهٔ گذشته ', num(stats.onTime), ' از ', num(stats.handed), ' سفارش به‌موقع به پست رسید.']);
+  return parts.length > 0 ? joined(parts, ' ') : null;
+}
+
 /** مدت، با دو واحد بزرگ کنار هم: «12 ساعت و 40 دقیقه»، «1 روز و 3 ساعت»، «40 دقیقه». */
 export function durationSegs(ms: number): Seg[] {
   const minutes = Math.floor(Math.abs(ms) / 60_000);
@@ -209,27 +233,111 @@ export function staleSections(sections: readonly PanelSection[], at: Date): bool
   );
 }
 
-export type OrderState = 'queued' | 'awaiting' | 'abandoned';
+export type OrderState = 'queued' | 'printing' | 'handed' | 'cancelled' | 'awaiting' | 'abandoned';
 
-/** وضعیت سفارش در ۴٫۲: پرداخت‌شده «در صف چاپ» است (چاپ و تحویل پست با ۴٫۳). */
+/** وضعیت سفارش در پنل: پس از پرداخت همان وضعیت پایگاه داده؛ پیش از آن «در انتظار پرداخت» تا فایل‌ها زنده‌اند، بعد «رهاشده». */
 export function orderState(status: OrderRow['status'], stale: boolean): OrderState {
-  if (status === 'paid') return 'queued';
-  return status === 'awaiting_payment' && !stale ? 'awaiting' : 'abandoned';
+  switch (status) {
+    case 'paid':
+      return 'queued';
+    case 'printing':
+      return 'printing';
+    case 'handed_to_post':
+      return 'handed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return status === 'awaiting_payment' && !stale ? 'awaiting' : 'abandoned';
+  }
 }
 
 export const STATE_LABELS: Record<OrderState, string> = {
   queued: 'در صف چاپ',
+  printing: 'در حال چاپ',
+  handed: 'تحویل پست شد',
+  cancelled: 'لغو شد',
   awaiting: 'در انتظار پرداخت',
   abandoned: 'رهاشده',
 };
 
+/** «باز»: در صف چاپ یا در حال چاپ؛ مهلت تحویل به پست فقط برای این‌ها معنا دارد. */
+export const isOpen = (status: OrderRow['status']) => (OPEN_STATUSES as readonly OrderStatus[]).includes(status);
+
 /** ستون وضعیت ردیف؛ کاری که متصدی باید بکند آیکون دارد. */
 export function rowState(line: PanelOrderLine): { label: string; icon: 'error' | 'info' | null } {
   const state = orderState(line.status, line.stale);
-  if (state === 'queued' && line.pdfJob === 'failed') return { label: 'PDF ساخته نشد', icon: 'error' };
+  if ((state === 'queued' || state === 'printing') && line.pdfJob === 'failed') return { label: 'PDF ساخته نشد', icon: 'error' };
   if (state === 'awaiting' && line.unreturnedPayments > 0) return { label: 'پرداخت بی برگشت', icon: 'info' };
   return { label: STATE_LABELS[state], icon: null };
 }
+
+/* ───────────────────────── وضعیت پس از پرداخت: کار بعدی و برگرداندن ───────────────────────── */
+
+/** نام هر وضعیت در رویدادها و فرم‌ها: «در صف چاپ ← در حال چاپ». */
+export const STATUS_LABELS: Record<OrderStatus, string> = {
+  awaiting_payment: 'در انتظار پرداخت',
+  paid: 'در صف چاپ',
+  expired: 'رها شد',
+  printing: 'در حال چاپ',
+  handed_to_post: 'تحویل پست شد',
+  cancelled: 'لغو شد',
+};
+
+/** کارهای وضعیت در پنل (ADR-039): دو کار رو به جلو، لغو، و برگرداندن یک قدم (فقط مالک). */
+export type StatusAction = 'start_print' | 'handed_to_post' | 'cancel' | 'revert';
+
+export const isStatusAction = (value: unknown): value is StatusAction =>
+  value === 'start_print' || value === 'handed_to_post' || value === 'cancel' || value === 'revert';
+
+/** برگرداندن؟ هر گذار رو به عقب: چاپ به صف، پست به چاپ، و لغو به وضعیتی که پیش از آن بود. */
+export function isRevert(from: OrderStatus | null, to: OrderStatus): boolean {
+  return (
+    (from === 'printing' && to === 'paid') ||
+    (from === 'handed_to_post' && to === 'printing') ||
+    (from === 'cancelled' && (to === 'paid' || to === 'printing'))
+  );
+}
+
+/** آخرین رویداد وضعیتی که سفارش را به `to` برد (کی، کدام ادمین، چه دلیلی). */
+export function lastMoveTo(events: readonly PanelStatusEvent[], to: OrderStatus): PanelStatusEvent | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) if (events[i]!.toStatus === to) return events[i]!;
+  return null;
+}
+
+/** دلیل لغو یا برگرداندن، از یادداشت رویداد؛ فقط در پنل. */
+export const reasonOf = (event: PanelStatusEvent | null): string | null => {
+  const reason = (event?.note as { reason?: unknown } | null)?.reason;
+  return typeof reason === 'string' && reason ? reason : null;
+};
+
+/**
+ * گذار هر کار از وضعیتی که ادمین دید (`from`): «شروع چاپ» از صف، «تحویل پست شد» از چاپ، لغو از هر دو، و
+ * برگرداندن یک قدم؛ لغو به همان وضعیتی برمی‌گردد که پیش از لغو داشت. null یعنی از `from` ممکن نیست. همان گذارهایی
+ * که تریگر `orders_status_flow` پایگاه داده می‌پذیرد.
+ */
+export function transitionOf(action: StatusAction, from: OrderStatus, events: readonly PanelStatusEvent[]): OrderStatus | null {
+  switch (action) {
+    case 'start_print':
+      return from === 'paid' ? 'printing' : null;
+    case 'handed_to_post':
+      return from === 'printing' ? 'handed_to_post' : null;
+    case 'cancel':
+      return from === 'paid' || from === 'printing' ? 'cancelled' : null;
+    case 'revert': {
+      if (from === 'printing') return 'paid';
+      if (from === 'handed_to_post') return 'printing';
+      if (from !== 'cancelled') return null;
+      const before = lastMoveTo(events, 'cancelled')?.fromStatus;
+      return before === 'paid' || before === 'printing' ? before : null;
+    }
+  }
+}
+
+/** بیشترین طول دلیل لغو یا برگرداندن، بعد از نرمال‌سازی. */
+export const REASON_MAX = 500;
+
+/** گیرنده تا وقتی به پست نرسیده ویرایش‌شدنی است: در صف چاپ و در حال چاپ. */
+export const RECIPIENT_EDITABLE = OPEN_STATUSES;
 
 /** «سیاه‌سفید»، «رنگی»، یا در حالت ترکیبی (چند قاعده، ADR-002) «رنگی و سیاه‌سفید». */
 function colorText(modes: readonly string[]): string {
@@ -413,6 +521,7 @@ const PDF_ERRORS: Record<string, string> = {
   sections_mismatch: 'بخش‌های جزوه با سفارش نخواند',
   order_not_paid: 'سفارش پرداخت‌شده پیدا نشد',
   order_missing: 'سفارش پرداخت‌شده پیدا نشد',
+  order_closed: 'سفارش لغو شده بود',
   transient: 'استوریج یا پایگاه داده جواب نداد',
 };
 
@@ -428,20 +537,23 @@ export function filesUntil(items: readonly PanelOrderItem[], at: Date): Date | n
 
 export type PdfView =
   | { kind: 'unpaid' }
+  | { kind: 'closed' }
   | { kind: 'ready'; fileName: string; pages: number; bytes: number | null; readyAt: Date }
   | { kind: 'building'; retrying: boolean }
   | { kind: 'failed'; fileName: string; attempts: number; reason: string; from: Date; to: Date | null; filesUntil: Date | null };
 
 /**
- * PDF یک جزوه: ساخته شده (دانلود)، در حال ساختن، یا ساخته نشد با دلیل و تا کی «دوباره بساز» ممکن است (فایل‌های
- * مشتری تا پاک شدنشان). کار `prepare_order` مال کل سفارش است؛ قلمی که ساخته شده، ساخته شده می‌ماند.
+ * PDF یک جزوه: ساخته شده (دانلود، در هر وضعیت پس از پرداخت)، در حال ساختن، یا ساخته نشد با دلیل و تا کی «دوباره
+ * بساز» ممکن است (فایل‌های مشتری تا پاک شدنشان). کار `prepare_order` مال کل سفارش است؛ قلمی که ساخته شده، ساخته شده
+ * می‌ماند. سفارشی که لغو شد یا به پست رسید و PDFش ساخته نشده، دیگر لازمش ندارد (`closed`).
  */
 export function pdfView(details: PanelOrderDetails, item: PanelOrderItem, at: Date): PdfView {
-  if (details.order.status !== 'paid') return { kind: 'unpaid' };
+  if (!isPaidStatus(details.order.status)) return { kind: 'unpaid' };
   const fileName = pdfFileName(details.order.orderNumber, item.seq);
   if (item.printPdfReadyAt) {
     return { kind: 'ready', fileName, pages: item.pageCount, bytes: item.printPdfBytes, readyAt: item.printPdfReadyAt };
   }
+  if (!isOpen(details.order.status)) return { kind: 'closed' };
   const job: PanelPdfJob | null = details.pdfJob;
   if (job?.status === 'failed') {
     return {
@@ -457,9 +569,16 @@ export function pdfView(details: PanelOrderDetails, item: PanelOrderItem, at: Da
   return { kind: 'building', retrying: Boolean(job && job.attempts > 0 && job.lastError) };
 }
 
+/** همهٔ جزوه‌های سفارش PDF دارند: «شروع چاپ» فقط بعد از این (طرح: «اول PDF جزوه ساخته شود»). */
+export const pdfReady = (details: PanelOrderDetails) =>
+  details.items.length > 0 && details.items.every((item) => item.printPdfReadyAt !== null);
+
 /* ───────────────────────── رویدادهای سفارش ───────────────────────── */
 
-const ACTORS: Record<string, string> = { user: 'مشتری', gateway: 'درگاه', system: 'سیستم' };
+const ACTORS: Record<string, string> = { user: 'مشتری', gateway: 'درگاه', system: 'سیستم', admin: 'ادمین' };
+
+/** نام فیلدهای گیرنده در رویداد ویرایش. */
+const RECIPIENT_FIELDS: Record<string, string> = { recipientName: 'نام گیرنده', addressText: 'نشانی', postalCode: 'کد پستی' };
 
 export interface TimelineEntry {
   at: Date;
@@ -468,17 +587,28 @@ export interface TimelineEntry {
 }
 
 /**
- * رویدادهای سفارش به ترتیب زمان (طرح پنل): تغییر وضعیت‌ها، PDF جزوه (ساخته شد، یا ماند)، و کار ادمین‌ها روی همین
- * سفارش (دانلود، «دوباره بساز»).
+ * رویدادهای سفارش به ترتیب زمان (طرح پنل): تغییر وضعیت‌ها (از ۴٫۳ با ادمین: «در صف چاپ ← در حال چاپ»، «لغو شد»، و
+ * برگرداندن با دلیلش)، PDF جزوه (ساخته شد، یا ماند)، و کار ادمین‌ها روی همین سفارش (دانلود، «دوباره بساز»، ویرایش
+ * گیرنده). تغییر وضعیت ادمین رویداد ادمین هم دارد، ولی یک بار نشان داده می‌شود.
  */
 export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const event of details.statusEvents) {
-    const who = ACTORS[event.actor] ?? event.actor;
-    if (event.fromStatus === null) entries.push({ at: event.at, text: ['سفارش ساخته شد'], who });
-    else if (event.toStatus === 'paid') entries.push({ at: event.at, text: ['پرداخت شد'], who });
-    else if (event.toStatus === 'expired') entries.push({ at: event.at, text: ['رها شد: فایل‌ها دیگر روی سرور نبود'], who });
-    else entries.push({ at: event.at, text: [`${event.fromStatus} ← ${event.toStatus}`], who });
+    const who = event.adminName ?? ACTORS[event.actor] ?? event.actor;
+    const from = event.fromStatus;
+    const to = event.toStatus;
+    if (from === null) entries.push({ at: event.at, text: ['سفارش ساخته شد'], who });
+    else if (from === 'awaiting_payment' && to === 'paid') entries.push({ at: event.at, text: ['پرداخت شد'], who });
+    else if (to === 'expired') entries.push({ at: event.at, text: ['رها شد: فایل‌ها دیگر روی سرور نبود'], who });
+    else if (isRevert(from, to)) {
+      const reason = reasonOf(event);
+      entries.push({
+        at: event.at,
+        text: [`برگرداندن: ${STATUS_LABELS[from]} ← ${STATUS_LABELS[to]}${reason ? `؛ ${reason}` : ''}`],
+        who,
+      });
+    } else if (to === 'cancelled') entries.push({ at: event.at, text: ['لغو شد'], who });
+    else entries.push({ at: event.at, text: [`${STATUS_LABELS[from]} ← ${STATUS_LABELS[to]}`], who });
   }
   const many = details.items.length > 1;
   const jozve = (seq: number): Seg[] => (many ? ['جزوهٔ ', num(seq)] : ['جزوه']);
@@ -490,12 +620,16 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     entries.push({ at: job.finishedAt, text: ['ساختن PDF جزوه ناموفق ماند'], who: 'سیستم' });
   }
   for (const event of details.events) {
-    const detail = (event.detail ?? {}) as { item?: unknown };
+    const detail = (event.detail ?? {}) as { item?: unknown; changed?: unknown };
     const seq = typeof detail.item === 'number' ? detail.item : 1;
     const who = event.adminName ?? 'ادمین';
+    if (event.action === 'orders.status') continue; // همان رویداد وضعیت بالا
     if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF ', ...jozve(seq), ' دانلود شد'], who });
     else if (event.action === 'orders.pdf_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ PDF جزوه'], who });
-    else entries.push({ at: event.at, text: [event.action], who });
+    else if (event.action === 'orders.recipient') {
+      const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT_FIELDS[String(field)] ?? String(field)) : [];
+      entries.push({ at: event.at, text: [`ویرایش گیرنده${changed.length ? `: ${changed.join('، ')}` : ''}`], who });
+    } else entries.push({ at: event.at, text: [event.action], who });
   }
   return entries.map((entry, i) => ({ entry, i })).sort((a, b) => a.entry.at.getTime() - b.entry.at.getTime() || a.i - b.i).map(({ entry }) => entry);
 }

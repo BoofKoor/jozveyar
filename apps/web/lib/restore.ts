@@ -20,7 +20,7 @@ import { DRAFT_KEY } from './draftKey';
 import { INITIAL, type AnalysisState } from './fileAnalysis';
 import type { RestoredSection } from './jozveController';
 import type { OrderConfig } from './orderConfig';
-import type { RecipientInput } from './recipient';
+import type { RecipientInput } from '@jozveyar/text/input';
 import type { ServerAnalysisView } from './server/uploads';
 
 /* ─────────────────────────── خواندن ─────────────────────────── */

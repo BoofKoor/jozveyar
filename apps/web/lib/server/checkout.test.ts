@@ -541,6 +541,7 @@ describe('مسیر خرید روی سرور', () => {
           status: 'paid',
           postHandoffDueAt: '2026-09-28T20:30:00.000Z',
           postHandoffDay: 'دوشنبه 6 مهر',
+          handedToPost: null,
           slaDays: 2,
           owner: false,
           details: null,
@@ -576,6 +577,50 @@ describe('مسیر خرید روی سرور', () => {
     it('توکن ناشناس یا بدشکل: ۴۰۴', async () => {
       expect(await service.orderView(randomUUID(), SARA)).toMatchObject({ status: 404 });
       expect(await service.orderView('10001', SARA)).toMatchObject({ status: 404 });
+    });
+
+    it('وضعیت‌های پنل (۴٫۳): در حال چاپ، تحویل پست شد با روزش و مهلت، و لغو شد؛ دلیل لغو نه', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      const row = orders.orders[0]!;
+      const view = async () => {
+        const result = await service.orderView(order.token, SARA);
+        if (!result.ok) throw new Error(result.error);
+        return result.value;
+      };
+
+      Object.assign(row, { status: 'printing' });
+      expect(await view()).toMatchObject({ status: 'printing', postHandoffDay: 'دوشنبه 6 مهر', handedToPost: null });
+
+      // مهلت پایان انحصاری دوشنبه است (سه‌شنبه ۰۰:۰۰ تهران): یک میلی‌ثانیه پیش از آن در مهلت، خودش نه. صریح.
+      Object.assign(row, { status: 'handed_to_post', handedToPostAt: new Date('2026-09-28T20:29:59.999Z') });
+      expect((await view()).handedToPost).toEqual({ day: 'دوشنبه 6 مهر', onTime: true });
+      Object.assign(row, { handedToPostAt: new Date('2026-09-28T20:30:00.000Z') });
+      expect((await view()).handedToPost).toEqual({ day: 'سه‌شنبه 7 مهر', onTime: false });
+      // غریبه هم روز تحویل پست را می‌بیند، نه بیشتر.
+      expect(await service.orderView(order.token, REZA)).toMatchObject({
+        value: { status: 'handed_to_post', handedToPost: { day: 'سه‌شنبه 7 مهر' }, details: null },
+      });
+
+      // لغو شد: دلیل فقط در پنل است (رویداد وضعیت)، نه در صفحهٔ مشتری.
+      orders.events.push({ orderId: row.id, fromStatus: 'paid', toStatus: 'cancelled', actor: 'admin', note: { reason: 'کارت‌به‌کارت برگشت' } });
+      Object.assign(row, { status: 'cancelled', handedToPostAt: null });
+      const cancelled = await view();
+      expect(cancelled).toMatchObject({ status: 'cancelled', handedToPost: null, details: { totalRials: order.totalRials, canPay: false } });
+      expect(JSON.stringify(cancelled)).not.toContain('کارت‌به‌کارت');
+    });
+
+    it('پرداخت‌شده در هر وضعیت پنل: «دوباره پرداخت کن» و همان کلید «پرداخت» درگاه باز نمی‌کنند', async () => {
+      const checkoutKey = randomUUID();
+      const { order, payment } = await placed([doc(10)], { checkoutKey });
+      await pay(payment!.redirectUrl, 'success');
+      for (const status of ['printing', 'handed_to_post', 'cancelled'] as const) {
+        Object.assign(orders.orders[0]!, { status });
+        expect(await service.payAgain(SARA, order.token)).toMatchObject({ ok: true, value: { payment: null, order: { status } } });
+        const again = await placed([doc(10)], { checkoutKey });
+        expect(again).toMatchObject({ payment: null, order: { number: order.number, status } });
+      }
+      expect(orders.payments).toHaveLength(1);
     });
   });
 });

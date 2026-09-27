@@ -147,3 +147,72 @@ export async function rebuildPdfAction(form: FormData): Promise<void> {
   const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
   redirect(result.ok ? back : `${back}?e=${result.error}`);
 }
+
+/**
+ * «شروع چاپ» و «تحویل پست شد» (۴٫۳): دکمهٔ اصلی ستون کنار، از وضعیتی که ادمین دید (`from`). برگشت به همان سفارش با
+ * وضعیت تازه؛ شکست با پیامش (`?e=`). کد تازه نمی‌خواهد (چیزی پاک نمی‌کند و پولی جابه‌جا نمی‌کند)؛ مجوز و رویدادش در سرویس.
+ */
+export async function advanceOrderAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const result = await orders.changeStatus(session, number, { action: field(form, 'action'), from: field(form, 'from') }, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
+  redirect(result.ok ? back : `${back}?e=${result.error}`);
+}
+
+export interface ReasonState {
+  error?: AdminErrorCode;
+  /** متنی که نوشته شد، تا پس از خطا بماند. */
+  reason?: string;
+}
+
+/**
+ * لغو سفارش و برگرداندن وضعیت (۴٫۳)، با دلیل. خطای دلیل همین‌جا می‌ماند و متن نوشته‌شده با آن؛ بقیه (وضعیت همین حالا عوض
+ * شد، بی مجوز) به صفحهٔ سفارش با پیامش، که وضعیت تازه را نشان می‌دهد.
+ */
+export async function orderReasonAction(_state: ReasonState, form: FormData): Promise<ReasonState> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const reason = field(form, 'reason');
+  const result = await orders.changeStatus(
+    session,
+    number,
+    { action: field(form, 'action'), from: field(form, 'from'), reason },
+    await requestIp(),
+  );
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
+  if (result.ok) redirect(back);
+  if (result.error === 'reason_required' || result.error === 'reason_too_long') return { error: result.error, reason: reason.slice(0, 2000) };
+  redirect(`${back}?e=${result.error}`);
+}
+
+export interface RecipientState {
+  error?: AdminErrorCode;
+  /** فیلدهایی که قاعده را نمی‌خوانند، به شکل `checkRecipient`. */
+  fields?: string[];
+  values?: { name: string; addressText: string; postalCode: string };
+}
+
+/** ویرایش نام، نشانی و کد پستی گیرنده (۴٫۳): خطای فیلد همین‌جا با مقدارهای نوشته‌شده؛ بقیه به صفحهٔ سفارش با پیامش. */
+export async function editRecipientAction(_state: RecipientState, form: FormData): Promise<RecipientState> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const values = {
+    name: field(form, 'name').slice(0, 1000),
+    addressText: field(form, 'addressText').slice(0, 5000),
+    postalCode: field(form, 'postalCode').slice(0, 100),
+  };
+  const result = await orders.editRecipient(session, number, values, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
+  if (result.ok) redirect(back);
+  if (result.error === 'invalid_recipient') {
+    return { error: result.error, fields: Array.isArray(result.fields) ? (result.fields as string[]) : [], values };
+  }
+  redirect(`${back}?e=${result.error}`);
+}

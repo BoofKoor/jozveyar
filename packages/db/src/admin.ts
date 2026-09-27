@@ -37,6 +37,8 @@ const ADMIN_LOCK = 0x61646d;
 export const ADMIN_PERMISSIONS = {
   'orders.read': 'دیدن سفارش‌ها',
   'orders.status': 'تغییر وضعیت سفارش',
+  /** برگرداندن وضعیت اشتباه، یک قدم، با دلیل: فقط مالک (سؤال ۲۶، ADR-038؛ ۴٫۳). */
+  'orders.revert': 'برگرداندن وضعیت سفارش',
   'orders.address': 'ویرایش نشانی گیرنده',
   'files.download': 'دانلود PDF جزوه',
   'tariff.read': 'دیدن تعرفه',

@@ -306,6 +306,16 @@
     height: 44px;
     color: var(--color-success-text);
   }
+  /* وضعیت‌های پنل (برش ۴٫۳): «در حال چاپ» اطلاع است و «لغو شد» خطا؛ «به پست رسید» همان موفق. */
+  .ck-done__icon--info {
+    color: var(--color-info-text);
+  }
+  .ck-done__icon--error {
+    color: var(--color-error-text);
+  }
+  .ck-done__actions {
+    margin-block-start: 20px;
+  }
   .ck-done__title {
     margin-block-start: 12px;
     font-size: var(--text-h3);

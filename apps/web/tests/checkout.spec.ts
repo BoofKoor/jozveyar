@@ -10,7 +10,7 @@ import {
   DEFAULT_SHIPPING_METHOD_ID,
   SEED_PRICE_LIST,
 } from '@jozveyar/pricing/seed';
-import { formatDeadlineDay, formatTomans } from '@jozveyar/text';
+import { formatDeadlineDay, formatJalaliWeekday, formatTomans } from '@jozveyar/text';
 
 /**
  * مسیر خرید، سرتاسری (برش ۳ج؛ طرح `docs/ui/mockups/checkout.html`، ADR-033 تا ADR-035): از «ادامه» تا «سفارش
@@ -275,6 +275,65 @@ test.describe.serial('سفارش کامل', () => {
     await page.goto(orderUrl);
     await expect(page.getByTestId('order-paid')).toContainText(mobile.slice(7));
     await expect(page.getByText('تومان')).not.toHaveCount(0);
+  });
+
+  test('وضعیت‌های پنل روی صفحهٔ سفارش (۴٫۳): در حال چاپ، به پست رسید، و لغو شد با مبلغی که برمی‌گردد', async ({ browser }) => {
+    // پنل وضعیت را از همان گذارهایی عوض می‌کند که تریگر `orders_status_flow` می‌پذیرد؛ اینجا همان را با SQL.
+    const token = new URL(orderUrl).pathname.split('/').at(-1)!;
+    const [order] = await sql()`select order_number, total_rials::text, post_handoff_due_at from orders where public_token = ${token}`;
+    const number = order!.order_number as number;
+    const total = Number(order!.total_rials);
+    const due = order!.post_handoff_due_at as Date;
+    const set = (status: string, handedAt: Date | null = null) =>
+      sql()`update orders set status = ${status}, handed_to_post_at = ${handedAt} where public_token = ${token}`;
+
+    await set('printing');
+    await page.goto(orderUrl);
+    await expect(page.getByRole('heading', { level: 1, name: 'جزوه‌ات در حال چاپ است' })).toBeVisible();
+    const printing = page.getByTestId('order-printing');
+    await expect(printing.locator('.ck-sub')).toHaveText(`سفارش ${number} · ${toman(total)} تومان پرداخت شد.`);
+    await expect(printing.locator('li[aria-current="step"]')).toHaveText('چاپ و صحافیجزوه‌ات در حال چاپ و صحافی است.');
+    await expect(page.getByTestId('handoff-day')).toHaveText(`تحویل به پست تا ${formatDeadlineDay(due)}`);
+    await expect(page.locator('.home-sum__label')).toHaveText('پرداخت شد');
+    await plainNumbers(page, 5);
+
+    // یک دقیقه پیش از پایان مهلت: در مهلت.
+    const handedAt = new Date(due.getTime() - 60_000);
+    await set('handed_to_post', handedAt);
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: 'جزوه‌ات به پست رسید' })).toBeVisible();
+    const handed = page.getByTestId('order-handed');
+    const day = formatJalaliWeekday(handedAt);
+    await expect(handed.locator('.ck-sub')).toHaveText(`سفارش ${number} ${day} تحویل پست شد.`);
+    await expect(handed.locator('li.is-done')).toHaveCount(3);
+    await expect(handed.locator('li.is-done').last()).toHaveText(`تحویل به پست${day}، در مهلت.`);
+    await expect(handed.locator('li[aria-current="step"]')).toContainText('کد رهگیری پست');
+    await expect(handed.locator('li[aria-current="step"]')).toContainText(`${mobile.slice(0, 4)} ${mobile.slice(4, 7)} ${mobile.slice(7)}`);
+    await expect(page.locator('.home-sum__ship')).toHaveText(`${day} تحویل پست شد.`);
+    // غریبه: وضعیت و روز تحویل پست، نه بیشتر.
+    const stranger = await newContext(browser);
+    const other = await stranger.newPage();
+    await other.goto(orderUrl);
+    await expect(other.getByTestId('order-stranger')).toContainText('تحویل پست شد');
+    await expect(other.getByTestId('order-stranger')).toContainText(`${day} تحویل پست شد.`);
+    await expect(other.getByText('تومان')).toHaveCount(0);
+    await stranger.close();
+
+    // برگرداندن یک قدم، و لغو.
+    await set('printing');
+    await set('cancelled');
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: 'سفارش لغو شد' })).toBeVisible();
+    await expect(page.getByTestId('order-cancelled').locator('.ck-sub')).toHaveText(
+      `سفارش ${number} لغو شد و چاپ نمی‌شود. مبلغ پرداختی، ${toman(total)} تومان، برمی‌گردد.`,
+    );
+    await expect(page.locator('.home-sum__label')).toHaveText('برمی‌گردد');
+    await expect(page.locator('.home-sum__ship')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'جزوهٔ دیگری داری؟ بینداز' })).toHaveAttribute('href', '/');
+    // پرداختی دوباره نیست.
+    await expect(page.getByRole('button', { name: /پرداخت/ })).toHaveCount(0);
+    await plainNumbers(page, 3);
+    await set('paid');
   });
 
   test('همین گوشی موبایلش را تأیید کرده: جزوهٔ بعدی بی کد به مرور می‌رسد؛ «عوض کن» نشست را باطل می‌کند', async () => {

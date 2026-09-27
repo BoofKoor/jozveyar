@@ -1,45 +1,68 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { FILE_MARGIN_MS, type PanelOrderDetails, type PanelOrderItem } from '@jozveyar/db';
+import { FILE_MARGIN_MS, isPaidStatus, type PanelOrderDetails, type PanelOrderItem } from '@jozveyar/db';
 import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
 import { NoAccess } from '../../../../../components/NoAccess';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
+import { ReasonForm } from '../../../../../components/ReasonForm';
+import { RecipientForm } from '../../../../../components/RecipientForm';
 import { Segments } from '../../../../../components/Segments';
+import { StatusButton } from '../../../../../components/StatusButton';
 import { tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import {
+  REASON_MAX,
+  STATUS_LABELS,
   addressText,
   breakdownOf,
   dueCard,
   filesUntil,
+  lastMoveTo,
   orderNumberOf,
   orderState,
   orderTimeline,
   paymentView,
+  pdfReady,
   pdfView,
   phoneText,
+  reasonOf,
   shippingText,
   specFacts,
   staleSections,
   sumLines,
   timelineWhen,
-  type DayBounds,
 } from '../../../../../lib/orders';
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
-import { rebuildPdfAction } from '../../../actions';
+import type { OrderDetailsView } from '../../../../../lib/server/orders';
+import { advanceOrderAction, rebuildPdfAction } from '../../../actions';
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const orderNumber = orderNumberOf((await params).number);
   return { title: orderNumber ? `سفارش ${orderNumber}` : 'سفارش' };
 }
 
-/** خطاهایی که «دوباره بساز» یا دانلود با برگشت به همین صفحه می‌گویند (`?e=`). */
-const PAGE_ERRORS = new Set(['pdf_not_ready', 'pdf_not_failed', 'files_gone', 'storage_unavailable', 'order_not_found', 'forbidden']);
+/** خطاهایی که «دوباره بساز»، دانلود و کارهای وضعیت با برگشت به همین صفحه می‌گویند (`?e=`). */
+const PAGE_ERRORS = new Set([
+  'pdf_not_ready',
+  'pdf_not_failed',
+  'files_gone',
+  'storage_unavailable',
+  'order_not_found',
+  'forbidden',
+  'invalid_transition',
+  'status_changed',
+  'print_needs_pdf',
+  'recipient_locked',
+]);
+
+/** فرم باز ستون کنار یا کارت گیرنده (`?do=`): لغو، برگرداندن، یا ویرایش گیرنده؛ هر چیز دیگر یعنی هیچ. */
+type Mode = 'cancel' | 'revert' | 'edit' | null;
+const modeOf = (value: unknown): Mode => (value === 'cancel' || value === 'revert' || value === 'edit' ? value : null);
 
 /** «(شنبه 11 مهر 14:06 تا 14:21)»: پایان، اگر همان روز است، فقط ساعت. */
 function span(from: Date, to: Date | null, now: Date): string {
@@ -64,6 +87,7 @@ function PdfBox({
 }) {
   const view = pdfView(details, item, now);
   if (view.kind === 'unpaid') return <p className="ad-hint ad-gap">PDF جزوه بعد از پرداخت ساخته می‌شود.</p>;
+  if (view.kind === 'closed') return <p className="ad-hint ad-gap">PDF جزوه ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.</p>;
   const icon = <span className="jy-icon jy-icon-file ad-pdf__icon" aria-hidden="true" />;
   if (view.kind === 'ready') {
     const size = view.bytes === null ? null : bytesParts(view.bytes);
@@ -137,14 +161,112 @@ function PdfBox({
   );
 }
 
-/** ستون کنار: مهلت تحویل به پست، یا اینکه هنوز پرداخت نشده یا رها شد. کار بعدی («شروع چاپ»…) با ۴٫۳. */
-function StatusCard({ details, bounds, stale }: { details: PanelOrderDetails; bounds: DayBounds; stale: boolean }) {
+/** پیوند کار ستون کنار: لغو یا برگرداندن در همان صفحه (`?do=`)، بی JS. */
+function ModeLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="jy-btn jy-btn--text jy-btn--block" scroll={false}>
+      {children}
+    </Link>
+  );
+}
+
+/** دکمهٔ اصلی رو به جلو: «شروع چاپ» یا «تحویل پست شد»، از وضعیتی که صفحه نشان داد. */
+function AdvanceForm({
+  gate,
+  orderNumber,
+  action,
+  from,
+  children,
+}: {
+  gate: string;
+  orderNumber: number;
+  action: 'start_print' | 'handed_to_post';
+  from: 'paid' | 'printing';
+  children: React.ReactNode;
+}) {
+  return (
+    <form action={advanceOrderAction}>
+      <input type="hidden" name="gate" value={gate} />
+      <input type="hidden" name="number" value={orderNumber} />
+      <input type="hidden" name="action" value={action} />
+      <input type="hidden" name="from" value={from} />
+      <StatusButton className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block">{children}</StatusButton>
+    </form>
+  );
+}
+
+/** «در حال چاپ از امروز 10:05، سارا»، «امروز 16:40، سارا»: کی، و کدام ادمین. */
+const byWhom = (at: Date, now: Date, adminName: string | null | undefined) => `${whenText(at, now)}${adminName ? `، ${adminName}` : ''}`;
+
+/**
+ * ستون کنار (طرح پنل): وضعیت، مهلت و کار بعدی. سفارش باز یک دکمهٔ اصلی دارد، «شروع چاپ» (تا PDF جزوه ساخته نشده بسته:
+ * «اول PDF جزوه ساخته شود») و بعد «تحویل پست شد»، با «لغو سفارش»؛ به پست رسیده روز و به‌موقع بودنش را دارد، و لغوشده
+ * دلیلش را. مالک هر وضعیت پس از پرداخت جز «در صف چاپ» را یک قدم برمی‌گرداند. پرداخت‌نشده همان کارت‌های ۴٫۲.
+ */
+function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDetailsView; stale: boolean; mode: Mode }) {
+  const { details, bounds, canStatus, canRevert, revertTo } = view;
   const { order } = details;
   const now = bounds.at;
-  if (order.status === 'paid' && order.postHandoffDueAt) {
+  const self = panelPath(gate, `/orders/${order.orderNumber}`);
+  const reasonForm = (kind: 'cancel' | 'revert', to: NonNullable<typeof revertTo>) => (
+    <ReasonForm
+      kind={kind}
+      gate={gate}
+      orderNumber={order.orderNumber}
+      from={order.status}
+      fromLabel={STATUS_LABELS[order.status]}
+      toLabel={STATUS_LABELS[to]}
+      amount={formatTomans(order.totalRials, false)}
+      maxLength={REASON_MAX}
+      back={self}
+    />
+  );
+  const revert = mode === 'revert' && canRevert && revertTo ? reasonForm('revert', revertTo) : null;
+  const revertLink =
+    canRevert && revertTo ? <ModeLink href={`${self}?do=revert`}>برگرداندن به «{STATUS_LABELS[revertTo]}»</ModeLink> : null;
+  const onlyRevert = revert ?? (revertLink ? <div className="ad-status__actions">{revertLink}</div> : null);
+
+  if ((order.status === 'paid' || order.status === 'printing') && order.postHandoffDueAt) {
     const card = dueCard(order.postHandoffDueAt, bounds);
+    const printing = order.status === 'printing';
+    const since = printing ? lastMoveTo(details.statusEvents, 'printing') : null;
+    const ready = pdfReady(details);
+    let actions: React.ReactNode = null;
+    if (mode === 'cancel' && canStatus) actions = reasonForm('cancel', 'cancelled');
+    else if (revert) actions = revert;
+    else if (canStatus || revertLink) {
+      actions = (
+        <div className="ad-status__actions">
+          {canStatus && printing ? (
+            <>
+              <AdvanceForm gate={gate} orderNumber={order.orderNumber} action="handed_to_post" from="printing">
+                <span className="jy-icon jy-icon-truck" aria-hidden="true" />
+                تحویل پست شد
+              </AdvanceForm>
+              <p className="ad-hint">وقتی بسته را به پست دادی بزن. کد رهگیری را بعداً فایل پست می‌آورد.</p>
+            </>
+          ) : null}
+          {canStatus && !printing && ready ? (
+            <>
+              <AdvanceForm gate={gate} orderNumber={order.orderNumber} action="start_print" from="paid">
+                <span className="jy-icon jy-icon-printer" aria-hidden="true" />
+                شروع چاپ
+              </AdvanceForm>
+              <p className="ad-hint">وقتی چاپ را شروع کردی بزن؛ مشتری در صفحهٔ سفارشش «در حال چاپ» می‌بیند.</p>
+            </>
+          ) : null}
+          {canStatus && !printing && !ready ? (
+            <button type="button" className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block is-status" aria-disabled="true">
+              اول PDF جزوه ساخته شود
+            </button>
+          ) : null}
+          {canStatus ? <ModeLink href={`${self}?do=cancel`}>لغو سفارش</ModeLink> : null}
+          {revertLink}
+        </div>
+      );
+    }
     return (
-      <section className="jy-card ad-status" aria-labelledby="t-st" data-due={card.kind}>
+      <section className="jy-card ad-status" aria-labelledby="t-st" data-due={card.kind} data-status={order.status}>
         <h2 id="t-st" className="jy-card__title">
           {card.title}
         </h2>
@@ -156,10 +278,67 @@ function StatusCard({ details, bounds, stale }: { details: PanelOrderDetails; bo
             </span>
           </DueBadge>
         </div>
-        {order.paidAt ? <p className="ad-meta ad-gap">پرداخت شد {whenText(order.paidAt, now)}</p> : null}
+        {printing && since ? (
+          <p className="ad-meta ad-gap">در حال چاپ از {byWhom(since.at, now, since.adminName)}</p>
+        ) : order.paidAt ? (
+          <p className="ad-meta ad-gap">پرداخت شد {whenText(order.paidAt, now)}</p>
+        ) : null}
+        {actions}
       </section>
     );
   }
+
+  if (order.status === 'handed_to_post' && order.handedToPostAt) {
+    const moved = lastMoveTo(details.statusEvents, 'handed_to_post');
+    // مهلت پایان انحصاری روز است: تحویل پیش از آن، به‌موقع.
+    const onTime = order.postHandoffDueAt !== null && order.handedToPostAt.getTime() < order.postHandoffDueAt.getTime();
+    return (
+      <section className="jy-card ad-status" aria-labelledby="t-st" data-status={order.status}>
+        <h2 id="t-st" className="jy-card__title">
+          به پست رسید
+        </h2>
+        <p className="ad-meta">{byWhom(order.handedToPostAt, now, moved?.adminName)}</p>
+        <div className="ad-status__badges">
+          {onTime ? (
+            <span className="jy-badge jy-badge--success">
+              <span className="jy-icon jy-icon-success" aria-hidden="true" />
+              به‌موقع
+            </span>
+          ) : (
+            <span className="jy-badge jy-badge--error">
+              <span className="jy-icon jy-icon-error" aria-hidden="true" />
+              دیرتر از مهلت
+            </span>
+          )}
+        </div>
+        <p className="jy-note ad-gap">کد رهگیری را فایل پست می‌آورد و به موبایل مشتری پیامک می‌شود.</p>
+        {onlyRevert}
+      </section>
+    );
+  }
+
+  if (order.status === 'cancelled') {
+    const moved = lastMoveTo(details.statusEvents, 'cancelled');
+    const reason = reasonOf(moved);
+    return (
+      <section className="jy-card ad-status" aria-labelledby="t-st" data-status={order.status}>
+        <h2 id="t-st" className="jy-card__title">
+          لغو شد
+        </h2>
+        {moved ? <p className="ad-meta">{byWhom(moved.at, now, moved.adminName)}</p> : null}
+        {reason ? (
+          <dl className="ad-facts">
+            <div>
+              <dt>دلیل</dt>
+              <dd>{reason}</dd>
+            </div>
+          </dl>
+        ) : null}
+        {onlyRevert}
+      </section>
+    );
+  }
+
   const until = filesUntil(details.items, now);
   const payableUntil = until ? new Date(until.getTime() - FILE_MARGIN_MS) : null;
   if (order.status === 'awaiting_payment' && !stale && payableUntil) {
@@ -188,9 +367,9 @@ function StatusCard({ details, bounds, stale }: { details: PanelOrderDetails; bo
 }
 
 /**
- * جزئیات سفارش (طرح پنل، ADR-039): وضعیت و مهلت در ستون کنار (در گوشی بالای همه)؛ جزوه با فایل‌ها، مشخصات و PDF
- * جزوه؛ گیرنده و نشانی؛ مبلغ منجمد؛ پرداخت‌ها؛ و رویدادها. وضعیت فقط دیدنی است: «شروع چاپ»، لغو و ویرایش نشانی
- * با ۴٫۳.
+ * جزئیات سفارش (طرح پنل، ADR-039): وضعیت، مهلت و کار بعدی در ستون کنار (در گوشی بالای همه)؛ جزوه با فایل‌ها، مشخصات و
+ * PDF جزوه؛ گیرنده و نشانی، با «ویرایش» تا پیش از پست؛ مبلغ منجمد؛ پرداخت‌ها؛ و رویدادها. لغو، برگرداندن و ویرایش در
+ * همین صفحه باز می‌شوند (`?do=`)؛ هر کار از وضعیتی که صفحه نشان داد.
  */
 export default async function OrderPage({
   params,
@@ -224,7 +403,8 @@ export default async function OrderPage({
       </>
     );
   }
-  const { details, bounds, canDownload } = result.value;
+  const view = result.value;
+  const { details, bounds, canDownload, canEditRecipient } = view;
   const { order } = details;
   const now = bounds.at;
   const stale = staleSections(
@@ -233,6 +413,8 @@ export default async function OrderPage({
   );
   const state = orderState(order.status, stale);
   const error = typeof query.e === 'string' && PAGE_ERRORS.has(query.e) ? query.e : null;
+  const mode = modeOf(query.do);
+  const self = panelPath(gate, `/orders/${order.orderNumber}`);
   const breakdown = breakdownOf(order);
   const many = details.items.length > 1;
   const entries = orderTimeline(details);
@@ -252,8 +434,8 @@ export default async function OrderPage({
       {error ? <Alert tone="error">{messageOf(error)}</Alert> : null}
 
       <div className="ad-grid">
-        <aside className="ad-side" aria-label="وضعیت">
-          <StatusCard details={details} bounds={bounds} stale={stale} />
+        <aside className="ad-side" aria-label="وضعیت و کار بعدی">
+          <StatusCard gate={gate} view={view} stale={stale} mode={mode} />
         </aside>
 
         <div className="ad-main">
@@ -302,35 +484,53 @@ export default async function OrderPage({
             </section>
           ))}
 
-          <section className="jy-card" aria-labelledby="t-to">
-            <h2 id="t-to" className="jy-card__title">
-              ارسال به
-            </h2>
-            <dl className="ad-facts">
-              <div>
-                <dt>گیرنده</dt>
-                <dd>{order.recipientName}</dd>
+          {mode === 'edit' && canEditRecipient ? (
+            <RecipientForm
+              gate={gate}
+              orderNumber={order.orderNumber}
+              initial={{ name: order.recipientName, addressText: order.addressText, postalCode: order.postalCode ?? '' }}
+              place={[details.provinceName, details.cityName].filter(Boolean).join('، ')}
+              phone={phoneText(order.recipientPhone)}
+              back={self}
+            />
+          ) : (
+            <section className="jy-card" aria-labelledby="t-to">
+              <div className="jy-card__head">
+                <h2 id="t-to" className="jy-card__title">
+                  ارسال به
+                </h2>
+                {canEditRecipient ? (
+                  <Link href={`${self}?do=edit`} className="jy-btn jy-btn--text ad-card-head-btn" scroll={false}>
+                    ویرایش
+                  </Link>
+                ) : null}
               </div>
-              <div>
-                <dt>موبایل</dt>
-                <dd>
-                  <span className="num">{phoneText(order.recipientPhone)}</span>
-                </dd>
-              </div>
-              <div>
-                <dt>نشانی</dt>
-                <dd>{addressText(details)}</dd>
-              </div>
-              <div>
-                <dt>کد پستی</dt>
-                <dd>{order.postalCode ? <span className="num">{order.postalCode}</span> : 'ندارد'}</dd>
-              </div>
-              <div>
-                <dt>ارسال</dt>
-                <dd>{shippingText(details)}</dd>
-              </div>
-            </dl>
-          </section>
+              <dl className="ad-facts">
+                <div>
+                  <dt>گیرنده</dt>
+                  <dd>{order.recipientName}</dd>
+                </div>
+                <div>
+                  <dt>موبایل</dt>
+                  <dd>
+                    <span className="num">{phoneText(order.recipientPhone)}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>نشانی</dt>
+                  <dd>{addressText(details)}</dd>
+                </div>
+                <div>
+                  <dt>کد پستی</dt>
+                  <dd>{order.postalCode ? <span className="num">{order.postalCode}</span> : 'ندارد'}</dd>
+                </div>
+                <div>
+                  <dt>ارسال</dt>
+                  <dd>{shippingText(details)}</dd>
+                </div>
+              </dl>
+            </section>
+          )}
 
           <section className="jy-card" aria-labelledby="t-sum">
             <div className="jy-card__head">
@@ -352,7 +552,7 @@ export default async function OrderPage({
               ))}
             </dl>
             <div className="ad-sum__total">
-              <span>{order.status === 'paid' ? 'پرداخت شد' : 'مبلغ سفارش'}</span>
+              <span>{isPaidStatus(order.status) ? 'پرداخت شد' : 'مبلغ سفارش'}</span>
               <b>
                 <span className="num">{formatTomans(order.totalRials, false)}</span> تومان
               </b>

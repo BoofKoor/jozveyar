@@ -71,6 +71,20 @@
       "when": 1790457263821,
       "tag": "0009_admin_events_target",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790465378816,
+      "tag": "0010_order_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790465382217,
+      "tag": "0011_order_status_guards",
+      "breakpoints": true
     }
   ]
 }

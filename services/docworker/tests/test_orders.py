@@ -291,3 +291,35 @@ def test_an_unpaid_order_gets_no_print_file(tmp_path, conn, worker):
     status, _, error = order_job(conn, order_id)
     assert status == "failed" and error.startswith("order_not_paid")
     assert worker.storage.list_objects(f"orders/{number}/") == []
+
+
+def set_status(conn, order_id, status):
+    """وضعیت پنل (برش ۴٫۳)، از همان گذاری که تریگر `orders_status_flow` می‌پذیرد: «در صف چاپ» به «در حال چاپ» یا «لغو شد»."""
+    conn.execute("UPDATE orders SET status = %s WHERE id = %s", (status, order_id))
+    conn.commit()
+
+
+@services
+def test_an_order_already_printing_still_gets_its_jozve_pdf(tmp_path, conn, worker):
+    """«شروع چاپ» پیش از رسیدن کار به کارگر، یا «دوباره بساز» بعدش: کار نمی‌شکند (برش ۴٫۳)."""
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "printing"), 2)
+    order_id, number = paid_order(conn, [(doc_id, 2)])
+    set_status(conn, order_id, "printing")
+    drain(worker, conn)
+    assert order_job(conn, order_id) == ("done", 1, None)
+    [(key, _, _, ready)] = printed(conn, order_id)
+    assert (key, ready) == (f"orders/{number}/jozve-1.pdf", True)
+
+
+@services
+def test_a_cancelled_order_gets_no_print_file(tmp_path, conn, worker):
+    """لغو پیش از ساختن PDF: فایل مشتری زیر `orders/` کپی نمی‌شود، و دلیلش روشن است نه «پرداخت نشده»."""
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 1, "cancelled"), 1)
+    order_id, number = paid_order(conn, [(doc_id, 1)])
+    set_status(conn, order_id, "cancelled")
+    drain(worker, conn)
+    status, attempts, error = order_job(conn, order_id)
+    assert (status, attempts) == ("failed", 1)
+    assert error == "order_closed: cancelled"
+    assert printed(conn, order_id)[0][3] is False
+    assert worker.storage.list_objects(f"orders/{number}/") == []

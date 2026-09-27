@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { OrderRow, PanelOrderDetails, PanelOrderItem, PanelOrderLine, PaymentRow } from '@jozveyar/db';
+import type { OrderRow, PanelOrderDetails, PanelOrderItem, PanelOrderLine, PanelStatusEvent, PaymentRow } from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { postHandoffDue } from '@jozveyar/text';
@@ -20,6 +20,7 @@ import {
   dueTiles,
   durationSegs,
   filesUntil,
+  isRevert,
   jozveSegs,
   orderNumberOf,
   orderState,
@@ -27,12 +28,15 @@ import {
   pageOf,
   parseSearch,
   paymentView,
+  pdfReady,
   pdfView,
   rowState,
   specFacts,
   staleSections,
+  statsSegs,
   sumLines,
   timelineWhen,
+  transitionOf,
   type Seg,
 } from './orders';
 
@@ -214,6 +218,8 @@ function line(over: Partial<PanelOrderLine> = {}): PanelOrderLine {
     createdAt: NOW,
     paidAt: NOW,
     postHandoffDueAt: END_MONDAY,
+    handedToPostAt: null,
+    cancelledAt: null,
     pageCount: 120,
     itemCount: 1,
     fileCount: 1,
@@ -331,6 +337,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     slaDays: 2,
     paidAt: tehran('2026-10-03 14:05'),
     postHandoffDueAt: END_MONDAY,
+    handedToPostAt: null,
     shippingMethodId: 'post',
     shippingZoneId: 'other',
     provinceId: 11,
@@ -356,6 +363,11 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     events: [],
     ...over.rest,
   };
+}
+
+/** یک تغییر وضعیت؛ ادمین فقط با `actor: 'admin'`. */
+function statusEvent(over: Partial<PanelStatusEvent> & Pick<PanelStatusEvent, 'fromStatus' | 'toStatus'>): PanelStatusEvent {
+  return { id: 1, orderId: 'o1', at: NOW, actor: 'admin', adminUserId: null, adminName: null, note: null, ...over };
 }
 
 describe('جزئیات سفارش', () => {
@@ -476,8 +488,8 @@ describe('جزئیات سفارش', () => {
       item: { printPdfReadyAt: tehran('2026-10-03 14:06') },
       rest: {
         statusEvents: [
-          { id: 1, orderId: 'o1', fromStatus: null, toStatus: 'awaiting_payment', at: tehran('2026-10-03 13:57'), actor: 'user', note: null },
-          { id: 2, orderId: 'o1', fromStatus: 'awaiting_payment', toStatus: 'paid', at: tehran('2026-10-03 14:05'), actor: 'gateway', note: null },
+          statusEvent({ id: 1, fromStatus: null, toStatus: 'awaiting_payment', at: tehran('2026-10-03 13:57'), actor: 'user' }),
+          statusEvent({ id: 2, fromStatus: 'awaiting_payment', toStatus: 'paid', at: tehran('2026-10-03 14:05'), actor: 'gateway' }),
         ],
         events: [
           { id: 9, at: tehran('2026-10-05 09:40'), action: 'orders.pdf_download', detail: { orderNumber: 10027, item: 1 }, adminName: 'علی' },
@@ -508,10 +520,126 @@ describe('جزئیات سفارش', () => {
       details({
         rest: {
           pdfJob: null,
-          statusEvents: [{ id: 3, orderId: 'o1', fromStatus: 'awaiting_payment', toStatus: 'expired', at: NOW, actor: 'system', note: null }],
+          statusEvents: [statusEvent({ id: 3, fromStatus: 'awaiting_payment', toStatus: 'expired', at: NOW, actor: 'system' })],
         },
       }),
     );
     expect(expired.map((e) => [text(e.text), e.who])).toEqual([['رها شد: فایل‌ها دیگر روی سرور نبود', 'سیستم']]);
+  });
+});
+
+/* ───────────── وضعیت پس از پرداخت (۴٫۳) ───────────── */
+
+describe('وضعیت پس از پرداخت (۴٫۳)', () => {
+  it('وضعیت سفارش و ستون ردیف: در حال چاپ، تحویل پست شد، لغو شد؛ PDF ساخته‌نشدهٔ سفارش باز هم', () => {
+    expect(['paid', 'printing', 'handed_to_post', 'cancelled'].map((status) => orderState(status as OrderRow['status'], true))).toEqual([
+      'queued',
+      'printing',
+      'handed',
+      'cancelled',
+    ]);
+    expect(rowState(line({ status: 'printing' }))).toEqual({ label: 'در حال چاپ', icon: null });
+    expect(rowState(line({ status: 'printing', pdfJob: 'failed' }))).toEqual({ label: 'PDF ساخته نشد', icon: 'error' });
+    expect(rowState(line({ status: 'handed_to_post', handedToPostAt: NOW }))).toEqual({ label: 'تحویل پست شد', icon: null });
+    // سفارش بسته دیگر PDF لازم ندارد: کار شکست‌خورده‌اش کار بعدی کسی نیست.
+    expect(rowState(line({ status: 'cancelled', pdfJob: 'failed' }))).toEqual({ label: 'لغو شد', icon: null });
+  });
+
+  it('گذار هر کار فقط از وضعیتی که ادمین دید؛ برگرداندن یک قدم، و لغو به همان وضعیتی که پیش از لغو داشت', () => {
+    const none: PanelStatusEvent[] = [];
+    expect(transitionOf('start_print', 'paid', none)).toBe('printing');
+    expect(transitionOf('handed_to_post', 'printing', none)).toBe('handed_to_post');
+    expect(transitionOf('cancel', 'paid', none)).toBe('cancelled');
+    expect(transitionOf('cancel', 'printing', none)).toBe('cancelled');
+    expect(transitionOf('revert', 'printing', none)).toBe('paid');
+    expect(transitionOf('revert', 'handed_to_post', none)).toBe('printing');
+    // از جای نادرست، هیچ: چاپِ چاپ‌شده، پستِ در صف، لغوِ رسیده به پست یا پرداخت‌نشده، و برگرداندنِ در صف.
+    expect(transitionOf('start_print', 'printing', none)).toBeNull();
+    expect(transitionOf('handed_to_post', 'paid', none)).toBeNull();
+    expect(transitionOf('cancel', 'handed_to_post', none)).toBeNull();
+    expect(transitionOf('cancel', 'awaiting_payment', none)).toBeNull();
+    expect(transitionOf('cancel', 'cancelled', none)).toBeNull();
+    expect(transitionOf('revert', 'paid', none)).toBeNull();
+    expect(transitionOf('revert', 'awaiting_payment', none)).toBeNull();
+    // لغو از «در حال چاپ» به همان برمی‌گردد؛ آخرین لغو حساب است، نه اولی.
+    const cancelledFrom = (...froms: ('paid' | 'printing')[]) =>
+      froms.map((fromStatus, i) => statusEvent({ id: i + 1, fromStatus, toStatus: 'cancelled' }));
+    expect(transitionOf('revert', 'cancelled', cancelledFrom('printing'))).toBe('printing');
+    expect(transitionOf('revert', 'cancelled', cancelledFrom('printing', 'paid'))).toBe('paid');
+    expect(transitionOf('revert', 'cancelled', none)).toBeNull();
+    expect([isRevert('printing', 'paid'), isRevert('handed_to_post', 'printing'), isRevert('cancelled', 'printing')]).toEqual([true, true, true]);
+    expect([isRevert('paid', 'printing'), isRevert('printing', 'cancelled'), isRevert('awaiting_payment', 'paid')]).toEqual([false, false, false]);
+  });
+
+  it('سطر آمار پیشخوان، همان طرح؛ هر جمله فقط وقتی چیزی برای گفتن دارد', () => {
+    const line = (open: number, printing: number, handed: number, onTime: number) => {
+      const segs = statsSegs(open, { printing, handed, onTime });
+      return segs && text(segs);
+    };
+    expect(line(10, 2, 42, 41)).toBe('از این 10 سفارش، 2 در حال چاپ است. هفتهٔ گذشته 41 از 42 سفارش به‌موقع به پست رسید.');
+    expect(nums(statsSegs(10, { printing: 2, handed: 42, onTime: 41 })!)).toEqual(['10', '2', '41', '42']);
+    expect(line(3, 0, 0, 0)).toBe('از این 3 سفارش، هنوز هیچ‌کدام در حال چاپ نیست.');
+    expect(line(0, 0, 2, 0)).toBe('هفتهٔ گذشته 0 از 2 سفارش به‌موقع به پست رسید.');
+    expect(line(0, 0, 0, 0)).toBeNull();
+  });
+
+  it('PDF جزوه: ساخته‌شده در هر وضعیت پس از پرداخت دانلودی است؛ ساخته‌نشدهٔ سفارش بسته دیگر لازم نیست', () => {
+    const readyAt = tehran('2026-10-03 14:06');
+    for (const status of ['printing', 'handed_to_post', 'cancelled'] as const) {
+      const ready = details({ order: { status }, item: { printPdfReadyAt: readyAt } });
+      expect(pdfView(ready, ready.items[0]!, NOW)).toMatchObject({ kind: 'ready' });
+    }
+    const cancelled = details({ order: { status: 'cancelled' }, rest: { pdfJob: { ...details().pdfJob!, status: 'failed', lastError: 'order_closed: cancelled' } } });
+    expect(pdfView(cancelled, cancelled.items[0]!, NOW)).toEqual({ kind: 'closed' });
+    const printing = details({ order: { status: 'printing' }, rest: { pdfJob: { ...details().pdfJob!, status: 'queued', attempts: 0 } } });
+    expect(pdfView(printing, printing.items[0]!, NOW)).toEqual({ kind: 'building', retrying: false });
+    // کار شکستی که لغوش برگشت: دلیلش روشن، و «دوباره بساز» تا فایل‌ها هستند.
+    const reopened = details({ rest: { pdfJob: { ...details().pdfJob!, status: 'failed', attempts: 1, lastError: 'order_closed: cancelled' } } });
+    expect(pdfView(reopened, reopened.items[0]!, NOW)).toMatchObject({ kind: 'failed', reason: 'سفارش لغو شده بود' });
+    // «شروع چاپ» فقط وقتی PDF همهٔ جزوه‌ها ساخته شده.
+    expect(pdfReady(details())).toBe(false);
+    expect(pdfReady(details({ item: { printPdfReadyAt: readyAt } }))).toBe(true);
+    const two = details({ item: { printPdfReadyAt: readyAt } });
+    expect(pdfReady({ ...two, items: [two.items[0]!, { ...two.items[0]!, id: 'i2', seq: 2, printPdfReadyAt: null }] })).toBe(false);
+    expect(pdfReady({ ...two, items: [] })).toBe(false);
+  });
+
+  it('رویدادهای وضعیت با نام ادمین؛ برگرداندن با دلیلش؛ ویرایش گیرنده؛ رویداد ادمینِ وضعیت یک بار', () => {
+    const at = (time: string) => tehran(`2026-10-05 ${time}`);
+    const d = details({
+      rest: {
+        pdfJob: null,
+        statusEvents: [
+          statusEvent({ id: 1, fromStatus: 'paid', toStatus: 'printing', at: at('10:05'), adminName: 'سارا' }),
+          statusEvent({ id: 2, fromStatus: 'printing', toStatus: 'handed_to_post', at: at('16:40'), adminName: 'سارا' }),
+          statusEvent({
+            id: 3,
+            fromStatus: 'handed_to_post',
+            toStatus: 'printing',
+            at: at('16:45'),
+            adminName: 'مالک',
+            note: { reason: 'اشتباه زدم' },
+          }),
+          statusEvent({ id: 4, fromStatus: 'printing', toStatus: 'cancelled', at: at('17:00'), adminName: 'سارا', note: { reason: 'مشتری خواست' } }),
+        ],
+        events: [
+          { id: 7, at: at('10:05'), action: 'orders.status', detail: { orderNumber: 10027, from: 'paid', to: 'printing' }, adminName: 'سارا' },
+          {
+            id: 8,
+            at: at('11:00'),
+            action: 'orders.recipient',
+            detail: { orderNumber: 10027, changed: ['addressText', 'postalCode'], previous: {} },
+            adminName: 'علی',
+          },
+        ],
+      },
+    });
+    expect(orderTimeline(d).map((e) => [text(e.text), e.who])).toEqual([
+      ['در صف چاپ ← در حال چاپ', 'سارا'],
+      ['ویرایش گیرنده: نشانی، کد پستی', 'علی'],
+      ['در حال چاپ ← تحویل پست شد', 'سارا'],
+      ['برگرداندن: تحویل پست شد ← در حال چاپ؛ اشتباه زدم', 'مالک'],
+      ['لغو شد', 'سارا'],
+    ]);
   });
 });

@@ -208,6 +208,25 @@ describe('رویدادها', () => {
       ['سارا', ['PDF سفارش ', { ltr: '10040' }, ' (جزوهٔ ', { ltr: '2' }, ')', ' دانلود شد']],
     ]);
   });
+
+  it('وضعیت سفارش و گیرنده (۴٫۳): گذار با نام وضعیت‌ها، لغو، و فیلدهای ویرایش‌شده؛ دلیل و نشانی نه', () => {
+    const lines = eventLines([
+      event('orders.status', { targetType: 'order', detail: { orderNumber: 10027, from: 'paid', to: 'printing' } }),
+      event('orders.status', { targetType: 'order', detail: { orderNumber: 10027, from: 'handed_to_post', to: 'printing' } }),
+      event('orders.status', { targetType: 'order', detail: { orderNumber: 10031, from: 'printing', to: 'cancelled' } }),
+      event('orders.recipient', {
+        targetType: 'order',
+        detail: { orderNumber: 10027, changed: ['addressText', 'postalCode'], previous: { addressText: 'پلاک 12', postalCode: null } },
+      }),
+    ]);
+    expect(lines.map((l) => [l.who, l.text])).toEqual([
+      ['سارا', ['سفارش ', { ltr: '10027' }, ': در صف چاپ ← در حال چاپ']],
+      ['سارا', ['سفارش ', { ltr: '10027' }, ': تحویل پست شد ← در حال چاپ']],
+      ['سارا', ['سفارش ', { ltr: '10031' }, ' لغو شد']],
+      ['سارا', ['گیرندهٔ سفارش ', { ltr: '10027' }, ' ویرایش شد: نشانی، کد پستی']],
+    ]);
+    expect(JSON.stringify(lines)).not.toContain('پلاک 12');
+  });
 });
 
 describe('QR', () => {
