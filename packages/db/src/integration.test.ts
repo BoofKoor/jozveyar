@@ -42,7 +42,7 @@ import {
   smsMessages,
   users,
 } from './schema.js';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
 import { HOLIDAYS_SETTING, SLA_DAYS_SETTING, seedReferenceData } from './reference.js';
@@ -59,6 +59,7 @@ import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder,
 import { createSmsLog } from './sms.js';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
 import {
+  ALL_ORDERS,
   createPanelOrderStore,
   pdfErrorCode,
   type PanelBucket,
@@ -1104,8 +1105,20 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const read = async (role: string) =>
         (await conn.db.select().from(rolePermissions).where(eq(rolePermissions.roleId, role))).map((r) => r.permissionId).sort();
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
-      expect(await read('operator')).toEqual(['files.download', 'orders.address', 'orders.assign', 'orders.read', 'orders.status', 'tariff.read']);
+      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد؛ چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042). صریح، نه از کد.
+      expect(await read('operator')).toEqual([
+        'files.download',
+        'orders.address',
+        'orders.assign',
+        'orders.cancel',
+        'orders.money',
+        'orders.read',
+        'orders.status',
+        'tariff.read',
+      ]);
       expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
+      expect(await read('print_partner')).toEqual(['files.download', 'orders.read', 'orders.status']);
+      expect([...ADMIN_ROLES.print_partner.permissions].sort()).toEqual(await read('print_partner'));
       await conn.db.insert(rolePermissions).values({ roleId: 'operator', permissionId: 'secrets.edit' });
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       expect(await read('operator')).not.toContain('secrets.edit');
@@ -1175,7 +1188,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await store.findUser(userId)).toMatchObject({ totpSealed: 'v1.sealed-user', totpLastStep: 1, lastLoginAt: at });
       const session = await store.findSession(sessionHash);
       expect(session).toMatchObject({ revokedAt: null, roles: ['operator'] });
-      expect(session!.permissions).toEqual(['files.download', 'orders.address', 'orders.assign', 'orders.read', 'orders.status', 'tariff.read']);
+      expect(session!.permissions).toEqual([
+        'files.download',
+        'orders.address',
+        'orders.assign',
+        'orders.cancel',
+        'orders.money',
+        'orders.read',
+        'orders.status',
+        'tariff.read',
+      ]);
+      expect(session!.partner).toBeNull();
       const actions = (await store.listEvents({ limit: 10 })).map((e) => e.action);
       expect(actions).toEqual(['auth.login', 'admins.enroll', 'admins.invite']);
     });
@@ -1189,9 +1212,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       );
       expect(await rejectedConstraint(conn.db.delete(adminEvents).where(eq(adminEvents.id, one!.id)))).toBe('admin_events_append_only');
       expect(await rejectedConstraint(conn.db.delete(adminUsers).where(eq(adminUsers.id, userId)))).toBe('admin_users_no_delete');
+      // از ۵٫۳ محدوده ستون نوع‌دار است: نقش چاپخانه بی چاپخانه نه (بقیهٔ محافظ‌هایش پایین، «نقش چاپخانه و محدوده»).
       expect(
-        await rejectedConstraint(conn.db.update(adminUserRoles).set({ scope: { partner: 1 } }).where(eq(adminUserRoles.adminUserId, userId))),
-      ).toBe('admin_user_roles_scope');
+        await rejectedConstraint(conn.db.update(adminUserRoles).set({ roleId: 'print_partner' }).where(eq(adminUserRoles.adminUserId, userId))),
+      ).toBe('admin_user_roles_partner');
       expect(await rejectedConstraint(conn.db.update(adminUsers).set({ totpSealed: null }).where(eq(adminUsers.id, userId)))).toBe(
         'admin_users_credentials',
       );
@@ -1506,7 +1530,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('کاشی‌های مهلت با مرز روز تهران: دیر شده، امروز، فردا، بعدتر', async () => {
       const panel = createPanelOrderStore(conn);
-      expect(await panel.dueSummary(bounds)).toEqual({
+      expect(await panel.dueSummary(ALL_ORDERS, bounds)).toEqual({
         overdue: 1,
         today: 2,
         tomorrow: 1,
@@ -1515,23 +1539,23 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         laterRange: { earliest: END_WEDNESDAY, latest: END_SATURDAY },
       });
       // مهلت خودِ «حالا» گذشته است؛ یک میلی‌ثانیه پیش از پایان روز هنوز «امروز» (شاهد `<=` و `<`).
-      expect(await panel.dueSummary({ ...bounds, at: new Date(END_MONDAY.getTime() - 1) })).toMatchObject({ overdue: 1, today: 2 });
-      expect(await panel.dueSummary({ ...bounds, at: END_MONDAY })).toMatchObject({ overdue: 3, today: 0 });
+      expect(await panel.dueSummary(ALL_ORDERS, { ...bounds, at: new Date(END_MONDAY.getTime() - 1) })).toMatchObject({ overdue: 1, today: 2 });
+      expect(await panel.dueSummary(ALL_ORDERS, { ...bounds, at: END_MONDAY })).toMatchObject({ overdue: 3, today: 0 });
       // فردا تا خود آغاز پس‌فردا؛ یک روز جلوتر «فردا» مال چهارشنبه است.
       expect(
-        await panel.dueSummary({ at: NOW, tomorrowStart: END_TUESDAY, dayAfterStart: END_WEDNESDAY }),
+        await panel.dueSummary(ALL_ORDERS, { at: NOW, tomorrowStart: END_TUESDAY, dayAfterStart: END_WEDNESDAY }),
       ).toMatchObject({ today: 3, tomorrow: 1, later: 1, laterRange: { earliest: END_SATURDAY, latest: END_SATURDAY } });
       // فقط پرداخت‌شده‌ها: سفارش در انتظار و رهاشده مهلت ندارند.
-      const all = await panel.dueSummary(bounds);
+      const all = await panel.dueSummary(ALL_ORDERS, bounds);
       expect(all.overdue + all.today + all.tomorrow + all.later).toBe(6);
     });
 
     it('چیپ‌ها: باز، در انتظار پرداخت، رهاشده و همه، با همان جست‌وجو', async () => {
       const panel = createPanelOrderStore(conn);
-      expect(await panel.counts({ search: null, clock })).toEqual({ open: 6, handed: 0, cancelled: 0, awaiting: 1, abandoned: 3, all: 10 });
+      expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toEqual({ open: 6, handed: 0, cancelled: 0, awaiting: 1, abandoned: 3, all: 10 });
       // شاهد حاشیه: یک ساعت دیرتر نه، همین حالا فایل ۵۹ دقیقه‌ای هنوز پرداختنی بود.
-      expect(await panel.counts({ search: null, clock: { ...clock, staleBefore: NOW } })).toMatchObject({ awaiting: 2, abandoned: 2 });
-      expect(await panel.counts({ search: { kind: 'name', text: 'محمد' }, clock })).toEqual({
+      expect(await panel.counts(ALL_ORDERS, { search: null, clock: { ...clock, staleBefore: NOW } })).toMatchObject({ awaiting: 2, abandoned: 2 });
+      expect(await panel.counts(ALL_ORDERS, { search: { kind: 'name', text: 'محمد' }, clock })).toEqual({
         open: 1,
         handed: 0,
         cancelled: 0,
@@ -1544,7 +1568,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('فهرست باز به ترتیب مهلت؛ هم‌مهلت‌ها به ترتیب پرداخت؛ بقیه تازه‌ترین اول', async () => {
       const panel = createPanelOrderStore(conn);
       const numbers = async (bucket: PanelBucket, limit = 50, offset = 0) =>
-        (await panel.list({ bucket, search: null, clock, limit, offset })).map((row) => row.orderNumber);
+        (await panel.list(ALL_ORDERS, { bucket, search: null, clock, limit, offset })).map((row) => row.orderNumber);
       expect(await numbers('open')).toEqual([num.late, num.today1, num.today2, num.tomorrow, num.wed, num.sat]);
       expect(await numbers('open', 2, 2)).toEqual([num.today2, num.tomorrow]);
       expect(await numbers('awaiting')).toEqual([num.waiting]);
@@ -1556,7 +1580,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('ردیف فهرست: جزوه، گیرنده، شهر، PDF، پرداخت بی برگشت و فایل‌ها', async () => {
       const panel = createPanelOrderStore(conn);
-      const rows = await panel.list({ bucket: 'all', search: null, clock, limit: 50, offset: 0 });
+      const rows = await panel.list(ALL_ORDERS, { bucket: 'all', search: null, clock, limit: 50, offset: 0 });
       const row = (key: string) => rows.find((r) => r.orderNumber === num[key])!;
       expect(row('today2')).toMatchObject({
         status: 'paid',
@@ -1589,7 +1613,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('جست‌وجو: شماره، ته موبایل، موبایل کامل و نام؛ نویسهٔ عام LIKE حرف است', async () => {
       const panel = createPanelOrderStore(conn);
       const find = async (search: PanelSearch) =>
-        (await panel.list({ bucket: 'all', search, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber).sort();
+        (await panel.list(ALL_ORDERS, { bucket: 'all', search, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber).sort();
       expect(await find({ kind: 'digits', orderNumber: num.wed!, phoneSuffix: null })).toEqual([num.wed]);
       expect(await find({ kind: 'digits', orderNumber: null, phoneSuffix: '5678' })).toEqual([num.today2]);
       // یک عدد: یا شمارهٔ سفارش، یا ته موبایل.
@@ -1605,24 +1629,24 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('هشدارها: PDF ساخته‌نشده، و تلاش بی برگشت فقط برای سفارشی که هنوز پرداختنی است', async () => {
       const panel = createPanelOrderStore(conn);
       // همه از راه برگشت درگاه پرداخت شدند، پس همه چاپخانه دارند (برش ۵٫۲).
-      expect(await panel.alerts(clock)).toEqual({
+      expect(await panel.alerts(ALL_ORDERS, clock)).toEqual({
         failedPdf: [num.tomorrow],
         unreturned: [{ orderNumber: num.waiting, attempts: 1 }],
         unassigned: [],
       });
       // نیم ساعت بعد، تلاش ۱۰ دقیقه‌ای هم بی برگشت است (شاهد مهلت تلاش).
       expect(
-        (await panel.alerts({ ...clock, unreturnedBefore: new Date(NOW.getTime() - 5 * MINUTE) })).unreturned,
+        (await panel.alerts(ALL_ORDERS, { ...clock, unreturnedBefore: new Date(NOW.getTime() - 5 * MINUTE) })).unreturned,
       ).toEqual([{ orderNumber: num.waiting, attempts: 2 }]);
       // بی حاشیه، سفارشی که فایلش ۵۹ دقیقهٔ دیگر پاک می‌شود هنوز پرداختنی است و تلاشش هشدار (شاهد حاشیه).
-      expect((await panel.alerts({ ...clock, staleBefore: NOW })).unreturned.map((u) => u.orderNumber).sort()).toEqual(
+      expect((await panel.alerts(ALL_ORDERS, { ...clock, staleBefore: NOW })).unreturned.map((u) => u.orderNumber).sort()).toEqual(
         [num.waiting, num.soon].sort(),
       );
     });
 
     it('جزئیات: جزوه با نام فایل‌ها، کاغذ و صحافی همان نسخهٔ تعرفه، گیرنده، پرداخت‌ها، رویدادها و کار PDF', async () => {
       const panel = createPanelOrderStore(conn);
-      const details = await panel.details(num.today2!);
+      const details = await panel.details(ALL_ORDERS, num.today2!);
       expect(details).toMatchObject({
         provinceName: 'خراسان رضوی',
         cityName: 'مشهد',
@@ -1653,9 +1677,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         ['awaiting_payment', 'paid', 'gateway'],
       ]);
       expect(details!.events).toEqual([]);
-      expect(await panel.details(1)).toBeNull();
+      expect(await panel.details(ALL_ORDERS, 1)).toBeNull();
 
-      const waiting = await panel.details(num.waiting!);
+      const waiting = await panel.details(ALL_ORDERS, num.waiting!);
       expect(waiting!.pdfJob).toBeNull();
       expect(waiting!.ticketJob).toBeNull();
       // تازه‌ترین تلاش اول.
@@ -1674,10 +1698,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         at,
       });
       // کار «امروز» هنوز در صف است: دوباره در صف رفتنش معنایی ندارد (شاهد: «فردا»ی شکست‌خورده می‌رود).
-      expect(await panel.requeue(ids.today2!, PREPARE_ORDER_JOB, { ...event(NOW), targetId: ids.today2! })).toBe('busy');
+      expect(await panel.requeue(ALL_ORDERS, ids.today2!, PREPARE_ORDER_JOB, { ...event(NOW), targetId: ids.today2! })).toBe('busy');
       const results = await Promise.all([
-        panel.requeue(ids.tomorrow!, PREPARE_ORDER_JOB, event(NOW)),
-        panel.requeue(ids.tomorrow!, PREPARE_ORDER_JOB, event(NOW)),
+        panel.requeue(ALL_ORDERS, ids.tomorrow!, PREPARE_ORDER_JOB, event(NOW)),
+        panel.requeue(ALL_ORDERS, ids.tomorrow!, PREPARE_ORDER_JOB, event(NOW)),
       ]);
       expect(results.sort()).toEqual(['busy', 'ok']);
       const [job] = await conn.db
@@ -1686,7 +1710,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         .where(and(eq(jobs.orderId, ids.tomorrow!), eq(jobs.kind, PREPARE_ORDER_JOB)));
       expect(job).toMatchObject({ status: 'queued', attempts: 0, lastError: null, finishedAt: null, lockedBy: null });
       expect(job!.runAfter.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
-      const details = await panel.details(num.tomorrow!);
+      const details = await panel.details(ALL_ORDERS, num.tomorrow!);
       expect(details!.events).toEqual([
         expect.objectContaining({
           action: 'orders.pdf_rebuild',
@@ -1696,13 +1720,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       ]);
       // دانلود با همان راه رویداد، در صفحهٔ همان سفارش؛ سفارش دیگر رویدادی ندارد.
       await panel.logEvent({ ...event(new Date(NOW.getTime() + MINUTE)), action: 'orders.pdf_download', detail: { orderNumber: num.tomorrow, item: 1 } });
-      expect((await panel.details(num.tomorrow!))!.events.map((e) => e.action)).toEqual(['orders.pdf_rebuild', 'orders.pdf_download']);
-      expect((await panel.details(num.late!))!.events).toEqual([]);
+      expect((await panel.details(ALL_ORDERS, num.tomorrow!))!.events.map((e) => e.action)).toEqual(['orders.pdf_rebuild', 'orders.pdf_download']);
+      expect((await panel.details(ALL_ORDERS, num.late!))!.events).toEqual([]);
     });
 
     it('PDF جزوه برای دانلود: کلید و حجم فقط وقتی کارگر ساخته', async () => {
       const panel = createPanelOrderStore(conn);
-      expect(await panel.jozveFile(num.late!, 1)).toMatchObject({
+      expect(await panel.jozveFile(ALL_ORDERS, num.late!, 1)).toMatchObject({
         orderId: ids.late,
         status: 'paid',
         filesDeletedAt: null,
@@ -1710,13 +1734,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         key: null,
         readyAt: null,
       });
-      expect(await panel.jozveFile(num.late!, 2)).toBeNull();
+      expect(await panel.jozveFile(ALL_ORDERS, num.late!, 2)).toBeNull();
       const [item] = await conn.db.select().from(orderItems).where(eq(orderItems.orderId, ids.late!));
       await conn.db
         .update(orderItems)
         .set({ printPdfKey: `orders/${num.late}/jozve-1.pdf`, printPdfBytes: 40_265_318, printPdfSha256: 'a'.repeat(64), printPdfReadyAt: NOW })
         .where(eq(orderItems.id, item!.id));
-      expect(await panel.jozveFile(num.late!, 1)).toMatchObject({ key: `orders/${num.late}/jozve-1.pdf`, bytes: 40_265_318, readyAt: NOW });
+      expect(await panel.jozveFile(ALL_ORDERS, num.late!, 1)).toMatchObject({ key: `orders/${num.late}/jozve-1.pdf`, bytes: 40_265_318, readyAt: NOW });
     });
 
     it('کد خطای کار از last_error کارگر: شکست قطعی با کد، بقیه گذرا', () => {
@@ -1963,19 +1987,19 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('تغییر وضعیت در یک تراکنش: سفارش، ردیف وضعیت با ادمین و دلیل، و رویداد ادمین؛ زمان تحویل پست و برگرداندنش', async () => {
       const panel = createPanelOrderStore(conn);
       const order = await paidOrder();
-      const started = await panel.changeStatus(change(order, 'paid', 'printing', { adminUserId: operator }));
+      const started = await panel.changeStatus(ALL_ORDERS, change(order, 'paid', 'printing', { adminUserId: operator }));
       expect(started).toMatchObject({ ok: true, order: { status: 'printing', handedToPostAt: null } });
       const handedAt = new Date(NOW.getTime() + 5 * 3_600_000);
-      expect(await panel.changeStatus(change(order, 'printing', 'handed_to_post', { at: handedAt, adminUserId: operator }))).toMatchObject({
+      expect(await panel.changeStatus(ALL_ORDERS, change(order, 'printing', 'handed_to_post', { at: handedAt, adminUserId: operator }))).toMatchObject({
         ok: true,
         order: { status: 'handed_to_post', handedToPostAt: handedAt },
       });
-      const reverted = await panel.changeStatus(
+      const reverted = await panel.changeStatus(ALL_ORDERS, 
         change(order, 'handed_to_post', 'printing', { at: new Date(NOW.getTime() + 6 * 3_600_000), reason: 'اشتباه زدم؛ هنوز صحافی نشده' }),
       );
       expect(reverted).toMatchObject({ ok: true, order: { status: 'printing', handedToPostAt: null } });
       expect(
-        await panel.changeStatus(change(order, 'printing', 'cancelled', { at: new Date(NOW.getTime() + 7 * 3_600_000), reason: 'مشتری خواست' })),
+        await panel.changeStatus(ALL_ORDERS, change(order, 'printing', 'cancelled', { at: new Date(NOW.getTime() + 7 * 3_600_000), reason: 'مشتری خواست' })),
       ).toMatchObject({ ok: true });
 
       expect((await statusRows(order.id)).map((e) => [e.fromStatus, e.toStatus, e.actor, e.adminUserId, e.note])).toEqual([
@@ -1998,7 +2022,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect([after.totalRials, after.postHandoffDueAt, after.paidAt]).toEqual([order.totalRials, order.postHandoffDueAt, order.paidAt]);
 
       // جزئیات پنل: رویدادهای وضعیت با نام ادمین و دلیل.
-      const details = await panel.details(order.orderNumber);
+      const details = await panel.details(ALL_ORDERS, order.orderNumber);
       expect(details!.statusEvents.slice(2).map((e) => [e.toStatus, e.adminName, e.note])).toEqual([
         ['printing', 'علی محمدی', null],
         ['handed_to_post', 'علی محمدی', null],
@@ -2011,27 +2035,27 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const panel = createPanelOrderStore(conn);
       const order = await paidOrder();
       const results = await Promise.all([
-        panel.changeStatus(change(order, 'paid', 'printing')),
-        panel.changeStatus(change(order, 'paid', 'printing')),
+        panel.changeStatus(ALL_ORDERS, change(order, 'paid', 'printing')),
+        panel.changeStatus(ALL_ORDERS, change(order, 'paid', 'printing')),
       ]);
       expect(results.map((r) => (r.ok ? 'ok' : r.current)).sort()).toEqual(['ok', 'printing']);
       expect((await statusRows(order.id)).filter((e) => e.actor === 'admin')).toHaveLength(1);
       expect(await eventsOf(order.id)).toHaveLength(1);
       // لغو و «تحویل پست شد» هم‌زمان: فقط یکی.
       const race = await Promise.all([
-        panel.changeStatus(change(order, 'printing', 'cancelled', { reason: 'مشتری خواست' })),
-        panel.changeStatus(change(order, 'printing', 'handed_to_post')),
+        panel.changeStatus(ALL_ORDERS, change(order, 'printing', 'cancelled', { reason: 'مشتری خواست' })),
+        panel.changeStatus(ALL_ORDERS, change(order, 'printing', 'handed_to_post')),
       ]);
       expect(race.filter((r) => r.ok)).toHaveLength(1);
       expect((await statusRows(order.id)).filter((e) => e.actor === 'admin')).toHaveLength(2);
       // وضعیتی که ادمین دید دیگر نیست: هیچ ردی نمی‌ماند.
       const current = (await statusOf(order.id)).status;
-      expect(await panel.changeStatus(change(order, 'paid', 'printing'))).toEqual({ ok: false, current });
-      expect(await panel.changeStatus(change({ id: randomUUID(), orderNumber: 1 }, 'paid', 'printing'))).toEqual({ ok: false, current: null });
+      expect(await panel.changeStatus(ALL_ORDERS, change(order, 'paid', 'printing'))).toEqual({ ok: false, current });
+      expect(await panel.changeStatus(ALL_ORDERS, change({ id: randomUUID(), orderNumber: 1 }, 'paid', 'printing'))).toEqual({ ok: false, current: null });
       expect(await eventsOf(order.id)).toHaveLength(2);
       // گذاری که پایگاه داده نمی‌پذیرد، با رویدادش برمی‌گردد (همه یا هیچ).
       const other = await paidOrder();
-      expect(await rejectedConstraint(panel.changeStatus(change(other, 'paid', 'handed_to_post')))).toBe('orders_status_flow');
+      expect(await rejectedConstraint(panel.changeStatus(ALL_ORDERS, change(other, 'paid', 'handed_to_post')))).toBe('orders_status_flow');
       expect(await eventsOf(other.id)).toEqual([]);
       expect((await statusRows(other.id)).filter((e) => e.actor === 'admin')).toEqual([]);
     });
@@ -2050,10 +2074,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       });
       const editable = ['paid', 'printing'] as const;
       const fixed = { recipientName: 'سارا احمدی', addressText: 'خیابان ولیعصر، کوچهٔ نسترن، پلاک 12', postalCode: '9187654321' };
-      const edited = await panel.editRecipient({ orderId: order.id, editable, recipient: fixed, event: event(NOW) });
+      const edited = await panel.editRecipient(ALL_ORDERS, { orderId: order.id, editable, recipient: fixed, event: event(NOW) });
       expect(edited).toMatchObject({ ok: true, changed: ['addressText', 'postalCode'], order: fixed });
       // دوباره همان: چیزی عوض نشد، رویدادی هم نه.
-      expect(await panel.editRecipient({ orderId: order.id, editable, recipient: fixed, event: event(NOW) })).toMatchObject({ ok: true, changed: [] });
+      expect(await panel.editRecipient(ALL_ORDERS, { orderId: order.id, editable, recipient: fixed, event: event(NOW) })).toMatchObject({ ok: true, changed: [] });
       expect((await eventsOf(order.id)).map((e) => [e.action, e.detail])).toEqual([
         [
           'orders.recipient',
@@ -2076,16 +2100,16 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       });
       // پایگاه داده هم کد پستی بد را نمی‌پذیرد.
       expect(
-        await rejectedConstraint(panel.editRecipient({ orderId: order.id, editable, recipient: { ...fixed, postalCode: '123' }, event: event(NOW) })),
+        await rejectedConstraint(panel.editRecipient(ALL_ORDERS, { orderId: order.id, editable, recipient: { ...fixed, postalCode: '123' }, event: event(NOW) })),
       ).toBe('orders_postal_code');
       // به پست رسید: دیگر نه.
-      await panel.changeStatus(change(order, 'paid', 'printing'));
-      await panel.changeStatus(change(order, 'printing', 'handed_to_post'));
+      await panel.changeStatus(ALL_ORDERS, change(order, 'paid', 'printing'));
+      await panel.changeStatus(ALL_ORDERS, change(order, 'printing', 'handed_to_post'));
       expect(
-        await panel.editRecipient({ orderId: order.id, editable, recipient: { ...fixed, recipientName: 'سارا' }, event: event(NOW) }),
+        await panel.editRecipient(ALL_ORDERS, { orderId: order.id, editable, recipient: { ...fixed, recipientName: 'سارا' }, event: event(NOW) }),
       ).toEqual({ ok: false, current: 'handed_to_post' });
       expect((await statusOf(order.id)).recipientName).toBe('سارا احمدی');
-      expect(await panel.editRecipient({ orderId: randomUUID(), editable, recipient: fixed, event: event(NOW) })).toEqual({ ok: false, current: null });
+      expect(await panel.editRecipient(ALL_ORDERS, { orderId: randomUUID(), editable, recipient: fixed, event: event(NOW) })).toEqual({ ok: false, current: null });
     });
 
     it('سطل‌ها، کاشی‌ها و هشدار: «باز» یعنی در صف و در حال چاپ؛ تحویل پست شد و لغو شد جدا', async () => {
@@ -2094,24 +2118,24 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const printing = await paidOrder(END_SATURDAY, 'در حال چاپ');
       const handed = await paidOrder(END_SATURDAY, 'به پست رسید');
       const cancelled = await paidOrder(END_MONDAY, 'لغو شد');
-      await panel.changeStatus(change(printing, 'paid', 'printing'));
-      await panel.changeStatus(change(handed, 'paid', 'printing'));
-      await panel.changeStatus(change(handed, 'printing', 'handed_to_post'));
-      await panel.changeStatus(change(cancelled, 'paid', 'cancelled', { reason: 'مشتری خواست' }));
+      await panel.changeStatus(ALL_ORDERS, change(printing, 'paid', 'printing'));
+      await panel.changeStatus(ALL_ORDERS, change(handed, 'paid', 'printing'));
+      await panel.changeStatus(ALL_ORDERS, change(handed, 'printing', 'handed_to_post'));
+      await panel.changeStatus(ALL_ORDERS, change(cancelled, 'paid', 'cancelled', { reason: 'مشتری خواست' }));
       const clock: PanelClock = { at: NOW, staleBefore: new Date(NOW.getTime() + 60 * MINUTE), unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE) };
-      expect(await panel.counts({ search: null, clock })).toEqual({ open: 2, handed: 1, cancelled: 1, awaiting: 0, abandoned: 0, all: 4 });
+      expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toEqual({ open: 2, handed: 1, cancelled: 1, awaiting: 0, abandoned: 0, all: 4 });
       const numbers = async (bucket: PanelBucket) =>
-        (await panel.list({ bucket, search: null, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber);
+        (await panel.list(ALL_ORDERS, { bucket, search: null, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber);
       // «باز» به ترتیب مهلت: در حال چاپِ دیرشده اول.
       expect(await numbers('open')).toEqual([printing.orderNumber, queued.orderNumber]);
       expect(await numbers('handed')).toEqual([handed.orderNumber]);
       expect(await numbers('cancelled')).toEqual([cancelled.orderNumber]);
-      const [line] = await panel.list({ bucket: 'handed', search: null, clock, limit: 50, offset: 0 });
+      const [line] = await panel.list(ALL_ORDERS, { bucket: 'handed', search: null, clock, limit: 50, offset: 0 });
       expect(line).toMatchObject({ status: 'handed_to_post', handedToPostAt: NOW, cancelledAt: null });
-      const [gone] = await panel.list({ bucket: 'cancelled', search: null, clock, limit: 50, offset: 0 });
+      const [gone] = await panel.list(ALL_ORDERS, { bucket: 'cancelled', search: null, clock, limit: 50, offset: 0 });
       expect(gone).toMatchObject({ status: 'cancelled', cancelledAt: NOW, handedToPostAt: null });
       // کاشی‌ها فقط سفارش‌هایی که هنوز به پست نرسیده‌اند: دیرشدهٔ «در حال چاپ» و امروزِ «در صف».
-      expect(await panel.dueSummary({ at: NOW, tomorrowStart: END_MONDAY, dayAfterStart: tehran('2026-10-07 00:00') })).toMatchObject({
+      expect(await panel.dueSummary(ALL_ORDERS, { at: NOW, tomorrowStart: END_MONDAY, dayAfterStart: tehran('2026-10-07 00:00') })).toMatchObject({
         overdue: 1,
         today: 1,
         tomorrow: 0,
@@ -2121,7 +2145,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       for (const o of [printing, cancelled]) {
         await conn.db.update(jobs).set({ status: 'failed', attempts: 1, lastError: 'file_missing: file_missing', finishedAt: NOW }).where(eq(jobs.orderId, o.id));
       }
-      expect((await panel.alerts(clock)).failedPdf).toEqual([printing.orderNumber]);
+      expect((await panel.alerts(ALL_ORDERS, clock)).failedPdf).toEqual([printing.orderNumber]);
     });
 
     it('آمار پیشخوان: در حال چاپ، و تحویل‌های پست از مرز تا «حالا»، به‌موقع و دیر؛ برگشته از پست نه', async () => {
@@ -2134,22 +2158,22 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const printing = await paidOrder(END_MONDAY);
       await paidOrder(END_MONDAY); // در صف چاپ: نه «در حال چاپ»، نه تحویل
       const hand = async (o: typeof onTime, at: Date) => {
-        await panel.changeStatus(change(o, 'paid', 'printing', { at }));
-        await panel.changeStatus(change(o, 'printing', 'handed_to_post', { at }));
+        await panel.changeStatus(ALL_ORDERS, change(o, 'paid', 'printing', { at }));
+        await panel.changeStatus(ALL_ORDERS, change(o, 'printing', 'handed_to_post', { at }));
       };
       await hand(onTime, new Date(END_MONDAY.getTime() - 1));
       // خودِ پایان مهلت دیگر دیر است (پایان انحصاری).
       await hand(late, END_SATURDAY);
       await hand(old, since);
       await hand(back, NOW);
-      await panel.changeStatus(change(back, 'handed_to_post', 'printing', { reason: 'اشتباه' }));
-      await panel.changeStatus(change(printing, 'paid', 'printing'));
+      await panel.changeStatus(ALL_ORDERS, change(back, 'handed_to_post', 'printing', { reason: 'اشتباه' }));
+      await panel.changeStatus(ALL_ORDERS, change(printing, 'paid', 'printing'));
       // «در حال چاپ»: خودِ آن و برگشته از پست. تحویل‌ها: به‌موقع و دیر؛ درست روی مرز بیرون است.
-      expect(await panel.stats({ since, at: END_MONDAY })).toEqual({ printing: 2, handed: 2, onTime: 1 });
+      expect(await panel.stats(ALL_ORDERS, { since, at: END_MONDAY })).toEqual({ printing: 2, handed: 2, onTime: 1 });
       // یک میلی‌ثانیه پیش‌تر، مرز هم درون است (شاهد `>`)؛ تحویلی درست در «حالا» شمرده می‌شود (شاهد `<=`)، و بعدش نه.
-      expect(await panel.stats({ since: new Date(since.getTime() - 1), at: END_MONDAY })).toEqual({ printing: 2, handed: 3, onTime: 2 });
-      expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 1) })).toEqual({ printing: 2, handed: 2, onTime: 1 });
-      expect(await panel.stats({ since, at: new Date(END_MONDAY.getTime() - 2) })).toEqual({ printing: 2, handed: 1, onTime: 0 });
+      expect(await panel.stats(ALL_ORDERS, { since: new Date(since.getTime() - 1), at: END_MONDAY })).toEqual({ printing: 2, handed: 3, onTime: 2 });
+      expect(await panel.stats(ALL_ORDERS, { since, at: new Date(END_MONDAY.getTime() - 1) })).toEqual({ printing: 2, handed: 2, onTime: 1 });
+      expect(await panel.stats(ALL_ORDERS, { since, at: new Date(END_MONDAY.getTime() - 2) })).toEqual({ printing: 2, handed: 1, onTime: 0 });
     });
   });
 
@@ -2248,7 +2272,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     }
     const recipientEvent = (id: string): AdminEventInput => ({ adminUserId: admin, action: 'orders.recipient', targetType: 'order', targetId: id, at: NOW });
     const edit = (id: string, recipient: { recipientName: string; addressText: string; postalCode: string | null }) =>
-      createPanelOrderStore(conn).editRecipient({ orderId: id, editable: ['paid', 'printing'], recipient, event: recipientEvent(id) });
+      createPanelOrderStore(conn).editRecipient(ALL_ORDERS, { orderId: id, editable: ['paid', 'printing'], recipient, event: recipientEvent(id) });
 
     beforeAll(async () => {
       await clearOrders(conn);
@@ -2377,10 +2401,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         note: { reason: 'مشتری پشیمان شد' },
         event: { adminUserId: admin, action: 'orders.status', targetType: 'order', targetId: cancelled.id, at: NOW },
       };
-      expect(await panel.changeStatus(change)).toEqual({ ok: false, current: 'cancelled', filesDeleted: true });
+      expect(await panel.changeStatus(ALL_ORDERS, change)).toEqual({ ok: false, current: 'cancelled', filesDeleted: true });
       expect((await conn.db.select().from(orders).where(eq(orders.id, cancelled.id)))[0]!.status).toBe('cancelled');
       // شاهد: وضعیتی که دیگر نیست «پاک شد» نیست.
-      expect(await panel.changeStatus({ ...change, orderId: kept.id, from: 'handed_to_post', to: 'printing' })).toEqual({
+      expect(await panel.changeStatus(ALL_ORDERS, { ...change, orderId: kept.id, from: 'handed_to_post', to: 'printing' })).toEqual({
         ok: false,
         current: 'printing',
       });
@@ -2414,14 +2438,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('برگه در پنل: تازه فقط با دادهٔ امروز؛ ویرایش گیرنده کار برگه را در همان تراکنش دوباره در صف می‌گذارد', async () => {
       const panel = createPanelOrderStore(conn);
       const order = await paidOrder(20);
-      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({ key: null, previewKey: null, fresh: false, filesDeletedAt: null });
-      expect((await panel.details(order.orderNumber))!.ticket).toBeNull();
+      expect(await panel.ticketFile(ALL_ORDERS, order.orderNumber)).toMatchObject({ key: null, previewKey: null, fresh: false, filesDeletedAt: null });
+      expect((await panel.details(ALL_ORDERS, order.orderNumber))!.ticket).toBeNull();
       await builtTicket(order.id);
-      expect((await panel.details(order.orderNumber))!).toMatchObject({
+      expect((await panel.details(ALL_ORDERS, order.orderNumber))!).toMatchObject({
         ticket: { sizeBytes: 2400, fresh: true },
         ticketJob: { status: 'done' },
       });
-      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({
+      expect(await panel.ticketFile(ALL_ORDERS, order.orderNumber)).toMatchObject({
         orderId: order.id,
         status: 'paid',
         key: `orders/${order.orderNumber}/ticket.pdf`,
@@ -2437,11 +2461,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       // نام تازه: برگهٔ ساخته‌شده کهنه است، و کارش در صف.
       expect(await edit(order.id, { ...same, recipientName: 'مریم کاظمی‌نژاد' })).toMatchObject({ ok: true, changed: ['recipientName'] });
       expect(await ticketJobOf(order.id)).toMatchObject({ status: 'queued', attempts: 0, finishedAt: null });
-      expect((await panel.details(order.orderNumber))!.ticket).toMatchObject({ fresh: false });
-      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({ fresh: false });
+      expect((await panel.details(ALL_ORDERS, order.orderNumber))!.ticket).toMatchObject({ fresh: false });
+      expect(await panel.ticketFile(ALL_ORDERS, order.orderNumber)).toMatchObject({ fresh: false });
       // کارگر با دادهٔ تازه ساخت: دوباره تازه.
       await builtTicket(order.id);
-      expect(await panel.ticketFile(order.orderNumber)).toMatchObject({ fresh: true });
+      expect(await panel.ticketFile(ALL_ORDERS, order.orderNumber)).toMatchObject({ fresh: true });
 
       // کار شکست‌خورده هم با ویرایش دوباره می‌رود؛ کاری که کارگر رویش است دست نمی‌خورد (کارگر پیش از ثبت اثر انگشت را زیر
       // قفل ردیف سفارش دوباره می‌سنجد).
@@ -2464,38 +2488,38 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         detail: { orderNumber: order.orderNumber },
         at: NOW,
       };
-      expect(await panel.requeue(order.id, PREPARE_TICKET_JOB, event)).toBe('busy');
+      expect(await panel.requeue(ALL_ORDERS, order.id, PREPARE_TICKET_JOB, event)).toBe('busy');
       // سفارش پیش از ۵٫۱ کار برگه نداشت.
       await conn.db.delete(jobs).where(and(eq(jobs.orderId, order.id), eq(jobs.kind, PREPARE_TICKET_JOB)));
       const [ok, second] = await Promise.all([
-        panel.requeue(order.id, PREPARE_TICKET_JOB, event),
-        panel.requeue(order.id, PREPARE_TICKET_JOB, event),
+        panel.requeue(ALL_ORDERS, order.id, PREPARE_TICKET_JOB, event),
+        panel.requeue(ALL_ORDERS, order.id, PREPARE_TICKET_JOB, event),
       ]);
       expect([ok, second].sort()).toEqual(['busy', 'ok']);
       expect(await ticketJobOf(order.id)).toMatchObject({ status: 'queued', attempts: 0 });
       await builtTicket(order.id);
-      expect(await panel.requeue(order.id, PREPARE_TICKET_JOB, event)).toBe('ok');
+      expect(await panel.requeue(ALL_ORDERS, order.id, PREPARE_TICKET_JOB, event)).toBe('ok');
       const events = await conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, order.id)).orderBy(adminEvents.id);
       expect(events.map((e) => [e.action, (e.detail as { previous: unknown }).previous])).toEqual([
         ['orders.ticket_rebuild', null],
         ['orders.ticket_rebuild', { status: 'done', attempts: 0, error: null }],
       ]);
       // PDF جزوهٔ همان سفارش دست نخورد.
-      expect((await panel.details(order.orderNumber))!.pdfJob).toMatchObject({ status: 'queued' });
+      expect((await panel.details(ALL_ORDERS, order.orderNumber))!.pdfJob).toMatchObject({ status: 'queued' });
     });
 
     it('فایل چاپ در پنل: جلدهای ساخته‌شده با «چه عوض شد»؛ جلد نساخته کلید ندارد؛ جزوه‌ای که نیست null', async () => {
       const panel = createPanelOrderStore(conn);
       const big = await paidOrder(1650);
-      expect(await panel.printVolume(big.orderNumber, 1, 1)).toMatchObject({ itemSeq: 1, volume: 1, volumes: 0, key: null, bytes: null });
-      expect(await panel.printVolume(big.orderNumber, 2, 1)).toBeNull();
-      expect(await panel.printVolume(1, 1, 1)).toBeNull();
+      expect(await panel.printVolume(ALL_ORDERS, big.orderNumber, 1, 1)).toMatchObject({ itemSeq: 1, volume: 1, volumes: 0, key: null, bytes: null });
+      expect(await panel.printVolume(ALL_ORDERS, big.orderNumber, 2, 1)).toBeNull();
+      expect(await panel.printVolume(ALL_ORDERS, 1, 1, 1)).toBeNull();
       const changes = { resized: [[103, 120, 612, 792]], rotated: [[5, 9]] };
       await writeVolumes([
         volume(big.itemId, 1, 1, 826, { storageKey: `orders/${big.orderNumber}/print-1-1.pdf`, sizeBytes: 212_400_000, changes }),
         volume(big.itemId, 2, 827, 1650, { storageKey: `orders/${big.orderNumber}/print-1-2.pdf`, sizeBytes: 208_900_000 }),
       ]);
-      expect(await panel.printVolume(big.orderNumber, 1, 2)).toMatchObject({
+      expect(await panel.printVolume(ALL_ORDERS, big.orderNumber, 1, 2)).toMatchObject({
         orderId: big.id,
         status: 'paid',
         filesDeletedAt: null,
@@ -2504,8 +2528,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         key: `orders/${big.orderNumber}/print-1-2.pdf`,
         bytes: 208_900_000,
       });
-      expect(await panel.printVolume(big.orderNumber, 1, 3)).toMatchObject({ volumes: 2, key: null });
-      const [item] = (await panel.details(big.orderNumber))!.items;
+      expect(await panel.printVolume(ALL_ORDERS, big.orderNumber, 1, 3)).toMatchObject({ volumes: 2, key: null });
+      const [item] = (await panel.details(ALL_ORDERS, big.orderNumber))!.items;
       expect(item!.printFiles).toEqual([
         expect.objectContaining({ volume: 1, firstPage: 1, lastPage: 826, sizeBytes: 212_400_000, changes }),
         expect.objectContaining({ volume: 2, firstPage: 827, lastPage: 1650, changes: null }),
@@ -2567,8 +2591,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       first = await partnerId('چاپخانهٔ جزوه‌یار');
     }
 
-    /** سفارش پرداخت‌شده همان‌طور که سرور می‌سازد: `createOrder`، و برگشت موفق درگاه که چاپخانه را هم انتخاب می‌کند. */
-    async function paidOrder(place: { provinceId: number; cityId: number | null }, name = 'مریم کاظمی') {
+    /**
+     * سفارش پرداخت‌شده همان‌طور که سرور می‌سازد: `createOrder`، و برگشت موفق درگاه که چاپخانه را هم انتخاب می‌کند. `settle: false`:
+     * تلاش پرداختی که از درگاه برنگشت (سفارش در انتظار پرداخت، بی چاپخانه).
+     */
+    async function paidOrder(place: { provinceId: number; cityId: number | null }, name = 'مریم کاظمی', { settle = true } = {}) {
       const zoneId = place.provinceId === 8 ? 'tehran' : 'other';
       const sections = [{ documentId: docId, pageCount: 20 }];
       const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
@@ -2605,6 +2632,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
         raw: null,
       });
+      if (!settle) return { id: order.id, orderNumber: order.orderNumber, partnerId: null };
       const settled = await store.settlePayment('mock', payment.authority, async () => ({
         kind: 'succeeded',
         refId: '803114',
@@ -2625,9 +2653,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       at: NOW,
     });
     const assign = (orderId: string, from: string | null, to: string, reason = 'دستگاه چاپ نور تا فردا خراب است.') =>
-      createPanelOrderStore(conn).assignPartner({ orderId, from, to, at: NOW, adminUserId: admin, reason, event: assignEvent(orderId) });
+      createPanelOrderStore(conn).assignPartner(ALL_ORDERS, { orderId, from, to, at: NOW, adminUserId: admin, reason, event: assignEvent(orderId) });
     const startPrint = (orderId: string, partner: string | null) =>
-      createPanelOrderStore(conn).changeStatus({
+      createPanelOrderStore(conn).changeStatus(ALL_ORDERS, {
         orderId,
         from: 'paid',
         to: 'printing',
@@ -2777,13 +2805,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       ]);
       const panel = createPanelOrderStore(conn);
       const clock: PanelClock = { at: NOW, staleBefore: new Date(NOW.getTime() + 60 * MINUTE), unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE) };
-      expect((await panel.alerts(clock)).unassigned).toEqual([order.orderNumber]);
-      expect((await panel.list({ bucket: 'open', search: null, clock, limit: 10, offset: 0 }))[0]).toMatchObject({ printPartnerId: null });
-      expect((await panel.details(order.orderNumber))!).toMatchObject({ partner: null, assignments: [] });
+      expect((await panel.alerts(ALL_ORDERS, clock)).unassigned).toEqual([order.orderNumber]);
+      expect((await panel.list(ALL_ORDERS, { bucket: 'open', search: null, clock, limit: 10, offset: 0 }))[0]).toMatchObject({ printPartnerId: null });
+      expect((await panel.details(ALL_ORDERS, order.orderNumber))!).toMatchObject({ partner: null, assignments: [] });
       // مالک چاپخانه‌ای را فعال می‌کند و متصدی سفارش را به آن می‌سپارد: از هیچ، با دلیل.
       await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, first));
       expect(await assign(order.id, null, first, 'چاپخانه دوباره فعال شد.')).toMatchObject({ ok: true });
-      expect((await panel.alerts(clock)).unassigned).toEqual([]);
+      expect((await panel.alerts(ALL_ORDERS, clock)).unassigned).toEqual([]);
       // «در حال چاپ» بی چاپخانه (پیش از ۵٫۲) هشدار نیست: چاپخانه‌اش دیگر عوض نمی‌شود (شاهد: همان سفارش در صف، بالا).
       await conn.db.update(printPartners).set({ isDefault: true }).where(eq(printPartners.id, first));
     });
@@ -2876,14 +2904,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         targetId: order.id,
         detail: { orderNumber: 1, from: { id: noor, name: 'چاپ نور' }, to: { id: first, name: 'چاپخانهٔ جزوه‌یار' }, reason: 'دستگاه چاپ نور تا فردا خراب است.' },
       });
-      const details = (await panel.details(order.orderNumber))!;
+      const details = (await panel.details(ALL_ORDERS, order.orderNumber))!;
       expect(details.partner).toEqual({ id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', provinceName: 'تهران', active: true, isDefault: true });
       expect(details.assignments).toEqual([
         expect.objectContaining({ fromName: null, toName: 'چاپ نور', actor: 'system', adminName: null, rule: 'city', reason: null }),
         expect.objectContaining({ fromName: 'چاپ نور', toName: 'چاپخانهٔ جزوه‌یار', actor: 'admin', adminName: 'علی محمدی', rule: null }),
       ]);
       // گزینه‌ها: فقط فعال‌ها، پیش‌فرض اول، با شمار سفارش باز.
-      expect(await panel.partnerOptions()).toEqual([
+      expect(await panel.partnerOptions(ALL_ORDERS)).toEqual([
         { id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 1 },
         { id: noor, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, openOrders: 0 },
       ]);
@@ -3132,6 +3160,368 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         detail: { changed: ['name', 'city'], name: 'چاپ نور مشهد', city: 'نیشابور', previous: { name: 'چاپ نور', city: 'مشهد' } },
       });
       expect((events[3]!.detail as { previous: { name: string } }).previous.name).toBe('چاپخانهٔ جزوه‌یار');
+    });
+
+    /**
+     * نقش چاپخانه و محدوده (برش ۵٫۳، ADR-042)، با همان چاپخانه‌ها و سفارش‌های واقعی بالا: نقش سوم با ستون نوع‌دار و محافظ‌هایش، و
+     * محدودهٔ هر تابع ذخیره‌گاه سفارش‌های پنل؛ چاپخانه فقط سفارش‌هایی را می‌خواند و می‌نویسد که امروز به خودش سپرده شده‌اند.
+     */
+    describe('نقش چاپخانه و محدوده (برش ۵٫۳)', () => {
+      const clock: PanelClock = {
+        at: NOW,
+        staleBefore: new Date(NOW.getTime() + 60 * MINUTE),
+        unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE),
+      };
+      const scopeOf = (partnerId: string) => ({ kind: 'partner' as const, partnerId });
+
+      /** کاربر تازه با پیوند، مثل فرم «افزودن ادمین». */
+      const invite = (username: string, role: 'owner' | 'operator' | 'print_partner', partnerId: string | null = null) =>
+        createAdminStore(conn).createInvite({
+          inviteId: randomUUID(),
+          newUserId: randomUUID(),
+          username,
+          displayName: `کاربر ${username}`,
+          role,
+          partnerId,
+          tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+          totpSealed: 'v1.sealed',
+          at: NOW,
+          expiresAt: new Date(NOW.getTime() + 15 * MINUTE),
+          createdBy: admin,
+          allowExisting: false,
+          event: { adminUserId: admin, action: 'admins.invite', targetType: 'admin', detail: { username, role } },
+        });
+      const userOf = async (created: Awaited<ReturnType<typeof invite>>) => {
+        if (!created.ok) throw new Error(created.reason);
+        return created.userId;
+      };
+
+      it('نقش سوم: دقیقاً یک چاپخانه، و نقش‌های دیگر هیچ؛ کاربر چاپخانه فقط همین نقش را دارد؛ یک چاپخانه چند کاربر', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const hasan = await userOf(await invite('hasan', 'print_partner', noor));
+        const reza = await userOf(await invite('reza', 'print_partner', noor));
+        const ali = await userOf(await invite('ali2', 'operator'));
+        expect(
+          (await conn.db.select().from(adminUserRoles).where(inArray(adminUserRoles.adminUserId, [hasan, reza, ali]))).map((r) => [
+            r.adminUserId,
+            r.roleId,
+            r.printPartnerId,
+          ]),
+        ).toEqual(expect.arrayContaining([[hasan, 'print_partner', noor], [reza, 'print_partner', noor], [ali, 'operator', null]]));
+        const role = (values: typeof adminUserRoles.$inferInsert) => rejectedConstraint(conn.db.insert(adminUserRoles).values(values));
+        const bare = await userOf(await invite('bare', 'owner'));
+        await conn.db.delete(adminUserRoles).where(eq(adminUserRoles.adminUserId, bare));
+        // نقش چاپخانه بی چاپخانه، و متصدی با چاپخانه.
+        expect(await role({ adminUserId: bare, roleId: 'print_partner' })).toBe('admin_user_roles_partner');
+        expect(await role({ adminUserId: bare, roleId: 'operator', printPartnerId: noor })).toBe('admin_user_roles_partner');
+        // چاپخانه‌ای که نیست.
+        expect(await role({ adminUserId: bare, roleId: 'print_partner', printPartnerId: randomUUID() })).toBe(
+          'admin_user_roles_print_partner_id_print_partners_id_fk',
+        );
+        // کاربر چاپخانه نقش دیگری نمی‌گیرد، و مالک و متصدی نقش چاپخانه نه.
+        expect(await role({ adminUserId: hasan, roleId: 'owner' })).toBe('admin_user_roles_partner_alone');
+        expect(await role({ adminUserId: ali, roleId: 'print_partner', printPartnerId: noor })).toBe('admin_user_roles_partner_alone');
+        // شاهد: مالک و متصدی با هم ممکن است (فقط چاپخانه تنهاست)، و چاپخانهٔ درست.
+        expect(await role({ adminUserId: ali, roleId: 'owner' })).toBeUndefined();
+        expect(await role({ adminUserId: bare, roleId: 'print_partner', printPartnerId: first })).toBeUndefined();
+      });
+
+      it('کاربر چاپخانه و نقش دیگر هم‌زمان: دومی پشت اولی می‌ماند و بعد رد می‌شود (EXCLUDE، نه سنجش پیش از نوشتن)', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const user = await userOf(await invite('mina', 'owner'));
+        await conn.db.delete(adminUserRoles).where(eq(adminUserRoles.adminUserId, user));
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let inserted!: () => void;
+        const insertedOnce = new Promise<void>((resolve) => (inserted = resolve));
+        const first$ = conn.db.transaction(async (tx) => {
+          await tx.insert(adminUserRoles).values({ adminUserId: user, roleId: 'print_partner', printPartnerId: noor });
+          inserted();
+          await held;
+        });
+        await insertedOnce;
+        let settled = false;
+        const second = rejectedConstraint(conn.db.insert(adminUserRoles).values({ adminUserId: user, roleId: 'owner' })).finally(() => {
+          settled = true;
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(settled).toBe(false);
+        } finally {
+          // شکست همین سنجش قفل را باز نگذارد تا تست‌های بعدی پشتش نمانند.
+          release();
+        }
+        await first$;
+        expect(await second).toBe('admin_user_roles_partner_alone');
+      });
+
+      it('پیوند کاربر چاپخانه: چاپخانهٔ فعال، زیر قفل؛ نشست و فهرست ادمین‌ها چاپخانه را دارند؛ رویداد با نام چاپخانه', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const aftab = await partner('چاپ آفتاب', ISFAHAN, { deactivatedAt: NOW });
+        const store = createAdminStore(conn);
+        expect(await invite('p1', 'print_partner')).toEqual({ ok: false, reason: 'partner_required' });
+        expect(await invite('p2', 'print_partner', aftab)).toEqual({ ok: false, reason: 'partner_inactive' });
+        expect(await invite('p3', 'print_partner', randomUUID())).toEqual({ ok: false, reason: 'partner_inactive' });
+        expect(await store.findUserByUsername('p2')).toBeNull();
+        const hasan = await userOf(await invite('hasan.noor', 'print_partner', noor));
+        const [event] = await conn.db
+          .select()
+          .from(adminEvents)
+          .where(and(eq(adminEvents.action, 'admins.invite'), eq(adminEvents.targetId, hasan)));
+        expect(event!.detail).toEqual({ username: 'hasan.noor', role: 'print_partner', partner: { id: noor, name: 'چاپ نور' }, reset: false });
+        // متصدی با چاپخانه در ورودی: چاپخانه نادیده (شاهد CHECK بالا: نوشتنش رد می‌شد).
+        const ali = await userOf(await invite('ali3', 'operator', noor));
+        expect(await store.rolesOf(ali)).toEqual(['operator']);
+
+        // نشست کاربر چاپخانه چاپخانه‌اش را دارد و فقط سه مجوز؛ متصدی بی چاپخانه.
+        await conn.db.update(adminUsers).set({ passwordHash: 'h', totpSealed: 't' }).where(inArray(adminUsers.id, [hasan, ali]));
+        const hashes = { hasan: randomUUID().replace(/-/g, ''), ali: randomUUID().replace(/-/g, '') };
+        await conn.db.insert(adminSessions).values([
+          { tokenHash: hashes.hasan, adminUserId: hasan, createdAt: NOW, expiresAt: new Date(NOW.getTime() + DAY), lastSeenAt: NOW },
+          { tokenHash: hashes.ali, adminUserId: ali, createdAt: NOW, expiresAt: new Date(NOW.getTime() + DAY), lastSeenAt: NOW },
+        ]);
+        expect(await store.findSession(hashes.hasan)).toMatchObject({
+          roles: ['print_partner'],
+          permissions: ['files.download', 'orders.read', 'orders.status'],
+          partner: { id: noor, name: 'چاپ نور' },
+        });
+        expect(await store.findSession(hashes.ali)).toMatchObject({ roles: ['operator'], partner: null });
+        const listed = await store.listAdmins(NOW);
+        expect(listed.filter((a) => a.partner).map((a) => [a.user.username, a.partner!.name])).toEqual([['hasan.noor', 'چاپ نور']]);
+        expect((await store.findInvite((await conn.db.select().from(adminInvites).where(eq(adminInvites.adminUserId, hasan)))[0]!.tokenHash))!.partner).toEqual({
+          id: noor,
+          name: 'چاپ نور',
+        });
+        // فرم «افزودن ادمین»: فعال‌ها، طرف قرارداد اول و پیش‌فرض آخر.
+        expect((await store.partnerChoices()).map((p) => [p.name, p.cityName, p.isDefault])).toEqual([
+          ['چاپ نور', 'مشهد', false],
+          ['چاپخانهٔ جزوه‌یار', 'تهران', true],
+        ]);
+        // فهرست «چاپخانه‌ها»: کاربرهای هر چاپخانه، جز غیرفعال‌ها.
+        const reza = await userOf(await invite('reza3', 'print_partner', noor));
+        await conn.db.update(adminUsers).set({ disabledAt: NOW }).where(eq(adminUsers.id, reza));
+        expect((await createPartnerStore(conn).list()).map((p) => [p.name, p.users])).toEqual([
+          ['چاپخانهٔ جزوه‌یار', []],
+          ['چاپ نور', ['کاربر hasan.noor']],
+          ['چاپ آفتاب', []],
+        ]);
+      });
+
+      it('پیوند کاربر چاپخانه و غیرفعال شدن هم‌زمان همان چاپخانه: پیوند پشت آن می‌ماند و «غیرفعال» می‌گیرد (FOR SHARE)', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let updated!: () => void;
+        const updatedOnce = new Promise<void>((resolve) => (updated = resolve));
+        const off$ = conn.db.transaction(async (tx) => {
+          await tx.update(printPartners).set({ deactivatedAt: NOW }).where(eq(printPartners.id, noor));
+          updated();
+          await held;
+        });
+        await updatedOnce;
+        let settled = false;
+        const invite$ = invite('late', 'print_partner', noor).finally(() => {
+          settled = true;
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(settled).toBe(false);
+        } finally {
+          // شکست همین سنجش قفل را باز نگذارد تا تست‌های بعدی پشتش نمانند.
+          release();
+        }
+        await off$;
+        expect(await invite$).toEqual({ ok: false, reason: 'partner_inactive' });
+        expect(await createAdminStore(conn).findUserByUsername('late')).toBeNull();
+      });
+
+      it('هر تابع ذخیره‌گاه در محدودهٔ یک چاپخانه فقط سفارش‌های همان را می‌خواند؛ سفارش چاپخانهٔ دیگر و پرداخت‌نشده «نیست»', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const panel = createPanelOrderStore(conn);
+        const mine = await paidOrder(MASHHAD, 'مریم کاظمی');
+        const theirs = await paidOrder(TEHRAN, 'زهرا محمدی');
+        expect([mine.partnerId, theirs.partnerId]).toEqual([noor, first]);
+        const NOOR = scopeOf(noor);
+        // هر دو PDF ساخته نشد، و یکی در حال چاپ.
+        await conn.db.update(jobs).set({ status: 'failed', lastError: 'file_missing: x', finishedAt: NOW }).where(eq(jobs.kind, PREPARE_ORDER_JOB));
+        await startPrint(theirs.id, first);
+
+        const bounds = { at: NOW, tomorrowStart: END_MONDAY, dayAfterStart: new Date(END_MONDAY.getTime() + DAY) };
+        expect(await panel.dueSummary(NOOR, bounds)).toMatchObject({ today: 1, overdue: 0, tomorrow: 0, later: 0 });
+        expect(await panel.dueSummary(ALL_ORDERS, bounds)).toMatchObject({ today: 2 });
+        expect(await panel.stats(NOOR, { since: new Date(NOW.getTime() - 7 * DAY), at: NOW })).toMatchObject({ printing: 0 });
+        expect(await panel.stats(ALL_ORDERS, { since: new Date(NOW.getTime() - 7 * DAY), at: NOW })).toMatchObject({ printing: 1 });
+        expect((await panel.alerts(NOOR, clock)).failedPdf).toEqual([mine.orderNumber]);
+        expect((await panel.alerts(ALL_ORDERS, clock)).failedPdf.sort()).toEqual([mine.orderNumber, theirs.orderNumber].sort());
+        for (const bucket of ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] as const) {
+          const numbers = (await panel.list(NOOR, { bucket, search: null, clock, limit: 50, offset: 0 })).map((row) => row.orderNumber);
+          expect(numbers, bucket).toEqual(bucket === 'open' || bucket === 'all' ? [mine.orderNumber] : []);
+        }
+        // جست‌وجوی نام سفارش دیگری در محدودهٔ چاپخانه هم هیچ.
+        expect(await panel.list(NOOR, { bucket: 'all', search: { kind: 'name', text: 'زهرا' }, clock, limit: 50, offset: 0 })).toEqual([]);
+        expect(await panel.counts(NOOR, { search: null, clock })).toEqual({ open: 1, handed: 0, cancelled: 0, awaiting: 0, abandoned: 0, all: 1 });
+        expect((await panel.counts(ALL_ORDERS, { search: null, clock })).all).toBe(2);
+
+        expect(await panel.details(NOOR, theirs.orderNumber)).toBeNull();
+        expect(await panel.jozveFile(NOOR, theirs.orderNumber, 1)).toBeNull();
+        expect(await panel.printVolume(NOOR, theirs.orderNumber, 1, 1)).toBeNull();
+        expect(await panel.ticketFile(NOOR, theirs.orderNumber)).toBeNull();
+        // شاهد: همان سفارش با «همه» هست، و سفارش خود چاپخانه در محدوده‌اش.
+        expect((await panel.details(ALL_ORDERS, theirs.orderNumber))?.order.id).toBe(theirs.id);
+        expect((await panel.details(NOOR, mine.orderNumber))?.order.id).toBe(mine.id);
+        expect(await panel.jozveFile(NOOR, mine.orderNumber, 1)).toMatchObject({ orderId: mine.id });
+        expect(await panel.printVolume(NOOR, mine.orderNumber, 1, 1)).toMatchObject({ orderId: mine.id });
+        expect(await panel.ticketFile(NOOR, mine.orderNumber)).toMatchObject({ orderId: mine.id });
+        // گزینه‌های جابه‌جایی: در محدودهٔ چاپخانه فقط خودش.
+        expect((await panel.partnerOptions(NOOR)).map((p) => p.id)).toEqual([noor]);
+        expect((await panel.partnerOptions(ALL_ORDERS)).map((p) => p.id).sort()).toEqual([first, noor].sort());
+      });
+
+      it('پرداخت‌نشده و بی چاپخانه در محدودهٔ هیچ چاپخانه‌ای نیستند، حتی هم‌شهرش: هشدارها، فهرست، شمارش، پیشخوان و جزئیات', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const panel = createPanelOrderStore(conn);
+        // پرداخت وقتی هیچ چاپخانهٔ فعالی نبود: بی چاپخانه، با هشدار. بعد همه دوباره فعال.
+        await conn.db.update(printPartners).set({ isDefault: false, deactivatedAt: NOW });
+        const bare = await paidOrder(MASHHAD, 'کیان رستمی');
+        await conn.db.update(printPartners).set({ deactivatedAt: null });
+        await conn.db.update(printPartners).set({ isDefault: true }).where(eq(printPartners.id, first));
+        expect(bare.partnerId).toBeNull();
+        // تلاش پرداختی که از درگاه برنگشت.
+        const waiting = await paidOrder(MASHHAD, 'نگار صادقی', { settle: false });
+        const NOOR = scopeOf(noor);
+        expect(await panel.alerts(ALL_ORDERS, clock)).toMatchObject({
+          unassigned: [bare.orderNumber],
+          unreturned: [{ orderNumber: waiting.orderNumber, attempts: 1 }],
+        });
+        expect(await panel.alerts(NOOR, clock)).toEqual({ failedPdf: [], unreturned: [], unassigned: [] });
+        expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toMatchObject({ open: 1, awaiting: 1, all: 2 });
+        expect(await panel.counts(NOOR, { search: null, clock })).toEqual({ open: 0, handed: 0, cancelled: 0, awaiting: 0, abandoned: 0, all: 0 });
+        for (const bucket of ['open', 'awaiting', 'all'] as const) {
+          expect(await panel.list(NOOR, { bucket, search: null, clock, limit: 50, offset: 0 }), bucket).toEqual([]);
+        }
+        const bounds = { at: NOW, tomorrowStart: END_MONDAY, dayAfterStart: new Date(END_MONDAY.getTime() + DAY) };
+        expect(await panel.dueSummary(NOOR, bounds)).toMatchObject({ overdue: 0, today: 0, tomorrow: 0, later: 0 });
+        expect(await panel.details(NOOR, bare.orderNumber)).toBeNull();
+        expect(await panel.details(NOOR, waiting.orderNumber)).toBeNull();
+        // شاهد: هر دو با «همه» هستند.
+        expect((await panel.details(ALL_ORDERS, waiting.orderNumber))?.order.status).toBe('awaiting_payment');
+      });
+
+      it('هر نوشتن در محدودهٔ یک چاپخانه به سفارش چاپخانهٔ دیگر نمی‌رسد: «نیست»، و سفارش و کارش دست نمی‌خورند', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const panel = createPanelOrderStore(conn);
+        const theirs = await paidOrder(TEHRAN);
+        const NOOR = scopeOf(noor);
+        await conn.db.update(jobs).set({ status: 'failed', attempts: 3, lastError: 'file_missing: x', finishedAt: NOW }).where(eq(jobs.orderId, theirs.id));
+        const event = (action: string): AdminEventInput => ({ adminUserId: admin, action, targetType: 'order', targetId: theirs.id, at: NOW });
+        expect(await panel.requeue(NOOR, theirs.id, PREPARE_ORDER_JOB, event('orders.pdf_rebuild'))).toBe('not_found');
+        expect(
+          await panel.changeStatus(NOOR, {
+            orderId: theirs.id,
+            from: 'paid',
+            to: 'printing',
+            partnerId: first,
+            at: NOW,
+            adminUserId: admin,
+            note: null,
+            event: event('orders.status'),
+          }),
+        ).toEqual({ ok: false, current: null });
+        expect(
+          await panel.editRecipient(NOOR, {
+            orderId: theirs.id,
+            editable: ['paid', 'printing'],
+            recipient: { recipientName: 'نام دیگر', addressText: 'نشانی دیگر، پلاک 1', postalCode: null },
+            event: event('orders.recipient'),
+          }),
+        ).toEqual({ ok: false, current: null });
+        expect(
+          await panel.assignPartner(NOOR, { orderId: theirs.id, from: first, to: noor, at: NOW, adminUserId: admin, reason: 'بردن', event: event('orders.assign') }),
+        ).toEqual({ ok: false, reason: 'changed', current: null, partnerId: null });
+        const [row] = await conn.db.select().from(orders).where(eq(orders.id, theirs.id));
+        expect(row).toMatchObject({ status: 'paid', printPartnerId: first, recipientName: 'مریم کاظمی' });
+        expect((await conn.db.select().from(jobs).where(and(eq(jobs.orderId, theirs.id), eq(jobs.kind, PREPARE_ORDER_JOB))))[0]).toMatchObject({
+          status: 'failed',
+          attempts: 3,
+        });
+        expect(await conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, theirs.id))).toEqual([]);
+        // شاهد: همان کارها با «همه».
+        expect(await panel.requeue(ALL_ORDERS, theirs.id, PREPARE_ORDER_JOB, event('orders.pdf_rebuild'))).toBe('ok');
+        expect(
+          await panel.changeStatus(ALL_ORDERS, {
+            orderId: theirs.id,
+            from: 'paid',
+            to: 'printing',
+            partnerId: first,
+            at: NOW,
+            adminUserId: admin,
+            note: null,
+            event: event('orders.status'),
+          }),
+        ).toMatchObject({ ok: true });
+      });
+
+      it('سفارشی که همین حالا به چاپخانهٔ دیگری رفت: نوشتنی که پشت قفل ماند شرط محدوده را دوباره می‌سنجد و «نیست» می‌گیرد', async () => {
+        const noor = await partner('چاپ نور', MASHHAD);
+        const panel = createPanelOrderStore(conn);
+        const order = await paidOrder(MASHHAD);
+        expect(order.partnerId).toBe(noor);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let moved!: () => void;
+        const movedOnce = new Promise<void>((resolve) => (moved = resolve));
+        // جابه‌جایی مالک، باز نگه داشته: ردیف سفارش قفل است.
+        const move$ = conn.db.transaction(async (tx) => {
+          await tx.update(orders).set({ printPartnerId: first }).where(eq(orders.id, order.id));
+          await tx.insert(orderAssignments).values({
+            orderId: order.id,
+            fromPartnerId: noor,
+            toPartnerId: first,
+            at: NOW,
+            actor: 'admin',
+            adminUserId: admin,
+            reason: 'دستگاه خراب است',
+          });
+          moved();
+          await held;
+        });
+        await movedOnce;
+        let settled = false;
+        const start$ = panel
+          .changeStatus(scopeOf(noor), {
+            orderId: order.id,
+            from: 'paid',
+            to: 'printing',
+            partnerId: noor,
+            at: NOW,
+            adminUserId: admin,
+            note: null,
+            event: { adminUserId: admin, action: 'orders.status', targetType: 'order', targetId: order.id, at: NOW },
+          })
+          .finally(() => {
+            settled = true;
+          });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(settled).toBe(false);
+        } finally {
+          // شکست همین سنجش قفل را باز نگذارد تا تست‌های بعدی پشتش نمانند.
+          release();
+        }
+        await move$;
+        expect(await start$).toEqual({ ok: false, current: null });
+        expect((await conn.db.select().from(orders).where(eq(orders.id, order.id)))[0]).toMatchObject({ status: 'paid', printPartnerId: first });
+        // «دوباره بساز» هم: پس از جابه‌جایی، در محدودهٔ چاپخانهٔ قبلی نیست.
+        expect(
+          await panel.requeue(scopeOf(noor), order.id, PREPARE_TICKET_JOB, {
+            adminUserId: admin,
+            action: 'orders.ticket_rebuild',
+            targetType: 'order',
+            targetId: order.id,
+            at: NOW,
+          }),
+        ).toBe('not_found');
+      });
     });
   });
 

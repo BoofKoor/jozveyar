@@ -70,7 +70,17 @@ describe('فهرست «چاپخانه‌ها»', () => {
     deactivatedAt: null,
     createdAt: tehran('2026-09-20 10:00'),
     openOrders: 8,
+    users: [],
     ...over,
+  });
+
+  it('کاربرهای چاپخانه (۵٫۳)، همان طرح: «مشهد · 2 سفارش باز · کاربر: حسن نوری»؛ چند کاربر با «،»؛ غیرفعالی که کاربر فعال دارد نامشان را', () => {
+    expect(text(partnerMeta(partner({ cityName: 'مشهد', openOrders: 2, isDefault: false, users: ['حسن نوری'] })))).toBe(
+      'مشهد · 2 سفارش باز · کاربر: حسن نوری',
+    );
+    expect(text(partnerMeta(partner({ users: ['حسن نوری', 'رضا کریمی'] })))).toBe('تهران · 8 سفارش باز · کاربرها: حسن نوری، رضا کریمی');
+    const inactive = partner({ cityName: 'اصفهان', deactivatedAt: tehran('2026-09-23 10:00'), openOrders: 0, users: ['مینا'] });
+    expect(text(partnerMeta(inactive))).toBe('اصفهان · از 1405/07/01 سفارش تازه نمی‌گیرد · کاربر: مینا');
   });
 
   it('خط دوم، همان طرح: «تهران · 8 سفارش باز · کاربرها: همان مالک و متصدی»؛ غیرفعال «از 1405/07/01 سفارش تازه نمی‌گیرد»', () => {
@@ -87,6 +97,7 @@ describe('چاپخانهٔ سفارش', () => {
     id: 1,
     at: tehran('2026-10-03 14:05'),
     fromName: null,
+    toPartnerId: 'partner-noor',
     toName: 'چاپ نور',
     actor: 'system',
     adminName: null,

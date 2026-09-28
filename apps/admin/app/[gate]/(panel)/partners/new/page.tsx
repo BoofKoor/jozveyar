@@ -15,7 +15,7 @@ export default async function NewPartnerPage({ params }: { params: Promise<{ gat
   const { gate } = await params;
   requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} />;
+  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} partner={session.partner} />;
   const back = panelPath(gate, '/partners');
   return (
     <>

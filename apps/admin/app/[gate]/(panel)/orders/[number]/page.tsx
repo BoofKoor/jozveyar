@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 
 import { FILE_MARGIN_MS, isPaidStatus, type PanelOrderDetails, type PanelOrderItem } from '@jozveyar/db';
 import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
@@ -81,6 +82,10 @@ const PAGE_ERRORS = new Set([
 type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | null;
 const modeOf = (value: unknown): Mode =>
   value === 'cancel' || value === 'revert' || value === 'edit' || value === 'assign' ? value : null;
+
+/** هر فرم، با مجوزی که می‌خواهد؛ کاربر چاپخانه (۵٫۳) هیچ‌کدام را ندارد و به جای سفارش «این بخش برای چاپخانه باز نیست» می‌بیند. */
+const modeAllowed = (mode: Exclude<Mode, null>, view: OrderDetailsView): boolean =>
+  mode === 'cancel' ? view.canCancel : mode === 'revert' ? view.canRevert : mode === 'edit' ? view.canEditRecipient : view.canAssign;
 
 /** «(شنبه 11 مهر 14:06 تا 14:21)»: پایان، اگر همان روز است، فقط ساعت. */
 function span(from: Date, to: Date | null, now: Date): string {
@@ -344,7 +349,7 @@ const byWhom = (at: Date, now: Date, adminName: string | null | undefined) => `$
  * پرداخت‌نشده همان کارت‌های ۴٫۲.
  */
 function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDetailsView; stale: boolean; mode: Mode }) {
-  const { details, bounds, canStatus, canRevert, revertTo } = view;
+  const { details, bounds, canStatus, canCancel, canRevert, revertTo } = view;
   const { order } = details;
   const now = bounds.at;
   const self = panelPath(gate, `/orders/${order.orderNumber}`);
@@ -373,10 +378,10 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
     const ready = printReady(details);
     const partner = order.printPartnerId;
     let actions: React.ReactNode = null;
-    if (mode === 'cancel' && canStatus) actions = reasonForm('cancel', 'cancelled');
+    if (mode === 'cancel' && canCancel) actions = reasonForm('cancel', 'cancelled');
     else if (revert) actions = revert;
     else if (mode === 'assign' && view.canAssign) actions = null;
-    else if (canStatus || revertLink) {
+    else if (canStatus || canCancel || revertLink) {
       actions = (
         <div className="ad-status__actions">
           {canStatus && printing ? (
@@ -407,7 +412,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
               اول فایل چاپ ساخته شود
             </button>
           ) : null}
-          {canStatus ? <ModeLink href={`${self}?do=cancel`}>لغو سفارش</ModeLink> : null}
+          {canCancel ? <ModeLink href={`${self}?do=cancel`}>لغو سفارش</ModeLink> : null}
           {revertLink}
         </div>
       );
@@ -481,6 +486,8 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
             </div>
           </dl>
         ) : null}
+        {/* چاپخانه (۵٫۳) دلیل را نمی‌بیند، که برگشت پول را می‌گوید؛ کار بعدی‌اش همین است */}
+        {view.partnerView ? <p className="jy-note ad-gap">این سفارش چاپ نمی‌شود؛ اگر چاپش کرده‌ای، کنار بگذار.</p> : null}
         {onlyRevert}
       </section>
     );
@@ -578,7 +585,7 @@ export default async function OrderPage({
   const query = await searchParams;
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'orders.read')) return <NoAccess gate={gate} />;
+  if (!can(session, 'orders.read')) return <NoAccess gate={gate} partner={session.partner} />;
   const back = (
     <Link href={panelPath(gate, '/orders')} className="ad-back">
       <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
@@ -586,20 +593,11 @@ export default async function OrderPage({
     </Link>
   );
   const result = await orders.details(session, number);
-  if (!result.ok) {
-    return (
-      <>
-        {back}
-        <section className="jy-card ad-noaccess" aria-labelledby="t-missing">
-          <h1 id="t-missing" className="jy-card__title">
-            این سفارش پیدا نشد
-          </h1>
-          <p className="ad-lead">شماره را در فهرست سفارش‌ها جست‌وجو کن.</p>
-        </section>
-      </>
-    );
-  }
+  // سفارشی که نیست، و از ۵٫۳ سفارشی که بیرون از محدودهٔ این نشست است: هر دو همین ۴۰۴ (`not-found.tsx`)، پس وجودش لو نمی‌رود.
+  if (!result.ok) notFound();
   const view = result.value;
+  const mode = modeOf(query.do);
+  if (mode && view.partnerView && !modeAllowed(mode, view)) return <NoAccess gate={gate} partner={session.partner} />;
   const { details, bounds, canDownload, canEditRecipient } = view;
   const { order } = details;
   const now = bounds.at;
@@ -609,7 +607,6 @@ export default async function OrderPage({
   );
   const state = orderState(order.status, stale);
   const error = typeof query.e === 'string' && PAGE_ERRORS.has(query.e) ? query.e : null;
-  const mode = modeOf(query.do);
   const self = panelPath(gate, `/orders/${order.orderNumber}`);
   const breakdown = breakdownOf(order);
   const many = details.items.length > 1;
@@ -644,7 +641,8 @@ export default async function OrderPage({
               maxLength={REASON_MAX}
               back={self}
             />
-          ) : (
+          ) : view.partnerView ? null : (
+            // چاپخانه (۵٫۳) کارت چاپخانه ندارد: سفارش‌هایش همه مال خودش است (طرح).
             <PartnerCard gate={gate} view={view} />
           )}
         </aside>
@@ -774,57 +772,61 @@ export default async function OrderPage({
             </section>
           )}
 
-          <section className="jy-card" aria-labelledby="t-sum">
-            <div className="jy-card__head">
-              <h2 id="t-sum" className="jy-card__title">
-                مبلغ
-              </h2>
-              <span className="jy-card__meta">
-                تعرفهٔ نسخهٔ <span className="num">{order.priceListVersion}</span> · منجمد
-              </span>
-            </div>
-            <dl className="ad-sum">
-              {sumLines(details).map((line, i) => (
-                <div key={i}>
-                  <dt>
-                    <Segments segs={line.label} />
-                  </dt>
-                  <dd className="num">{formatTomans(line.rials, false)}</dd>
+          {view.canMoney ? (
+            <>
+              <section className="jy-card" aria-labelledby="t-sum">
+                <div className="jy-card__head">
+                  <h2 id="t-sum" className="jy-card__title">
+                    مبلغ
+                  </h2>
+                  <span className="jy-card__meta">
+                    تعرفهٔ نسخهٔ <span className="num">{order.priceListVersion}</span> · منجمد
+                  </span>
                 </div>
-              ))}
-            </dl>
-            <div className="ad-sum__total">
-              <span>{isPaidStatus(order.status) ? 'پرداخت شد' : 'مبلغ سفارش'}</span>
-              <b>
-                <span className="num">{formatTomans(order.totalRials, false)}</span> تومان
-              </b>
-            </div>
-            <p className="ad-hint ad-gap">قیمت سفارش ثبت‌شده هیچ‌وقت دوباره حساب نمی‌شود، حتی اگر تعرفه عوض شود.</p>
-          </section>
+                <dl className="ad-sum">
+                  {sumLines(details).map((line, i) => (
+                    <div key={i}>
+                      <dt>
+                        <Segments segs={line.label} />
+                      </dt>
+                      <dd className="num">{formatTomans(line.rials, false)}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="ad-sum__total">
+                  <span>{isPaidStatus(order.status) ? 'پرداخت شد' : 'مبلغ سفارش'}</span>
+                  <b>
+                    <span className="num">{formatTomans(order.totalRials, false)}</span> تومان
+                  </b>
+                </div>
+                <p className="ad-hint ad-gap">قیمت سفارش ثبت‌شده هیچ‌وقت دوباره حساب نمی‌شود، حتی اگر تعرفه عوض شود.</p>
+              </section>
 
-          <section className="jy-card" aria-labelledby="t-pay">
-            <h2 id="t-pay" className="jy-card__title">
-              پرداخت‌ها
-            </h2>
-            {details.payments.length === 0 ? (
-              <p className="ad-hint ad-gap">مشتری هنوز به درگاه نرفته است.</p>
-            ) : (
-              <ol className="ad-pay">
-                {details.payments.map((payment) => {
-                  const view = paymentView(payment, now);
-                  return (
-                    <li key={payment.id} data-payment={view.kind}>
-                      <PaymentBadge kind={view.kind} />
-                      <span>{whenText(view.at, now)}</span>
-                      <span className="ad-pay__meta">
-                        <Segments segs={view.meta} />
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
+              <section className="jy-card" aria-labelledby="t-pay">
+                <h2 id="t-pay" className="jy-card__title">
+                  پرداخت‌ها
+                </h2>
+                {details.payments.length === 0 ? (
+                  <p className="ad-hint ad-gap">مشتری هنوز به درگاه نرفته است.</p>
+                ) : (
+                  <ol className="ad-pay">
+                    {details.payments.map((payment) => {
+                      const view = paymentView(payment, now);
+                      return (
+                        <li key={payment.id} data-payment={view.kind}>
+                          <PaymentBadge kind={view.kind} />
+                          <span>{whenText(view.at, now)}</span>
+                          <span className="ad-pay__meta">
+                            <Segments segs={view.meta} />
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </section>
+            </>
+          ) : null}
 
           <section className="jy-card" aria-labelledby="t-log">
             <h2 id="t-log" className="jy-card__title">

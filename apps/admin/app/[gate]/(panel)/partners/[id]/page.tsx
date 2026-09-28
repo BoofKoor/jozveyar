@@ -28,7 +28,7 @@ export default async function PartnerPage({
   const query = await searchParams;
   const { partners } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} />;
+  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} partner={session.partner} />;
   const back = panelPath(gate, '/partners');
   const backLink = (
     <Link href={back} className="ad-back">

@@ -73,6 +73,13 @@ export const MESSAGES: Record<AdminErrorCode, string> = {
 export const messageOf = (code: string | undefined) =>
   code && code in MESSAGES ? MESSAGES[code as AdminErrorCode] : MESSAGES.unavailable;
 
-export const ROLE_NAMES: Record<string, string> = { owner: 'مالک', operator: 'متصدی' };
+export const ROLE_NAMES: Record<string, string> = { owner: 'مالک', operator: 'متصدی', print_partner: 'چاپخانه' };
 
 export const roleName = (roles: readonly string[]) => roles.map((role) => ROLE_NAMES[role] ?? role).join('، ');
+
+/**
+ * نقش در سربرگ و فهرست ادمین‌ها: کاربر چاپخانه نام چاپخانه‌اش را دارد (طرح: «حسن · چاپ نور» در سربرگ، «چاپخانه · چاپ نور» در
+ * فهرست)، بقیه نام نقش.
+ */
+export const roleLabel = (roles: readonly string[], partner: { name: string } | null, { withRole = false } = {}) =>
+  partner ? (withRole ? `${ROLE_NAMES.print_partner} · ${partner.name}` : partner.name) : roleName(roles);

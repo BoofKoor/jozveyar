@@ -13,6 +13,7 @@ import type { AdminEventView } from '@jozveyar/db';
 import { byDay, EVENT_KINDS, eventLines } from './events';
 import { dayHeading, whenText } from './format';
 import { gateOf, panelPath } from './gate';
+import { roleLabel } from './messages';
 import { contentSecurityPolicy, originOf, sameOrigin } from './security';
 import { adminConfig, configProblems, describeConfig } from './server/config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './server/cookie';
@@ -196,6 +197,23 @@ describe('رویدادها', () => {
     ]);
   });
 
+  it('پیوند ثبت کاربر چاپخانه (۵٫۳) با نام چاپخانه، همان طرح: «(چاپخانه، چاپ نور)»؛ کار خودش با نام خودش', () => {
+    const lines = eventLines([
+      event('admins.invite', {
+        detail: { username: 'hasan.noor', role: 'print_partner', partner: { id: 'p2', name: 'چاپ نور' }, reset: false },
+      }),
+      event('orders.status', {
+        username: 'hasan.noor',
+        displayName: 'حسن نوری',
+        detail: { orderNumber: 10027, from: 'paid', to: 'printing' },
+      }),
+    ]);
+    expect(lines.map((l) => [l.who, l.text])).toEqual([
+      ['سارا', ['پیوند ثبت برای ', { ltr: 'hasan.noor' }, ' (چاپخانه، چاپ نور)', ' ساخته شد']],
+      ['حسن نوری', ['سفارش ', { ltr: '10027' }, ': در صف چاپ ← در حال چاپ']],
+    ]);
+  });
+
   it('کار سفارش‌ها (۴٫۲، و از ۵٫۱ فایل چاپ و برگه) با شمارهٔ سفارش، جدا از جملهٔ فارسی؛ جزوهٔ دوم و جلد هم گفته می‌شوند', () => {
     const lines = eventLines([
       event('orders.pdf_download', { targetType: 'order', detail: { orderNumber: 10027, item: 1 } }),
@@ -308,6 +326,16 @@ describe('رویدادها', () => {
       ['سفارش ', { ltr: '10027' }, ' از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه خراب است'],
       ['سفارش ', { ltr: '10037' }, ' به «چاپ نور» سپرده شد؛ تازه آمد'],
     ]);
+  });
+});
+
+describe('نقش در سربرگ و فهرست ادمین‌ها', () => {
+  it('کاربر چاپخانه (۵٫۳) نام چاپخانه‌اش را دارد، همان طرح: «حسن · چاپ نور» و «چاپخانه · چاپ نور»؛ بقیه نام نقش', () => {
+    const noor = { name: 'چاپ نور' };
+    expect(roleLabel(['print_partner'], noor)).toBe('چاپ نور');
+    expect(roleLabel(['print_partner'], noor, { withRole: true })).toBe('چاپخانه · چاپ نور');
+    expect(roleLabel(['owner'], null)).toBe('مالک');
+    expect(roleLabel(['operator'], null, { withRole: true })).toBe('متصدی');
   });
 });
 

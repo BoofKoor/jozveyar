@@ -36,11 +36,11 @@ export default async function ActivateTariffPage({
   const query = await searchParams;
   const { tariff } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'tariff.edit')) return <NoAccess gate={gate} />;
+  if (!can(session, 'tariff.edit')) return <NoAccess gate={gate} partner={session.partner} />;
   const home = panelPath(gate, '/tariff');
   const result = await tariff.activation(session, param);
   if (!result.ok) {
-    if (result.error === 'forbidden') return <NoAccess gate={gate} />;
+    if (result.error === 'forbidden') return <NoAccess gate={gate} partner={session.partner} />;
     // همین حالا فعال است (دو کلیک، یا برگشت مرورگر پس از فعال شدن): صفحهٔ تعرفه همان را نشان می‌دهد.
     if (result.error === 'already_active') redirect(home);
     return (

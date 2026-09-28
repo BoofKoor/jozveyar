@@ -39,6 +39,7 @@ function session(permissions: string[]): AdminSession {
     roles: ['owner'],
     permissions,
     expiresAt: new Date(NOW.getTime() + 3_600_000),
+    partner: null,
   };
 }
 const OWNER = session(['settings.edit', 'secrets.edit', 'tariff.read']);

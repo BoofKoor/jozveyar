@@ -77,9 +77,9 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   const query = await searchParams;
   const { settings } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} />;
+  if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await settings.overview(session);
-  if (!result.ok) return <NoAccess gate={gate} />;
+  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
   const { now, values, keys } = result.value;
 
   const home = panelPath(gate, '/settings');

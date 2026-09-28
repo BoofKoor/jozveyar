@@ -6,8 +6,13 @@
  * فقط در «در صف چاپ» و از چاپخانه‌ای که ادمین دید؛ و «شروع چاپ» فقط با چاپخانه، آن هم از همان که ادمین دید.
  *
  * - **مجوز در سرور** (ADR-038)، نه فقط پنهان کردن دکمه: دیدن با `orders.read`، و دانلود و «دوباره بساز» با
- *   `files.download` (کسی که فایل را می‌گیرد، ساختن دوباره‌اش را هم می‌تواند بخواهد). وضعیت با `orders.status`،
- *   برگرداندن با `orders.revert` (فقط مالک)، و گیرنده با `orders.address`.
+ *   `files.download` (کسی که فایل را می‌گیرد، ساختن دوباره‌اش را هم می‌تواند بخواهد). وضعیت با `orders.status`، لغو از ۵٫۳
+ *   با `orders.cancel`، برگرداندن با `orders.revert` (فقط مالک)، گیرنده با `orders.address`، و مبلغ و پرداخت‌ها از ۵٫۳ با
+ *   `orders.money`: بی آن، جزئیات بی مبلغ از سرویس بیرون می‌آید (`withoutMoney`)، نه فقط پنهان در صفحه.
+ * - **محدوده** (برش ۵٫۳، ADR-042): هر فراخوانی ذخیره‌گاه محدودهٔ همین نشست را دارد (`scopeOf`)؛ کاربر چاپخانه فقط سفارش‌هایی
+ *   را که امروز به چاپخانهٔ خودش سپرده شده‌اند می‌بیند و می‌نویسد. بیرون از محدوده ۴۰۴ است (`order_not_found`)، نه ۴۰۳:
+ *   همان پاسخ شماره‌ای که نیست، پس وجودش لو نمی‌رود. کاری که نقش ندارد پیش از هر خواندنی ۴۰۳ است، برای هر سفارشی. از چشم
+ *   چاپخانه یادداشت‌های درونی (دلیل لغو و برگرداندن و جابه‌جایی) و چاپخانه‌های دیگر نیستند (`partnerView`).
  * - **هر کار از وضعیتی که ادمین دید** (`from` فرم): اگر سفارش همین حالا جای دیگری رفته، کار انجام نمی‌شود و صفحه
  *   وضعیت تازه را نشان می‌دهد؛ دو کلیک هم‌زمان یک بار، و دو برگرداندن هم‌زمان یک قدم، نه دو قدم.
  * - **روز تهران:** مرزهای پیشخوان (آغاز فردا و پس‌فردا) از `tehranDayStart`؛ پایگاه داده فقط مقایسه می‌کند.
@@ -28,6 +33,7 @@ import {
   isPaidStatus,
   readSetting,
   type AdminEventInput,
+  type AdminPermission,
   type OrderStatus,
   type PanelAlerts,
   type PanelBucket,
@@ -46,13 +52,16 @@ import {
   REASON_MAX,
   RECIPIENT_EDITABLE,
   bucketOf,
+  bucketsOf,
   dayBounds,
   dueTiles,
   isOpen,
   isStatusAction,
+  linesWithoutMoney,
   orderNumberOf,
   pageOf,
   parseSearch,
+  partnerView,
   pdfFileName,
   printReady,
   printView,
@@ -61,11 +70,12 @@ import {
   ticketView,
   transitionOf,
   volumeFileName,
+  withoutMoney,
   type DayBounds,
   type DueTile,
   type StatusAction,
 } from '../orders';
-import { can, ipHashOf, type AdminSession } from './auth';
+import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 
 /** ردیف‌های هر صفحهٔ فهرست. */
@@ -100,6 +110,8 @@ export interface DashboardView {
 
 export interface OrdersListView {
   bounds: DayBounds;
+  /** چیپ‌های این نشست، به ترتیب طرح: کاربر چاپخانه «در انتظار» و «رهاشده» ندارد (۵٫۳). */
+  buckets: readonly PanelBucket[];
   bucket: PanelBucket;
   /** متن کادر جست‌وجو، همان که تایپ شد. */
   q: string;
@@ -114,8 +126,10 @@ export interface OrderDetailsView {
   bounds: DayBounds;
   details: PanelOrderDetails;
   canDownload: boolean;
-  /** «شروع چاپ»، «تحویل پست شد» و لغو. */
+  /** «شروع چاپ» و «تحویل پست شد». */
   canStatus: boolean;
+  /** لغو (از ۵٫۳ مجوز خودش، `orders.cancel`). */
+  canCancel: boolean;
   /** برگرداندن یک قدم (فقط مالک)، و وضعیتی که سفارش به آن برمی‌گردد؛ null اگر از وضعیت امروز ممکن نیست. */
   canRevert: boolean;
   revertTo: OrderStatus | null;
@@ -125,6 +139,10 @@ export interface OrderDetailsView {
   canAssign: boolean;
   /** چاپخانه‌های فعالی که سفارش به آن‌ها می‌رود (جز چاپخانهٔ امروزش)؛ فقط با `canAssign`. */
   partnerOptions: PanelPartnerOption[];
+  /** مبلغ و پرداخت‌ها (۵٫۳، `orders.money`)؛ بی آن، `details` بی مبلغ است. */
+  canMoney: boolean;
+  /** از چشم چاپخانه (۵٫۳): بی کارت چاپخانه و بی یادداشت‌های درونی؛ لغوشده «چاپ نمی‌شود» می‌گوید. */
+  partnerView: boolean;
 }
 
 /** فرم لغو یا برگرداندن: کار، وضعیتی که ادمین دید، و دلیل. «شروع چاپ» چاپخانه‌ای را هم دارد که ادمین دید (۵٫۲). */
@@ -150,6 +168,13 @@ export interface RecipientForm {
 }
 
 const STATUSES: readonly OrderStatus[] = ['awaiting_payment', 'paid', 'expired', 'printing', 'handed_to_post', 'cancelled'];
+/** مجوز هر کار وضعیت: رو به جلو `orders.status`، لغو از ۵٫۳ `orders.cancel` (چاپخانه نه)، برگرداندن `orders.revert` (مالک). */
+const ACTION_PERMISSION: Record<StatusAction, AdminPermission> = {
+  start_print: 'orders.status',
+  handed_to_post: 'orders.status',
+  cancel: 'orders.cancel',
+  revert: 'orders.revert',
+};
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** شناسهٔ چاپخانه از فرم؛ خالی یا بدشکل null. */
@@ -169,22 +194,23 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
   return {
     async dashboard(session: AdminSession): Promise<Result<DashboardView>> {
       if (!can(session, 'orders.read')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
       const at = now();
       const bounds = dayBounds(at);
       const clock = clockOf(at);
       const [summary, alerts, queue, slaDays, stats] = await Promise.all([
-        store.dueSummary({ at, tomorrowStart: bounds.tomorrowStart, dayAfterStart: bounds.dayAfterStart }),
-        store.alerts(clock),
-        store.list({ bucket: 'open', search: null, clock, limit: QUEUE_SIZE, offset: 0 }),
+        store.dueSummary(scope, { at, tomorrowStart: bounds.tomorrowStart, dayAfterStart: bounds.dayAfterStart }),
+        store.alerts(scope, clock),
+        store.list(scope, { bucket: 'open', search: null, clock, limit: QUEUE_SIZE, offset: 0 }),
         readSetting((key) => store.setting(key), 'order.sla_days', log),
-        store.stats({ since: new Date(at.getTime() - STATS_WINDOW_MS), at }),
+        store.stats(scope, { since: new Date(at.getTime() - STATS_WINDOW_MS), at }),
       ]);
       return ok({
         bounds,
         tiles: dueTiles(summary, bounds),
         alerts,
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
-        queue,
+        queue: can(session, 'orders.money') ? queue : linesWithoutMoney(queue),
         slaDays,
         stats,
       });
@@ -193,40 +219,60 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     /** فهرست: چیپ (`status`)، جست‌وجو (`q`) و صفحه (`page`)، همه از نشانی و همه سنجیده. */
     async list(session: AdminSession, params: { status?: string; q?: string; page?: string }): Promise<Result<OrdersListView>> {
       if (!can(session, 'orders.read')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
       const at = now();
       const clock = clockOf(at);
       const q = (params.q ?? '').slice(0, 100);
       const search = parseSearch(q);
-      const bucket = bucketOf(params.status, search !== null);
-      const counts = await store.counts({ search, clock });
+      const buckets = bucketsOf(scope);
+      const bucket = bucketOf(params.status, search !== null, buckets);
+      const counts = await store.counts(scope, { search, clock });
       const pages = Math.max(1, Math.ceil(counts[bucket] / ORDERS_PAGE));
       const page = Math.min(pageOf(params.page), pages);
-      const rows = await store.list({ bucket, search, clock, limit: ORDERS_PAGE, offset: (page - 1) * ORDERS_PAGE });
-      return ok({ bounds: dayBounds(at), bucket, q: search ? q.trim() : '', search, counts, page, pages, rows });
+      const rows = await store.list(scope, { bucket, search, clock, limit: ORDERS_PAGE, offset: (page - 1) * ORDERS_PAGE });
+      return ok({
+        bounds: dayBounds(at),
+        buckets,
+        bucket,
+        q: search ? q.trim() : '',
+        search,
+        counts,
+        page,
+        pages,
+        rows: can(session, 'orders.money') ? rows : linesWithoutMoney(rows),
+      });
     },
 
     async details(session: AdminSession, numberParam: string): Promise<Result<OrderDetailsView>> {
       if (!can(session, 'orders.read')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
       const orderNumber = orderNumberOf(numberParam);
-      const details = orderNumber === null ? null : await store.details(orderNumber);
-      if (!details) return fail(404, 'order_not_found');
+      const found = orderNumber === null ? null : await store.details(scope, orderNumber);
+      if (!found) return fail(404, 'order_not_found');
+      const canMoney = can(session, 'orders.money');
+      // بی مبلغ و از چشم چاپخانه همین‌جا، پیش از صفحه: آنچه صفحه نمی‌گیرد، هیچ‌جا نشان داده نمی‌شود.
+      const unpriced = canMoney ? found : withoutMoney(found);
+      const details = scope.kind === 'partner' ? partnerView(unpriced, scope.partnerId) : unpriced;
       const { status } = details.order;
       // سفارشی که فایل‌هایش پاک شد به صف چاپ برنمی‌گردد (ADR-044).
       const revertTo = details.order.filesDeletedAt ? null : transitionOf('revert', status, details.statusEvents);
       const partnerOptions =
         can(session, 'orders.assign') && status === 'paid'
-          ? (await store.partnerOptions()).filter((partner) => partner.id !== details.order.printPartnerId)
+          ? (await store.partnerOptions(scope)).filter((partner) => partner.id !== details.order.printPartnerId)
           : [];
       return ok({
         bounds: dayBounds(now()),
         details,
         canDownload: can(session, 'files.download'),
         canStatus: can(session, 'orders.status'),
+        canCancel: can(session, 'orders.cancel'),
         canRevert: can(session, 'orders.revert') && revertTo !== null,
         revertTo,
         canEditRecipient: can(session, 'orders.address') && (RECIPIENT_EDITABLE as readonly OrderStatus[]).includes(status),
         canAssign: partnerOptions.length > 0,
         partnerOptions,
+        canMoney,
+        partnerView: scope.kind === 'partner',
       });
     },
 
@@ -238,11 +284,12 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     async changeStatus(session: AdminSession, numberParam: string, form: StatusForm, ip: string): Promise<Result<{ status: OrderStatus }>> {
       const action: StatusAction | null = isStatusAction(form.action) ? form.action : null;
       if (!action) return fail(400, 'invalid_transition');
-      if (!can(session, action === 'revert' ? 'orders.revert' : 'orders.status')) return fail(403, 'forbidden');
+      if (!can(session, ACTION_PERMISSION[action])) return fail(403, 'forbidden');
       const from = STATUSES.find((status) => status === form.from);
       if (!from) return fail(400, 'invalid_transition');
+      const scope = scopeOf(session);
       const orderNumber = orderNumberOf(numberParam);
-      const details = orderNumber === null ? null : await store.details(orderNumber);
+      const details = orderNumber === null ? null : await store.details(scope, orderNumber);
       if (!details) return fail(404, 'order_not_found');
       const to = transitionOf(action, from, details.statusEvents);
       if (!to) return fail(400, 'invalid_transition');
@@ -263,7 +310,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (action === 'start_print' && !printReady(details)) return fail(409, 'print_needs_pdf');
 
       const at = now();
-      const written = await store.changeStatus({
+      const written = await store.changeStatus(scope, {
         orderId: details.order.id,
         from,
         to,
@@ -282,7 +329,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         },
       });
       if (written.ok) return ok({ status: to });
-      // هم‌زمان: کارگر همین حالا فایل‌ها را پاک کرد، کلیک دیگری همین کار را کرد، یا سفارش را جای دیگری برد.
+      // هم‌زمان: سفارش همین حالا به چاپخانهٔ دیگری رفت (دیگر در محدوده نیست)، کارگر فایل‌ها را پاک کرد، کلیک دیگری همین کار را
+      // کرد، یا سفارش را جای دیگری برد.
+      if (written.current === null) return fail(404, 'order_not_found');
       if (written.filesDeleted) return fail(409, 'files_deleted');
       if (written.partnerChanged) return fail(409, 'order_partner_changed');
       return written.current === to ? ok({ status: to }) : fail(409, 'status_changed', { current: written.current });
@@ -295,8 +344,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
      */
     async assign(session: AdminSession, numberParam: string, form: AssignForm, ip: string): Promise<Result<{ to: string }>> {
       if (!can(session, 'orders.assign')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
       const orderNumber = orderNumberOf(numberParam);
-      const details = orderNumber === null ? null : await store.details(orderNumber);
+      const details = orderNumber === null ? null : await store.details(scope, orderNumber);
       if (!details) return fail(404, 'order_not_found');
       const from = partnerIdOf(form.from);
       const to = partnerIdOf(form.to);
@@ -308,7 +358,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (reason.length > REASON_MAX) return fail(400, 'reason_too_long');
 
       const at = now();
-      const written = await store.assignPartner({
+      const written = await store.assignPartner(scope, {
         orderId: details.order.id,
         from,
         to,
@@ -327,6 +377,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       });
       if (written.ok) return ok({ to });
       if (written.reason === 'partner_inactive') return fail(409, 'partner_inactive');
+      if (written.current === null) return fail(404, 'order_not_found');
       // دو کلیک هم‌زمان به یک مقصد: دومی همان را می‌بیند که خواست.
       if (written.current === 'paid' && written.partnerId === to) return ok({ to });
       return written.current === 'paid' ? fail(409, 'order_partner_changed') : fail(409, 'assign_closed', { current: written.current });
@@ -343,8 +394,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       ip: string,
     ): Promise<Result<{ changed: string[] }>> {
       if (!can(session, 'orders.address')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
       const orderNumber = orderNumberOf(numberParam);
-      const details = orderNumber === null ? null : await store.details(orderNumber);
+      const details = orderNumber === null ? null : await store.details(scope, orderNumber);
       if (!details) return fail(404, 'order_not_found');
       const checked = checkRecipient({
         name: text(form.name),
@@ -353,7 +405,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       });
       if (checked.fields.length > 0) return fail(400, 'invalid_recipient', { fields: checked.fields satisfies RecipientField[] });
       const at = now();
-      const written = await store.editRecipient({
+      const written = await store.editRecipient(scope, {
         orderId: details.order.id,
         editable: RECIPIENT_EDITABLE,
         recipient: { recipientName: checked.value.name, addressText: checked.value.addressText, postalCode: checked.value.postalCode },
@@ -378,8 +430,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
      */
     async rebuild(session: AdminSession, numberParam: string, kind: 'print' | 'ticket', ip: string): Promise<Result<true>> {
       if (!can(session, 'files.download')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
       const orderNumber = orderNumberOf(numberParam);
-      const details = orderNumber === null ? null : await store.details(orderNumber);
+      const details = orderNumber === null ? null : await store.details(scope, orderNumber);
       // فقط سفارش باز: لغوشده یا رسیده به پست دیگر جزوه‌ای برای چاپ ندارد.
       if (!details || !isOpen(details.order.status)) return fail(404, 'order_not_found');
       const at = now();
@@ -394,12 +447,14 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       });
       if (kind === 'ticket') {
         if (ticketView(details).kind !== 'failed') return fail(409, 'ticket_not_failed');
-        const done = await store.requeue(details.order.id, PREPARE_TICKET_JOB, event('orders.ticket_rebuild'));
+        const done = await store.requeue(scope, details.order.id, PREPARE_TICKET_JOB, event('orders.ticket_rebuild'));
+        if (done === 'not_found') return fail(404, 'order_not_found');
         return done === 'ok' ? ok(true) : fail(409, 'ticket_not_failed');
       }
       if (!details.items.some((item) => printView(details, item, at).kind === 'failed')) return fail(409, 'pdf_not_failed');
       if (!rebuildable(details.items, at)) return fail(410, 'files_gone');
-      const done = await store.requeue(details.order.id, PREPARE_ORDER_JOB, event('orders.pdf_rebuild'));
+      const done = await store.requeue(scope, details.order.id, PREPARE_ORDER_JOB, event('orders.pdf_rebuild'));
+      if (done === 'not_found') return fail(404, 'order_not_found');
       return done === 'ok' ? ok(true) : fail(409, 'pdf_not_failed');
     },
 
@@ -411,7 +466,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (!can(session, 'files.download')) return fail(403, 'forbidden');
       const orderNumber = orderNumberOf(numberParam);
       const itemSeq = smallOf(itemParam);
-      const file = orderNumber === null || itemSeq === null ? null : await store.jozveFile(orderNumber, itemSeq);
+      const file = orderNumber === null || itemSeq === null ? null : await store.jozveFile(scopeOf(session), orderNumber, itemSeq);
       if (!file) return fail(404, 'order_not_found');
       if (file.filesDeletedAt) return fail(410, 'files_deleted');
       // PDF ساخته‌شده در هر وضعیت پس از پرداخت دانلودشدنی است، حتی لغوشده (سابقه).
@@ -436,7 +491,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const itemSeq = smallOf(itemParam);
       const volume = smallOf(volumeParam);
       if (orderNumber === null || itemSeq === null || volume === null) return fail(404, 'order_not_found');
-      const file = await store.printVolume(orderNumber, itemSeq, volume);
+      const file = await store.printVolume(scopeOf(session), orderNumber, itemSeq, volume);
       if (!file) return fail(404, 'order_not_found');
       if (file.filesDeletedAt) return fail(410, 'files_deleted');
       if (!isPaidStatus(file.status) || !file.key) return fail(409, 'pdf_not_ready');
@@ -459,7 +514,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     ): Promise<Result<DownloadFile>> {
       if (!can(session, 'files.download')) return fail(403, 'forbidden');
       const orderNumber = orderNumberOf(numberParam);
-      const file = orderNumber === null ? null : await store.ticketFile(orderNumber);
+      const file = orderNumber === null ? null : await store.ticketFile(scopeOf(session), orderNumber);
       if (!file) return fail(404, 'order_not_found');
       if (file.filesDeletedAt) return fail(410, 'files_deleted');
       if (!isPaidStatus(file.status) || !file.key || !file.previewKey || !file.fresh) return fail(409, 'ticket_not_ready');

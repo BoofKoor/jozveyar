@@ -9,17 +9,19 @@ import { createHmac } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import type {
-  AdminEventInput,
-  OrderStatus,
-  PanelDueSummary,
-  PanelJozveFile,
-  PanelOrderDetails,
-  PanelOrderStore,
-  PanelStatusChange,
-  PanelStatusEvent,
-  PanelTicketFile,
-  PanelVolumeFile,
+import {
+  ALL_ORDERS,
+  type AdminEventInput,
+  type OrderStatus,
+  type PanelDueSummary,
+  type PanelJozveFile,
+  type PanelOrderDetails,
+  type PanelOrderStore,
+  type PanelScope,
+  type PanelStatusChange,
+  type PanelStatusEvent,
+  type PanelTicketFile,
+  type PanelVolumeFile,
 } from '@jozveyar/db';
 import { MemoryDriver } from '@jozveyar/storage';
 
@@ -31,15 +33,16 @@ const NOW = new Date('2026-10-05T07:50:00Z');
 const MINUTE = 60_000;
 const SECRET = 's'.repeat(64);
 
-function session(permissions: string[] = ['orders.read', 'files.download']): AdminSession {
+function session(permissions: string[] = ['orders.read', 'files.download'], partner: AdminSession['partner'] = null): AdminSession {
   return {
     sessionId: 's1',
     userId: 'admin-1',
     username: 'ali',
     displayName: 'علی',
-    roles: ['operator'],
+    roles: [partner ? 'print_partner' : 'operator'],
     permissions,
     expiresAt: new Date(NOW.getTime() + 3_600_000),
+    partner,
   };
 }
 
@@ -49,14 +52,21 @@ const PARTNER_B = '22222222-2222-4222-8222-222222222222';
 
 const SUMMARY: PanelDueSummary = { overdue: 1, today: 3, tomorrow: 4, later: 2, overdueRange: null, laterRange: null };
 
-/** پایگاه دادهٔ ساختگی: هر فراخوانی ثبت می‌شود و پاسخ‌ها از پیش گذاشته‌اند. */
+/** یک فراخوانی ذخیره‌گاه ساختگی: نام، آرگومان‌ها جز محدوده، و محدوده (برش ۵٫۳) جدا، تا هر تست هر دو را بسنجد. */
+interface Call {
+  method: string;
+  args: unknown[];
+  scope?: PanelScope;
+}
+
+/** پایگاه دادهٔ ساختگی: هر فراخوانی با محدوده‌اش ثبت می‌شود و پاسخ‌ها از پیش گذاشته‌اند. */
 function fakeStore(over: Partial<PanelOrderStore> = {}) {
-  const calls: { method: string; args: unknown[] }[] = [];
+  const calls: Call[] = [];
   const events: AdminEventInput[] = [];
   const record =
     <T>(method: string, value: T) =>
-    async (...args: unknown[]) => {
-      calls.push({ method, args });
+    async (scope: PanelScope, ...args: unknown[]) => {
+      calls.push({ method, args, scope });
       return value;
     };
   const store: PanelOrderStore = {
@@ -69,31 +79,35 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     jozveFile: record('jozveFile', null),
     printVolume: record('printVolume', null),
     ticketFile: record('ticketFile', null),
-    requeue: async (orderId, kind, event) => {
-      calls.push({ method: 'requeue', args: [orderId, kind, event] });
+    requeue: async (scope, orderId, kind, event) => {
+      calls.push({ method: 'requeue', args: [orderId, kind, event], scope });
       events.push(event);
       return 'ok';
     },
     logEvent: async (event) => {
       events.push(event);
     },
-    changeStatus: async (change) => {
-      calls.push({ method: 'changeStatus', args: [change] });
+    changeStatus: async (scope, change) => {
+      calls.push({ method: 'changeStatus', args: [change], scope });
       events.push(change.event);
       return { ok: true, order: { status: change.to } as never };
     },
-    editRecipient: async (input) => {
-      calls.push({ method: 'editRecipient', args: [input] });
+    editRecipient: async (scope, input) => {
+      calls.push({ method: 'editRecipient', args: [input], scope });
       events.push(input.event);
       return { ok: true, order: {} as never, changed: ['addressText'] };
     },
-    setting: record('setting', undefined),
+    // تنظیم سفارش نمی‌خواند، پس محدوده ندارد.
+    setting: async (...args) => {
+      calls.push({ method: 'setting', args });
+      return undefined;
+    },
     partnerOptions: record('partnerOptions', [
       { id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 8 },
       { id: PARTNER_B, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, openOrders: 2 },
     ]),
-    assignPartner: async (input) => {
-      calls.push({ method: 'assignPartner', args: [input] });
+    assignPartner: async (scope, input) => {
+      calls.push({ method: 'assignPartner', args: [input], scope });
       events.push(input.event);
       return { ok: true, order: { printPartnerId: input.to } as never };
     },
@@ -289,7 +303,10 @@ describe('دوباره بساز', () => {
 
   it('برگه: فقط وقتی «ساخته نشد»، با کار برگه و رویداد خودش؛ برگهٔ تازه یا در حال به‌روز شدن نه', async () => {
     const run = async (details: PanelOrderDetails, rebuilt: 'ok' | 'busy' = 'ok') => {
-      const { orders, events, calls } = service({ details: async () => details, requeue: async (...args) => (calls.push({ method: 'requeue', args }), rebuilt) });
+      const { orders, events, calls } = service({
+        details: async () => details,
+        requeue: async (scope, ...args) => (calls.push({ method: 'requeue', args, scope }), rebuilt),
+      });
       const result = await orders.rebuild(session(), '10031', 'ticket', '1.2.3.4');
       return [result.ok ? 'ok' : result.error, calls.filter((c) => c.method === 'requeue').map((c) => [c.args[1], (c.args[2] as AdminEventInput).action]), events.length];
     };
@@ -318,9 +335,9 @@ describe('دانلود PDF جزوه', () => {
   it('از استوریج داخلی، جریانی، با نام jozve-10027-1-asli.pdf (PDF اصلی، کنار فایل چاپ)؛ رویداد با کننده، سفارش و قلم', async () => {
     const storage = new MemoryDriver();
     storage.putObject('orders/10027/jozve-1.pdf', new TextEncoder().encode('%PDF-1.4 jozve'));
-    const { orders, events, calls } = service({ jozveFile: async (...args) => (calls.push({ method: 'jozveFile', args }), READY) }, storage);
+    const { orders, events, calls } = service({ jozveFile: async (scope, ...args) => (calls.push({ method: 'jozveFile', args, scope }), READY) }, storage);
     const result = await orders.download(session(), '10027', '1', '1.2.3.4');
-    expect(calls).toEqual([{ method: 'jozveFile', args: [10027, 1] }]);
+    expect(calls).toEqual([{ method: 'jozveFile', args: [10027, 1], scope: ALL_ORDERS }]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toMatchObject({ sizeBytes: 14, fileName: 'jozve-10027-1-asli.pdf' });
@@ -390,13 +407,19 @@ function orderDetails(
 ) {
   // چاپخانهٔ سفارش (۵٫۲): پیش‌فرض همان چاپخانهٔ جزوه‌یار، مثل تخصیص در پرداخت.
   const partner = over.partner === undefined ? PARTNER_A : over.partner;
+  const named = partner === PARTNER_B ? { name: 'چاپ نور', cityName: 'مشهد', provinceName: 'خراسان رضوی', isDefault: false } : null;
   return {
-    partner: partner ? { id: partner, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', provinceName: 'تهران', active: true, isDefault: true } : null,
+    partner: partner
+      ? { id: partner, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', provinceName: 'تهران', active: true, isDefault: true, ...named }
+      : null,
     assignments: [],
+    events: [],
+    payments: [],
     order: {
       id: 'order-1',
       orderNumber: 10027,
       status,
+      priceBreakdown: { items: [] },
       filesDeletedAt: over.filesDeletedAt ?? null,
       printPartnerId: partner,
       recipientName: 'مریم کاظمی',
@@ -418,13 +441,13 @@ function orderDetails(
   } as unknown as PanelOrderDetails;
 }
 
-const OWNER = ['orders.read', 'orders.status', 'orders.revert', 'orders.address', 'files.download'];
-const OPERATOR = ['orders.read', 'orders.status', 'orders.address', 'files.download'];
+// لغو از ۵٫۳ مجوز خودش را دارد (`orders.cancel`)، و مبلغ هم (`orders.money`)؛ مالک و متصدی هر دو را دارند.
+const OWNER = ['orders.read', 'orders.status', 'orders.cancel', 'orders.revert', 'orders.address', 'orders.money', 'files.download'];
+const OPERATOR = ['orders.read', 'orders.status', 'orders.cancel', 'orders.address', 'orders.money', 'files.download'];
 const ipHash = createHmac('sha256', SECRET).update('ip\x001.2.3.4').digest('hex');
 
 describe('وضعیت سفارش', () => {
-  const changes = (calls: { method: string; args: unknown[] }[]) =>
-    calls.filter((c) => c.method === 'changeStatus').map((c) => c.args[0] as PanelStatusChange);
+  const changes = (calls: Call[]) => calls.filter((c) => c.method === 'changeStatus').map((c) => c.args[0] as PanelStatusChange);
 
   it('مجوز در سرور: وضعیت با `orders.status`، برگرداندن فقط با `orders.revert` (مالک)، گیرنده با `orders.address`', async () => {
     const { orders, calls } = service({ details: async () => orderDetails('printing') });
@@ -618,7 +641,7 @@ describe('وضعیت سفارش', () => {
 });
 
 describe('ویرایش گیرنده', () => {
-  const edits = (calls: { method: string; args: unknown[] }[]) => calls.filter((c) => c.method === 'editRecipient').map((c) => c.args[0]);
+  const edits = (calls: Call[]) => calls.filter((c) => c.method === 'editRecipient').map((c) => c.args[0]);
 
   it('با همان قاعدهٔ مسیر خرید: فارسی‌نرمال، کد پستی با ارقام فارسی؛ فقط تا پیش از پست؛ رویداد با هش IP', async () => {
     const { orders, calls } = service({ details: async () => orderDetails('paid') });
@@ -742,9 +765,12 @@ describe('دانلود فایل چاپ و برگه', () => {
   };
 
   it('هر جلد با نام jozve-10040-1-jeld-2.pdf و رویداد جلد؛ جلد یک‌جلدی همان نام جزوه', async () => {
-    const { orders, events, calls } = service({ printVolume: async (...args) => (calls.push({ method: 'printVolume', args }), VOLUME) }, stored());
+    const { orders, events, calls } = service(
+      { printVolume: async (scope, ...args) => (calls.push({ method: 'printVolume', args, scope }), VOLUME) },
+      stored(),
+    );
     const result = await orders.downloadVolume(session(), '10040', '1', '2', 'ip');
-    expect(calls).toEqual([{ method: 'printVolume', args: [10040, 1, 2] }]);
+    expect(calls).toEqual([{ method: 'printVolume', args: [10040, 1, 2], scope: ALL_ORDERS }]);
     expect(result.ok && [result.value.fileName, result.value.sizeBytes]).toEqual(['jozve-10040-1-jeld-2.pdf', 15]);
     expect(result.ok && (await new Response(result.value.body).text())).toBe('%PDF-1.4 jeld-2');
     expect(events).toEqual([
@@ -797,7 +823,7 @@ describe('جابه‌جایی چاپخانه', () => {
     const run = async (details: PanelOrderDetails, permissions = ASSIGNER, options?: Awaited<ReturnType<PanelOrderStore['partnerOptions']>>) => {
       const { orders, calls } = service({
         details: async () => details,
-        ...(options ? { partnerOptions: async () => (calls.push({ method: 'partnerOptions', args: [] }), options) } : {}),
+        ...(options ? { partnerOptions: async (scope) => (calls.push({ method: 'partnerOptions', args: [], scope }), options) } : {}),
       });
       const result = await orders.details(session(permissions), '10027');
       if (!result.ok) throw new Error(result.error);
@@ -886,5 +912,215 @@ describe('جابه‌جایی چاپخانه', () => {
     expect(await run(orderDetails('paid'), {}, async () => ({ ok: false, reason: 'changed', current: 'paid', partnerId: PARTNER_B }))).toEqual(['ok', 0]);
     // شاهد: همان سفارش و همان چاپخانه.
     expect(await run(orderDetails('paid'))).toEqual(['ok', 1]);
+  });
+});
+
+/* ───────────── نقش چاپخانه و محدوده (۵٫۳، ADR-042) ───────────── */
+
+describe('نقش چاپخانه و محدوده', () => {
+  /** همان سه مجوز نقش «چاپخانه»، صریح. */
+  const PARTNER_PERMS = ['orders.read', 'orders.status', 'files.download'];
+  const noor = () => session(PARTNER_PERMS, { id: PARTNER_B, name: 'چاپ نور' });
+  const NOOR_SCOPE: PanelScope = { kind: 'partner', partnerId: PARTNER_B };
+  const ip = '1.2.3.4';
+
+  /** هر کاری که سرویس با ذخیره‌گاه می‌کند، یک بار؛ برای سنجیدن محدودهٔ همهٔ فراخوانی‌ها. */
+  async function everything(orders: ReturnType<typeof service>['orders'], who: AdminSession) {
+    await orders.dashboard(who);
+    await orders.list(who, { q: 'مریم' });
+    await orders.details(who, '10027');
+    await orders.changeStatus(who, '10027', { action: 'start_print', from: 'paid', partner: PARTNER_B }, ip);
+    await orders.changeStatus(who, '10027', { action: 'handed_to_post', from: 'printing' }, ip);
+    await orders.rebuild(who, '10027', 'print', ip);
+    await orders.rebuild(who, '10027', 'ticket', ip);
+    await orders.download(who, '10027', '1', ip);
+    await orders.downloadVolume(who, '10027', '1', '1', ip);
+    await orders.downloadTicket(who, '10027', 'pdf', ip);
+    await orders.downloadTicket(who, '10027', 'preview', ip);
+    await orders.editRecipient(who, '10027', { name: 'مریم کاظمی', addressText: 'بلوار سجاد، پلاک 42', postalCode: '' }, ip);
+    await orders.assign(who, '10027', { from: PARTNER_B, to: PARTNER_A, reason: 'خراب' }, ip);
+  }
+
+  it('هر فراخوانی ذخیره‌گاه محدودهٔ همین نشست را دارد: کاربر چاپخانه فقط چاپخانهٔ خودش، مالک و متصدی همه', async () => {
+    const paid = orderDetails('paid', { partner: PARTNER_B });
+    const partner = service({ details: async (scope, ...args) => (partner.calls.push({ method: 'details', args, scope }), paid) });
+    await everything(partner.orders, noor());
+    const scoped = partner.calls.filter((c) => c.method !== 'setting');
+    expect(new Set(scoped.map((c) => c.method))).toEqual(
+      new Set(['dueSummary', 'alerts', 'list', 'stats', 'counts', 'details', 'changeStatus', 'requeue', 'jozveFile', 'printVolume', 'ticketFile']),
+    );
+    expect(scoped.filter((c) => JSON.stringify(c.scope) !== JSON.stringify(NOOR_SCOPE))).toEqual([]);
+
+    const staff = service({ details: async (scope, ...args) => (staff.calls.push({ method: 'details', args, scope }), paid) });
+    await everything(staff.orders, session([...OWNER, 'orders.assign']));
+    const all = staff.calls.filter((c) => c.method !== 'setting');
+    // مالک همان کارها و بیشتر (ویرایش گیرنده، جابه‌جایی و گزینه‌هایش)، همه با «همه».
+    expect(all.map((c) => c.method)).toEqual(expect.arrayContaining(['editRecipient', 'assignPartner', 'partnerOptions']));
+    expect(all.filter((c) => c.scope !== ALL_ORDERS)).toEqual([]);
+  });
+
+  it('بیرون از محدوده ۴۰۴ است، نه ۴۰۳، در جزئیات، هر دانلود و هر کاری که نقش دارد: همان پاسخ شماره‌ای که نیست', async () => {
+    // ذخیره‌گاه در محدودهٔ چاپ نور سفارش چاپخانهٔ دیگر را نمی‌یابد: همان null شماره‌ای که نیست.
+    const { orders, events } = service();
+    const results = [
+      await orders.details(noor(), '10027'),
+      await orders.changeStatus(noor(), '10027', { action: 'start_print', from: 'paid', partner: PARTNER_A }, ip),
+      await orders.changeStatus(noor(), '10027', { action: 'handed_to_post', from: 'printing' }, ip),
+      await orders.rebuild(noor(), '10027', 'print', ip),
+      await orders.rebuild(noor(), '10027', 'ticket', ip),
+      await orders.download(noor(), '10027', '1', ip),
+      await orders.downloadVolume(noor(), '10027', '1', '1', ip),
+      await orders.downloadTicket(noor(), '10027', 'pdf', ip),
+      await orders.downloadTicket(noor(), '10027', 'preview', ip),
+    ];
+    for (const result of results) expect(result).toEqual({ ok: false, status: 404, error: 'order_not_found' });
+    expect(events).toEqual([]);
+  });
+
+  it('سفارشی که همین حالا به چاپخانهٔ دیگری رفت: نوشتنِ پس از خواندن هم ۴۰۴ (ذخیره‌گاه زیر قفل «نیست» می‌گوید)', async () => {
+    const paid = orderDetails('paid', { partner: PARTNER_B });
+    const moved = service({ details: async () => paid, changeStatus: async () => ({ ok: false, current: null }) });
+    expect(await moved.orders.changeStatus(noor(), '10027', { action: 'start_print', from: 'paid', partner: PARTNER_B }, ip)).toEqual({
+      ok: false,
+      status: 404,
+      error: 'order_not_found',
+    });
+    const failed = { ...failedDetails(), order: { ...failedDetails().order, printPartnerId: PARTNER_B } } as PanelOrderDetails;
+    const gone = service({ details: async () => failed, requeue: async () => 'not_found' as const });
+    expect(await gone.orders.rebuild(noor(), '10031', 'print', ip)).toEqual({ ok: false, status: 404, error: 'order_not_found' });
+    // برگه هم.
+    const ticketFailed = { ...failed, ticketJob: { ...failed.ticketJob!, status: 'failed' as const, lastError: 'font_missing: x' } } as PanelOrderDetails;
+    const ticketGone = service({ details: async () => ticketFailed, requeue: async () => 'not_found' as const });
+    expect(await ticketGone.orders.rebuild(noor(), '10031', 'ticket', ip)).toEqual({ ok: false, status: 404, error: 'order_not_found' });
+    const staff = service({ details: async () => orderDetails('paid'), assignPartner: async () => ({ ok: false, reason: 'changed', current: null, partnerId: null }) });
+    expect(await staff.orders.assign(session(['orders.read', 'orders.assign']), '10027', { from: PARTNER_A, to: PARTNER_B, reason: 'x' }, ip)).toEqual({
+      ok: false,
+      status: 404,
+      error: 'order_not_found',
+    });
+  });
+
+  it('چاپخانه لغو، برگرداندن، ویرایش گیرنده و جابه‌جایی ندارد: ۴۰۳ پیش از هر خواندن، برای هر سفارشی', async () => {
+    const { orders, calls } = service({ details: async () => orderDetails('printing', { partner: PARTNER_B }) });
+    for (const result of [
+      await orders.changeStatus(noor(), '10027', { action: 'cancel', from: 'printing', reason: 'چاپ نمی‌کنم' }, ip),
+      await orders.changeStatus(noor(), '10027', { action: 'revert', from: 'printing', reason: 'اشتباه' }, ip),
+      await orders.editRecipient(noor(), '10027', { name: 'مریم کاظمی', addressText: 'بلوار سجاد، پلاک 42', postalCode: '' }, ip),
+      await orders.assign(noor(), '10027', { from: PARTNER_B, to: PARTNER_A, reason: 'خراب' }, ip),
+    ]) {
+      expect(result).toEqual({ ok: false, status: 403, error: 'forbidden' });
+    }
+    expect(calls).toEqual([]);
+    // لغو از ۵٫۳ مجوز خودش را دارد: `orders.status` به‌تنهایی لغو نمی‌کند (شاهد: متصدی با `orders.cancel` می‌کند).
+    expect(await orders.changeStatus(session(['orders.read', 'orders.status']), '10027', { action: 'cancel', from: 'printing', reason: 'x' }, ip)).toMatchObject({
+      status: 403,
+    });
+    expect(await orders.changeStatus(session(OPERATOR), '10027', { action: 'cancel', from: 'printing', reason: 'مشتری خواست' }, ip)).toMatchObject({
+      ok: true,
+      value: { status: 'cancelled' },
+    });
+    // جزئیات: کار رو به جلو بله، بقیه نه.
+    const view = await orders.details(noor(), '10027');
+    expect(view).toMatchObject({
+      ok: true,
+      value: { canStatus: true, canCancel: false, canRevert: false, canEditRecipient: false, canAssign: false, canDownload: true, partnerView: true },
+    });
+    // «شروع چاپ» و «تحویل پست شد» روی سفارش خودش.
+    const own = service({ details: async () => orderDetails('printing', { partner: PARTNER_B }) });
+    expect(await own.orders.changeStatus(noor(), '10027', { action: 'handed_to_post', from: 'printing' }, ip)).toEqual({
+      ok: true,
+      value: { status: 'handed_to_post' },
+    });
+    expect(own.calls.find((c) => c.method === 'changeStatus')!.scope).toEqual(NOOR_SCOPE);
+  });
+
+  it('بی مبلغ: جزئیات بی پرداخت و با هر مبلغ صفر، ردیف‌های فهرست و صف هم؛ شمار جلد و برگ هر جلد می‌ماند', async () => {
+    const priced = {
+      ...orderDetails('paid', { partner: PARTNER_B }),
+      payments: [{ id: 'pay-1', amountRials: 3_747_500, status: 'succeeded' }],
+    } as unknown as PanelOrderDetails;
+    const money = {
+      subtotalRials: 2_370_000,
+      discountRials: 0,
+      shippingRials: 1_377_500,
+      vatRials: 0,
+      roundingRials: 0,
+      totalRials: 3_747_500,
+      priceBreakdown: {
+        totalRials: 3_747_500,
+        shippingRials: 1_377_500,
+        items: [{ volumes: 2, sheetsPerVolume: [413, 412], sheets: 825, printRials: 2_000_000, bindingRials: 370_000, totalRials: 2_370_000 }],
+      },
+      quoteSnapshot: { totalRials: 3_747_500 },
+      paidAt: NOW,
+    };
+    Object.assign(priced.order, money);
+    const line = { id: 'order-1', orderNumber: 10027, totalRials: 3_747_500, pageCount: 1650 };
+    const { orders } = service({ details: async () => priced, list: async () => [line as never] });
+    const seen = await orders.details(noor(), '10027');
+    if (!seen.ok) throw new Error(seen.error);
+    expect(seen.value.canMoney).toBe(false);
+    expect(seen.value.details.payments).toEqual([]);
+    const flat = JSON.stringify(seen.value.details);
+    // هیچ مقدار پولی جز صفر؛ شمار جلد و برگ همان.
+    expect([...flat.matchAll(/"(\w*Rials)":(\d+)/g)].filter(([, , value]) => value !== '0')).toEqual([]);
+    expect(flat).not.toContain('3747500');
+    expect(seen.value.details.order.priceBreakdown).toMatchObject({ items: [{ volumes: 2, sheetsPerVolume: [413, 412], sheets: 825 }] });
+    expect(seen.value.details.order.paidAt).toEqual(NOW);
+    const list = await orders.list(noor(), {});
+    expect(list.ok && list.value.rows.map((row) => [row.orderNumber, row.totalRials, row.pageCount])).toEqual([[10027, 0, 1650]]);
+    const dashboard = await orders.dashboard(noor());
+    expect(dashboard.ok && dashboard.value.queue.map((row) => row.totalRials)).toEqual([0]);
+    // شاهد: مالک و متصدی همان مبلغ را می‌بینند.
+    const staff = await orders.details(session(OPERATOR), '10027');
+    expect(staff.ok && [staff.value.canMoney, staff.value.details.order.totalRials, staff.value.details.payments.length]).toEqual([true, 3_747_500, 1]);
+    const staffList = await orders.list(session(OPERATOR), {});
+    expect(staffList.ok && staffList.value.rows[0]!.totalRials).toBe(3_747_500);
+  });
+
+  it('از چشم چاپخانه: بی دلیل لغو و برگرداندن و جابه‌جایی، و از تاریخچهٔ تخصیص فقط رسیدن به خودش، بی نام چاپخانهٔ قبلی', async () => {
+    const details = {
+      ...orderDetails('cancelled', {
+        partner: PARTNER_B,
+        events: [
+          { fromStatus: 'awaiting_payment', toStatus: 'paid', actor: 'gateway', note: { paymentId: 'pay-1' } },
+          { fromStatus: 'paid', toStatus: 'cancelled', note: { reason: 'مشتری خواست؛ 374,750 تومان کارت‌به‌کارت برگشت' } },
+        ],
+      }),
+      assignments: [
+        { id: 1, at: NOW, fromName: null, toPartnerId: PARTNER_A, toName: 'چاپخانهٔ جزوه‌یار', actor: 'system', adminName: null, rule: 'default', reason: null },
+        { id: 2, at: NOW, fromName: 'چاپخانهٔ جزوه‌یار', toPartnerId: PARTNER_B, toName: 'چاپ نور', actor: 'admin', adminName: 'سارا', rule: null, reason: 'چاپ آفتاب کند است' },
+      ],
+      events: [
+        { id: 1, at: NOW, action: 'orders.assign', detail: { reason: 'چاپ آفتاب کند است' }, adminName: 'سارا' },
+        { id: 2, at: NOW, action: 'orders.recipient', detail: { orderNumber: 10027, changed: ['addressText'], previous: { addressText: 'نشانی قبلی' } }, adminName: 'سارا' },
+      ],
+    } as unknown as PanelOrderDetails;
+    const { orders } = service({ details: async () => details });
+    const seen = await orders.details(noor(), '10027');
+    if (!seen.ok) throw new Error(seen.error);
+    const flat = JSON.stringify(seen.value.details);
+    for (const hidden of ['مشتری خواست', 'چاپ آفتاب کند است', 'نشانی قبلی', 'چاپخانهٔ جزوه‌یار', 'pay-1']) expect(flat).not.toContain(hidden);
+    expect(seen.value.details.assignments).toMatchObject([{ id: 2, toName: 'چاپ نور', fromName: null, reason: null, adminName: 'سارا' }]);
+    expect(seen.value.details.events).toEqual([{ id: 2, at: NOW, action: 'orders.recipient', detail: { orderNumber: 10027, changed: ['addressText'] }, adminName: 'سارا' }]);
+    // شاهد: مالک همه را می‌بیند.
+    const owner = await orders.details(session(OWNER), '10027');
+    const all = JSON.stringify(owner.ok && owner.value.details);
+    for (const shown of ['مشتری خواست', 'چاپ آفتاب کند است', 'نشانی قبلی']) expect(all).toContain(shown);
+    expect(owner.ok && owner.value.partnerView).toBe(false);
+  });
+
+  it('چیپ‌های چاپخانه: باز، تحویل پست شد، لغو شد و همه؛ «در انتظار» و «رهاشده» نیستند و به «باز» برمی‌گردند', async () => {
+    const { orders, calls } = service();
+    const open = await orders.list(noor(), { status: 'awaiting' });
+    expect(open).toMatchObject({ ok: true, value: { bucket: 'open', buckets: ['open', 'handed', 'cancelled', 'all'] } });
+    expect(calls.filter((c) => c.method === 'list').at(-1)).toMatchObject({ args: [{ bucket: 'open' }], scope: NOOR_SCOPE });
+    expect(await orders.list(noor(), { status: 'abandoned', q: 'مریم' })).toMatchObject({ ok: true, value: { bucket: 'all' } });
+    expect(await orders.list(noor(), { status: 'handed' })).toMatchObject({ ok: true, value: { bucket: 'handed' } });
+    // شاهد: متصدی همان شش چیپ.
+    expect(await orders.list(session(OPERATOR), { status: 'awaiting' })).toMatchObject({
+      ok: true,
+      value: { bucket: 'awaiting', buckets: ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] },
+    });
   });
 });

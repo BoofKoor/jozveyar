@@ -28,6 +28,7 @@ function session(permissions: string[]): AdminSession {
     roles: ['owner'],
     permissions,
     expiresAt: new Date(NOW.getTime() + 3_600_000),
+    partner: null,
   };
 }
 const OWNER = session(['partners.manage', 'orders.read', 'orders.assign']);
@@ -49,6 +50,7 @@ function memoryPartners() {
         deactivatedAt: null,
         createdAt: new Date(NOW.getTime() - 86_400_000),
         openOrders: 3,
+        users: [],
       },
     ],
   ]);
@@ -66,7 +68,7 @@ function memoryPartners() {
       calls.push({ method: 'create', input });
       if ([...rows.values()].some((row) => row.name === input.name)) return { ok: false, reason: 'name_taken' };
       const id = NOOR;
-      const row = { id, name: input.name, provinceId: input.provinceId, cityId: input.cityId, provinceName: '', cityName: '', isDefault: false, deactivatedAt: null, createdAt: input.at, openOrders: 0 };
+      const row = { id, name: input.name, provinceId: input.provinceId, cityId: input.cityId, provinceName: '', cityName: '', isDefault: false, deactivatedAt: null, createdAt: input.at, openOrders: 0, users: [] };
       rows.set(id, row);
       events.push(input.event);
       return { ok: true, partner: { ...row, createdBy: input.createdBy }, changed: [] };

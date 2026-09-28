@@ -134,6 +134,20 @@
       "when": 1790594964013,
       "tag": "0018_print_partners_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790603506287,
+      "tag": "0019_admin_role_partner",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790603524230,
+      "tag": "0020_admin_role_partner_guards",
+      "breakpoints": true
     }
   ]
 }

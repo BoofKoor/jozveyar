@@ -12,19 +12,23 @@ import { Segments } from './Segments';
 /**
  * ردیف‌های سفارش (طرح پنل): در دسکتاپ ردیف جدول، در گوشی کارت فشرده؛ هر ردیف پیوند جزئیات. ستون آخر مهلت تحویل
  * به پست است، فقط برای سفارش باز (در صف و در حال چاپ)؛ در فهرست «تحویل پست شد» روزی که رسید، در «لغو شد» روز لغو، و
- * برای سفارش پرداخت‌نشده (فهرست «در انتظار» و «رهاشده») زمان ساختنش.
+ * برای سفارش پرداخت‌نشده (فهرست «در انتظار» و «رهاشده») زمان ساختنش. بی `orders.money` (کاربر چاپخانه، ۵٫۳) بی ستون مبلغ، و
+ * فهرستش `ad-list--nosum`.
  */
 export function OrderRows({
   gate,
   rows,
   bounds,
   dates,
+  money,
 }: {
   gate: string;
   rows: readonly PanelOrderLine[];
   bounds: DayBounds;
   /** ستون آخر: `due` فقط مهلت؛ `created` زمان ساختن؛ `handed` رسیدن به پست؛ `cancelled` زمان لغو. */
   dates: 'due' | 'created' | 'handed' | 'cancelled';
+  /** ستون مبلغ (`orders.money`). */
+  money: boolean;
 }) {
   return (
     <ul className="ad-rows">
@@ -43,10 +47,12 @@ export function OrderRows({
               <span className="ad-row__what">
                 <Segments segs={jozveSegs(row)} />
               </span>
-              <span className="ad-row__sum">
-                <span className="num">{formatTomans(row.totalRials, false)}</span>
-                <span className="ad-row__unit"> تومان</span>
-              </span>
+              {money ? (
+                <span className="ad-row__sum">
+                  <span className="num">{formatTomans(row.totalRials, false)}</span>
+                  <span className="ad-row__unit"> تومان</span>
+                </span>
+              ) : null}
               <span
                 className={
                   state.icon === 'info'
