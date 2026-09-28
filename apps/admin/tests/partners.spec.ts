@@ -208,8 +208,9 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(first.locator('.ad-partners__meta')).toHaveText('تهران · 0 سفارش باز · کاربرها: همان مالک و متصدی');
     await expect(first.getByRole('link', { name: 'ویرایش' })).toBeVisible();
     await expect(first.getByRole('button')).toHaveCount(0);
+    // از ۵٫۳ کاربر چاپخانه هم هست، و راهش پایین فهرست، همان طرح.
     await expect(ownerPage.locator('.ad-hint')).toHaveText(
-      'چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد.',
+      'چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد. کاربر چاپخانه را از «ادمین‌ها» بساز.',
     );
     expect(ownerProblems).toEqual([]);
   });
@@ -218,7 +219,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await ownerPage.goto(at('/partners'));
     await ownerPage.getByRole('link', { name: 'افزودن چاپخانه' }).click();
     await expect(ownerPage.getByRole('heading', { name: 'افزودن چاپخانه' })).toBeVisible();
-    await expect(ownerPage.getByText('چاپخانه به‌تنهایی به کسی دسترسی نمی‌دهد.')).toBeVisible();
+    await expect(ownerPage.getByText('چاپخانه به‌تنهایی به کسی دسترسی نمی‌دهد؛ کاربرش را بعد از «ادمین‌ها» می‌سازی.')).toBeVisible();
     // فیلد شهر پیشنهادهای همان فهرست سایت را دارد.
     const city = ownerPage.getByLabel('شهر');
     await expect(city).toHaveAttribute('list', 'partner-cities');
