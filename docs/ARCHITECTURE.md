@@ -2,7 +2,7 @@
 
 سند کامل معماری. دلیل هر تصمیم در `docs/DECISIONS.md`. تعرفه و فرمول قیمت در `docs/PRICING.md`.
 
-**وضعیت:** معماری تأیید شد. برش ۰ تا ۴ ساخته، تست و مستقر شده، و مرحلهٔ طراحی رابط کاربری جز قدم ۵ تمام است (`docs/UI.md`). برش ۵ (چاپخانه و خروجی چاپ) برنامه‌اش تأیید شده؛ برنامه و وضعیتش در بخش ۸، «برش ۵».
+**وضعیت:** معماری تأیید شد. برش ۰ تا ۴ ساخته، تست و مستقر شده، و مرحلهٔ طراحی رابط کاربری جز قدم ۵ تمام است (`docs/UI.md`). برش ۵ (چاپخانه و خروجی چاپ) در حال ساخت است: برنامه و طرح نمونه‌اش تأیید شده و ۵٫۱ (خروجی چاپ) ساخته شده (#48)؛ برنامه و وضعیتش در بخش ۸، «برش ۵».
 
 ---
 
@@ -191,6 +191,7 @@ CREATE TABLE orders (
   paid_at             timestamptz,
   post_handoff_due_at timestamptz,              -- پایان روز کاری تعهد تحویل به پست (ADR-013)
   handed_to_post_at   timestamptz,              -- ۴٫۳: فقط و همیشه در handed_to_post (CHECK `orders_handed_at`)
+  files_deleted_at    timestamptz,              -- ۵٫۱ (ADR-044): فایل‌های سفارش پاک شد؛ فقط سفارش بسته، و پس از آن وضعیت قفل
   shipping_method_id  text NOT NULL,            -- (نسخهٔ تعرفه، روش) ← shipping_methods
   shipping_zone_id    text NOT NULL,            -- منطقهٔ کرایه در لحظهٔ سفارش
   province_id         smallint NOT NULL,
@@ -229,18 +230,32 @@ CREATE TABLE order_assignments (
   note            jsonb                                    -- قاعده (city | province | default) یا دلیل جابه‌جایی
 );
 
--- فایل چاپ هر جلد هر جزوه (برنامهٔ ۵٫۱، ADR-043): A4 عمودی، جلدها با `sheetsPerVolume` ریز قیمت منجمد.
+-- ✅ فایل چاپ هر جلد هر جزوه (۵٫۱، ADR-043): A4 عمودی، جلدها با `sheetsPerVolume` ریز قیمت منجمد. ردیف ثبت‌شده عوض
+-- نمی‌شود (`order_print_files_frozen`)، و جلدهای هر جزوه در COMMIT باید ۱..صفحهٔ آخر را پشت‌سرهم و به شمار `volumes` ریز
+-- قیمت بپوشانند (تریگر معوق `order_print_files_cover`؛ 0016_print_files_guards).
 CREATE TABLE order_print_files (
-  order_item_id uuid NOT NULL REFERENCES order_items(id),
+  order_item_id uuid NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
   volume        smallint NOT NULL,
   first_page    integer NOT NULL,           -- شمارهٔ صفحهٔ سراسری جزوه، هر دو سر شامل
   last_page     integer NOT NULL,
-  storage_key   text NOT NULL,              -- همان PDF جزوه، اگر چیزی عوض نشد
+  storage_key   text NOT NULL,              -- زیر orders/؛ همان PDF جزوه، اگر چیزی عوض نشد و یک جلد است
   size_bytes    bigint NOT NULL,
   sha256        text NOT NULL,
-  changes       jsonb,                      -- چند صفحه اندازه گرفت، چرخید یا حاشیه‌نویسی داشت؛ null یعنی بی تغییر
+  changes       jsonb,                      -- resized [از، تا، پهنا، ارتفاع]، rotated و annotated [از، تا]؛ null یعنی بی تغییر
   created_at    timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (order_item_id, volume)
+);
+
+-- ✅ برگهٔ سفارش (۵٫۱، ADR-043)، یکی برای هر سفارش؛ با هر ساختن دوباره جایگزین می‌شود. پنل فقط برگه‌ای را می‌دهد که
+-- `stamp`ش همان `order_ticket_stamp(orders)` امروز است (نام، موبایل، نشانی و کد پستی گیرنده).
+CREATE TABLE order_tickets (
+  order_id    uuid PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+  storage_key text NOT NULL,                -- orders/<شماره>/ticket-<اثر انگشت>.pdf
+  size_bytes  bigint NOT NULL,
+  sha256      text NOT NULL,
+  preview_key text NOT NULL,                -- همان صفحه، PNG برای پنل
+  stamp       text NOT NULL,
+  built_at    timestamptz NOT NULL DEFAULT now()
 );
 ```
 
@@ -250,7 +265,7 @@ CREATE TABLE order_print_files (
 |---|---|---|
 | تعرفه | `price_lists` `paper_types` `binding_types` `binding_rate_bands` `shipping_methods` `shipping_rates` | ✅ ساخته شد. نسخه‌دار با `version` و دقیقاً یکی فعال. بازه‌های صحافی و وزن با `EXCLUDE` — دیتابیس اجازهٔ همپوشانی نمی‌دهد. `print_rates` و `pricing_settings` جدول جدا نشدند؛ دلیل در ADR-021. `discount_tiers` هنوز ساخته نشده. ✅ ۴٫۵ (ADR-040): `activated_at`، `created_by` و `based_on`؛ نسخه‌ای که یک بار فعال شد با تریگرهای `price_lists_frozen` و `price_list_rows_frozen` عوض و پاک نمی‌شود، جز `is_active` (`0013_price_list_guards.sql`)، و CHECK `price_lists_active_activated`: نسخهٔ فعال زمان فعال شدن دارد |
 | سند | `documents` `document_analyses` `document_pages` | ✅ ساخته شد. سند = فایل آپلودشده، قبل از اینکه سفارشی باشد. مالکش هش کوکی نشست ناشناس است (`session_hash`) و شناسهٔ آپلود چندتکه کنارش می‌ماند. تحلیل مرورگر و سرور **هر دو** ذخیره می‌شوند تا واگرایی قابل اندازه‌گیری باشد. `document_pages` اعداد خام رنگ را نگه می‌دارد، نه فقط بولین |
-| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش. ✅ سرور در ۳ب: ساختن در یک تراکنش، برگشت از درگاه زیر قفل پرداخت و سفارش، و `prepare_order` کارگر (پایین، «۳ب»). ✅ ۴٫۳: `order_status_events.admin_user_id` برای گذار ادمین (CHECK `order_status_events_admin`: actor ادمین یعنی شناسهٔ ادمین)، و دلیل لغو و برگرداندن در `note`. برنامهٔ ۵٫۱ (ADR-043): `order_print_files`، فایل چاپ هر جلد، و برگهٔ سفارش با کار جدای `prepare_ticket`؛ ADR-044: فایل‌های سفارش N روز پس از پست یا لغو پاک می‌شوند و ردش می‌ماند |
+| سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش. ✅ سرور در ۳ب: ساختن در یک تراکنش، برگشت از درگاه زیر قفل پرداخت و سفارش، و `prepare_order` کارگر (پایین، «۳ب»). ✅ ۴٫۳: `order_status_events.admin_user_id` برای گذار ادمین (CHECK `order_status_events_admin`: actor ادمین یعنی شناسهٔ ادمین)، و دلیل لغو و برگرداندن در `note`. ✅ ۵٫۱ (ADR-043): `order_print_files`، فایل چاپ هر جلد، و `order_tickets`، برگهٔ سفارش با کار جدای `prepare_ticket`؛ ADR-044: فایل‌های سفارش N روز پس از پست یا لغو پاک می‌شوند و `orders.files_deleted_at` ردش را نگه می‌دارد |
 | ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن). ✅ منطقه‌ها، استان‌ها و شهرها در ۳الف، از `@jozveyar/geo` (۳۱ استان، ۱۳۲۳ شهر)؛ منطقه مال استان است: استان تهران `tehran`، بقیه `other`. `shipments` با برش ۶ |
 | رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود |
 | دسترسی | `admin_users` `admin_invites` `admin_sessions` `admin_login_attempts` `roles` `permissions` `role_permissions` `admin_user_roles` `admin_events` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` (ADR-007). ✅ در ۴٫۱ (ADR-037، ADR-038): ادمین با رمز argon2id و رمز برنامهٔ تأیید مهروموم‌شده، پیوند ثبت یک‌باره، نشست و تلاش ورود فقط با هش؛ نقش‌ها از کد؛ رویداد فقط افزودنی، ادمین پاک‌نشدنی و پیوند مصرف‌شده دست‌نخوردنی با تریگر (`0008_admin_guards.sql`)؛ در ۴٫۲ نمایهٔ رویدادهای یک هدف، برای رویدادهای هر سفارش (`0009_admin_events_target.sql`). `scope` تا برش ۵ فقط `NULL`؛ `print_partners` و `order_assignments` با برش ۵. برنامهٔ ۵٫۲ و ۵٫۳ (ADR-042): دو جدول بالا، `orders.print_partner_id`، و `scope` jsonb جایش را به ستون نوع‌دار `admin_user_roles.print_partner_id` با کلید خارجی می‌دهد (CHECK: نقش چاپخانه یعنی دقیقاً یک چاپخانه) |
@@ -265,7 +280,7 @@ order.sla_days                          = 2       # روز کاری تا تحو�
 calendar.holidays                       = [...]   # تعطیلی‌های رسمی ۱۴۰۵ و ۱۴۰۶، `{ date: '1405/10/02', title }`؛ ✅ همان‌طور؛ از ۴٫۶ از پنل
 calendar.official_through               = 1405    # تعطیلی‌ها تا پایان این سال با تقویم رسمی تطبیق داده شده‌اند؛ ✅ ۴٫۶ (هشدار قمری پنل)
 otp.site_hourly_limit                   = 300     # سقف کد پیامکی کل سایت در ساعت (ADR-033)؛ ✅ از ۳ب؛ از ۴٫۶ از پنل
-order.files_retention_days              = 30      # فایل‌های سفارش چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (ADR-044)؛ برنامهٔ ۵٫۱، از پنل
+order.files_retention_days              = 30      # فایل‌های سفارش چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (ADR-044)؛ ✅ ۵٫۱، ۷ تا ۳۶۵، از پنل
 order.min_order_rials                   = 0
 file.max_pages                          = 1500
 file.max_bytes                          = 1_610_612_736   # 1.5 GiB
@@ -351,7 +366,7 @@ detection.sample_dpi                    = 40
 | 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ ۲ب: ✅ ایمیج پایه با LibreOffice و فونت‌ها (ADR-027)، ✅ تبدیل Word/PPT/عکس با پیش‌فاکتور فوری (ADR-028)، ✅ هشدارها با شمارهٔ صفحه، DPI از جای تصویر و فونت جایگزین (ADR-029)، ✅ چند فایل در یک جزوه، یک صحافی (ADR-030) |
 | 3 | ✅ سفارش کامل با پرداخت جعلی | ۳الف تا ۳د مستقر (#34 تا #38، پایین). شهر و آدرس، نرخ ارسال، OTP، ساخت سفارش، درگاه نمونه (فقط بیرون از سایت زنده، ADR-035)، صفحهٔ تأیید |
 | 4 | ✅ پنل ادمین نسخهٔ ۱ | TOTP روی ساب‌دامین جدا، فهرست و جزئیات سفارش، دانلود فایل، تغییر وضعیت، ویرایش تعرفه، ساعت SLA؛ و به خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۴) کلیدها و تنظیمات سرویس‌های بیرونی (پیامک، درگاه) که امروز در `.env`اند، دیدنی و تغییرپذیر از پنل. شش PR، #40 تا #46، همه ادغام و مستقر (پایین، «برش ۴») |
-| 5 | چاپخانه و خروجی چاپ — برنامه تأیید شد | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ. سه PR، پس از طرح نمونه (پایین، «برش ۵») |
+| 5 | چاپخانه و خروجی چاپ — در حال ساخت | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ. سه PR، پس از طرح نمونه؛ ۵٫۱ ساخته شد (پایین، «برش ۵») |
 | 6 | ارسال و رهگیری | ورود فایل پست، تطبیق، صف تأیید، نمایش رهگیری، گزارش حاشیهٔ ارسال |
 | 7 | پیامک و درگاه واقعی | جایگزینی آداپتورها — تغییر `.env` و یک کلاس |
 | 8 | پنل کاربری و آمار | سفارش‌های قبلی، سفارش مجدد، پیگیری زنده، داشبورد قیف و درآمد |
@@ -612,14 +627,14 @@ detection.sample_dpi                    = 40
 
 ### برش ۵: برنامه و وضعیت
 
-برنامه تأیید شد (۱۴۰۵/۰۷/۰۵، سؤال‌های ۲۹ تا ۳۸، همه طبق پیشنهاد). رابطش طرح نمونه‌ای است که پیش از ۵٫۱ ساخته و تأیید می‌شود:
-حالت‌های تازهٔ `docs/ui/mockups/admin.html` (`docs/UI.md`، بخش ۸؛ سؤال‌های طرح از ۳۹). تصمیم‌ها: ADR-042 (چاپخانه‌ها، تخصیص و نقش
+برنامه تأیید شد (۱۴۰۵/۰۷/۰۵، سؤال‌های ۲۹ تا ۳۸، همه طبق پیشنهاد). رابطش طرح نمونه‌ای است که پیش از ۵٫۱ ساخته و تأیید شد
+(۱۴۰۵/۰۷/۰۵، سؤال‌های ۳۹ تا ۴۶، همه طبق پیشنهاد): حالت‌های تازهٔ `docs/ui/mockups/admin.html` (`docs/UI.md`، بخش ۸). تصمیم‌ها: ADR-042 (چاپخانه‌ها، تخصیص و نقش
 چاپخانه با محدوده)، ADR-043 (فایل آمادهٔ چاپ و برگهٔ سفارش) و ADR-044 (نگهداری فایل‌های سفارش). نام‌ها ۵٫۱ تا ۵٫۳، مثل برش ۴.
 
 | PR | دامنه | وضعیت |
 |---|---|---|
-| سند | همین برنامه: ADR-042 تا ۰۴۴، سؤال‌های ۲۹ تا ۳۸، و «ادغام و مستقر شد» #46 | باز |
-| ۵٫۱ | خروجی چاپ: کارگر فایل چاپ هر جلد را می‌سازد (A4 عمودی، چرخش صفحهٔ افقی، حاشیه‌نویسی‌ها، جلدها با ریز قیمت منجمد، بی بازنویسی وقتی فرقی نیست) و برگهٔ سفارش با برچسب پست (`prepare_ticket`)؛ در جزئیات سفارش پنل کارت فایل چاپ و برگه، با دانلود جریانی و رویداد؛ «شروع چاپ» فقط با فایل چاپ؛ نگهداری فایل‌های سفارش و عددش در «تنظیمات» | مانده (پس از طرح نمونه) |
+| سند | همین برنامه: ADR-042 تا ۰۴۴، سؤال‌های ۲۹ تا ۳۸، و «ادغام و مستقر شد» #46 | #47، ادغام شد |
+| ۵٫۱ | خروجی چاپ: کارگر فایل چاپ هر جلد را می‌سازد (A4 عمودی، چرخش صفحهٔ افقی، حاشیه‌نویسی‌ها، جلدها با ریز قیمت منجمد، بی بازنویسی وقتی فرقی نیست) و برگهٔ سفارش با برچسب پست (`prepare_ticket`)؛ در جزئیات سفارش پنل کارت فایل چاپ و برگه، با دانلود جریانی و رویداد؛ «شروع چاپ» فقط با فایل چاپ؛ نگهداری فایل‌های سفارش و عددش در «تنظیمات» | #48، باز (پایین) |
 | ۵٫۲ | چاپخانه‌ها و تخصیص: `print_partners`، `orders.print_partner_id`، `order_assignments` و محافظ‌ها؛ «چاپخانهٔ جزوه‌یار» در دادهٔ پایه؛ تخصیص خودکار در پرداخت؛ جابه‌جایی با دلیل (`orders.assign`)؛ زبانهٔ «چاپخانه‌ها» (`partners.manage`)؛ هشدار «بی چاپخانه»؛ چاپخانه روی برگه | مانده |
 | ۵٫۳ | نقش چاپخانه: نقش سوم و محدوده (`admin_user_roles.print_partner_id`)، مجوزهای تازهٔ `orders.cancel` و `orders.money`، محدودهٔ اجباری در هر کوئری پنل، پنل از چشم چاپخانه (بی مبلغ، بی لغو)، و افزودن کاربر چاپخانه در «ادمین‌ها» | مانده |
 
@@ -658,6 +673,25 @@ detection.sample_dpi                    = 40
 
 **کار دستی صاحب پروژه:** پس از ۵٫۲، اگر نام دیگری می‌خواهی، نام «چاپخانهٔ جزوه‌یار» از زبانهٔ «چاپخانه‌ها»؛ پس از ۵٫۳، کاربر هر
 چاپخانهٔ طرف قرارداد از «ادمین‌ها»؛ و با پایان همکاری با یک چاپخانه، غیرفعال کردن کاربرانش و `ADMIN_BASE_PATH` تازه.
+
+#### ۵٫۱: خروجی چاپ (#48، باز)
+
+| جا | کار |
+|---|---|
+| `packages/db`: `schema.ts`، `0015_print_files.sql` (تولیدی)، `0016_print_files_guards.sql` (دست‌نویس) | `order_print_files`، `order_tickets` و `orders.files_deleted_at`؛ تریگرهای `order_print_files_frozen` و معوق `order_print_files_cover` (جلدها با ریز قیمت منجمد)؛ `order_ticket_stamp(orders)`؛ `orders_files_deleted` در `orders_price_frozen` و CHECK `orders_files_deleted_closed`؛ ارتقا: `prepare_order` سفارش‌های باز دوباره، و `prepare_ticket` برایشان |
+| `packages/db/src/orders.ts`، `panel.ts`، `reference.ts`؛ `packages/contracts` | `settlePayment` هر دو کار را می‌گذارد؛ پنل فایل چاپ هر جلد، برگه با «تازه» یا نه، کار برگه و «فایل‌ها پاک شد» را می‌خواند؛ ویرایش گیرنده کار برگه را در همان تراکنش؛ `requeue` هر دو کار؛ تنظیم `order.files_retention_days` (۷ تا ۳۶۵، پیش‌فرض ۳۰) |
+| `services/docworker`: `orders.py`، `printfile.py`، `ticket.py`، `retention.py`، `jalali.py`، `__main__.py` | `prepare_order` با فایل چاپ هر جلد، `prepare_ticket` (PDF و پیش‌نمایش PNG با وزیرمتن)، پاک کردن فایل‌های سفارش بسته بین کارها (`DOCWORKER_RETENTION_SECONDS`، فقط نود کارهای سفارش)، و تاریخ شمسی با بردارهای هم‌ارزی `packages/text/parity/jalali.json` |
+| `apps/admin/lib/orders.ts`، `lib/server/orders.ts`، `lib/server/download.ts` | نمای فایل چاپ، «چه عوض شد»، برگه و «فایل‌ها پاک شد»؛ `printReady`؛ دانلود هر جلد، PDF اصلی و برگه، جریانی با رویداد؛ «دوباره بساز» هر کار |
+| `apps/admin/app/[gate]/(panel)/orders/[number]/…` | کارت هر جزوه با فایل چاپ و برگه (در سفارش چندجزوه‌ای کارت جدای برگه)؛ `print/[item]/[volume]`، `pdf/[item]`، `ticket` (صفحه با پیش‌نمایش)، `ticket/pdf` و `ticket/preview` |
+| `apps/admin/app/[gate]/(panel)/settings` | کارت «فایل‌های سفارش» با شمارنده (`NumberSettingForm`) |
+| `apps/web/lib/server/testing.ts` و تست‌ها | ذخیره‌گاه حافظه‌ای و تست‌های مسیر خرید هر دو کار پرداخت را می‌بینند؛ کد مرورگری سایت دست نخورد |
+| CI | ایمیج کارگر ماژول‌های تازه و وزیرمتن را بار می‌کند؛ «پنل، سرتاسری» با `print.spec.ts` و دور پاک کردن ۲ ثانیه‌ای کارگر (`DOCWORKER_RETENTION_SECONDS=2`) |
+
+- باندل اولیهٔ سایت همان ۱۰۷٬۶۳۳ بایت؛ ایمیج پایهٔ کارگر عوض نشد (فقط PyMuPDF و وزیرمتنِ همان).
+- **پس از استقرار، خودکار:** مهاجرت `0016` کار `prepare_order` سفارش‌های باز را دوباره در صف می‌گذارد و `prepare_ticket` را برایشان، پس
+  کارگر فایل چاپ و برگهٔ سفارش‌های پیش از ۵٫۱ را هم می‌سازد. سفارش پیش از ۵٫۱ که بسته است، فایل چاپ و برگه نمی‌گیرد؛ PDF جزوه‌اش
+  همان است.
+- تصمیم‌های اجرا و سنجش‌ها در ADR-043 و ADR-044، «اجرا در ۵٫۱»؛ رابط و فرق‌ها با طرح در `docs/UI.md`، «۵٫۱».
 
 ---
 

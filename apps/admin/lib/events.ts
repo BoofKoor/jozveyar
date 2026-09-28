@@ -75,6 +75,7 @@ const versionRef = (value: unknown): Segment[] => [{ ltr: typeof value === 'numb
 const SETTING_NAMES: Record<string, string> = {
   'order.sla_days': 'روز کاری تحویل به پست',
   'otp.site_hourly_limit': 'سقف ساعتی کد پیامکی کل سایت',
+  'order.files_retention_days': 'روزهای نگهداری فایل‌های سفارش',
 };
 
 /** عدد یا تاریخ، جدا از جملهٔ فارسی. */
@@ -126,9 +127,20 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
     case 'admins.invite_revoked':
       return { badge: null, text: ['دعوت ', { ltr: name }, ' لغو شد'] };
     case 'orders.pdf_download':
-      return { badge: null, text: ['PDF سفارش ', ...orderRef(detail), ' دانلود شد'] };
+      return { badge: null, text: ['PDF اصلی سفارش ', ...orderRef(detail), ' دانلود شد'] };
+    case 'orders.print_download': {
+      const volume =
+        typeof detail.volume === 'number' && typeof detail.volumes === 'number' && detail.volumes > 1
+          ? [' جلد ', { ltr: String(detail.volume) }]
+          : [];
+      return { badge: null, text: ['فایل چاپ سفارش ', ...orderRef(detail), ...volume, ' دانلود شد'] };
+    }
+    case 'orders.ticket_download':
+      return { badge: null, text: ['برگهٔ سفارش ', ...orderRef(detail), ' دانلود شد'] };
     case 'orders.pdf_rebuild':
-      return { badge: null, text: ['ساختن دوبارهٔ PDF سفارش ', ...orderRef(detail)] };
+      return { badge: null, text: ['ساختن دوبارهٔ فایل چاپ سفارش ', ...orderRef(detail)] };
+    case 'orders.ticket_rebuild':
+      return { badge: null, text: ['ساختن دوبارهٔ برگهٔ سفارش ', ...orderRef(detail)] };
     case 'orders.status':
       return detail.to === 'cancelled'
         ? { badge: null, text: ['سفارش ', ...orderRef(detail), ' لغو شد'] }

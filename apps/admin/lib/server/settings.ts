@@ -81,7 +81,7 @@ export interface SettingsView {
   canSettings: boolean;
   canSecrets: boolean;
   /** تنظیم‌ها، اگر `settings.edit`. */
-  values: { slaDays: number; otpLimit: number; holidays: Holiday[]; officialThrough: number } | null;
+  values: { slaDays: number; otpLimit: number; retentionDays: number; holidays: Holiday[]; officialThrough: number } | null;
   /** کلیدها، اگر `secrets.edit`؛ به ترتیب `SERVICE_KEYS`. */
   keys: KeyView[];
 }
@@ -140,6 +140,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               readSetting(read, 'otp.site_hourly_limit', log),
               readSetting(read, 'calendar.holidays', log),
               readSetting(read, 'calendar.official_through', log),
+              readSetting(read, 'order.files_retention_days', log),
             ])
           : null,
         canSecrets ? deps.secrets.list() : [],
@@ -149,15 +150,21 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
         canSettings,
         canSecrets,
         values: values
-          ? { slaDays: values[0], otpLimit: values[1], holidays: sortHolidays(values[2]), officialThrough: values[3] }
+          ? {
+              slaDays: values[0],
+              otpLimit: values[1],
+              retentionDays: values[4],
+              holidays: sortHolidays(values[2]),
+              officialThrough: values[3],
+            }
           : null,
         keys: canSecrets ? SERVICE_KEYS.map((name) => keyView(name, rows.find((row) => row.name === name) ?? null)) : [],
       });
     },
 
     /**
-     * روز کاری تحویل به پست یا سقف ساعتی کد پیامکی. مقصد یکسان موفق است، بی رویداد؛ وگرنه فقط اگر امروز همان است که صفحه
-     * نشان داد (`seen`).
+     * روز کاری تحویل به پست، سقف ساعتی کد پیامکی، یا روزهای نگهداری فایل‌های سفارش (۵٫۱). مقصد یکسان موفق است، بی رویداد؛
+     * وگرنه فقط اگر امروز همان است که صفحه نشان داد (`seen`).
      */
     async saveNumber(
       session: AdminSession,

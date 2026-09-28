@@ -1,16 +1,22 @@
 """
-کار سفارش بعد از پرداخت (برش ۳ب؛ ADR-024، ADR-030، ADR-034).
+کار سفارش بعد از پرداخت (برش ۳ب؛ ADR-024، ADR-030، ADR-034؛ از برش ۵٫۱ ADR-043).
 
-`prepare_order`: بخش‌های هر جزوه به ترتیب صحافی (`order_item_sections.seq`) از استوریج خوانده می‌شوند —
-همان PDF یکدستی که تحلیل و قیمت رویش بود (`coalesce(pdf_storage_key, storage_key)`) — و پشت‌سرهم، بی
-صفحهٔ سفید بینشان، در یک PDF زیر `orders/<شماره>/jozve-<قلم>.pdf` می‌نشینند. این پیشوند بیرون از قاعدهٔ
-نگهداری `uploads/` است: جزوه‌ای که دیرتر از روزهای نگهداری چاپ شود، فایلش را از دست نمی‌دهد.
+`prepare_order`، برای هر جزوه:
 
-تعداد صفحهٔ هر بخش با همان شمارش سرور سنجیده می‌شود که قیمت از آن آمد، و جمعشان با صفحه‌های قلم.
-اختلاف یعنی چیزی که چاپ می‌شود با چیزی که پولش گرفته شد نمی‌خواند: شکست قطعی و بلند، نه چاپ بی‌صدا.
+1. **PDF جزوه:** بخش‌ها به ترتیب صحافی (`order_item_sections.seq`) از استوریج خوانده می‌شوند — همان PDF یکدستی که
+   تحلیل و قیمت رویش بود (`coalesce(pdf_storage_key, storage_key)`) — و پشت‌سرهم، بی صفحهٔ سفید بینشان، در یک PDF زیر
+   `orders/<شماره>/jozve-<قلم>.pdf` می‌نشینند. این پیشوند بیرون از قاعدهٔ نگهداری `uploads/` است: جزوه‌ای که دیرتر از
+   روزهای نگهداری چاپ شود، فایلش را از دست نمی‌دهد (ADR-044 آن را N روز پس از پست یا لغو پاک می‌کند).
+2. **فایل چاپ هر جلد** (`printfile.py`): از روی همان PDF جزوه، A4 عمودی، جلدها با ریز قیمت منجمد. جزوه‌ای که هیچ صفحه‌اش
+   عوض نمی‌شود و یک جلد است، فایل چاپش خود PDF جزوه است، بی کپی دوم؛ بقیه زیر `orders/<شماره>/print-<قلم>-<جلد>.pdf`.
 
-کلید خروجی قطعی است، پس تلاش دوباره همان فایل را بازنویسی می‌کند و فایل یتیم نمی‌ماند. مثل کارهای سند،
-تراکنش آخر را خودش commit نمی‌کند: حلقهٔ کارگر همان تراکنش را با «کار انجام شد» می‌بندد.
+تعداد صفحهٔ هر بخش با همان شمارش سرور سنجیده می‌شود که قیمت از آن آمد، جمعشان با صفحه‌های قلم، و صفحه‌های هر جلد با
+بازه‌اش. اختلاف یعنی چیزی که چاپ می‌شود با چیزی که پولش گرفته شد نمی‌خواند: شکست قطعی و بلند، نه چاپ بی‌صدا.
+
+PDF جزوه به محض ساخته شدن ثبت می‌شود و فایل‌های چاپ هر جزوه با هم: فایل‌های `uploads/` دو روز می‌مانند، پس جزوه‌ای که PDFش
+ساخته شد، اگر ساختن فایل چاپ شکست خورد، با «دوباره بساز» از همان PDF جزوه ادامه می‌دهد. جزوه‌ای که هر دو را دارد دوباره
+ساخته نمی‌شود. کلیدها قطعی‌اند، پس تلاش دوباره همان فایل را بازنویسی می‌کند و فایل یتیم نمی‌ماند؛ حلقهٔ کارگر کار را با
+«انجام شد» می‌بندد.
 """
 
 from __future__ import annotations
@@ -22,7 +28,9 @@ import tempfile
 
 import fitz  # PyMuPDF
 import psycopg
+from psycopg.types.json import Jsonb
 
+from . import printfile
 from .jobs import PermanentFailure, download
 from .storage import S3Storage
 
@@ -30,14 +38,25 @@ PREPARE_ORDER = "prepare_order"
 ORDERS_PREFIX = "orders/"
 
 # وضعیت‌هایی که چاپشان هنوز پیش روست (برش ۴٫۳، ADR-039): «در صف چاپ» و «در حال چاپ». پنل «شروع چاپ» را پیش از
-# آماده شدن PDF نمی‌زند، ولی اگر کار دیرتر برسد (تلاش دوباره، «دوباره بساز») سفارشِ در حال چاپ هم PDF می‌گیرد.
+# آماده شدن فایل چاپ نمی‌زند، ولی اگر کار دیرتر برسد (تلاش دوباره، «دوباره بساز») سفارشِ در حال چاپ هم فایل می‌گیرد.
 PRINTABLE = ("paid", "printing")
 # پیش از پرداخت: کار فقط با پرداخت در صف می‌رود.
 UNPAID = ("awaiting_payment", "expired")
 
 
 def print_key(order_number: int, item_seq: int) -> str:
+    """PDF جزوه (نام از برش ۳ب مانده: «فایلی که به چاپ می‌رود»)."""
     return f"{ORDERS_PREFIX}{order_number}/jozve-{item_seq}.pdf"
+
+
+def volume_key(order_number: int, item_seq: int, volume: int) -> str:
+    """فایل چاپ یک جلد، وقتی چیزی عوض شده یا جزوه چند جلد است."""
+    return f"{ORDERS_PREFIX}{order_number}/print-{item_seq}-{volume}.pdf"
+
+
+def order_prefix(order_number: int) -> str:
+    """همهٔ فایل‌های یک سفارش؛ `/` آخر: پیشوند 1000 سفارش 10001 را نمی‌گیرد."""
+    return f"{ORDERS_PREFIX}{order_number}/"
 
 
 def _page_count(path: str) -> int:
@@ -57,7 +76,7 @@ def merge_sections(paths: list[str], expected_pages: list[int], out_path: str) -
 
     یک بخش عیناً همان فایل است، بایت‌به‌بایت: بازنویسی چیزی به چاپ اضافه نمی‌کند و فقط خطر عوض شدن
     چیزی را دارد. چند بخش با `insert_pdf` پشت‌سرهم می‌آیند؛ اندازه‌ها و جهت هر صفحه همان می‌ماند و
-    چاپخانه (برش ۵) خودش می‌چیند. خروجی: تعداد صفحه‌های PDF جزوه.
+    فایل چاپ (برش ۵٫۱) آنها را روی A4 می‌چیند. خروجی: تعداد صفحه‌های PDF جزوه.
     """
     if len(paths) != len(expected_pages) or not paths:
         raise PermanentFailure("sections_mismatch")
@@ -90,13 +109,52 @@ def _sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+def plan_volumes(breakdown: object, seq: int, page_count: int, sides_mode: str) -> list[tuple[int, int]]:
+    """بازهٔ جلدهای قلم `seq` از ریز قیمت منجمد سفارش (`items[seq - 1].sheetsPerVolume`)."""
+    items = breakdown.get("items") if isinstance(breakdown, dict) else None
+    item = items[seq - 1] if isinstance(items, list) and 0 < seq <= len(items) else None
+    if not isinstance(item, dict) or not isinstance(item.get("sheetsPerVolume"), list):
+        raise PermanentFailure("breakdown_missing", f"قلم {seq} در ریز قیمت جلد ندارد")
+    if item.get("pageCount") != page_count:
+        raise PermanentFailure("breakdown_mismatch", f"ریز قیمت {item.get('pageCount')} صفحه، قلم {page_count}")
+    return printfile.volume_ranges(page_count, sides_mode, item["sheetsPerVolume"])
+
+
+def build_print_files(jozve_path: str, ranges: list[tuple[int, int]], workdir: str) -> list[dict]:
+    """فایل چاپ هر جلد از روی PDF جزوه. `path` null یعنی فایل چاپ خود PDF جزوه است (یک جلد، بی تغییر)."""
+    with fitz.open(jozve_path) as doc:
+        if doc.needs_pass:
+            doc.authenticate("")
+        if doc.page_count != ranges[-1][1]:
+            raise PermanentFailure("page_count_mismatch", f"PDF جزوه {doc.page_count} صفحه، جلدها {ranges[-1][1]}")
+        states = printfile.page_states(doc)
+        if len(ranges) == 1 and not any(state.changed for state in states):
+            return [{"volume": 1, "first": 1, "last": ranges[0][1], "path": None, "changes": None}]
+        if any(state.annotated for state in states):
+            doc.bake()
+        files = []
+        for volume, (first, last) in enumerate(ranges, start=1):
+            path = os.path.join(workdir, f"print-{volume}.pdf")
+            pages = printfile.build_volume(doc, states, first, last, path)
+            if pages != last - first + 1:
+                raise PermanentFailure("page_count_mismatch", f"جلد {volume} {pages} صفحه شد، بازه‌اش {last - first + 1}")
+            files.append(
+                {"volume": volume, "first": first, "last": last, "path": path, "changes": printfile.changes_of(states, first, last)}
+            )
+    # شمار صفحهٔ هر فایل از خود فایل ذخیره‌شده، نه از سندی که ساختش.
+    for file in files:
+        if _page_count(file["path"]) != file["last"] - file["first"] + 1:
+            raise PermanentFailure("page_count_mismatch", f"جلد {file['volume']} پس از ذخیره")
+    return files
+
+
 def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -> dict:
     order = conn.execute(
-        "SELECT order_number, status::text FROM orders WHERE id = %s", (order_id,)
+        "SELECT order_number, status::text, price_breakdown FROM orders WHERE id = %s", (order_id,)
     ).fetchone()
     if order is None:
         raise PermanentFailure("order_missing")
-    number, status = order
+    number, status, breakdown = order
     if status in UNPAID:
         # کار فقط با پرداخت در صف می‌رود؛ رسیدن به اینجا یعنی چیزی جای دیگر غلط است.
         raise PermanentFailure("order_not_paid")
@@ -105,8 +163,10 @@ def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -
         # شود، «دوباره بساز» پنل همین کار را از نو در صف می‌گذارد.
         raise PermanentFailure("order_closed", status)
     items = conn.execute(
-        """SELECT id::text, seq, page_count, print_pdf_ready_at IS NOT NULL
-             FROM order_items WHERE order_id = %s ORDER BY seq""",
+        """SELECT i.id::text, i.seq, i.page_count, i.sides_mode::text, i.print_pdf_key, i.print_pdf_sha256,
+                  i.print_pdf_ready_at IS NOT NULL,
+                  EXISTS (SELECT 1 FROM order_print_files f WHERE f.order_item_id = i.id)
+             FROM order_items i WHERE i.order_id = %s ORDER BY i.seq""",
         (order_id,),
     ).fetchall()
     sections = conn.execute(
@@ -121,35 +181,64 @@ def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -
     ).fetchall()
     # پیش از دانلود و ادغام: کار طولانی تراکنش بازی نگه نمی‌دارد.
     conn.commit()
+    # ریز قیمت پیش از هر دانلودی: جلدبندی‌ای که نمی‌خواند، چیزی نمی‌سازد.
+    plans = {item_id: plan_volumes(breakdown, seq, pages, sides) for item_id, seq, pages, sides, *_ in items}
 
     prepared = []
-    for item_id, seq, item_pages, ready in items:
-        if ready:
+    for item_id, seq, item_pages, _, jozve_key, jozve_sha, jozve_ready, printed in items:
+        if jozve_ready and printed:
             continue  # تلاش قبلی همین قلم را ساخت و ثبت کرد
-        parts = [(pages, key, deleted) for owner, pages, key, deleted in sections if owner == item_id]
-        if not parts:
-            raise PermanentFailure("sections_missing")
-        if any(deleted or not key for _, key, deleted in parts):
-            raise PermanentFailure("file_missing")
         with tempfile.TemporaryDirectory(prefix="docworker-order-") as workdir:
-            paths = []
-            for index, (_, key, _) in enumerate(parts, start=1):
-                path = os.path.join(workdir, f"{index}.pdf")
-                download(storage, key, path)
-                paths.append(path)
-            out = os.path.join(workdir, "jozve.pdf")
-            pages = merge_sections(paths, [p for p, _, _ in parts], out)
-            if pages != item_pages:
-                raise PermanentFailure("page_count_mismatch", f"جزوه {pages} صفحه شد، قلم {item_pages}")
-            size = os.path.getsize(out)
-            digest = _sha256(out)
-            key = print_key(number, seq)
-            storage.upload(key, out, "application/pdf")
-        conn.execute(
-            """UPDATE order_items
-                  SET print_pdf_key = %s, print_pdf_bytes = %s, print_pdf_sha256 = %s, print_pdf_ready_at = now()
-                WHERE id = %s AND print_pdf_ready_at IS NULL""",
-            (key, size, digest, item_id),
-        )
-        prepared.append({"seq": seq, "key": key, "pages": pages, "bytes": size})
+            jozve = os.path.join(workdir, "jozve.pdf")
+            if jozve_ready:
+                # PDF جزوه از تلاش قبلی (یا پیش از ۵٫۱)؛ فایل‌های `uploads/` شاید دیگر نباشند.
+                download(storage, jozve_key, jozve)
+                if _sha256(jozve) != jozve_sha:
+                    raise PermanentFailure("file_mismatch", f"PDF جزوهٔ قلم {seq} همان که ثبت شد نیست")
+            else:
+                parts = [(pages, key, deleted) for owner, pages, key, deleted in sections if owner == item_id]
+                if not parts:
+                    raise PermanentFailure("sections_missing")
+                if any(deleted or not key for _, key, deleted in parts):
+                    raise PermanentFailure("file_missing")
+                paths = []
+                for index, (_, key, _) in enumerate(parts, start=1):
+                    path = os.path.join(workdir, f"{index}.pdf")
+                    download(storage, key, path)
+                    paths.append(path)
+                pages = merge_sections(paths, [p for p, _, _ in parts], jozve)
+                if pages != item_pages:
+                    raise PermanentFailure("page_count_mismatch", f"جزوه {pages} صفحه شد، قلم {item_pages}")
+                jozve_key, jozve_sha = print_key(number, seq), _sha256(jozve)
+                storage.upload(jozve_key, jozve, "application/pdf")
+                conn.execute(
+                    """UPDATE order_items
+                          SET print_pdf_key = %s, print_pdf_bytes = %s, print_pdf_sha256 = %s, print_pdf_ready_at = now()
+                        WHERE id = %s AND print_pdf_ready_at IS NULL""",
+                    (jozve_key, os.path.getsize(jozve), jozve_sha, item_id),
+                )
+                conn.commit()
+
+            volumes = []
+            for file in build_print_files(jozve, plans[item_id], workdir):
+                if file["path"] is None:
+                    key, path = jozve_key, jozve
+                else:
+                    key, path = volume_key(number, seq, file["volume"]), file["path"]
+                    storage.upload(key, path, "application/pdf")
+                volumes.append({**file, "key": key, "bytes": os.path.getsize(path), "sha256": _sha256(path)})
+        # همهٔ جلدها با هم؛ محافظ معوق `order_print_files_cover` پوشش را در همین COMMIT می‌سنجد.
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO order_print_files
+                          (order_item_id, volume, first_page, last_page, storage_key, size_bytes, sha256, changes)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                [
+                    (item_id, v["volume"], v["first"], v["last"], v["key"], v["bytes"], v["sha256"],
+                     Jsonb(v["changes"]) if v["changes"] else None)
+                    for v in volumes
+                ],
+            )
+        conn.commit()
+        prepared.append({"seq": seq, "pages": item_pages, "volumes": [(v["first"], v["last"], v["key"]) for v in volumes]})
     return {"orderNumber": number, "items": prepared}

@@ -206,7 +206,7 @@ jobs:
         run: |
           set -eux
           docker build --build-arg "BASE_IMAGE=${{ steps.base.outputs.image }}" -t docworker-smoke dw
-          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert; print(fitz.VersionBind)"
+          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert, docworker.orders, docworker.printfile, docworker.ticket, docworker.retention, docworker.jalali; print(fitz.VersionBind, docworker.ticket.font_dir())"
           docker run --rm docworker-smoke soffice --version
           # تبدیل واقعی همان‌طور که روی سرور اجرا می‌شود (ADR-028): کاربر بی‌امتیاز
           # docworker، پایتون PID 1 بی init، پروفایل مهارشده، بی‌شبکه.
@@ -301,6 +301,8 @@ jobs:
       # وب ۳۱۰۱ را تا ISR یک دقیقه‌ای می‌پاید (`E2E_WEB_BASE_URL`)؛ در پایان نسخهٔ ۱ دوباره فعال است.
       # تنظیمات و کلیدها (برش ۴٫۶، ADR-041، `settings.spec.ts`): `SMS_API_KEY` پنل تصادفی است (کلید «از .env»)، و مقداری
       # که تست از پنل وارد می‌کند `E2E_KEY_PROBE`؛ پس از اجرا هیچ‌کدام نباید در لاگ پنل یا وب باشد (`grep -q`، بی چاپ).
+      # خروجی چاپ (برش ۵٫۱، ADR-043 و ADR-044، `print.spec.ts`): فایل چاپ هر جلد و برگهٔ سفارش را همان کارگر می‌سازد، و
+      # فایل‌های سفارش بسته را پس از روزهای نگهداری پاک می‌کند؛ دور پاک کردن اینجا هر ۲ ثانیه (پیش‌فرض کارگر ده دقیقه).
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
@@ -310,6 +312,7 @@ jobs:
           S3_ENDPOINT: http://127.0.0.1:3900
           S3_BUCKET: jozveyar
           DOCWORKER_POLL_SECONDS: '0.5'
+          DOCWORKER_RETENTION_SECONDS: '2'
         run: |
           set -eu
           docker run --rm --network host -e PGPASSWORD=jozveyar postgres:17-alpine \
@@ -318,6 +321,7 @@ jobs:
           timeout 120 sh -c 'until grep -qF "✓ دادهٔ پایه" "$0"; do sleep 1; done' "$RUNNER_TEMP/web-admin.log"
           docker run -d --name docworker-admin --network host \
             -e DATABASE_URL -e S3_ENDPOINT -e S3_BUCKET -e S3_ACCESS_KEY -e S3_SECRET_KEY -e DOCWORKER_POLL_SECONDS \
+            -e DOCWORKER_RETENTION_SECONDS \
             docworker-smoke
           SESSION_SECRET="$(openssl rand -hex 32)"
           SECRETS_KEY="$(openssl rand -hex 32)"

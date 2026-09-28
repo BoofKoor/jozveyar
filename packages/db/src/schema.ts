@@ -606,6 +606,12 @@ export const orders = pgTable(
      * `post_handoff_due_at`؛ آمار پیشخوان و صفحهٔ سفارش مشتری از همین.
      */
     handedToPostAt: timestamp('handed_to_post_at', { withTimezone: true }),
+    /**
+     * فایل‌های سفارش (PDF جزوه، فایل‌های چاپ و برگه) پاک شد (برش ۵٫۱، ADR-044): کارگر N روز پس از «تحویل پست شد» یا
+     * «لغو شد» پاکشان می‌کند و همین را می‌نشاند؛ فقط در همان دو وضعیت (CHECK `orders_files_deleted_closed`)، یک بار، و
+     * پس از آن وضعیت عوض نمی‌شود (تریگر `orders_files_deleted`، 0016). ردیف‌ها، مشخصات و ریز قیمت می‌مانند.
+     */
+    filesDeletedAt: timestamp('files_deleted_at', { withTimezone: true }),
 
     shippingMethodId: text('shipping_method_id').notNull(),
     /** منطقهٔ کرایه در لحظهٔ سفارش؛ کرایه با همین منجمد شده. */
@@ -662,6 +668,11 @@ export const orders = pgTable(
     ),
     // زمان تحویل به پست فقط در همان وضعیت. `::text`، به همان دلیل: مقایسهٔ متن، نه مقدار تازهٔ enum.
     check('orders_handed_at', sql`(${t.status}::text = 'handed_to_post') = (${t.handedToPostAt} IS NOT NULL)`),
+    // فایل‌ها فقط از سفارش بسته پاک می‌شوند (ADR-044)؛ سفارش باز هرگز. `::text`، به همان دلیل.
+    check(
+      'orders_files_deleted_closed',
+      sql`${t.filesDeletedAt} IS NULL OR ${t.status}::text IN ('handed_to_post', 'cancelled')`,
+    ),
     check('orders_sla_positive', sql`${t.slaDays} > 0`),
     check('orders_phone_normalized', sql`${t.recipientPhone} ~ '^09[0-9]{9}$'`),
     check('orders_postal_code', sql`${t.postalCode} IS NULL OR ${t.postalCode} ~ '^[0-9]{10}$'`),
@@ -753,6 +764,74 @@ export const printRules = pgTable(
   (t) => [
     unique('print_rules_item_seq').on(t.orderItemId, t.seq),
     check('print_rules_seq_positive', sql`${t.seq} >= 1`),
+  ],
+);
+
+/**
+ * فایل چاپ هر جلد هر جزوه (برش ۵٫۱، ADR-043): همهٔ صفحه‌ها A4 عمودی، جلدها دقیقاً با `sheetsPerVolume` ریز قیمت
+ * منجمد. کار `prepare_order` کارگر از روی PDF جزوه می‌سازدش، همهٔ جلدهای یک جزوه در یک تراکنش.
+ *
+ * جزوه‌ای که هیچ صفحه‌اش عوض نمی‌شود و یک جلد است، فایل چاپش خود PDF جزوه است: `storage_key` همان
+ * `order_items.print_pdf_key`، بی کپی دوم. جلدهای هر جزوه صفحه‌های ۱ تا `page_count` را پشت‌سرهم و دقیقاً یک بار
+ * می‌پوشانند، به همان شمار جلد ریز قیمت (تریگر معوق `order_print_files_cover`، 0016)، و ردیفی که نوشته شد عوض
+ * نمی‌شود (`order_print_files_frozen`).
+ */
+export const orderPrintFiles = pgTable(
+  'order_print_files',
+  {
+    orderItemId: uuid('order_item_id')
+      .notNull()
+      .references(() => orderItems.id, { onDelete: 'cascade' }),
+    volume: smallint('volume').notNull(),
+    /** شمارهٔ صفحهٔ سراسری جزوه، هر دو سر شامل. */
+    firstPage: integer('first_page').notNull(),
+    lastPage: integer('last_page').notNull(),
+    storageKey: text('storage_key').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    /**
+     * چه عوض شد، به بازهٔ صفحهٔ سراسری: `{ resized: [[first, last, widthPt, heightPt]], rotated: [[first, last]],
+     * annotated: [[first, last]] }`؛ اندازه همان که صفحه پیش از چیدن داشت. null یعنی هیچ صفحه‌ای عوض نشد.
+     */
+    changes: jsonb('changes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orderItemId, t.volume] }),
+    check('order_print_files_pages', sql`${t.volume} >= 1 AND ${t.firstPage} >= 1 AND ${t.lastPage} >= ${t.firstPage}`),
+    check(
+      'order_print_files_file',
+      sql`${t.storageKey} LIKE 'orders/%' AND ${t.sizeBytes} > 0 AND ${t.sha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+/**
+ * برگهٔ سفارش (برش ۵٫۱، ADR-043): یک PDF A4 برای هر سفارش، جدا از فایل‌های جزوه، و پیش‌نمایش PNG همان برای پنل. کار
+ * جدای `prepare_ticket` کارگر می‌سازدش و با هر ساختن دوباره همین ردیف عوض می‌شود.
+ *
+ * `stamp` اثر انگشت داده‌ای است که برگه با آن ساخته شد: `order_ticket_stamp(orders)` (0016)، که هم کارگر می‌خواند و
+ * هم پنل. پنل برگه‌ای را که با دادهٔ امروز سفارش نمی‌خواند نمی‌دهد («در حال به‌روز شدن»)، و هر تغییر داده‌اش کار را
+ * در همان تراکنش دوباره در صف می‌گذارد.
+ */
+export const orderTickets = pgTable(
+  'order_tickets',
+  {
+    orderId: uuid('order_id')
+      .primaryKey()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    previewKey: text('preview_key').notNull(),
+    stamp: text('stamp').notNull(),
+    builtAt: timestamp('built_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'order_tickets_file',
+      sql`${t.storageKey} LIKE 'orders/%' AND ${t.previewKey} LIKE 'orders/%' AND ${t.sizeBytes} > 0 AND ${t.sha256} ~ '^[0-9a-f]{64}$'`,
+    ),
   ],
 );
 

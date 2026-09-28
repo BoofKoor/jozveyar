@@ -9,8 +9,12 @@
 
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
 S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
-مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، و از برش ۳ب
-ساختن PDF جزوهٔ سفارش پرداخت‌شده)، DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰).
+مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، از برش ۳ب
+ساختن PDF جزوهٔ سفارش پرداخت‌شده و از ۵٫۱ فایل چاپ و برگهٔ سفارش)، DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛
+پیش‌فرض ۳۰۰)، DOCWORKER_RETENTION_SECONDS (اختیاری؛ فاصلهٔ دورهای پاک کردن فایل‌های سفارش بسته، پیش‌فرض ۶۰۰).
+
+نودی که کار سفارش (`prepare_order`) برمی‌دارد، بین کارها فایل‌های سفارش‌های بسته را هم پس از روزهای نگهداری پاک می‌کند
+(ADR-044)؛ نود فقط‌تحلیل نه.
 """
 
 from __future__ import annotations
@@ -33,7 +37,9 @@ from .jobs import (
     mark_document_failed,
 )
 from .orders import PREPARE_ORDER, prepare_order
+from .retention import sweep
 from .storage import S3Storage
+from .ticket import PREPARE_TICKET, prepare_ticket
 
 log = logging.getLogger("docworker")
 
@@ -41,7 +47,7 @@ log = logging.getLogger("docworker")
 # سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
 
-KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER)
+KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET)
 # شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
 EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
 
@@ -67,6 +73,9 @@ class Worker:
         self.office = convert.LibreOffice()
         # اولین هم‌گام‌سازی فونت همان اول کار؛ بعد هر ده دقیقه، بین کارها.
         self.fonts_due = 0.0
+        # پاک کردن فایل‌های سفارش بسته (ADR-044): همان الگو، فقط روی نودی که کار سفارش برمی‌دارد.
+        self.retention_every = float(os.environ.get("DOCWORKER_RETENTION_SECONDS", "600"))
+        self.retention_due = 0.0 if PREPARE_ORDER in self.kinds else float("inf")
 
     def stop(self, *_: object) -> None:
         # کار جاری تمام می‌شود؛ اگر داکر زودتر بکشد، اجاره کار را برمی‌گرداند.
@@ -90,6 +99,18 @@ class Worker:
                 result.fonts, result.added or "—", result.removed or "—",
             )
 
+    def sweep_if_due(self, conn: psycopg.Connection) -> None:
+        """فایل‌های سفارش‌های بستهٔ سررسیده. شکستش کار را نگه نمی‌دارد: دور بعد دوباره."""
+        now = time.monotonic()
+        if now < self.retention_due:
+            return
+        self.retention_due = now + self.retention_every
+        try:
+            sweep(conn, self.storage)
+        except Exception as error:  # noqa: BLE001
+            conn.rollback()
+            log.warning("فایل‌های سفارش‌های بسته پاک نشدند: %s", error)
+
     def run_once(self, conn: psycopg.Connection) -> bool:
         """یک کار برمی‌دارد و انجام می‌دهد. false یعنی صف خالی بود."""
         job = queue.claim(conn, self.id, self.kinds, LEASE_SECONDS)
@@ -102,6 +123,8 @@ class Worker:
                 result = convert_document(conn, self.storage, self.office, job.document_id)
             elif job.kind == PREPARE_ORDER:
                 result = prepare_order(conn, self.storage, job.order_id)
+            elif job.kind == PREPARE_TICKET:
+                result = prepare_ticket(conn, self.storage, job.order_id)
             else:
                 result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)
@@ -132,6 +155,7 @@ class Worker:
                 with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
                     while not self.stopping:
                         self.sync_fonts_if_due()
+                        self.sweep_if_due(conn)
                         if not self.run_once(conn):
                             sandbox.reap_orphans()
                             time.sleep(self.poll)

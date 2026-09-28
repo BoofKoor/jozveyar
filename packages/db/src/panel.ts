@@ -12,17 +12,28 @@
  *    یا تا حاشیهٔ پرداخت پاک می‌شود: همان قاعدهٔ «دوباره پرداخت کن» سایت (ADR-034).
  *  - **مرز روز:** مهلت تحویل به پست پایان انحصاری روز است (`postHandoffDue`)، پس مهلتِ «امروز» خودِ آغاز فرداست.
  *    شمارش با مرزهایی است که سرویس از روز تهران می‌سازد.
- *  - **یک تراکنش:** «دوباره بساز» کار شکست‌خوردهٔ `prepare_order` را با رویداد ادمین در همان تراکنش به صف
+ *  - **یک تراکنش:** «دوباره بساز» کار `prepare_order` یا `prepare_ticket` را با رویداد ادمین در همان تراکنش به صف
  *    برمی‌گرداند، زیر قفل ردیف کار؛ دو کلیک هم‌زمان یک بار. تغییر وضعیت هم: سفارش فقط اگر هنوز همان وضعیتی را دارد
  *    که ادمین دید، با ردیف `order_status_events` و رویداد ادمین در همان تراکنش؛ ویرایش گیرنده زیر قفل ردیف سفارش.
  *    کدام وضعیت به کدام می‌رود را تریگر `orders_status_flow` هم می‌سنجد (0011).
+ *  - **برگهٔ امروز** (برش ۵٫۱، ADR-043): برگه‌ای که اثر انگشتش (`order_ticket_stamp`، 0016) با دادهٔ امروز سفارش نمی‌خواند
+ *    تازه نیست؛ ویرایش گیرنده کار برگه را در همان تراکنش دوباره در صف می‌گذارد.
+ *  - **فایل‌های پاک‌شده** (ADR-044): سفارشی که فایلش رفته وضعیتش عوض نمی‌شود؛ تغییر وضعیت شرطش را دارد، و تریگر
+ *    `orders_files_deleted` هم.
  */
 
-import { and, asc, desc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
 import type { Database } from './index.js';
-import { PREPARE_ORDER_JOB, type OrderItemRow, type OrderRow, type OrderStatus, type PaymentRow } from './orders.js';
+import {
+  PREPARE_ORDER_JOB,
+  PREPARE_TICKET_JOB,
+  type OrderItemRow,
+  type OrderRow,
+  type OrderStatus,
+  type PaymentRow,
+} from './orders.js';
 import {
   adminEvents,
   adminUsers,
@@ -32,7 +43,9 @@ import {
   jobs,
   orderItemSections,
   orderItems,
+  orderPrintFiles,
   orderStatusEvents,
+  orderTickets,
   orders,
   paperTypes,
   payments,
@@ -42,6 +55,9 @@ import {
   shippingMethods,
   shippingZones,
 } from './schema.js';
+
+/** دو کار سفارش پس از پرداخت: PDF جزوه و فایل چاپ، و برگهٔ سفارش. */
+export type OrderJobKind = typeof PREPARE_ORDER_JOB | typeof PREPARE_TICKET_JOB;
 
 /** چیپ‌های فهرست سفارش‌ها، به ترتیب طرح پنل. */
 export const PANEL_BUCKETS = ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] as const;
@@ -154,11 +170,43 @@ export interface PanelRule {
   paperName: string | null;
 }
 
+/** چه عوض شد در فایل چاپ یک جلد (ADR-043)؛ بازه‌ها به صفحهٔ سراسری جزوه، هر دو سر شامل. */
+export interface PrintChanges {
+  /** روی A4 نشست: `[first, last, widthPt, heightPt]`، با اندازه‌ای که صفحه پیش از چیدن داشت. */
+  resized?: [number, number, number, number][];
+  /** افقی بود و چرخید. */
+  rotated?: [number, number][];
+  /** حاشیه‌نویسی داشت و جزو صفحه شد. */
+  annotated?: [number, number][];
+}
+
+/** فایل چاپ یک جلد (`order_print_files`). */
+export interface PanelPrintVolume {
+  volume: number;
+  firstPage: number;
+  lastPage: number;
+  storageKey: string;
+  sizeBytes: number;
+  /** null یعنی هیچ صفحه‌ای عوض نشد. */
+  changes: PrintChanges | null;
+  createdAt: Date;
+}
+
 export interface PanelOrderItem extends OrderItemRow {
   /** نام صحافی در همان نسخهٔ تعرفهٔ سفارش. */
   bindingName: string | null;
   sections: PanelSection[];
   rules: PanelRule[];
+  /** فایل‌های چاپ، به ترتیب جلد؛ خالی یعنی هنوز ساخته نشده. */
+  printFiles: PanelPrintVolume[];
+}
+
+/** برگهٔ سفارش (`order_tickets`). */
+export interface PanelTicket {
+  sizeBytes: number;
+  builtAt: Date;
+  /** با دادهٔ امروز سفارش ساخته شده (`order_ticket_stamp`)؛ نه یعنی کهنه، تا کارگر دوباره بسازدش. */
+  fresh: boolean;
 }
 
 export interface PanelPdfJob {
@@ -195,20 +243,47 @@ export interface PanelOrderDetails {
   payments: PaymentRow[];
   /** تغییرهای وضعیت، به ترتیب زمان. */
   statusEvents: PanelStatusEvent[];
+  /** کار `prepare_order`: PDF جزوه و فایل‌های چاپ. */
   pdfJob: PanelPdfJob | null;
+  /** کار `prepare_ticket` و برگه‌ای که ساخت (برش ۵٫۱). */
+  ticketJob: PanelPdfJob | null;
+  ticket: PanelTicket | null;
   /** رویدادهای ادمینِ همین سفارش، به ترتیب زمان. */
   events: PanelOrderEvent[];
 }
 
-/** PDF یک جزوه برای دانلود. */
-export interface PanelPrintFile {
+/** سفارشِ یک فایل: برای مجوز وضعیت و «پاک شد». */
+interface PanelFileOwner {
   orderId: string;
   orderNumber: number;
   status: OrderRow['status'];
+  filesDeletedAt: Date | null;
+}
+
+/** PDF یک جزوه برای دانلود. */
+export interface PanelJozveFile extends PanelFileOwner {
   itemSeq: number;
   key: string | null;
   bytes: number | null;
   readyAt: Date | null;
+}
+
+/** فایل چاپ یک جلد برای دانلود؛ `key` null یعنی هنوز ساخته نشده. */
+export interface PanelVolumeFile extends PanelFileOwner {
+  itemSeq: number;
+  volume: number;
+  /** جلدهای ساخته‌شدهٔ همین جزوه؛ نام فایل یک‌جلدی «-jeld-» ندارد. */
+  volumes: number;
+  key: string | null;
+  bytes: number | null;
+}
+
+/** برگهٔ سفارش برای دانلود و پیش‌نمایش؛ `key` null یعنی هنوز ساخته نشده. */
+export interface PanelTicketFile extends PanelFileOwner {
+  key: string | null;
+  previewKey: string | null;
+  bytes: number | null;
+  fresh: boolean;
 }
 
 /**
@@ -225,8 +300,11 @@ export interface PanelStatusChange {
   event: AdminEventInput;
 }
 
-/** نتیجهٔ تغییر وضعیت یا ویرایش: انجام شد، یا سفارش دیگر آن وضعیت را نداشت (`current`؛ null یعنی سفارشی نیست). */
-export type PanelWrite = { ok: true; order: OrderRow } | { ok: false; current: OrderStatus | null };
+/**
+ * نتیجهٔ تغییر وضعیت یا ویرایش: انجام شد، یا سفارش دیگر آن وضعیت را نداشت (`current`؛ null یعنی سفارشی نیست)، یا
+ * فایل‌هایش همین حالا پاک شد (`filesDeleted`، ADR-044).
+ */
+export type PanelWrite = { ok: true; order: OrderRow } | { ok: false; current: OrderStatus | null; filesDeleted?: boolean };
 
 export interface PanelOrderStore {
   dueSummary(bounds: { at: Date; tomorrowStart: Date; dayAfterStart: Date }): Promise<PanelDueSummary>;
@@ -240,22 +318,26 @@ export interface PanelOrderStore {
   /** شمارش هر سطل با همان جست‌وجو. */
   counts(query: { search: PanelSearch | null; clock: PanelClock }): Promise<Record<PanelBucket, number>>;
   details(orderNumber: number): Promise<PanelOrderDetails | null>;
-  printFile(orderNumber: number, itemSeq: number): Promise<PanelPrintFile | null>;
+  /** null یعنی چنین سفارش یا جزوه‌ای نیست. */
+  jozveFile(orderNumber: number, itemSeq: number): Promise<PanelJozveFile | null>;
+  printVolume(orderNumber: number, itemSeq: number, volume: number): Promise<PanelVolumeFile | null>;
+  ticketFile(orderNumber: number): Promise<PanelTicketFile | null>;
   /**
-   * «دوباره بساز»: کار شکست‌خوردهٔ `prepare_order` از نو در صف، با رویداد در همان تراکنش. شکست قبلی (تعداد
-   * تلاش و کد خطا، بی متن خام) در جزئیات رویداد می‌ماند، چون ردیف کار پاک می‌شود. `not_failed`: کاری نبود یا
-   * شکست‌خورده نبود (دو کلیک: دومی).
+   * «دوباره بساز»: کار `prepare_order` یا `prepare_ticket` از نو در صف (یا تازه، اگر نبود)، با رویداد در همان تراکنش. کار
+   * قبلی (تعداد تلاش و کد خطا، بی متن خام) در جزئیات رویداد می‌ماند، چون ردیف کار از نو می‌شود. `busy`: کار همین حالا
+   * در صف است یا کارگر رویش است (دو کلیک: دومی). اینکه کی ساختن دوباره معنا دارد را سرویس می‌گوید.
    */
-  rebuildPdf(orderId: string, event: AdminEventInput): Promise<'ok' | 'not_failed'>;
+  requeue(orderId: string, kind: OrderJobKind, event: AdminEventInput): Promise<'ok' | 'busy'>;
   /**
    * تغییر وضعیت در یک تراکنش: `UPDATE … WHERE status = from` (دو کلیک هم‌زمان یک بار؛ دومی `ok: false` با وضعیت
-   * تازه)، زمان تحویل به پست فقط در «تحویل پست شد»، یک ردیف `order_status_events` با ادمین و یادداشت، و رویداد
-   * ادمین.
+   * تازه)، و فقط اگر فایل‌های سفارش پاک نشده (`filesDeleted`)؛ زمان تحویل به پست فقط در «تحویل پست شد»، یک ردیف
+   * `order_status_events` با ادمین و یادداشت، و رویداد ادمین.
    */
   changeStatus(change: PanelStatusChange): Promise<PanelWrite>;
   /**
    * گیرندهٔ تازه، زیر قفل ردیف سفارش و فقط اگر وضعیت سفارش هنوز در `editable` است. رویداد ادمین با نام فیلدهای
-   * عوض‌شده و مقدار پیشینشان (سابقه‌ای که بعداً بگوید پیش از ویرایش چه بود)؛ بی تغییر، بی رویداد.
+   * عوض‌شده و مقدار پیشینشان (سابقه‌ای که بعداً بگوید پیش از ویرایش چه بود)؛ بی تغییر، بی رویداد. برگهٔ سفارش نام و
+   * نشانی را دارد، پس کارش در همان تراکنش دوباره در صف می‌رود (برش ۵٫۱).
    */
   editRecipient(input: {
     orderId: string;
@@ -513,7 +595,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         .orderBy(orderItems.seq);
       const itemIds = itemRows.map((row) => row.item.id);
 
-      const [sectionRows, ruleRows, paymentRows, statusRows, jobRows, eventRows] = await Promise.all([
+      const [sectionRows, ruleRows, paymentRows, statusRows, jobRows, eventRows, printRows, ticketRows] = await Promise.all([
         itemIds.length === 0
           ? []
           : db
@@ -552,8 +634,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         db
           .select()
           .from(jobs)
-          .where(and(eq(jobs.orderId, order.id), eq(jobs.kind, PREPARE_ORDER_JOB)))
-          .limit(1),
+          .where(and(eq(jobs.orderId, order.id), inArray(jobs.kind, [PREPARE_ORDER_JOB, PREPARE_TICKET_JOB]))),
         db
           .select({
             id: adminEvents.id,
@@ -566,9 +647,39 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(adminUsers, eq(adminUsers.id, adminEvents.adminUserId))
           .where(and(eq(adminEvents.targetType, 'order'), eq(adminEvents.targetId, order.id)))
           .orderBy(asc(adminEvents.at), asc(adminEvents.id)),
+        itemIds.length === 0
+          ? []
+          : db
+              .select()
+              .from(orderPrintFiles)
+              .where(inArray(orderPrintFiles.orderItemId, itemIds))
+              .orderBy(orderPrintFiles.orderItemId, orderPrintFiles.volume),
+        db
+          .select({
+            sizeBytes: orderTickets.sizeBytes,
+            builtAt: orderTickets.builtAt,
+            fresh: sql<boolean>`${orderTickets.stamp} = order_ticket_stamp(${orders})`,
+          })
+          .from(orderTickets)
+          .innerJoin(orders, eq(orders.id, orderTickets.orderId))
+          .where(eq(orderTickets.orderId, order.id))
+          .limit(1),
       ]);
 
-      const job = jobRows[0];
+      const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
+        const job = jobRows.find((row) => row.kind === kind);
+        return job
+          ? {
+              status: job.status,
+              attempts: job.attempts,
+              maxAttempts: job.maxAttempts,
+              lastError: job.lastError,
+              createdAt: job.createdAt,
+              updatedAt: job.updatedAt,
+              finishedAt: job.finishedAt,
+            }
+          : null;
+      };
       return {
         order,
         provinceName: head.provinceName,
@@ -590,30 +701,26 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
               paperTypeId: rule.paperTypeId,
               paperName,
             })),
+          printFiles: printRows
+            .filter((row) => row.orderItemId === item.id)
+            .map(({ orderItemId: _item, sha256: _sha, changes, ...file }) => ({ ...file, changes: changes as PrintChanges | null })),
         })),
         payments: paymentRows,
         statusEvents: statusRows.map(({ event, adminName }) => ({ ...event, adminName })),
-        pdfJob: job
-          ? {
-              status: job.status,
-              attempts: job.attempts,
-              maxAttempts: job.maxAttempts,
-              lastError: job.lastError,
-              createdAt: job.createdAt,
-              updatedAt: job.updatedAt,
-              finishedAt: job.finishedAt,
-            }
-          : null,
+        pdfJob: jobOf(PREPARE_ORDER_JOB),
+        ticketJob: jobOf(PREPARE_TICKET_JOB),
+        ticket: ticketRows[0] ?? null,
         events: eventRows,
       };
     },
 
-    async printFile(orderNumber, itemSeq) {
+    async jozveFile(orderNumber, itemSeq) {
       const [row] = await db
         .select({
           orderId: orders.id,
           orderNumber: orders.orderNumber,
           status: orders.status,
+          filesDeletedAt: orders.filesDeletedAt,
           itemSeq: orderItems.seq,
           key: orderItems.printPdfKey,
           bytes: orderItems.printPdfBytes,
@@ -626,35 +733,80 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       return row ?? null;
     },
 
-    async rebuildPdf(orderId, event) {
+    async printVolume(orderNumber, itemSeq, volume) {
+      const [row] = await db
+        .select({
+          orderId: orders.id,
+          orderNumber: orders.orderNumber,
+          status: orders.status,
+          filesDeletedAt: orders.filesDeletedAt,
+          itemSeq: orderItems.seq,
+          volumes: sql<number>`(SELECT count(*)::int FROM order_print_files f WHERE f.order_item_id = ${orderItems.id})`,
+          key: orderPrintFiles.storageKey,
+          bytes: orderPrintFiles.sizeBytes,
+        })
+        .from(orderItems)
+        .innerJoin(orders, eq(orders.id, orderItems.orderId))
+        .leftJoin(orderPrintFiles, and(eq(orderPrintFiles.orderItemId, orderItems.id), eq(orderPrintFiles.volume, volume)))
+        .where(and(eq(orders.orderNumber, orderNumber), eq(orderItems.seq, itemSeq)))
+        .limit(1);
+      return row ? { ...row, volume } : null;
+    },
+
+    async ticketFile(orderNumber) {
+      const [row] = await db
+        .select({
+          orderId: orders.id,
+          orderNumber: orders.orderNumber,
+          status: orders.status,
+          filesDeletedAt: orders.filesDeletedAt,
+          key: orderTickets.storageKey,
+          previewKey: orderTickets.previewKey,
+          bytes: orderTickets.sizeBytes,
+          fresh: sql<boolean>`coalesce(${orderTickets.stamp} = order_ticket_stamp(${orders}), false)`,
+        })
+        .from(orders)
+        .leftJoin(orderTickets, eq(orderTickets.orderId, orders.id))
+        .where(eq(orders.orderNumber, orderNumber))
+        .limit(1);
+      return row ?? null;
+    },
+
+    async requeue(orderId, kind, event) {
       return db.transaction(async (tx) => {
         const [job] = await tx
           .select()
           .from(jobs)
-          .where(and(eq(jobs.orderId, orderId), eq(jobs.kind, PREPARE_ORDER_JOB)))
+          .where(and(eq(jobs.orderId, orderId), eq(jobs.kind, kind)))
           .limit(1)
           .for('update');
-        if (!job || job.status !== 'failed') return 'not_failed' as const;
-        // `now()` پایگاه داده، مثل `queue_job` کارگر: کارگر کار را با ساعت پایگاه داده برمی‌دارد.
-        await tx
-          .update(jobs)
-          .set({
-            status: 'queued',
-            attempts: 0,
-            runAfter: sql`now()`,
-            lockedBy: null,
-            lockedUntil: null,
-            lastError: null,
-            finishedAt: null,
-            updatedAt: sql`now()`,
-          })
-          .where(eq(jobs.id, job.id));
+        if (job && (job.status === 'queued' || job.status === 'running')) return 'busy' as const;
+        if (job) {
+          // `now()` پایگاه داده، مثل `queue_job` کارگر: کارگر کار را با ساعت پایگاه داده برمی‌دارد.
+          await tx
+            .update(jobs)
+            .set({
+              status: 'queued',
+              attempts: 0,
+              runAfter: sql`now()`,
+              lockedBy: null,
+              lockedUntil: null,
+              lastError: null,
+              finishedAt: null,
+              updatedAt: sql`now()`,
+            })
+            .where(eq(jobs.id, job.id));
+        } else {
+          // کاری نبود (سفارش پیش از ۵٫۱): تازه. دو کلیک هم‌زمان به شاخص یکتای (سفارش، نوع) می‌خورند و دومی `busy` است.
+          const inserted = await tx.insert(jobs).values({ kind, orderId }).onConflictDoNothing().returning({ id: jobs.id });
+          if (inserted.length === 0) return 'busy' as const;
+        }
         await tx.insert(adminEvents).values(
           adminEventRow({
             ...event,
             detail: {
               ...(event.detail as Record<string, unknown> | undefined),
-              previous: { attempts: job.attempts, error: pdfErrorCode(job.lastError) },
+              previous: job ? { status: job.status, attempts: job.attempts, error: pdfErrorCode(job.lastError) } : null,
             },
           }),
         );
@@ -665,13 +817,19 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     async changeStatus(change) {
       return db.transaction(async (tx): Promise<PanelWrite> => {
         // دو کلیک هم‌زمان: دومی پشت قفل ردیف می‌ماند و بعد شرط `status = from` را دوباره می‌سنجد، که دیگر نمی‌خواند.
+        // کارگری که فایل‌ها را پاک می‌کند هم ردیف را قفل می‌کند (ADR-044): پس از او شرط فایل دیگر نمی‌خواند.
         const [order] = await tx
           .update(orders)
           .set({ status: change.to, handedToPostAt: change.to === 'handed_to_post' ? change.at : null })
-          .where(and(eq(orders.id, change.orderId), eq(orders.status, change.from)))
+          .where(and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt)))
           .returning();
         if (!order) {
-          const [current] = await tx.select({ status: orders.status }).from(orders).where(eq(orders.id, change.orderId)).limit(1);
+          const [current] = await tx
+            .select({ status: orders.status, filesDeletedAt: orders.filesDeletedAt })
+            .from(orders)
+            .where(eq(orders.id, change.orderId))
+            .limit(1);
+          if (current?.filesDeletedAt) return { ok: false, current: current.status, filesDeleted: true };
           return { ok: false, current: current?.status ?? null };
         }
         await tx.insert(orderStatusEvents).values({
@@ -696,6 +854,15 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         const changed = (['recipientName', 'addressText', 'postalCode'] as const).filter((key) => order[key] !== recipient[key]);
         if (changed.length === 0) return { ok: true as const, order, changed };
         const [updated] = await tx.update(orders).set(recipient).where(eq(orders.id, orderId)).returning();
+        // برگه با نام و نشانی تازه: کار تمام‌شده یا شکست‌خورده دوباره در صف، مثل `queue_job` کارگر. کاری که همین حالا
+        // در صف است دادهٔ تازه را می‌خواند؛ کاری که کارگر رویش است، پیش از ثبت اثر انگشت را زیر قفل همین ردیف دوباره
+        // می‌سنجد و با دادهٔ تازه از نو می‌سازد (`docworker/ticket.py`).
+        await tx.execute(sql`
+          INSERT INTO jobs (kind, order_id) VALUES (${PREPARE_TICKET_JOB}, ${orderId})
+          ON CONFLICT (order_id, kind) DO UPDATE
+             SET status = 'queued', attempts = 0, run_after = now(), locked_by = NULL, locked_until = NULL,
+                 last_error = NULL, finished_at = NULL, updated_at = now()
+           WHERE jobs.status IN ('done', 'failed')`);
         await tx.insert(adminEvents).values(
           adminEventRow({
             ...event,

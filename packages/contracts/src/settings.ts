@@ -27,6 +27,12 @@ export const SETTING_SCHEMAS = {
   'calendar.official_through': z.number().int().min(1400).max(1500),
   /** سقف کد پیامکی در ساعت برای کل سایت (ADR-033)؛ جلوی «پیامک‌سازی» با شماره‌ها و IPهای زیاد. */
   'otp.site_hourly_limit': z.number().int().min(1).max(100_000),
+  /**
+   * فایل‌های سفارش (PDF جزوه، فایل‌های چاپ و برگه) چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (ADR-044). کمتر از
+   * یک هفته فرصت چاپ دوبارهٔ بستهٔ گم‌شده را می‌برد، و بیش از یک سال فقط دیسک است. کارگر همین بازه را می‌سنجد
+   * (`services/docworker/docworker/retention.py`) و مقدار بیرون از آن را به کار نمی‌برد: هیچ فایلی پاک نمی‌شود.
+   */
+  'order.files_retention_days': z.number().int().min(7).max(365),
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

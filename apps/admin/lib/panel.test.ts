@@ -196,16 +196,24 @@ describe('رویدادها', () => {
     ]);
   });
 
-  it('کار سفارش‌ها (۴٫۲) با شمارهٔ سفارش، جدا از جملهٔ فارسی؛ جزوهٔ دوم هم گفته می‌شود', () => {
+  it('کار سفارش‌ها (۴٫۲، و از ۵٫۱ فایل چاپ و برگه) با شمارهٔ سفارش، جدا از جملهٔ فارسی؛ جزوهٔ دوم و جلد هم گفته می‌شوند', () => {
     const lines = eventLines([
       event('orders.pdf_download', { targetType: 'order', detail: { orderNumber: 10027, item: 1 } }),
       event('orders.pdf_rebuild', { targetType: 'order', detail: { orderNumber: 10031, previous: { attempts: 3, error: 'transient' } } }),
       event('orders.pdf_download', { targetType: 'order', detail: { orderNumber: 10040, item: 2 } }),
+      event('orders.print_download', { targetType: 'order', detail: { orderNumber: 10040, item: 1, volume: 2, volumes: 2 } }),
+      event('orders.print_download', { targetType: 'order', detail: { orderNumber: 10027, item: 1, volume: 1, volumes: 1 } }),
+      event('orders.ticket_download', { targetType: 'order', detail: { orderNumber: 10027 } }),
+      event('orders.ticket_rebuild', { targetType: 'order', detail: { orderNumber: 10027, previous: null } }),
     ]);
     expect(lines.map((l) => [l.who, l.text])).toEqual([
-      ['سارا', ['PDF سفارش ', { ltr: '10027' }, ' دانلود شد']],
-      ['سارا', ['ساختن دوبارهٔ PDF سفارش ', { ltr: '10031' }]],
-      ['سارا', ['PDF سفارش ', { ltr: '10040' }, ' (جزوهٔ ', { ltr: '2' }, ')', ' دانلود شد']],
+      ['سارا', ['PDF اصلی سفارش ', { ltr: '10027' }, ' دانلود شد']],
+      ['سارا', ['ساختن دوبارهٔ فایل چاپ سفارش ', { ltr: '10031' }]],
+      ['سارا', ['PDF اصلی سفارش ', { ltr: '10040' }, ' (جزوهٔ ', { ltr: '2' }, ')', ' دانلود شد']],
+      ['سارا', ['فایل چاپ سفارش ', { ltr: '10040' }, ' جلد ', { ltr: '2' }, ' دانلود شد']],
+      ['سارا', ['فایل چاپ سفارش ', { ltr: '10027' }, ' دانلود شد']],
+      ['سارا', ['برگهٔ سفارش ', { ltr: '10027' }, ' دانلود شد']],
+      ['سارا', ['ساختن دوبارهٔ برگهٔ سفارش ', { ltr: '10027' }]],
     ]);
   });
 
@@ -252,6 +260,7 @@ describe('رویدادها', () => {
     const lines = eventLines([
       setting('settings.update', { key: 'order.sla_days', from: 2, to: 3 }),
       setting('settings.update', { key: 'otp.site_hourly_limit', from: 300, to: 1500 }),
+      setting('settings.update', { key: 'order.files_retention_days', from: 30, to: 45 }),
       setting('settings.update', { key: 'calendar.official_through', from: 1405, to: 1406 }),
       setting('settings.holiday_add', { date: '1406/04/01', title: 'آزمایش' }),
       setting('settings.holiday_remove', { date: '1405/10/02', title: 'ولادت امام علی (ع) / روز پدر' }),
@@ -262,6 +271,7 @@ describe('رویدادها', () => {
     expect(lines.map((l) => l.text)).toEqual([
       ['روز کاری تحویل به پست: ', { ltr: '2' }, ' ← ', { ltr: '3' }],
       ['سقف ساعتی کد پیامکی کل سایت: ', { ltr: '300' }, ' ← ', { ltr: '1,500' }],
+      ['روزهای نگهداری فایل‌های سفارش: ', { ltr: '30' }, ' ← ', { ltr: '45' }],
       ['تعطیلی‌های ', { ltr: '1406' }, ' با تقویم رسمی تطبیق داده شد'],
       ['تعطیلی ', { ltr: '1406/04/01' }, ' افزوده شد: آزمایش'],
       ['تعطیلی ', { ltr: '1405/10/02' }, ' حذف شد: ولادت امام علی (ع) / روز پدر'],

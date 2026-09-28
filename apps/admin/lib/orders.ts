@@ -8,6 +8,7 @@
  * (`postHandoffDue`): مهلتِ «تا پایان امروز» همان آغاز فرداست.
  */
 
+import { paperSizeName, ptToMm } from '@jozveyar/analysis';
 import type { Breakdown, ItemBreakdown } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
@@ -47,9 +48,14 @@ export type Seg = string | { num: string } | { ltr: string };
 
 const num = (value: number): Seg => ({ num: formatNumber(value) });
 
-/** تکه‌ها با جداکننده؛ `[[a], [b]]` ← `a · b`. */
-function joined(parts: Seg[][], separator = ' · '): Seg[] {
-  return parts.flatMap((part, i) => (i === 0 ? part : [separator, ...part]));
+const VOLUME_WORDS: Record<number, string> = { 1: 'یک', 2: 'دو', 3: 'سه', 4: 'چهار', 5: 'پنج' };
+
+/** شمار جلد، همان طرح: «دو جلد»؛ بیش از پنج با رقم. */
+export const volumesSegs = (volumes: number): Seg[] => [VOLUME_WORDS[volumes] ?? num(volumes), ' جلد'];
+
+/** تکه‌ها با جداکننده؛ `[[a], [b]]` ← `a · b`، و با `last` پیش از آخری: «413، 412 و 410». */
+function joined(parts: Seg[][], separator = ' · ', last = separator): Seg[] {
+  return parts.flatMap((part, i) => (i === 0 ? part : [i === parts.length - 1 ? last : separator, ...part]));
 }
 
 /* ───────────────────────── فهرست: پارامترها و جست‌وجو ───────────────────────── */
@@ -371,10 +377,18 @@ export interface Fact {
   value: Seg[];
 }
 
-/** مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو · تحریر ۸۰ گرم»، صحافی با صفحه و برگ و جلد، و تعداد. */
+/**
+ * مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو · تحریر ۸۰ گرم»، صحافی با صفحه و برگ و جلد («دو جلد (413 و 412 برگ)»، طرح برش ۵)، و
+ * تعداد.
+ */
 export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefined): Fact[] {
   const papers = [...new Set(item.rules.map((rule) => rule.paperName ?? rule.paperTypeId))];
   const volumes = priced?.volumes ?? 1;
+  const perVolume = priced?.sheetsPerVolume ?? [];
+  const sheetsOf: Seg[] =
+    volumes > 1 && perVolume.length === volumes
+      ? [' (', ...joined(perVolume.map((sheets) => [num(sheets)]), '، ', ' و '), ' برگ)']
+      : [];
   return [
     {
       label: 'چاپ',
@@ -389,7 +403,8 @@ export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefine
           ' صفحه',
           ...(priced ? ['، ', num(priced.sheets), ' برگ'] : []),
           '، ',
-          ...(volumes === 1 ? ['یک جلد'] : [num(volumes), ' جلد']),
+          ...volumesSegs(volumes),
+          ...sheetsOf,
         ],
       ]),
     },
@@ -510,22 +525,36 @@ export function paymentView(payment: PaymentRow, at: Date): PaymentView {
   };
 }
 
-/* ───────────────────────── PDF جزوه ───────────────────────── */
+/* ───────────────────────── فایل چاپ و برگهٔ سفارش (برش ۵٫۱) ───────────────────────── */
 
+/** کد شکست کارگر (`last_error`) به زبان پنل؛ کار `prepare_order` (PDF جزوه و فایل چاپ) و `prepare_ticket` (برگه). */
 const PDF_ERRORS: Record<string, string> = {
   file_missing: 'فایل مشتری روی استوریج پیدا نشد',
+  file_mismatch: 'PDF جزوه روی استوریج همان که ثبت شد نیست',
   page_count_mismatch: 'صفحه‌های فایل با شمارش سرور نخواند',
   corrupt_file: 'فایل خراب بود',
   password_protected: 'فایل رمز دارد',
   sections_missing: 'بخش‌های جزوه با سفارش نخواند',
   sections_mismatch: 'بخش‌های جزوه با سفارش نخواند',
+  breakdown_missing: 'ریز قیمت سفارش جلدبندی ندارد',
+  breakdown_mismatch: 'جلدبندی ریز قیمت با صفحه‌های جزوه نخواند',
+  font_missing: 'قلم وزیرمتن روی کارگر پیدا نشد',
+  ticket_overflow: 'برچسب پست در برگه جا نشد',
   order_not_paid: 'سفارش پرداخت‌شده پیدا نشد',
   order_missing: 'سفارش پرداخت‌شده پیدا نشد',
   order_closed: 'سفارش لغو شده بود',
   transient: 'استوریج یا پایگاه داده جواب نداد',
 };
 
-export const pdfFileName = (orderNumber: number, itemSeq: number) => `jozve-${orderNumber}-${itemSeq}.pdf`;
+/** نام فایل چاپ هر جلد، همان که برگهٔ سفارش می‌نویسد (`docworker/ticket.py`): یک‌جلدی همان نام جزوه. */
+export const volumeFileName = (orderNumber: number, itemSeq: number, volume: number, volumes: number) =>
+  volumes === 1 ? `jozve-${orderNumber}-${itemSeq}.pdf` : `jozve-${orderNumber}-${itemSeq}-jeld-${volume}.pdf`;
+
+/** PDF اصلی جزوه (بخش‌ها پشت‌سرهم، اندازه‌ها همان‌طور که بود)؛ نامش با فایل چاپ یکی نیست. */
+export const pdfFileName = (orderNumber: number, itemSeq: number) => `jozve-${orderNumber}-${itemSeq}-asli.pdf`;
+
+/** برگهٔ سفارش، بی پسوند (PDF و پیش‌نمایش PNG). */
+export const ticketFileName = (orderNumber: number) => `barge-sefaresh-${orderNumber}`;
 
 /** تا کی فایل‌های مشتری روی سرورند؛ null یعنی دیگر نیستند. */
 export function filesUntil(items: readonly PanelOrderItem[], at: Date): Date | null {
@@ -535,43 +564,204 @@ export function filesUntil(items: readonly PanelOrderItem[], at: Date): Date | n
   return earliest > at.getTime() ? new Date(earliest) : null;
 }
 
-export type PdfView =
-  | { kind: 'unpaid' }
-  | { kind: 'closed' }
-  | { kind: 'ready'; fileName: string; pages: number; bytes: number | null; readyAt: Date }
-  | { kind: 'building'; retrying: boolean }
-  | { kind: 'failed'; fileName: string; attempts: number; reason: string; from: Date; to: Date | null; filesUntil: Date | null };
-
 /**
- * PDF یک جزوه: ساخته شده (دانلود، در هر وضعیت پس از پرداخت)، در حال ساختن، یا ساخته نشد با دلیل و تا کی «دوباره
- * بساز» ممکن است (فایل‌های مشتری تا پاک شدنشان). کار `prepare_order` مال کل سفارش است؛ قلمی که ساخته شده، ساخته شده
- * می‌ماند. سفارشی که لغو شد یا به پست رسید و PDFش ساخته نشده، دیگر لازمش ندارد (`closed`).
+ * «دوباره بساز» فایل چاپ ممکن است؟ جزوه‌ای که PDFش ساخته شده از همان PDF ادامه می‌دهد، که تا پاک شدن فایل‌های سفارش
+ * (ADR-044) هست؛ جزوهٔ بی PDF فایل‌های `uploads/` مشتری را می‌خواهد. `until` null یعنی مهلتی ندارد؛ خود null یعنی ممکن نیست.
  */
-export function pdfView(details: PanelOrderDetails, item: PanelOrderItem, at: Date): PdfView {
-  if (!isPaidStatus(details.order.status)) return { kind: 'unpaid' };
-  const fileName = pdfFileName(details.order.orderNumber, item.seq);
-  if (item.printPdfReadyAt) {
-    return { kind: 'ready', fileName, pages: item.pageCount, bytes: item.printPdfBytes, readyAt: item.printPdfReadyAt };
-  }
-  if (!isOpen(details.order.status)) return { kind: 'closed' };
-  const job: PanelPdfJob | null = details.pdfJob;
-  if (job?.status === 'failed') {
-    return {
-      kind: 'failed',
-      fileName,
-      attempts: job.attempts,
-      reason: PDF_ERRORS[pdfErrorCode(job.lastError) ?? ''] ?? 'خطای ناشناخته',
-      from: job.createdAt,
-      to: job.finishedAt,
-      filesUntil: filesUntil(details.items, at),
-    };
-  }
-  return { kind: 'building', retrying: Boolean(job && job.attempts > 0 && job.lastError) };
+export function rebuildable(items: readonly PanelOrderItem[], at: Date): { until: Date | null } | null {
+  const missing = items.filter((item) => item.printPdfReadyAt === null);
+  if (missing.length === 0) return { until: null };
+  const until = filesUntil(missing, at);
+  return until ? { until } : null;
 }
 
-/** همهٔ جزوه‌های سفارش PDF دارند: «شروع چاپ» فقط بعد از این (طرح: «اول PDF جزوه ساخته شود»). */
-export const pdfReady = (details: PanelOrderDetails) =>
-  details.items.length > 0 && details.items.every((item) => item.printPdfReadyAt !== null);
+const busy = (job: PanelPdfJob | null) => job?.status === 'queued' || job?.status === 'running';
+
+/** شکست یک کار: چند تلاش، به چه دلیل، از کی تا کی. کار تمام‌شده‌ای که چیزی نساخت (استقرار پیش از ۵٫۱) یا کاری که نیست هم. */
+export interface JobFailure {
+  attempts: number;
+  reason: string;
+  from: Date | null;
+  to: Date | null;
+}
+
+function failureOf(job: PanelPdfJob | null): JobFailure {
+  if (!job || job.status !== 'failed') return { attempts: job?.attempts ?? 0, reason: 'کارگر چیزی نساخت', from: null, to: null };
+  return {
+    attempts: job.attempts,
+    reason: PDF_ERRORS[pdfErrorCode(job.lastError) ?? ''] ?? 'خطای ناشناخته',
+    from: job.createdAt,
+    to: job.finishedAt,
+  };
+}
+
+export interface VolumeView {
+  volume: number;
+  fileName: string;
+  firstPage: number;
+  lastPage: number;
+  /** برگ‌های همین جلد، از ریز قیمت منجمد. */
+  sheets: number | null;
+  bytes: number;
+  builtAt: Date;
+}
+
+export type PrintView =
+  | { kind: 'unpaid' }
+  | { kind: 'purged' }
+  | { kind: 'closed' }
+  | { kind: 'ready'; volumes: VolumeView[]; changed: boolean; note: Seg[] }
+  | { kind: 'building'; retrying: boolean }
+  | ({ kind: 'failed'; rebuild: { until: Date | null } | null } & JobFailure);
+
+/**
+ * فایل چاپ یک جزوه (طرح پنل، ADR-043): ساخته شده (هر جلد با دانلود، و «چه عوض شد»)، در حال ساختن، یا ساخته نشد با دلیل و
+ * «دوباره بساز» تا وقتی ممکن است. کار `prepare_order` مال کل سفارش است؛ جزوه‌ای که ساخته شد، ساخته شده می‌ماند. سفارشی که
+ * لغو شد یا به پست رسید و فایل چاپش ساخته نشد، دیگر لازمش ندارد (`closed`)؛ و سفارشی که فایل‌هایش پاک شد هیچ (`purged`).
+ */
+export function printView(details: PanelOrderDetails, item: PanelOrderItem, at: Date): PrintView {
+  const { order } = details;
+  if (!isPaidStatus(order.status)) return { kind: 'unpaid' };
+  if (order.filesDeletedAt) return { kind: 'purged' };
+  const priced = breakdownOf(order).items[item.seq - 1];
+  if (item.printFiles.length > 0) {
+    const count = item.printFiles.length;
+    return {
+      kind: 'ready',
+      volumes: item.printFiles.map((file) => ({
+        volume: file.volume,
+        fileName: volumeFileName(order.orderNumber, item.seq, file.volume, count),
+        firstPage: file.firstPage,
+        lastPage: file.lastPage,
+        sheets: priced?.sheetsPerVolume?.[file.volume - 1] ?? null,
+        bytes: file.sizeBytes,
+        builtAt: file.createdAt,
+      })),
+      // صفحه‌ای اندازه گرفت، چرخید یا حاشیه‌نویسی‌اش جزو صفحه شد؛ فقط آن وقت «PDF اصلی جزوه» (طرح، سؤال ۳۹). تقسیم به جلد
+      // به‌تنهایی نه: جلدها پشت‌سرهم همان PDF جزوه‌اند.
+      changed: item.printFiles.some((file) => file.changes !== null),
+      note: changesNote(item),
+    };
+  }
+  if (!isOpen(order.status)) return { kind: 'closed' };
+  const job = details.pdfJob;
+  if (busy(job)) return { kind: 'building', retrying: Boolean(job!.attempts > 0 && job!.lastError) };
+  return { kind: 'failed', rebuild: rebuildable(details.items, at), ...failureOf(job) };
+}
+
+/** همهٔ جزوه‌های سفارش فایل چاپ دارند: «شروع چاپ» فقط بعد از این (طرح: «اول فایل چاپ ساخته شود»). */
+export const printReady = (details: PanelOrderDetails) =>
+  details.order.filesDeletedAt === null && details.items.length > 0 && details.items.every((item) => item.printFiles.length > 0);
+
+/* «چه عوض شد»: بازه‌های صفحه به فایل مشتری، با نام اندازه همان `paperSizeName` سایت. */
+
+/** بازه‌ها به ترتیب، و بازه‌های پشت‌سرهمِ دو جلد یکی. */
+function mergedRuns<T extends number[]>(runs: T[]): T[] {
+  const sorted = [...runs].sort((a, b) => a[0]! - b[0]!);
+  const out: T[] = [];
+  for (const run of sorted) {
+    const last = out.at(-1);
+    if (last && last[1]! + 1 === run[0] && last.slice(2).join() === run.slice(2).join()) last[1] = run[1]!;
+    else out.push([...run] as T);
+  }
+  return out;
+}
+
+/** «A5»، «Letter»، و اندازهٔ بی‌نام به میلی‌متر، مثل کارت «جزوهٔ تو» سایت. */
+function sizeLabel(widthPt: number, heightPt: number): string {
+  const name = paperSizeName(widthPt, heightPt);
+  const points = /^(\d+)×(\d+)pt$/.exec(name);
+  if (!points) return name;
+  const [w, h] = [points[1], points[2]].map((pt) => Math.round(ptToMm(Number(pt))));
+  return `${w}×${h} میلی‌متر`;
+}
+
+/** «صفحهٔ 103 تا 120 (فایل حل تمرین.docx)». */
+function runRef(item: PanelOrderItem, first: number, last: number): Seg[] {
+  const pages: Seg[] = first === last ? ['صفحهٔ ', num(first)] : ['صفحهٔ ', num(first), ' تا ', num(last)];
+  let start = 1;
+  const files: PanelSection[] = [];
+  for (const section of item.sections) {
+    const end = start + section.pageCount - 1;
+    if (start <= last && end >= first) files.push(section);
+    start = end + 1;
+  }
+  if (item.sections.length < 2 || files.length === 0) return pages;
+  if (files.length === 1) return [...pages, ' (فایل ', { ltr: files[0]!.originalName }, ')'];
+  return [...pages, ' (', num(files.length), ' فایل)'];
+}
+
+/** بیشترین بازه‌ای که از هر نوع نام برده می‌شود؛ بقیه با شمارشان. */
+const MAX_RUNS = 3;
+
+function listed<T extends number[]>(runs: T[], clause: (run: T) => Seg[]): Seg[][] {
+  const shown = runs.slice(0, MAX_RUNS).map(clause);
+  if (runs.length > MAX_RUNS) shown.push(['و ', num(runs.length - MAX_RUNS), ' بازهٔ دیگر هم']);
+  return shown;
+}
+
+/**
+ * «چه عوض شد» (طرح پنل): «صفحهٔ 103 تا 120 (فایل حل تمرین فصل ۱.docx) اندازهٔ Letter داشت و روی A4 نشست؛ بقیه بی
+ * تغییر.»؛ یا «همهٔ صفحه‌ها A4 عمودی بود؛ فقط به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.»
+ */
+export function changesNote(item: PanelOrderItem): Seg[] {
+  const resized = mergedRuns(item.printFiles.flatMap((file) => file.changes?.resized ?? []));
+  const rotated = mergedRuns(item.printFiles.flatMap((file) => file.changes?.rotated ?? []));
+  const annotated = mergedRuns(item.printFiles.flatMap((file) => file.changes?.annotated ?? []));
+  const volumes = item.printFiles.length;
+  const split: Seg[] = volumes > 1 ? ['به ', ...volumesSegs(volumes), ' تقسیم شد، همان‌طور که صحافی‌اش حساب شده'] : [];
+  const clauses: Seg[][] = [
+    ...listed(resized, ([first, last, w, h]) => [...runRef(item, first!, last!), ` اندازهٔ ${sizeLabel(w!, h!)} داشت و روی A4 نشست`]),
+    ...listed(rotated, ([first, last]) => [...runRef(item, first!, last!), ' افقی بود و چرخید، بالایش لبهٔ چپ کاغذ']),
+    ...listed(annotated, ([first, last]) => [...runRef(item, first!, last!), ' حاشیه‌نویسی داشت و جزو صفحه شد']),
+  ];
+  if (clauses.length === 0) {
+    return volumes > 1 ? ['همهٔ صفحه‌ها A4 عمودی بود؛ فقط ', ...split, '.'] : ['همهٔ صفحه‌ها A4 عمودی بود؛ فایل چاپ همان PDF جزوه است.'];
+  }
+  const changed = new Set<number>();
+  for (const [first, last] of [...resized, ...rotated, ...annotated]) for (let n = first!; n <= last!; n += 1) changed.add(n);
+  const rest = changed.size < item.pageCount ? ['؛ بقیه بی تغییر'] : [];
+  return [...joined(clauses, '؛ '), ...rest, ...(split.length ? ['؛ ', ...split] : []), '.'];
+}
+
+
+export type TicketView =
+  | { kind: 'unpaid' }
+  | { kind: 'purged' }
+  | { kind: 'closed' }
+  | { kind: 'ready'; bytes: number; builtAt: Date }
+  | { kind: 'updating' }
+  | { kind: 'building'; retrying: boolean }
+  | ({ kind: 'failed' } & JobFailure);
+
+/**
+ * برگهٔ سفارش (ADR-043): ساخته شده با دادهٔ امروز سفارش (دیدن و دانلود)، در حال به‌روز شدن (برگه‌ای هست ولی نام یا نشانی
+ * پس از آن عوض شد)، در حال ساختن، یا ساخته نشد با «دوباره بساز». برگهٔ کهنه هرگز داده نمی‌شود.
+ */
+export function ticketView(details: PanelOrderDetails): TicketView {
+  const { order, ticket, ticketJob } = details;
+  if (!isPaidStatus(order.status)) return { kind: 'unpaid' };
+  if (order.filesDeletedAt) return { kind: 'purged' };
+  if (ticket?.fresh) return { kind: 'ready', bytes: ticket.sizeBytes, builtAt: ticket.builtAt };
+  if (!isOpen(order.status)) return { kind: 'closed' };
+  if (busy(ticketJob)) return ticket ? { kind: 'updating' } : { kind: 'building', retrying: Boolean(ticketJob!.attempts > 0 && ticketJob!.lastError) };
+  return { kind: 'failed', ...failureOf(ticketJob) };
+}
+
+/** «فایل‌های این سفارش … سه‌شنبه 7 مهر پاک شد: 30 روز پس از تحویل پست.» (طرح پنل، ADR-044). */
+export function purgedNote(details: PanelOrderDetails): Seg[] | null {
+  const { order } = details;
+  if (!order.filesDeletedAt) return null;
+  const closedAt = order.status === 'handed_to_post' ? order.handedToPostAt : lastMoveTo(details.statusEvents, 'cancelled')?.at ?? null;
+  const after = closedAt ? Math.floor((order.filesDeletedAt.getTime() - closedAt.getTime()) / 86_400_000) : null;
+  return [
+    `فایل‌های این سفارش (PDF جزوه، فایل چاپ و برگه) ${formatJalaliWeekday(order.filesDeletedAt)} پاک شد`,
+    ...(after !== null && after >= 0
+      ? [': ', num(after), ` روز پس از ${order.status === 'handed_to_post' ? 'تحویل پست' : 'لغو'}`]
+      : []),
+    '. مشخصات، مبلغ و رویدادها می‌مانند.',
+  ];
+}
 
 /* ───────────────────────── رویدادهای سفارش ───────────────────────── */
 
@@ -612,20 +802,40 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   }
   const many = details.items.length > 1;
   const jozve = (seq: number): Seg[] => (many ? ['جزوهٔ ', num(seq)] : ['جزوه']);
+  const ofJozve = (seq: number): Seg[] => (many ? [' جزوهٔ ', num(seq)] : []);
   for (const item of details.items) {
-    if (item.printPdfReadyAt) entries.push({ at: item.printPdfReadyAt, text: ['PDF ', ...jozve(item.seq), ' ساخته شد'], who: 'سیستم' });
+    // PDF جزوه و فایل چاپ معمولاً در همان کار ساخته می‌شوند (یک سطر، طرح پنل)؛ سفارش پیش از ۵٫۱ دو سطر دارد.
+    const printedAt = item.printFiles.length > 0 ? new Date(Math.max(...item.printFiles.map((file) => file.createdAt.getTime()))) : null;
+    const together = item.printPdfReadyAt && printedAt && printedAt.getTime() - item.printPdfReadyAt.getTime() < 60_000;
+    if (item.printPdfReadyAt && printedAt && together) {
+      entries.push({ at: printedAt, text: ['PDF ', ...jozve(item.seq), ' و فایل چاپ ساخته شد'], who: 'سیستم' });
+    } else {
+      if (item.printPdfReadyAt) entries.push({ at: item.printPdfReadyAt, text: ['PDF ', ...jozve(item.seq), ' ساخته شد'], who: 'سیستم' });
+      if (printedAt) entries.push({ at: printedAt, text: ['فایل چاپ', ...ofJozve(item.seq), ' ساخته شد'], who: 'سیستم' });
+    }
   }
   const job = details.pdfJob;
   if (job?.status === 'failed' && job.finishedAt) {
-    entries.push({ at: job.finishedAt, text: ['ساختن PDF جزوه ناموفق ماند'], who: 'سیستم' });
+    entries.push({ at: job.finishedAt, text: ['ساختن فایل چاپ ناموفق ماند'], who: 'سیستم' });
+  }
+  if (details.ticketJob?.status === 'failed' && details.ticketJob.finishedAt) {
+    entries.push({ at: details.ticketJob.finishedAt, text: ['ساختن برگهٔ سفارش ناموفق ماند'], who: 'سیستم' });
+  }
+  if (details.order.filesDeletedAt) {
+    entries.push({ at: details.order.filesDeletedAt, text: ['فایل‌های سفارش پاک شد'], who: 'سیستم' });
   }
   for (const event of details.events) {
-    const detail = (event.detail ?? {}) as { item?: unknown; changed?: unknown };
+    const detail = (event.detail ?? {}) as { item?: unknown; volume?: unknown; volumes?: unknown; changed?: unknown };
     const seq = typeof detail.item === 'number' ? detail.item : 1;
+    const volume = typeof detail.volume === 'number' && typeof detail.volumes === 'number' && detail.volumes > 1 ? detail.volume : null;
     const who = event.adminName ?? 'ادمین';
     if (event.action === 'orders.status') continue; // همان رویداد وضعیت بالا
-    if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF ', ...jozve(seq), ' دانلود شد'], who });
-    else if (event.action === 'orders.pdf_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ PDF جزوه'], who });
+    if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF اصلی ', ...jozve(seq), ' دانلود شد'], who });
+    else if (event.action === 'orders.print_download') {
+      entries.push({ at: event.at, text: ['فایل چاپ', ...ofJozve(seq), ...(volume ? [' جلد ', num(volume)] : []), ' دانلود شد'], who });
+    } else if (event.action === 'orders.ticket_download') entries.push({ at: event.at, text: ['برگهٔ سفارش دانلود شد'], who });
+    else if (event.action === 'orders.pdf_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ فایل چاپ'], who });
+    else if (event.action === 'orders.ticket_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ برگهٔ سفارش'], who });
     else if (event.action === 'orders.recipient') {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT_FIELDS[String(field)] ?? String(field)) : [];
       entries.push({ at: event.at, text: [`ویرایش گیرنده${changed.length ? `: ${changed.join('، ')}` : ''}`], who });

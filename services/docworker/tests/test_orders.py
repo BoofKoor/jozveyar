@@ -1,9 +1,9 @@
 """
-کار سفارش (برش ۳ب): PDF جزوه بعد از پرداخت، زیر `orders/`.
+کار سفارش (برش ۳ب، و از ۵٫۱ فایل چاپ هر جلد): PDF جزوه بعد از پرداخت، زیر `orders/`، و فایل چاپ از روی آن.
 
 دو بخش: ادغام با PDF واقعی PyMuPDF، بی سرویس؛ و کل کار روی پستگرس و Garage واقعی، که بی `DATABASE_URL` و
 `S3_*` رد می‌شود (مثل `test_integration.py`). پایگاه داده باید مهاجرت‌شده و دادهٔ پایه‌دار باشد: در CI،
-`pnpm test` پیش از این اجرا می‌شود.
+`pnpm test` پیش از این اجرا می‌شود. خود چیدن صفحه‌ها بی سرویس در `test_printfile.py`.
 """
 
 import hashlib
@@ -15,7 +15,7 @@ import fitz
 import pytest
 
 from docworker.jobs import PermanentFailure
-from docworker.orders import PREPARE_ORDER, merge_sections, print_key
+from docworker.orders import PREPARE_ORDER, merge_sections, order_prefix, print_key, volume_key
 
 A4 = fitz.paper_rect("a4")
 A5 = fitz.paper_rect("a5")
@@ -41,6 +41,10 @@ def labels(path):
 def test_print_key_is_outside_the_uploads_retention_prefix():
     assert print_key(10001, 1) == "orders/10001/jozve-1.pdf"
     assert not print_key(10001, 1).startswith("uploads/")
+    assert volume_key(10001, 2, 3) == "orders/10001/print-2-3.pdf"
+    # پیشوند یک سفارش سفارش دیگری را نمی‌گیرد (نگهداری، ADR-044).
+    assert order_prefix(1000) == "orders/1000/"
+    assert not print_key(10001, 1).startswith(order_prefix(1000))
 
 
 def test_one_section_is_copied_byte_for_byte(tmp_path):
@@ -57,7 +61,7 @@ def test_sections_follow_each_other_in_binding_order_without_blank_pages(tmp_pat
     out = str(tmp_path / "out.pdf")
     assert merge_sections([first, second, third], [3, 2, 1], out) == 6
     assert labels(out) == ["first-1", "first-2", "first-3", "second-1", "second-2", "third-1"]
-    # اندازهٔ هر صفحه همان است که بود: چیدمان کار چاپخانه است (برش ۵).
+    # اندازهٔ هر صفحه همان است که بود: چیدن روی A4 کار فایل چاپ است (برش ۵٫۱، `test_printfile.py`).
     with fitz.open(out) as doc:
         sizes = [(round(p.rect.width), round(p.rect.height)) for p in doc]
     assert sizes == [(595, 842)] * 3 + [(420, 595)] * 2 + [(612, 792)]
@@ -115,6 +119,7 @@ def worker(monkeypatch):
     monkeypatch.setenv("S3_BUCKET", os.environ.get("S3_BUCKET") or "jozveyar")
     w = Worker()
     w.fonts_due = float("inf")  # هم‌گام‌سازی فونت جدا تست می‌شود
+    w.retention_due = float("inf")  # نگهداری هم (`test_retention.py`)
     return w
 
 
@@ -145,11 +150,18 @@ def ready_document(conn, storage, body, pages, *, converted=False):
     return doc_id
 
 
-def paid_order(conn, sections, *, pay=True):
-    """سفارش همان‌طور که سرور می‌سازد (یک تراکنش)، بعد پرداخت و کار `prepare_order` (یک تراکنش)."""
+def paid_order(conn, sections, *, pay=True, sheets_per_volume=None, sides="double"):
+    """سفارش همان‌طور که سرور می‌سازد (یک تراکنش)، بعد پرداخت و کار `prepare_order` (یک تراکنش).
+
+    ریز قیمت منجمد فقط همان تکه‌ای را دارد که کارگر می‌خواند (`items[0]`: صفحه، برگ و برگ هر جلد)؛ جلدها پیش‌فرض یکی،
+    و جزوهٔ بزرگ‌تر با عددهای صریح `quote()` (مثل `[413, 412]` برای ۱۶۵۰ صفحهٔ دورو).
+    """
     active = conn.execute("SELECT version FROM price_lists WHERE is_active").fetchone()
     assert active, "تعرفهٔ فعال نیست — اول `pnpm test` دادهٔ پایه را بنشاند"
     total = sum(pages for _, pages in sections)
+    sheets = -(-total // 2) if sides == "double" else total
+    per_volume = sheets_per_volume or [sheets]
+    breakdown = {"items": [{"pageCount": total, "sheets": sheets, "volumes": len(per_volume), "sheetsPerVolume": per_volume}]}
     user_id = conn.execute(
         """INSERT INTO users (mobile) VALUES ('09120000000')
            ON CONFLICT (mobile) DO UPDATE SET last_login_at = now() RETURNING id"""
@@ -158,15 +170,15 @@ def paid_order(conn, sections, *, pay=True):
         """INSERT INTO orders (checkout_key, user_id, price_list_version, price_breakdown, subtotal_rials,
                                shipping_rials, total_rials, est_weight_grams, sla_days, shipping_method_id,
                                shipping_zone_id, province_id, recipient_name, recipient_phone, address_text)
-           VALUES (gen_random_uuid(), %s, %s, '{}', 1000, 500, 1500, 300, 2, 'post', 'tehran', 8,
+           VALUES (gen_random_uuid(), %s, %s, %s, 1000, 500, 1500, 300, 2, 'post', 'tehran', 8,
                    'سارا احمدی', '09120000000', 'تهران، خیابان ولیعصر، پلاک 12')
         RETURNING id::text, order_number""",
-        (user_id, active[0]),
+        (user_id, active[0], Jsonb(breakdown)),
     ).fetchone()
     item_id = conn.execute(
         """INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-           VALUES (%s, 1, %s, 1, 'double', 'spiral_clear') RETURNING id""",
-        (order_id, total),
+           VALUES (%s, 1, %s, 1, %s, 'spiral_clear') RETURNING id""",
+        (order_id, total, sides),
     ).fetchone()[0]
     for seq, (doc_id, pages) in enumerate(sections, start=1):
         conn.execute(
@@ -323,3 +335,128 @@ def test_a_cancelled_order_gets_no_print_file(tmp_path, conn, worker):
     assert error == "order_closed: cancelled"
     assert printed(conn, order_id)[0][3] is False
     assert worker.storage.list_objects(f"orders/{number}/") == []
+
+
+# ── فایل چاپ هر جلد (برش ۵٫۱، ADR-043) ───────────────────────────────────────
+
+
+def print_files(conn, order_id):
+    return conn.execute(
+        """SELECT f.volume, f.first_page, f.last_page, f.storage_key, f.size_bytes, f.sha256, f.changes
+             FROM order_print_files f JOIN order_items i ON i.id = f.order_item_id
+            WHERE i.order_id = %s ORDER BY i.seq, f.volume""",
+        (order_id,),
+    ).fetchall()
+
+
+def fetched(worker, key, tmp_path):
+    path = str(tmp_path / key.replace("/", "_"))
+    worker.storage.download(key, path)
+    return path
+
+
+@services
+def test_an_a4_jozve_in_one_volume_prints_from_the_jozve_itself(tmp_path, conn, worker):
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 3, "a4"), 3)
+    order_id, number = paid_order(conn, [(doc_id, 3)])
+    drain(worker, conn)
+    assert order_job(conn, order_id) == ("done", 1, None)
+    [(key, size, digest, _)] = printed(conn, order_id)
+    # همان PDF جزوه، همان کلید و همان بایت‌ها؛ بی کپی دوم.
+    assert print_files(conn, order_id) == [(1, 1, 3, key, size, digest, None)]
+    assert [o.key for o in worker.storage.list_objects(f"orders/{number}/")] == [f"orders/{number}/jozve-1.pdf"]
+
+
+@services
+def test_a_jozve_with_other_sizes_gets_its_own_print_file_on_a4(tmp_path, conn, worker):
+    a4 = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "a4"), 2)
+    a5 = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "a5", A5), 2, converted=True)
+    order_id, number = paid_order(conn, [(a4, 2), (a5, 2)])
+    drain(worker, conn)
+    assert order_job(conn, order_id) == ("done", 1, None)
+    [(volume, first, last, key, size, digest, changes)] = print_files(conn, order_id)
+    assert (volume, first, last, key) == (1, 1, 4, volume_key(number, 1, 1))
+    assert changes == {"resized": [[3, 4, 420, 595]]}
+    path = fetched(worker, key, tmp_path)
+    assert (os.path.getsize(path), hashlib.sha256(open(path, "rb").read()).hexdigest()) == (size, digest)
+    with fitz.open(path) as doc:
+        assert [(round(p.rect.width), round(p.rect.height)) for p in doc] == [(595, 842)] * 4
+    assert labels(path) == ["a4-1", "a4-2", "a5-1", "a5-2"]
+    # PDF جزوه همان‌طور که بود می‌ماند (پنل «PDF اصلی جزوه» را می‌دهد).
+    [(jozve_key, *_)] = printed(conn, order_id)
+    with fitz.open(fetched(worker, jozve_key, tmp_path)) as jozve:
+        assert [(round(p.rect.width), round(p.rect.height)) for p in jozve] == [(595, 842)] * 2 + [(420, 595)] * 2
+
+
+@services
+def test_a_long_jozve_is_split_into_volumes_exactly_like_its_breakdown(tmp_path, conn, worker):
+    # ۱۶۵۰ صفحهٔ دورو، [413, 412] برگ: صفحهٔ ۱ تا ۸۲۶ و ۸۲۷ تا ۱۶۵۰.
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 1650, "long"), 1650)
+    order_id, number = paid_order(conn, [(doc_id, 1650)], sheets_per_volume=[413, 412])
+    drain(worker, conn)
+    assert order_job(conn, order_id) == ("done", 1, None)
+    rows = print_files(conn, order_id)
+    assert [(v, f, l, k, c) for v, f, l, k, _, _, c in rows] == [
+        (1, 1, 826, volume_key(number, 1, 1), None),
+        (2, 827, 1650, volume_key(number, 1, 2), None),
+    ]
+    first, second = (labels(fetched(worker, row[3], tmp_path)) for row in rows)
+    assert (len(first), first[0], first[-1]) == (826, "long-1", "long-826")
+    assert (len(second), second[0], second[-1]) == (824, "long-827", "long-1650")
+
+
+@services
+def test_an_order_from_before_print_files_gets_them_from_its_jozve_pdf(tmp_path, conn, worker, monkeypatch):
+    """سفارش باز پیش از ۵٫۱ (و «دوباره بساز» پس از شکست فایل چاپ): PDF جزوه هست، فایل‌های `uploads/` شاید نه."""
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "old", A5), 2)
+    order_id, number = paid_order(conn, [(doc_id, 2)])
+    drain(worker, conn)
+    [(key, *_)] = printed(conn, order_id)
+    conn.execute(
+        "DELETE FROM order_print_files WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = %s)", (order_id,)
+    )
+    worker.storage.delete(volume_key(number, 1, 1))
+    worker.storage.delete(f"uploads/{doc_id}.pdf")
+    conn.execute("UPDATE documents SET file_deleted_at = now() WHERE id = %s", (doc_id,))
+    conn.execute("UPDATE jobs SET status = 'queued', finished_at = NULL WHERE order_id = %s", (order_id,))
+    conn.commit()
+    import docworker.orders as orders
+
+    merged = []
+    monkeypatch.setattr(orders, "merge_sections", lambda *args: merged.append(args))
+    drain(worker, conn)
+    assert order_job(conn, order_id)[0] == "done"
+    assert merged == []
+    [(_, _, _, print_key_, *_)] = print_files(conn, order_id)
+    assert labels(fetched(worker, print_key_, tmp_path)) == ["old-1", "old-2"]
+    assert printed(conn, order_id)[0][0] == key
+
+
+@services
+def test_a_jozve_pdf_that_is_not_what_was_recorded_is_never_printed(tmp_path, conn, worker):
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "kept", A5), 2)
+    order_id, number = paid_order(conn, [(doc_id, 2)])
+    drain(worker, conn)
+    conn.execute(
+        "DELETE FROM order_print_files WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = %s)", (order_id,)
+    )
+    conn.execute("UPDATE jobs SET status = 'queued', finished_at = NULL WHERE order_id = %s", (order_id,))
+    conn.commit()
+    put(worker.storage, f"orders/{number}/jozve-1.pdf", pdf_bytes(tmp_path, 2, "other", A5))
+    drain(worker, conn)
+    status, _, error = order_job(conn, order_id)
+    assert status == "failed" and error.startswith("file_mismatch")
+    assert print_files(conn, order_id) == []
+
+
+@services
+def test_a_breakdown_that_does_not_match_the_jozve_builds_nothing(tmp_path, conn, worker):
+    doc_id = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 4, "four"), 4)
+    # ۴ صفحهٔ دورو دو برگ است، نه یک.
+    order_id, number = paid_order(conn, [(doc_id, 4)], sheets_per_volume=[1])
+    drain(worker, conn)
+    status, _, error = order_job(conn, order_id)
+    assert status == "failed" and error.startswith("breakdown_mismatch")
+    # پیش از هر دانلودی: نه PDF جزوه، نه فایل چاپ.
+    assert worker.storage.list_objects(f"orders/{number}/") == []
+    assert printed(conn, order_id)[0][3] is False

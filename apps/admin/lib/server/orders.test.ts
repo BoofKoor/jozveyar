@@ -1,7 +1,8 @@
 /**
  * سرویس سفارش‌های پنل (`orders.ts`) با ذخیره‌گاه ساختگی و ساعت ساختگی: مجوز در سرور، مرز روز تهران و حاشیه‌ها
  * که به پایگاه داده می‌رسند، پارامترهای فهرست، «دوباره بساز» و دانلود با رویدادشان، و از ۴٫۳ وضعیت سفارش و ویرایش
- * گیرنده. خود کوئری‌ها و تراکنش‌ها روی پستگرس در تست یکپارچگی `packages/db`. عددهای تصمیم صریح‌اند، نه از ثابت کد.
+ * گیرنده، و از ۵٫۱ فایل چاپ هر جلد، برگهٔ سفارش و فایل‌های پاک‌شده. خود کوئری‌ها و تراکنش‌ها روی پستگرس در تست یکپارچگی
+ * `packages/db`. عددهای تصمیم صریح‌اند، نه از ثابت کد.
  */
 
 import { createHmac } from 'node:crypto';
@@ -12,11 +13,13 @@ import type {
   AdminEventInput,
   OrderStatus,
   PanelDueSummary,
+  PanelJozveFile,
   PanelOrderDetails,
   PanelOrderStore,
-  PanelPrintFile,
   PanelStatusChange,
   PanelStatusEvent,
+  PanelTicketFile,
+  PanelVolumeFile,
 } from '@jozveyar/db';
 import { MemoryDriver } from '@jozveyar/storage';
 
@@ -59,9 +62,11 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
     stats: record('stats', { printing: 2, handed: 42, onTime: 41 }),
     details: record('details', null),
-    printFile: record('printFile', null),
-    rebuildPdf: async (orderId, event) => {
-      calls.push({ method: 'rebuildPdf', args: [orderId, event] });
+    jozveFile: record('jozveFile', null),
+    printVolume: record('printVolume', null),
+    ticketFile: record('ticketFile', null),
+    requeue: async (orderId, kind, event) => {
+      calls.push({ method: 'requeue', args: [orderId, kind, event] });
       events.push(event);
       return 'ok';
     },
@@ -92,13 +97,24 @@ function service(over: Partial<PanelOrderStore> = {}, storage: MemoryDriver | nu
 }
 
 /** سفارش پرداخت‌شده‌ای که کار PDFش شکست خورده، با فایل‌هایی که تا دو روز دیگر روی سرورند. */
-function failedDetails(over: { expires?: Date | null; deleted?: boolean; status?: 'paid' | 'awaiting_payment'; job?: 'failed' | 'queued' | null } = {}) {
+function failedDetails(
+  over: {
+    expires?: Date | null;
+    deleted?: boolean;
+    status?: 'paid' | 'awaiting_payment';
+    job?: 'failed' | 'queued' | null;
+    jozve?: boolean;
+    ticket?: 'fresh' | 'stale' | null;
+  } = {},
+) {
   const job = over.job === undefined ? 'failed' : over.job;
   return {
-    order: { id: 'order-1', orderNumber: 10031, status: over.status ?? 'paid' },
+    order: { id: 'order-1', orderNumber: 10031, status: over.status ?? 'paid', priceBreakdown: { items: [] }, filesDeletedAt: null },
     items: [
       {
         seq: 1,
+        printPdfReadyAt: over.jozve ? NOW : null,
+        printFiles: [],
         sections: [
           {
             seq: 1,
@@ -109,6 +125,8 @@ function failedDetails(over: { expires?: Date | null; deleted?: boolean; status?
       },
     ],
     pdfJob: job ? { status: job, attempts: 3, maxAttempts: 3, lastError: 'x', createdAt: NOW, updatedAt: NOW, finishedAt: NOW } : null,
+    ticketJob: { status: over.ticket === 'stale' ? 'queued' : 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: NOW },
+    ticket: over.ticket ? { sizeBytes: 38_000, builtAt: NOW, fresh: over.ticket === 'fresh' } : null,
   } as unknown as PanelOrderDetails;
 }
 
@@ -120,14 +138,20 @@ describe('مجوز در سرور (ADR-038)', () => {
       await orders.dashboard(none),
       await orders.list(none, {}),
       await orders.details(none, '10027'),
-      await orders.rebuild(none, '10027', '1.2.3.4'),
+      await orders.rebuild(none, '10027', 'print', '1.2.3.4'),
+      await orders.rebuild(none, '10027', 'ticket', '1.2.3.4'),
       await orders.download(none, '10027', '1', '1.2.3.4'),
+      await orders.downloadVolume(none, '10027', '1', '1', '1.2.3.4'),
+      await orders.downloadTicket(none, '10027', 'pdf', '1.2.3.4'),
+      await orders.downloadTicket(none, '10027', 'preview', '1.2.3.4'),
     ]) {
       expect(result).toMatchObject({ ok: false, status: 403, error: 'forbidden' });
     }
     const readOnly = session(['orders.read']);
-    expect(await orders.rebuild(readOnly, '10027', 'ip')).toMatchObject({ error: 'forbidden' });
+    expect(await orders.rebuild(readOnly, '10027', 'print', 'ip')).toMatchObject({ error: 'forbidden' });
     expect(await orders.download(readOnly, '10027', '1', 'ip')).toMatchObject({ error: 'forbidden' });
+    expect(await orders.downloadVolume(readOnly, '10027', '1', '1', 'ip')).toMatchObject({ error: 'forbidden' });
+    expect(await orders.downloadTicket(readOnly, '10027', 'preview', 'ip')).toMatchObject({ error: 'forbidden' });
     // هیچ‌کدام به پایگاه داده نرسید.
     expect(calls).toEqual([]);
     expect((await orders.details(readOnly, '10027')).ok).toBe(false);
@@ -206,8 +230,9 @@ describe('دوباره بساز', () => {
   const ipHash = createHmac('sha256', SECRET).update('ip\x001.2.3.4').digest('hex');
 
   it('کار شکست‌خورده و فایل زنده: در صف، با رویداد کننده و هش IP؛ IP خام هرگز', async () => {
-    const { orders, events } = service({ details: async () => failedDetails() });
-    expect(await orders.rebuild(session(), '10031', '1.2.3.4')).toEqual({ ok: true, value: true });
+    const { orders, events, calls } = service({ details: async () => failedDetails() });
+    expect(await orders.rebuild(session(), '10031', 'print', '1.2.3.4')).toEqual({ ok: true, value: true });
+    expect(calls.filter((c) => c.method === 'requeue').map((c) => c.args.slice(0, 2))).toEqual([['order-1', 'prepare_order']]);
     expect(events).toEqual([
       {
         adminUserId: 'admin-1',
@@ -223,43 +248,66 @@ describe('دوباره بساز', () => {
   });
 
   it('نه برای کاری که شکست نخورده، سفارش پرداخت‌نشده، یا فایلی که دیگر روی سرور نیست', async () => {
-    const run = async (details: PanelOrderDetails | null, rebuilt: 'ok' | 'not_failed' = 'ok') => {
-      const { orders, events } = service({ details: async () => details, rebuildPdf: async () => rebuilt });
-      const result = await orders.rebuild(session(), '10031', 'ip');
+    const run = async (details: PanelOrderDetails | null, rebuilt: 'ok' | 'busy' = 'ok') => {
+      const { orders, events } = service({ details: async () => details, requeue: async () => rebuilt });
+      const result = await orders.rebuild(session(), '10031', 'print', 'ip');
       return [result.ok ? 'ok' : result.error, events.length];
     };
     expect(await run(failedDetails({ job: 'queued' }))).toEqual(['pdf_not_failed', 0]);
-    expect(await run(failedDetails({ job: null }))).toEqual(['pdf_not_failed', 0]);
+    // کاری نیست (سفارش پیش از ۵٫۱) یا کار تمام شد و فایلی نساخت: همان «ساخته نشد»، پس دوباره در صف.
+    expect(await run(failedDetails({ job: null }))).toEqual(['ok', 0]);
     expect(await run(failedDetails({ status: 'awaiting_payment' }))).toEqual(['order_not_found', 0]);
     expect(await run(null)).toEqual(['order_not_found', 0]);
     expect(await run(failedDetails({ deleted: true }))).toEqual(['files_gone', 0]);
     expect(await run(failedDetails({ expires: new Date(NOW.getTime() - 1) }))).toEqual(['files_gone', 0]);
     expect(await run(failedDetails({ expires: null }))).toEqual(['files_gone', 0]);
+    // PDF جزوه ساخته شد و فایل‌های مشتری رفته‌اند: فایل چاپ از همان PDF، پس ممکن است.
+    expect(await run(failedDetails({ jozve: true, deleted: true }))).toEqual(['ok', 0]);
+    // فایل چاپ همهٔ جزوه‌ها هست: کاری نمانده (شاهد: همان سفارش بی فایل چاپ ممکن بود).
+    const printed = failedDetails({ jozve: true });
+    printed.items[0]!.printFiles = [{ volume: 1, firstPage: 1, lastPage: 20, storageKey: 'k', sizeBytes: 1, changes: null, createdAt: NOW }];
+    expect(await run(printed)).toEqual(['pdf_not_failed', 0]);
     // دو کلیک هم‌زمان: دومی را پایگاه داده زیر قفل رد می‌کند.
-    expect(await run(failedDetails(), 'not_failed')).toEqual(['pdf_not_failed', 0]);
+    expect(await run(failedDetails(), 'busy')).toEqual(['pdf_not_failed', 0]);
+  });
+
+  it('برگه: فقط وقتی «ساخته نشد»، با کار برگه و رویداد خودش؛ برگهٔ تازه یا در حال به‌روز شدن نه', async () => {
+    const run = async (details: PanelOrderDetails, rebuilt: 'ok' | 'busy' = 'ok') => {
+      const { orders, events, calls } = service({ details: async () => details, requeue: async (...args) => (calls.push({ method: 'requeue', args }), rebuilt) });
+      const result = await orders.rebuild(session(), '10031', 'ticket', '1.2.3.4');
+      return [result.ok ? 'ok' : result.error, calls.filter((c) => c.method === 'requeue').map((c) => [c.args[1], (c.args[2] as AdminEventInput).action]), events.length];
+    };
+    const failed = { ...failedDetails(), ticketJob: { ...failedDetails().ticketJob!, status: 'failed' as const, lastError: 'font_missing: x' } };
+    expect(await run(failed)).toEqual(['ok', [['prepare_ticket', 'orders.ticket_rebuild']], 0]);
+    expect(await run(failedDetails({ ticket: 'fresh' }))).toEqual(['ticket_not_failed', [], 0]);
+    expect(await run(failedDetails({ ticket: 'stale' }))).toEqual(['ticket_not_failed', [], 0]);
+    expect(await run(failed, 'busy')).toEqual(['ticket_not_failed', [['prepare_ticket', 'orders.ticket_rebuild']], 0]);
+    // سفارش بسته برگه نمی‌خواهد.
+    expect(await run({ ...failed, order: { ...failed.order, status: 'cancelled' } } as PanelOrderDetails)).toEqual(['order_not_found', [], 0]);
   });
 });
 
 describe('دانلود PDF جزوه', () => {
-  const READY: PanelPrintFile = {
+  const READY: PanelJozveFile = {
     orderId: 'order-1',
     orderNumber: 10027,
     status: 'paid',
+    filesDeletedAt: null,
     itemSeq: 1,
     key: 'orders/10027/jozve-1.pdf',
     bytes: 14,
     readyAt: NOW,
   };
 
-  it('از استوریج داخلی، جریانی، با نام jozve-10027-1.pdf؛ رویداد با کننده، سفارش و قلم', async () => {
+  it('از استوریج داخلی، جریانی، با نام jozve-10027-1-asli.pdf (PDF اصلی، کنار فایل چاپ)؛ رویداد با کننده، سفارش و قلم', async () => {
     const storage = new MemoryDriver();
     storage.putObject('orders/10027/jozve-1.pdf', new TextEncoder().encode('%PDF-1.4 jozve'));
-    const { orders, events, calls } = service({ printFile: async (...args) => (calls.push({ method: 'printFile', args }), READY) }, storage);
+    const { orders, events, calls } = service({ jozveFile: async (...args) => (calls.push({ method: 'jozveFile', args }), READY) }, storage);
     const result = await orders.download(session(), '10027', '1', '1.2.3.4');
-    expect(calls).toEqual([{ method: 'printFile', args: [10027, 1] }]);
+    expect(calls).toEqual([{ method: 'jozveFile', args: [10027, 1] }]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value).toMatchObject({ sizeBytes: 14, fileName: 'jozve-10027-1.pdf' });
+    expect(result.value).toMatchObject({ sizeBytes: 14, fileName: 'jozve-10027-1-asli.pdf' });
     expect(await new Response(result.value.body).text()).toBe('%PDF-1.4 jozve');
     expect(events).toEqual([
       expect.objectContaining({
@@ -274,8 +322,8 @@ describe('دانلود PDF جزوه', () => {
   });
 
   it('هنوز ساخته نشده، پرداخت‌نشده، نشانی بد، بی استوریج یا استوریج بی فایل: کار روشن، بی رویداد', async () => {
-    const run = async (file: PanelPrintFile | null, storage: MemoryDriver | null = new MemoryDriver(), item = '1') => {
-      const { orders, events, logs } = service({ printFile: async () => file }, storage);
+    const run = async (file: PanelJozveFile | null, storage: MemoryDriver | null = new MemoryDriver(), item = '1') => {
+      const { orders, events, logs } = service({ jozveFile: async () => file }, storage);
       const result = await orders.download(session(), '10027', item, 'ip');
       return [result.ok ? 'ok' : `${result.status} ${result.error}`, events.length, logs.length];
     };
@@ -283,6 +331,8 @@ describe('دانلود PDF جزوه', () => {
     expect(await run({ ...READY, status: 'expired' })).toEqual(['409 pdf_not_ready', 0, 0]);
     expect(await run(null)).toEqual(['404 order_not_found', 0, 0]);
     expect(await run(READY, new MemoryDriver(), '0')).toEqual(['404 order_not_found', 0, 0]);
+    // فایل‌های سفارش پس از روزهای نگهداری پاک شد (ADR-044): ۴۱۰، نه «در استوریج نیست».
+    expect(await run({ ...READY, status: 'handed_to_post', filesDeletedAt: NOW })).toEqual(['410 files_deleted', 0, 0]);
     expect(await run(READY, null)).toEqual(['503 storage_unavailable', 0, 0]);
     // ساخته شده ولی در استوریج نیست: بلند در لاگ.
     expect(await run(READY)).toEqual(['503 storage_unavailable', 0, 1]);
@@ -303,7 +353,7 @@ describe('دانلود PDF جزوه', () => {
     });
     const { orders } = service(
       {
-        printFile: async () => READY,
+        jozveFile: async () => READY,
         logEvent: async () => {
           throw new Error('db down');
         },
@@ -318,17 +368,27 @@ describe('دانلود PDF جزوه', () => {
 /* ───────────── وضعیت سفارش و گیرنده (۴٫۳) ───────────── */
 
 /** سفارشی با وضعیت دلخواه، PDF ساخته‌شده، و رویدادهای وضعیت. */
-function orderDetails(status: OrderStatus, over: { ready?: boolean; events?: Partial<PanelStatusEvent>[] } = {}) {
+function orderDetails(status: OrderStatus, over: { ready?: boolean; events?: Partial<PanelStatusEvent>[]; filesDeletedAt?: Date } = {}) {
   return {
     order: {
       id: 'order-1',
       orderNumber: 10027,
       status,
+      filesDeletedAt: over.filesDeletedAt ?? null,
       recipientName: 'مریم کاظمی',
       addressText: 'بلوار سجاد، سجاد 18، پلاک 42، واحد 6',
       postalCode: null,
     },
-    items: [{ seq: 1, printPdfReadyAt: over.ready === false ? null : NOW, sections: [] }],
+    // «آماده» یعنی فایل چاپ هست (۵٫۱)؛ PDF جزوه به‌تنهایی نه.
+    items: [
+      {
+        seq: 1,
+        printPdfReadyAt: NOW,
+        printFiles:
+          over.ready === false ? [] : [{ volume: 1, firstPage: 1, lastPage: 20, storageKey: 'orders/10027/jozve-1.pdf', sizeBytes: 1, changes: null, createdAt: NOW }],
+        sections: [],
+      },
+    ],
     statusEvents: (over.events ?? []).map((e, i) => ({ id: i + 1, orderId: 'order-1', at: NOW, actor: 'admin', adminName: null, note: null, ...e })),
     pdfJob: null,
   } as unknown as PanelOrderDetails;
@@ -396,7 +456,7 @@ describe('وضعیت سفارش', () => {
     });
   });
 
-  it('«شروع چاپ» پیش از PDF جزوه نه؛ کار ناشناس، وضعیت ناشناس یا گذار نادرست نه؛ سفارشی که نیست ۴۰۴', async () => {
+  it('«شروع چاپ» پیش از فایل چاپ نه (PDF جزوه به‌تنهایی نه)؛ کار ناشناس، وضعیت ناشناس یا گذار نادرست نه؛ سفارشی که نیست ۴۰۴', async () => {
     const run = async (details: PanelOrderDetails | null, form: { action: unknown; from: unknown; reason?: unknown }) => {
       const { orders, calls } = service({ details: async () => details });
       const result = await orders.changeStatus(session(OWNER), '10027', form, 'ip');
@@ -413,6 +473,33 @@ describe('وضعیت سفارش', () => {
     ]);
     expect(await run(orderDetails('paid'), { action: 'revert', from: 'paid', reason: 'x' })).toEqual(['400 invalid_transition', 0]);
     expect(await run(null, { action: 'start_print', from: 'paid' })).toEqual(['404 order_not_found', 0]);
+    // شاهد: با فایل چاپ همان «شروع چاپ» می‌رود.
+    expect(await run(orderDetails('paid'), { action: 'start_print', from: 'paid' })).toEqual(['ok', 1]);
+  });
+
+  it('فایل‌های پاک‌شده (ADR-044): نه برگرداندن، نه در جزئیات؛ و پاک شدن هم‌زمان هم «پاک شد» است، نه «وضعیت عوض شد»', async () => {
+    const deleted = { filesDeletedAt: NOW, events: [{ fromStatus: 'paid' as const, toStatus: 'cancelled' as const }] };
+    const { orders, calls } = service({ details: async () => orderDetails('cancelled', deleted) });
+    expect(await orders.details(session(OWNER), '10027')).toMatchObject({ ok: true, value: { canRevert: false, revertTo: null } });
+    expect(await orders.changeStatus(session(OWNER), '10027', { action: 'revert', from: 'cancelled', reason: 'اشتباه' }, 'ip')).toMatchObject({
+      ok: false,
+      status: 409,
+      error: 'files_deleted',
+    });
+    expect(changes(calls)).toEqual([]);
+    // شاهد: همان سفارش با فایل برمی‌گردد.
+    const kept = service({ details: async () => orderDetails('cancelled', { events: deleted.events }) });
+    expect(await kept.orders.details(session(OWNER), '10027')).toMatchObject({ ok: true, value: { canRevert: true, revertTo: 'paid' } });
+    // کارگر بین خواندن و نوشتن پاک کرد.
+    const raced = service({
+      details: async () => orderDetails('cancelled', { events: deleted.events }),
+      changeStatus: async () => ({ ok: false, current: 'cancelled', filesDeleted: true }),
+    });
+    expect(await raced.orders.changeStatus(session(OWNER), '10027', { action: 'revert', from: 'cancelled', reason: 'اشتباه' }, 'ip')).toMatchObject({
+      ok: false,
+      status: 409,
+      error: 'files_deleted',
+    });
   });
 
   it('وضعیت همین حالا عوض شد: همان جا که ادمین می‌خواست یعنی انجام شده (دو کلیک)؛ جای دیگر یعنی ۴۰۹ با وضعیت تازه', async () => {
@@ -543,7 +630,7 @@ describe('PDF جزوه پس از ۴٫۳', () => {
   it('«دوباره بساز» فقط برای سفارش باز؛ دانلود PDF ساخته‌شده در هر وضعیت پس از پرداخت', async () => {
     const rebuild = async (status: OrderStatus) => {
       const details = { ...failedDetails(), order: { ...failedDetails().order, status } } as PanelOrderDetails;
-      const result = await service({ details: async () => details }).orders.rebuild(session(), '10031', 'ip');
+      const result = await service({ details: async () => details }).orders.rebuild(session(), '10031', 'print', 'ip');
       return result.ok ? 'ok' : result.error;
     };
     expect([await rebuild('paid'), await rebuild('printing'), await rebuild('cancelled'), await rebuild('handed_to_post')]).toEqual([
@@ -554,10 +641,97 @@ describe('PDF جزوه پس از ۴٫۳', () => {
     ]);
     const storage = new MemoryDriver();
     storage.putObject('orders/10027/jozve-1.pdf', new TextEncoder().encode('%PDF-1.4 jozve'));
-    const file: PanelPrintFile = { orderId: 'order-1', orderNumber: 10027, status: 'cancelled', itemSeq: 1, key: 'orders/10027/jozve-1.pdf', bytes: 14, readyAt: NOW };
-    const { orders } = service({ printFile: async () => file }, storage);
+    const file: PanelJozveFile = {
+      orderId: 'order-1',
+      orderNumber: 10027,
+      status: 'cancelled',
+      filesDeletedAt: null,
+      itemSeq: 1,
+      key: 'orders/10027/jozve-1.pdf',
+      bytes: 14,
+      readyAt: NOW,
+    };
+    const { orders } = service({ jozveFile: async () => file }, storage);
     expect((await orders.download(session(), '10027', '1', 'ip')).ok).toBe(true);
-    const unpaid = service({ printFile: async () => ({ ...file, status: 'awaiting_payment' }) }, storage);
+    const unpaid = service({ jozveFile: async () => ({ ...file, status: 'awaiting_payment' }) }, storage);
     expect(await unpaid.orders.download(session(), '10027', '1', 'ip')).toMatchObject({ error: 'pdf_not_ready' });
+  });
+});
+
+/* ───────────── فایل چاپ هر جلد و برگهٔ سفارش (۵٫۱) ───────────── */
+
+describe('دانلود فایل چاپ و برگه', () => {
+  const VOLUME: PanelVolumeFile = {
+    orderId: 'order-1',
+    orderNumber: 10040,
+    status: 'paid',
+    filesDeletedAt: null,
+    itemSeq: 1,
+    volume: 2,
+    volumes: 2,
+    key: 'orders/10040/print-1-2.pdf',
+    bytes: 16,
+  };
+  const TICKET: PanelTicketFile = {
+    orderId: 'order-1',
+    orderNumber: 10040,
+    status: 'paid',
+    filesDeletedAt: null,
+    key: 'orders/10040/ticket-0123456789abcdef.pdf',
+    previewKey: 'orders/10040/ticket-0123456789abcdef.png',
+    bytes: 9,
+    fresh: true,
+  };
+  const stored = () => {
+    const storage = new MemoryDriver();
+    storage.putObject(VOLUME.key!, new TextEncoder().encode('%PDF-1.4 jeld-2'));
+    storage.putObject(TICKET.key!, new TextEncoder().encode('%PDF-1.4 '));
+    storage.putObject(TICKET.previewKey!, new TextEncoder().encode('png'));
+    return storage;
+  };
+
+  it('هر جلد با نام jozve-10040-1-jeld-2.pdf و رویداد جلد؛ جلد یک‌جلدی همان نام جزوه', async () => {
+    const { orders, events, calls } = service({ printVolume: async (...args) => (calls.push({ method: 'printVolume', args }), VOLUME) }, stored());
+    const result = await orders.downloadVolume(session(), '10040', '1', '2', 'ip');
+    expect(calls).toEqual([{ method: 'printVolume', args: [10040, 1, 2] }]);
+    expect(result.ok && [result.value.fileName, result.value.sizeBytes]).toEqual(['jozve-10040-1-jeld-2.pdf', 15]);
+    expect(result.ok && (await new Response(result.value.body).text())).toBe('%PDF-1.4 jeld-2');
+    expect(events).toEqual([
+      expect.objectContaining({ action: 'orders.print_download', targetId: 'order-1', detail: { orderNumber: 10040, item: 1, volume: 2, volumes: 2 } }),
+    ]);
+    // جزوهٔ یک‌جلدی: نامش همان نام جزوه، بی «jeld».
+    const one = await service({ printVolume: async () => ({ ...VOLUME, volumes: 1 }) }, stored()).orders.downloadVolume(session(), '10040', '1', '2', 'ip');
+    expect(one.ok && one.value.fileName).toBe('jozve-10040-1.pdf');
+  });
+
+  it('جلد نساخته، پاک‌شده، پرداخت‌نشده یا نشانی بد: کار روشن، بی رویداد', async () => {
+    const run = async (file: PanelVolumeFile | null, item = '1', volume = '2') => {
+      const { orders, events } = service({ printVolume: async () => file }, stored());
+      const result = await orders.downloadVolume(session(), '10040', item, volume, 'ip');
+      return [result.ok ? 'ok' : `${result.status} ${result.error}`, events.length];
+    };
+    expect(await run({ ...VOLUME, key: null, bytes: null })).toEqual(['409 pdf_not_ready', 0]);
+    expect(await run({ ...VOLUME, status: 'expired' })).toEqual(['409 pdf_not_ready', 0]);
+    expect(await run({ ...VOLUME, status: 'handed_to_post', filesDeletedAt: NOW })).toEqual(['410 files_deleted', 0]);
+    expect(await run(null)).toEqual(['404 order_not_found', 0]);
+    expect(await run(VOLUME, '1', '0')).toEqual(['404 order_not_found', 0]);
+    expect(await run(VOLUME, 'x', '1')).toEqual(['404 order_not_found', 0]);
+    expect(await run(VOLUME)).toEqual(['ok', 1]);
+  });
+
+  it('برگه: PDF با رویداد و پیش‌نمایش بی رویداد؛ برگهٔ کهنه، نساخته یا پاک‌شده نه', async () => {
+    const run = async (file: PanelTicketFile | null, what: 'pdf' | 'preview') => {
+      const { orders, events } = service({ ticketFile: async () => file }, stored());
+      const result = await orders.downloadTicket(session(), '10040', what, 'ip');
+      return [result.ok ? result.value.fileName : `${result.status} ${result.error}`, events.map((e) => e.action)];
+    };
+    expect(await run(TICKET, 'pdf')).toEqual(['barge-sefaresh-10040.pdf', ['orders.ticket_download']]);
+    expect(await run(TICKET, 'preview')).toEqual(['barge-sefaresh-10040.png', []]);
+    // با نام یا نشانی تازه در حال به‌روز شدن: فایلش هست، ولی داده نمی‌شود (شاهد: تازه‌اش داده شد).
+    expect(await run({ ...TICKET, fresh: false }, 'pdf')).toEqual(['409 ticket_not_ready', []]);
+    expect(await run({ ...TICKET, fresh: false }, 'preview')).toEqual(['409 ticket_not_ready', []]);
+    expect(await run({ ...TICKET, key: null, previewKey: null, bytes: null, fresh: false }, 'pdf')).toEqual(['409 ticket_not_ready', []]);
+    expect(await run({ ...TICKET, status: 'handed_to_post', filesDeletedAt: NOW }, 'preview')).toEqual(['410 files_deleted', []]);
+    expect(await run(null, 'pdf')).toEqual(['404 order_not_found', []]);
   });
 });

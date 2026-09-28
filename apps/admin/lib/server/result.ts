@@ -38,6 +38,10 @@ export type AdminErrorCode =
   | 'reason_too_long'
   | 'invalid_recipient'
   | 'recipient_locked'
+  /** فایل چاپ، برگه و نگهداری (۵٫۱). */
+  | 'ticket_not_ready'
+  | 'ticket_not_failed'
+  | 'files_deleted'
   /** تعرفه (۴٫۵). */
   | 'tariff_not_found'
   | 'not_draft'
