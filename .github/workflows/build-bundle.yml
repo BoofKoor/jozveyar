@@ -206,7 +206,7 @@ jobs:
         run: |
           set -eux
           docker build --build-arg "BASE_IMAGE=${{ steps.base.outputs.image }}" -t docworker-smoke dw
-          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert, docworker.orders, docworker.printfile, docworker.ticket, docworker.retention, docworker.jalali; print(fitz.VersionBind, docworker.ticket.font_dir())"
+          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert, docworker.orders, docworker.printfile, docworker.ticket, docworker.retention, docworker.jalali, docworker.postfile, docworker.shipments; print(fitz.VersionBind, docworker.ticket.font_dir())"
           docker run --rm docworker-smoke soffice --version
           # تبدیل واقعی همان‌طور که روی سرور اجرا می‌شود (ADR-028): کاربر بی‌امتیاز
           # docworker، پایتون PID 1 بی init، پروفایل مهارشده، بی‌شبکه.

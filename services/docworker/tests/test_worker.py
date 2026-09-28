@@ -85,7 +85,7 @@ def test_unreachable_database_waits(worker, monkeypatch):
 def test_worker_takes_every_kind_by_default(monkeypatch):
     """از برش ۳ب ساختن PDF جزوهٔ سفارش پرداخت‌شده (`prepare_order`)، و از ۵٫۱ برگهٔ سفارش (`prepare_ticket`)."""
     monkeypatch.delenv("DOCWORKER_KINDS", raising=False)
-    assert kinds_from_env() == ["convert_document", "analyze_document", "prepare_order", "prepare_ticket"] == list(KINDS)
+    assert kinds_from_env() == ["convert_document", "analyze_document", "prepare_order", "prepare_ticket", "read_post_file"] == list(KINDS)
 
 
 def test_only_a_node_that_takes_order_jobs_deletes_order_files(monkeypatch):
