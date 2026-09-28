@@ -7,22 +7,25 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type {
-  AuthStore,
-  CheckoutDocument,
-  DocumentJob,
-  DocumentRow,
-  DocumentStore,
-  NewOrder,
-  NewUploadDocument,
-  OrderRow,
-  OrderStore,
-  OtpRow,
-  PaymentRow,
-  PrintRuleRow,
-  SmsLog,
-  SmsRecord,
-  StoredAnalysis,
+import {
+  choosePartner,
+  type AssignmentRule,
+  type AuthStore,
+  type CheckoutDocument,
+  type DocumentJob,
+  type DocumentRow,
+  type DocumentStore,
+  type NewOrder,
+  type NewUploadDocument,
+  type OrderRow,
+  type OrderStore,
+  type OtpRow,
+  type PartnerCandidate,
+  type PaymentRow,
+  type PrintRuleRow,
+  type SmsLog,
+  type SmsRecord,
+  type StoredAnalysis,
 } from '@jozveyar/db';
 import type { DocumentAnalysis, PriceList } from '@jozveyar/contracts';
 
@@ -205,9 +208,27 @@ interface MemoryItem {
   rules: PrintRuleRow[];
 }
 
+/** چاپخانهٔ ذخیره‌گاه حافظه‌ای (برش ۵٫۲)؛ غیرفعال یعنی سفارش تازه نمی‌گیرد. */
+export interface MemoryPartner extends PartnerCandidate {
+  name: string;
+  active: boolean;
+}
+
+/** همان اولین چاپخانهٔ دادهٔ پایه (`seedReferenceData`): «چاپخانهٔ جزوه‌یار» در شهر تهران، پیش‌فرض. */
+export const FIRST_MEMORY_PARTNER: MemoryPartner = {
+  id: 'partner-jozveyar',
+  name: 'چاپخانهٔ جزوه‌یار',
+  cityId: 394,
+  provinceId: 8,
+  isDefault: true,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  active: true,
+};
+
 /**
  * `OrderStore` حافظه‌ای، با همان محافظ‌هایی که پایگاه داده دارد و سرویس به آنها تکیه می‌کند: پوشش دقیق
- * صفحه‌ها، یکتایی `checkout_key`، یک پرداخت موفق برای هر سفارش، و «پرداخت برگشت ندارد».
+ * صفحه‌ها، یکتایی `checkout_key`، یک پرداخت موفق برای هر سفارش، و «پرداخت برگشت ندارد». از برش ۵٫۲ پرداخت چاپخانه را
+ * با همان قاعدهٔ پایگاه داده (`choosePartner`) انتخاب می‌کند.
  */
 export function memoryOrderStore(options: { priceList: PriceList; now: () => Date }): OrderStore & {
   documentsById: Map<string, CheckoutDocument>;
@@ -218,6 +239,9 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   events: { orderId: string; fromStatus: string | null; toStatus: string; actor: string; note: unknown }[];
   jobs: { kind: string; orderId: string }[];
   priceLists: Map<number, PriceList>;
+  /** چاپخانه‌ها؛ با اولین چاپخانهٔ دادهٔ پایه شروع می‌شود. */
+  partners: MemoryPartner[];
+  assignments: { orderId: string; fromPartnerId: string | null; toPartnerId: string; actor: 'system'; rule: AssignmentRule }[];
   activate(list: PriceList): void;
 } {
   const documentsById = new Map<string, CheckoutDocument>();
@@ -227,6 +251,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   const payments: PaymentRow[] = [];
   const events: { orderId: string; fromStatus: string | null; toStatus: string; actor: string; note: unknown }[] = [];
   const jobs: { kind: string; orderId: string }[] = [];
+  const partners: MemoryPartner[] = [{ ...FIRST_MEMORY_PARTNER }];
+  const assignments: { orderId: string; fromPartnerId: string | null; toPartnerId: string; actor: 'system'; rule: AssignmentRule }[] = [];
   const priceLists = new Map<number, PriceList>([[options.priceList.version, options.priceList]]);
   let active = options.priceList;
   let nextNumber = 10_001;
@@ -293,6 +319,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     events,
     jobs,
     priceLists,
+    partners,
+    assignments,
     activate(list) {
       priceLists.set(list.version, list);
       active = list;
@@ -343,6 +371,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         postHandoffDueAt: null,
         handedToPostAt: null,
         filesDeletedAt: null,
+        printPartnerId: null,
         shippingMethodId: input.shippingMethodId,
         shippingZoneId: input.shippingZoneId,
         provinceId: input.provinceId,
@@ -437,6 +466,15 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         actor: 'gateway',
         note: { paymentId: payment.id, provider, refId: outcome.refId },
       });
+      // چاپخانه، مثل `assignAtPayment`: فقط فعال‌ها؛ هیچ؟ بی چاپخانه.
+      const chosen = choosePartner(
+        partners.filter((p) => p.active),
+        order,
+      );
+      if (chosen) {
+        order.printPartnerId = chosen.partnerId;
+        assignments.push({ orderId: order.id, fromPartnerId: null, toPartnerId: chosen.partnerId, actor: 'system', rule: chosen.rule });
+      }
       // PDF جزوه و فایل چاپ، و برگهٔ سفارش (برش ۵٫۱)؛ هر کدام یک بار، مثل `jobs_order_kind`.
       for (const kind of ['prepare_order', 'prepare_ticket']) {
         if (!jobs.some((j) => j.orderId === order.id && j.kind === kind)) jobs.push({ kind, orderId: order.id });

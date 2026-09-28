@@ -5,6 +5,7 @@ import { FILE_MARGIN_MS, isPaidStatus, type PanelOrderDetails, type PanelOrderIt
 import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
+import { AssignForm } from '../../../../../components/AssignForm';
 import { NoAccess } from '../../../../../components/NoAccess';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { ReasonForm } from '../../../../../components/ReasonForm';
@@ -14,6 +15,7 @@ import { StatusButton } from '../../../../../components/StatusButton';
 import { tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
+import { partnerCard } from '../../../../../lib/partners';
 import {
   REASON_MAX,
   STATUS_LABELS,
@@ -36,6 +38,7 @@ import {
   specFacts,
   staleSections,
   sumLines,
+  TICKET_UPDATING_WITH,
   ticketFileName,
   ticketView,
   timelineWhen,
@@ -68,11 +71,16 @@ const PAGE_ERRORS = new Set([
   'status_changed',
   'print_needs_pdf',
   'recipient_locked',
+  'print_needs_partner',
+  'order_partner_changed',
+  'assign_closed',
+  'partner_inactive',
 ]);
 
-/** فرم باز ستون کنار یا کارت گیرنده (`?do=`): لغو، برگرداندن، یا ویرایش گیرنده؛ هر چیز دیگر یعنی هیچ. */
-type Mode = 'cancel' | 'revert' | 'edit' | null;
-const modeOf = (value: unknown): Mode => (value === 'cancel' || value === 'revert' || value === 'edit' ? value : null);
+/** فرم باز ستون کنار یا کارت گیرنده (`?do=`): لغو، برگرداندن، ویرایش گیرنده، یا جابه‌جایی چاپخانه (۵٫۲)؛ هر چیز دیگر یعنی هیچ. */
+type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | null;
+const modeOf = (value: unknown): Mode =>
+  value === 'cancel' || value === 'revert' || value === 'edit' || value === 'assign' ? value : null;
 
 /** «(شنبه 11 مهر 14:06 تا 14:21)»: پایان، اگر همان روز است، فقط ساعت. */
 function span(from: Date, to: Date | null, now: Date): string {
@@ -248,7 +256,7 @@ function TicketRow({ gate, details, now, canDownload }: { gate: string; details:
     view.kind === 'ready'
       ? 'شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه'
       : view.kind === 'updating'
-        ? 'در حال به‌روز شدن با نام و نشانی تازه…'
+        ? `در حال به‌روز شدن ${TICKET_UPDATING_WITH[view.cause]}…`
         : view.kind === 'building'
           ? `در حال ساختن برگه…${view.retrying ? ' تلاش قبلی ناموفق بود؛ کارگر خودش دوباره امتحان می‌کند.' : ''}`
           : view.kind === 'closed'
@@ -294,18 +302,23 @@ function ModeLink({ href, children }: { href: string; children: React.ReactNode 
   );
 }
 
-/** دکمهٔ اصلی رو به جلو: «شروع چاپ» یا «تحویل پست شد»، از وضعیتی که صفحه نشان داد. */
+/**
+ * دکمهٔ اصلی رو به جلو: «شروع چاپ» یا «تحویل پست شد»، از وضعیتی که صفحه نشان داد؛ «شروع چاپ» از چاپخانه‌ای هم که صفحه نشان داد
+ * (۵٫۲)، تا جابه‌جایی هم‌زمان و «شروع چاپ» فقط یکی شوند.
+ */
 function AdvanceForm({
   gate,
   orderNumber,
   action,
   from,
+  partner,
   children,
 }: {
   gate: string;
   orderNumber: number;
   action: 'start_print' | 'handed_to_post';
   from: 'paid' | 'printing';
+  partner?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -314,6 +327,7 @@ function AdvanceForm({
       <input type="hidden" name="number" value={orderNumber} />
       <input type="hidden" name="action" value={action} />
       <input type="hidden" name="from" value={from} />
+      {partner ? <input type="hidden" name="partner" value={partner} /> : null}
       <StatusButton className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block">{children}</StatusButton>
     </form>
   );
@@ -323,10 +337,11 @@ function AdvanceForm({
 const byWhom = (at: Date, now: Date, adminName: string | null | undefined) => `${whenText(at, now)}${adminName ? `، ${adminName}` : ''}`;
 
 /**
- * ستون کنار (طرح پنل): وضعیت، مهلت و کار بعدی. سفارش باز یک دکمهٔ اصلی دارد، «شروع چاپ» (تا فایل چاپ همهٔ جزوه‌ها ساخته
- * نشده بسته: «اول فایل چاپ ساخته شود»، برش ۵٫۱) و بعد «تحویل پست شد»، با «لغو سفارش»؛ به پست رسیده روز و به‌موقع بودنش را
- * دارد، و لغوشده دلیلش را. مالک هر وضعیت پس از پرداخت جز «در صف چاپ» را یک قدم برمی‌گرداند، مگر فایل‌هایش پاک شده باشد
- * (ADR-044). پرداخت‌نشده همان کارت‌های ۴٫۲.
+ * ستون کنار (طرح پنل): وضعیت، مهلت و کار بعدی. سفارش باز یک دکمهٔ اصلی دارد، «شروع چاپ» (تا چاپخانه ندارد بسته: «اول چاپخانه
+ * انتخاب شود»، برش ۵٫۲؛ و تا فایل چاپ همهٔ جزوه‌ها ساخته نشده: «اول فایل چاپ ساخته شود»، برش ۵٫۱) و بعد «تحویل پست شد»، با «لغو
+ * سفارش»؛ به پست رسیده روز و به‌موقع بودنش را دارد، و لغوشده دلیلش را. مالک هر وضعیت پس از پرداخت جز «در صف چاپ» را یک قدم
+ * برمی‌گرداند، مگر فایل‌هایش پاک شده باشد (ADR-044). با فرم جابه‌جایی چاپخانه باز (طرح `m-order-assign`) کارهای وضعیت پنهان‌اند.
+ * پرداخت‌نشده همان کارت‌های ۴٫۲.
  */
 function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDetailsView; stale: boolean; mode: Mode }) {
   const { details, bounds, canStatus, canRevert, revertTo } = view;
@@ -356,9 +371,11 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
     const printing = order.status === 'printing';
     const since = printing ? lastMoveTo(details.statusEvents, 'printing') : null;
     const ready = printReady(details);
+    const partner = order.printPartnerId;
     let actions: React.ReactNode = null;
     if (mode === 'cancel' && canStatus) actions = reasonForm('cancel', 'cancelled');
     else if (revert) actions = revert;
+    else if (mode === 'assign' && view.canAssign) actions = null;
     else if (canStatus || revertLink) {
       actions = (
         <div className="ad-status__actions">
@@ -371,16 +388,21 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
               <p className="ad-hint">وقتی بسته را به پست دادی بزن. کد رهگیری را بعداً فایل پست می‌آورد.</p>
             </>
           ) : null}
-          {canStatus && !printing && ready ? (
+          {canStatus && !printing && partner && ready ? (
             <>
-              <AdvanceForm gate={gate} orderNumber={order.orderNumber} action="start_print" from="paid">
+              <AdvanceForm gate={gate} orderNumber={order.orderNumber} action="start_print" from="paid" partner={partner}>
                 <span className="jy-icon jy-icon-printer" aria-hidden="true" />
                 شروع چاپ
               </AdvanceForm>
               <p className="ad-hint">وقتی چاپ را شروع کردی بزن؛ مشتری در صفحهٔ سفارشش «در حال چاپ» می‌بیند.</p>
             </>
           ) : null}
-          {canStatus && !printing && !ready ? (
+          {canStatus && !printing && !partner ? (
+            <button type="button" className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block is-status" aria-disabled="true">
+              اول چاپخانه انتخاب شود
+            </button>
+          ) : null}
+          {canStatus && !printing && partner && !ready ? (
             <button type="button" className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block is-status" aria-disabled="true">
               اول فایل چاپ ساخته شود
             </button>
@@ -492,6 +514,54 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
 }
 
 /**
+ * چاپخانهٔ سفارش در ستون کنار (طرح پنل `m-order`، برش ۵٫۲): نام و شهر، و از کجا آمد («خودکار، هنگام پرداخت: هم‌شهر مشتری.»)؛
+ * «جابه‌جایی» فقط در «در صف چاپ» و وقتی چاپخانهٔ فعال دیگری هست. سفارش «در صف چاپ» بی چاپخانه هشدار دارد و «انتخاب»؛ پرداخت‌نشده
+ * کارت ندارد.
+ */
+function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
+  const { details, canAssign } = view;
+  const card = partnerCard(details);
+  if (!card) return null;
+  const { partner, order } = details;
+  const self = panelPath(gate, `/orders/${order.orderNumber}`);
+  return (
+    <section className="jy-card" aria-labelledby="t-prt" data-partner={partner?.id ?? 'none'}>
+      <div className="jy-card__head">
+        <h2 id="t-prt" className="jy-card__title">
+          چاپخانه
+        </h2>
+        {canAssign ? (
+          <Link href={`${self}?do=assign`} className="jy-btn jy-btn--text ad-card-head-btn" scroll={false}>
+            {partner ? 'جابه‌جایی' : 'انتخاب'}
+          </Link>
+        ) : null}
+      </div>
+      {partner ? (
+        <>
+          <p className="ad-partner">
+            <b>{partner.name}</b>
+            <span className="ad-meta">{partner.cityName}</span>
+            {partner.active ? null : <span className="jy-badge jy-badge--neutral">غیرفعال</span>}
+          </p>
+          {card.note ? <p className="ad-meta">{card.note}</p> : null}
+        </>
+      ) : order.status === 'paid' ? (
+        <p className="jy-note jy-note--warning ad-gap">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            {canAssign
+              ? 'این سفارش چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.'
+              : 'این سفارش چاپخانه ندارد و هیچ چاپخانهٔ فعالی نیست؛ مالک پنل از «چاپخانه‌ها» یکی را فعال یا اضافه کند.'}
+          </span>
+        </p>
+      ) : (
+        <p className="ad-meta">بی چاپخانه.</p>
+      )}
+    </section>
+  );
+}
+
+/**
  * جزئیات سفارش (طرح پنل، ADR-039): وضعیت، مهلت و کار بعدی در ستون کنار (در گوشی بالای همه)؛ جزوه با فایل‌ها، مشخصات، و از
  * ۵٫۱ فایل چاپ هر جلد و برگهٔ سفارش (ADR-043)، یا «فایل‌ها پاک شد» (ADR-044)؛ گیرنده و نشانی، با «ویرایش» تا پیش از پست؛
  * مبلغ منجمد؛ پرداخت‌ها؛ و رویدادها. لغو، برگرداندن و ویرایش در همین صفحه باز می‌شوند (`?do=`)؛ هر کار از وضعیتی که صفحه
@@ -565,6 +635,18 @@ export default async function OrderPage({
       <div className="ad-grid">
         <aside className="ad-side" aria-label="وضعیت و کار بعدی">
           <StatusCard gate={gate} view={view} stale={stale} mode={mode} />
+          {mode === 'assign' && view.canAssign ? (
+            <AssignForm
+              gate={gate}
+              orderNumber={order.orderNumber}
+              from={details.partner ? { id: details.partner.id, name: details.partner.name, cityName: details.partner.cityName } : null}
+              options={view.partnerOptions}
+              maxLength={REASON_MAX}
+              back={self}
+            />
+          ) : (
+            <PartnerCard gate={gate} view={view} />
+          )}
         </aside>
 
         <div className="ad-main">

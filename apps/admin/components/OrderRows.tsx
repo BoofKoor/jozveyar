@@ -47,8 +47,17 @@ export function OrderRows({
                 <span className="num">{formatTomans(row.totalRials, false)}</span>
                 <span className="ad-row__unit"> تومان</span>
               </span>
-              <span className={state.icon === 'info' ? 'ad-row__state ad-row__state--info' : 'ad-row__state'}>
+              <span
+                className={
+                  state.icon === 'info'
+                    ? 'ad-row__state ad-row__state--info'
+                    : state.icon === 'warning'
+                      ? 'ad-row__state ad-row__state--warning'
+                      : 'ad-row__state'
+                }
+              >
                 {state.icon === 'error' ? <span className="jy-icon jy-icon-error" aria-hidden="true" /> : null}
+                {state.icon === 'warning' ? <span className="jy-icon jy-icon-warning" aria-hidden="true" /> : null}
                 {state.icon === 'info' ? <span className="jy-icon jy-icon-info" aria-hidden="true" /> : null}
                 {state.icon ? ' ' : null}
                 {state.label}

@@ -34,7 +34,7 @@ const IDLE = HOUR;
 const INVITE = 15 * MINUTE;
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 200;
-const OPERATOR_PERMISSIONS = ['files.download', 'orders.address', 'orders.read', 'orders.status', 'tariff.read'];
+const OPERATOR_PERMISSIONS = ['files.download', 'orders.address', 'orders.assign', 'orders.read', 'orders.status', 'tariff.read'];
 
 /** argon2 جدا در `password.test.ts`؛ اینجا همان قرارداد، سریع، با شمارش صدازدن‌ها. */
 function fakePasswords() {

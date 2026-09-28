@@ -42,6 +42,21 @@ export type AdminErrorCode =
   | 'ticket_not_ready'
   | 'ticket_not_failed'
   | 'files_deleted'
+  /** چاپخانهٔ سفارش و جابه‌جایی (۵٫۲). */
+  | 'print_needs_partner'
+  | 'order_partner_changed'
+  | 'assign_closed'
+  | 'partner_required'
+  | 'partner_inactive'
+  /** زبانهٔ «چاپخانه‌ها» (۵٫۲). */
+  | 'partner_not_found'
+  | 'invalid_partner_name'
+  | 'city_required'
+  | 'invalid_city'
+  | 'partner_name_taken'
+  | 'partner_changed'
+  | 'partner_is_default'
+  | 'partner_has_orders'
   /** تعرفه (۴٫۵). */
   | 'tariff_not_found'
   | 'not_draft'

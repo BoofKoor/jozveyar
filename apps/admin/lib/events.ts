@@ -171,6 +171,40 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: [`کلید «${keyName(detail.name)}» ${detail.from === 'empty' ? 'وارد شد' : 'عوض شد'}`] };
     case 'settings.key_revert':
       return { badge: null, text: [`کلید «${keyName(detail.name)}» به `, { ltr: '.env' }, ' برگشت'] };
+    case 'orders.assign': {
+      // نام‌ها همان لحظه در جزئیات رویداد نشسته‌اند (۵٫۲): چاپخانه‌ای که بعداً نامش عوض شد، اینجا همان نام آن روز است.
+      const from = (detail.from ?? null) as { name?: unknown } | null;
+      const to = (detail.to ?? {}) as { name?: unknown };
+      const why = str(detail.reason) ? `؛ ${str(detail.reason)}` : '';
+      return {
+        badge: null,
+        text: from
+          ? ['سفارش ', ...orderRef(detail), ` از «${str(from.name)}» به «${str(to.name)}» رفت${why}`]
+          : ['سفارش ', ...orderRef(detail), ` به «${str(to.name)}» سپرده شد${why}`],
+      };
+    }
+    case 'partners.create':
+      return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» در ${str(detail.city)} افزوده شد`] };
+    case 'partners.update': {
+      const previous = (detail.previous ?? {}) as { name?: unknown; city?: unknown };
+      const changed = Array.isArray(detail.changed) ? detail.changed : [];
+      const parts = [
+        ...(changed.includes('name') ? [`نام «${str(previous.name)}» ← «${str(detail.name)}»`] : []),
+        ...(changed.includes('city') ? [`شهر ${str(previous.city)} ← ${str(detail.city)}`] : []),
+      ];
+      return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» ویرایش شد${parts.length ? `: ${parts.join('، ')}` : ''}`] };
+    }
+    case 'partners.default': {
+      const previous = (detail.previous ?? null) as { name?: unknown } | null;
+      return {
+        badge: null,
+        text: [`چاپخانهٔ «${str(detail.name)}» پیش‌فرض شد${previous ? `، به جای «${str(previous.name)}»` : ''}`],
+      };
+    }
+    case 'partners.deactivate':
+      return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» غیرفعال شد`] };
+    case 'partners.activate':
+      return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» دوباره فعال شد`] };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -218,12 +252,16 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
   return days;
 }
 
-/** چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶). */
+/**
+ * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲)،
+ * به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش».
+ */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
   { kind: 'auth', label: 'ورود' },
   { kind: 'orders', label: 'سفارش' },
   { kind: 'tariff', label: 'تعرفه' },
   { kind: 'settings', label: 'تنظیمات و کلیدها' },
+  { kind: 'partners', label: 'چاپخانه‌ها' },
   { kind: 'admins', label: 'ادمین‌ها' },
 ] as const;

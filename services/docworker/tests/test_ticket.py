@@ -32,6 +32,7 @@ def sample(**over) -> TicketData:
         address="خراسان رضوی، مشهد، بلوار سجاد، سجاد 18، پلاک 42، واحد 6",
         postal_code="9187654321",
         shipping="پست پیشتاز",
+        partner=("چاپ نور", "مشهد"),
         items=[
             TicketItem(1, 120, 60, 1, "double", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم",
                        [("ریاضی ۲ - جلسه ۱.pdf", 1, 48), ("ریاضی ۲ - جلسه ۲.pdf", 49, 102), ("حل تمرین فصل ۱.docx", 103, 120)],
@@ -86,15 +87,27 @@ def test_the_longest_name_and_address_shrink_into_the_label(tmp_path):
         assert max(last.values()) < 842 - ticket.MARGIN
 
 
+def test_the_print_partner_sits_under_the_deadline():
+    # طرح `m-ticket`: «چاپ نور، مشهد · پرداخت شنبه 11 مهر، 14:05»، زیر مهلت (برش ۵٫۲).
+    top, _ = ticket_html(sample(), ticket.font_dir())
+    assert '<p class="k">چاپ نور، مشهد · پرداخت شنبه 11 مهر، 14:05</p>' in top
+    assert top.index("تحویل به پست تا") < top.index("چاپ نور، مشهد")
+    # شاهد: سفارش بی چاپخانه فقط پرداخت را دارد، بی جداکنندهٔ تنها.
+    top, _ = ticket_html(sample(partner=None), ticket.font_dir())
+    assert '<p class="k">پرداخت شنبه 11 مهر، 14:05</p>' in top and "چاپ نور" not in top
+
+
 def test_every_string_from_a_person_is_escaped():
     data = sample(recipient_name='<img src="x">مریم', address="تهران & <b>شمال</b>", shipping="پست <i>")
+    data.partner = ("<s>چاپ</s> & نور", "مشهد")
     data.items[0].sections = [('<script>a</script>.pdf', 1, 120)]
     data.items[0].binding = "طلق & سیم"
     data.items[0].papers = ["<u>تحریر</u>"]
     top, bottom = ticket_html(data, ticket.font_dir())
     html = top + bottom
-    for raw in ("<img", "<b>", "<i>", "<script>", "<u>"):
+    for raw in ("<img", "<b>", "<i>", "<script>", "<u>", "<s>"):
         assert raw not in html
+    assert "&lt;s&gt;چاپ&lt;/s&gt; &amp; نور، مشهد" in html
     assert "&lt;img src=&quot;x&quot;&gt;مریم" in html and "&lt;script&gt;a&lt;/script&gt;.pdf" in html
 
 
@@ -302,3 +315,32 @@ def test_an_unpaid_or_cancelled_order_gets_no_ticket(conn, worker):
     assert ticket_row(conn, unpaid) is None and ticket_row(conn, cancelled) is None
     # شاهد: «در حال چاپ» هنوز چاپ می‌شود و برگه می‌گیرد.
     assert ticket_job(conn, printing) == ("done", 1, None)
+
+
+@services
+def test_the_ticket_names_the_print_partner_and_a_new_partner_rebuilds_it(conn, worker, monkeypatch):
+    """برش ۵٫۲: نام و شهر چاپخانهٔ سفارش روی برگه، و در اثر انگشتش؛ پس سفارشی که چاپخانه گرفت، برگهٔ کهنه‌اش دیگر «تازه» نیست
+    و ساختن دوباره چاپخانه را دارد. شاهد: پیش از تخصیص، بی چاپخانه."""
+    rendered = []
+    real = ticket.render_ticket
+    monkeypatch.setattr(ticket, "render_ticket", lambda data, *paths: (rendered.append(data.partner), real(data, *paths)))
+    order_id, _ = paid_order(conn)
+    drain(worker, conn)
+    assert rendered == [None] and ticket_row(conn, order_id)[4] is True
+
+    name = f"چاپ نور {uuid.uuid4().hex[:6]}"
+    partner_id = conn.execute(
+        "INSERT INTO print_partners (name, province_id, city_id) VALUES (%s, 11, 1326) RETURNING id", (name,)
+    ).fetchone()[0]
+    # همان کاری که پرداخت می‌کند: چاپخانه و ردیف تخصیص در یک تراکنش (تریگر معوق `order_assignments_recorded`).
+    conn.execute("UPDATE orders SET print_partner_id = %s WHERE id = %s", (partner_id, order_id))
+    conn.execute(
+        """INSERT INTO order_assignments (order_id, to_partner_id, actor, rule) VALUES (%s, %s, 'system', 'city')""",
+        (order_id, partner_id),
+    )
+    conn.execute("UPDATE jobs SET status = 'queued', finished_at = NULL WHERE order_id = %s AND kind = %s", (order_id, PREPARE_TICKET))
+    conn.commit()
+    assert ticket_row(conn, order_id)[4] is False
+    drain(worker, conn)
+    assert rendered == [None, (name, "مشهد")]
+    assert ticket_row(conn, order_id)[4] is True

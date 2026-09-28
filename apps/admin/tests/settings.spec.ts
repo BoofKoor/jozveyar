@@ -125,14 +125,14 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await operatorPage.goto(at('/settings'));
     await expect(operatorPage.getByRole('heading', { name: NO_ACCESS })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
-      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، ادمین‌ها و رویدادها با مالک پنل است.',
+      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها و رویدادها با مالک پنل است.',
     );
     expect((await html(operatorPage)).includes('کلیدهای سرویس‌ها')).toBe(false);
 
     const page = ownerPage;
     await page.goto(at());
     const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
-    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تنظیمات', 'ادمین‌ها', 'رویدادها']);
+    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' }).click();
     await expect(page.getByRole('heading', { name: 'تنظیمات', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' })).toHaveAttribute('aria-current', 'page');

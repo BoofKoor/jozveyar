@@ -20,15 +20,21 @@
  *    تازه نیست؛ ویرایش گیرنده کار برگه را در همان تراکنش دوباره در صف می‌گذارد.
  *  - **فایل‌های پاک‌شده** (ADR-044): سفارشی که فایلش رفته وضعیتش عوض نمی‌شود؛ تغییر وضعیت شرطش را دارد، و تریگر
  *    `orders_files_deleted` هم.
+ *  - **چاپخانهٔ سفارش** (برش ۵٫۲، ADR-042): جابه‌جایی فقط از چاپخانه‌ای که ادمین دید و فقط در «در صف چاپ»، با ردیف
+ *    `order_assignments`، کار برگه و رویداد ادمین در همان تراکنش؛ «شروع چاپ» هم از چاپخانه‌ای که ادمین دید. پس جابه‌جایی و
+ *    «شروع چاپ» هم‌زمان فقط یکی می‌شوند: هر دو ردیف سفارش را قفل می‌کنند و دومی شرطش را دیگر نمی‌یابد.
  */
 
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
+import type { AssignmentRule } from './assignment.js';
 import type { Database } from './index.js';
 import {
   PREPARE_ORDER_JOB,
   PREPARE_TICKET_JOB,
+  requeueTicket,
   type OrderItemRow,
   type OrderRow,
   type OrderStatus,
@@ -41,6 +47,7 @@ import {
   cities,
   documents,
   jobs,
+  orderAssignments,
   orderItemSections,
   orderItems,
   orderPrintFiles,
@@ -49,6 +56,7 @@ import {
   orders,
   paperTypes,
   payments,
+  printPartners,
   printRules,
   provinces,
   settings,
@@ -117,6 +125,8 @@ export interface PanelOrderLine {
   sidesModes: string[];
   /** کار `prepare_order`؛ null یعنی هنوز نیست (سفارش پرداخت‌نشده). */
   pdfJob: 'queued' | 'running' | 'done' | 'failed' | null;
+  /** چاپخانهٔ سفارش (برش ۵٫۲)؛ null یعنی بی چاپخانه. */
+  printPartnerId: string | null;
   /** تلاش‌های پرداختی که هنوز در انتظارند و از مهلتشان گذشته. */
   unreturnedPayments: number;
   /** فایلی از جزوه پاک شده، بی مهلت است، یا پیش از `staleBefore` پاک می‌شود. */
@@ -149,6 +159,11 @@ export interface PanelAlerts {
   failedPdf: number[];
   /** تلاش‌های بی برگشتِ سفارش‌هایی که هنوز پرداختنی‌اند، هر سفارش یک بار؛ تازه‌ترین سفارش اول. */
   unreturned: { orderNumber: number; attempts: number }[];
+  /**
+   * سفارش‌های «در صف چاپ» بی چاپخانه (برش ۵٫۲): هنگام پرداختشان هیچ چاپخانهٔ فعالی نبود، یا پیش از ۵٫۲ پرداخت شدند؛ به ترتیب
+   * مهلت. «در حال چاپ» بی چاپخانه (پیش از ۵٫۲) نه: چاپخانه‌اش دیگر عوض نمی‌شود.
+   */
+  unassigned: number[];
 }
 
 export interface PanelSection {
@@ -219,6 +234,38 @@ export interface PanelPdfJob {
   finishedAt: Date | null;
 }
 
+/** چاپخانهٔ امروز سفارش (برش ۵٫۲). */
+export interface PanelPartnerRef {
+  id: string;
+  name: string;
+  cityName: string;
+  provinceName: string;
+  /** غیرفعال شده، پس از تخصیص (مثلاً سفارش لغوشده‌ای که برگشت). */
+  active: boolean;
+  isDefault: boolean;
+}
+
+/** یک تخصیص چاپخانه (`order_assignments`)، با نام چاپخانه‌ها و ادمین. */
+export interface PanelAssignment {
+  id: number;
+  at: Date;
+  fromName: string | null;
+  toName: string;
+  actor: 'system' | 'admin';
+  adminName: string | null;
+  rule: AssignmentRule | null;
+  reason: string | null;
+}
+
+/** چاپخانهٔ فعالی که سفارش به آن جابه‌جا می‌شود: شهر و سفارش‌های بازش، مثل کاشی طرح. */
+export interface PanelPartnerOption {
+  id: string;
+  name: string;
+  cityName: string;
+  isDefault: boolean;
+  openOrders: number;
+}
+
 /** یک تغییر وضعیت، با نام ادمینی که عوضش کرد (از ۴٫۳). */
 export type PanelStatusEvent = typeof orderStatusEvents.$inferSelect & { adminName: string | null };
 
@@ -250,6 +297,10 @@ export interface PanelOrderDetails {
   ticket: PanelTicket | null;
   /** رویدادهای ادمینِ همین سفارش، به ترتیب زمان. */
   events: PanelOrderEvent[];
+  /** چاپخانهٔ امروز سفارش (برش ۵٫۲)؛ null یعنی بی چاپخانه. */
+  partner: PanelPartnerRef | null;
+  /** تاریخچهٔ تخصیص، به ترتیب زمان. */
+  assignments: PanelAssignment[];
 }
 
 /** سفارشِ یک فایل: برای مجوز وضعیت و «پاک شد». */
@@ -294,6 +345,11 @@ export interface PanelStatusChange {
   orderId: string;
   from: OrderStatus;
   to: OrderStatus;
+  /**
+   * «شروع چاپ» (برش ۵٫۲): چاپخانه‌ای که ادمین دید. سفارشی که همین حالا به چاپخانهٔ دیگری رفت چاپش شروع نمی‌شود
+   * (`partnerChanged`). نبودنش یعنی چاپخانه در این گذار سنجیده نمی‌شود.
+   */
+  partnerId?: string | null;
   at: Date;
   adminUserId: string;
   note: { reason: string } | null;
@@ -304,7 +360,29 @@ export interface PanelStatusChange {
  * نتیجهٔ تغییر وضعیت یا ویرایش: انجام شد، یا سفارش دیگر آن وضعیت را نداشت (`current`؛ null یعنی سفارشی نیست)، یا
  * فایل‌هایش همین حالا پاک شد (`filesDeleted`، ADR-044).
  */
-export type PanelWrite = { ok: true; order: OrderRow } | { ok: false; current: OrderStatus | null; filesDeleted?: boolean };
+export type PanelWrite =
+  | { ok: true; order: OrderRow }
+  | { ok: false; current: OrderStatus | null; filesDeleted?: boolean; partnerChanged?: boolean };
+
+/** جابه‌جایی چاپخانهٔ سفارش (برش ۵٫۲): از چاپخانه‌ای که ادمین دید (`from`؛ null یعنی سفارش بی چاپخانه بود)، با دلیل. */
+export interface PanelAssign {
+  orderId: string;
+  from: string | null;
+  to: string;
+  at: Date;
+  adminUserId: string;
+  reason: string;
+  event: AdminEventInput;
+}
+
+/**
+ * نتیجهٔ جابه‌جایی: انجام شد؛ چاپخانهٔ تازه دیگر فعال نیست (`partner_inactive`)؛ یا سفارش دیگر «در صف چاپ» با همان چاپخانه نبود
+ * (`changed`، با وضعیت و چاپخانهٔ امروز).
+ */
+export type PanelAssignWrite =
+  | { ok: true; order: OrderRow }
+  | { ok: false; reason: 'partner_inactive' }
+  | { ok: false; reason: 'changed'; current: OrderStatus | null; partnerId: string | null };
 
 export interface PanelOrderStore {
   dueSummary(bounds: { at: Date; tomorrowStart: Date; dayAfterStart: Date }): Promise<PanelDueSummary>;
@@ -345,6 +423,14 @@ export interface PanelOrderStore {
     recipient: PanelRecipient;
     event: AdminEventInput;
   }): Promise<PanelWrite & { changed?: (keyof PanelRecipient)[] }>;
+  /** چاپخانه‌های فعال برای جابه‌جایی: پیش‌فرض اول، بعد قدیمی‌ترین. */
+  partnerOptions(): Promise<PanelPartnerOption[]>;
+  /**
+   * جابه‌جایی در یک تراکنش: چاپخانهٔ تازه `FOR SHARE` (فعال بماند)، `UPDATE … WHERE status = 'paid' AND چاپخانه = from`، ردیف
+   * `order_assignments` با ادمین و دلیل، کار برگه دوباره در صف (نام و شهر چاپخانه روی برگه است)، و رویداد ادمین با نام هر دو
+   * چاپخانه و دلیل. دو کلیک هم‌زمان یک بار؛ دومی `changed` با چاپخانهٔ تازه.
+   */
+  assignPartner(input: PanelAssign): Promise<PanelAssignWrite>;
   logEvent(event: AdminEventInput): Promise<void>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
@@ -437,6 +523,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       sidesModes: sql<string[]>`(SELECT coalesce(array_agg(DISTINCT i.sides_mode::text), '{}'::text[])
         FROM order_items i WHERE i.order_id = ${orders.id})`,
       pdfJob: jobs.status,
+      printPartnerId: orders.printPartnerId,
       unreturnedPayments: sql<number>`(SELECT count(*)::int FROM payments p WHERE p.order_id = ${orders.id}
         AND p.status = 'pending' AND p.created_at < ${ts(clock.unreturnedBefore)})`,
       stale: sql<boolean>`${staleFiles(clock.staleBefore)}`,
@@ -495,7 +582,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     },
 
     async alerts(clock) {
-      const [failed, unreturned] = await Promise.all([
+      const [failed, unreturned, unassigned] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -516,8 +603,13 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           )
           .groupBy(orders.orderNumber)
           .orderBy(desc(orders.orderNumber)),
+        db
+          .select({ orderNumber: orders.orderNumber })
+          .from(orders)
+          .where(and(eq(orders.status, 'paid'), isNull(orders.printPartnerId)))
+          .orderBy(asc(orders.postHandoffDueAt), asc(orders.orderNumber)),
       ]);
-      return { failedPdf: failed.map((row) => row.orderNumber), unreturned };
+      return { failedPdf: failed.map((row) => row.orderNumber), unreturned, unassigned: unassigned.map((row) => row.orderNumber) };
     },
 
     async list({ bucket, search, clock, limit, offset }) {
@@ -595,7 +687,10 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         .orderBy(orderItems.seq);
       const itemIds = itemRows.map((row) => row.item.id);
 
-      const [sectionRows, ruleRows, paymentRows, statusRows, jobRows, eventRows, printRows, ticketRows] = await Promise.all([
+      const fromPartner = alias(printPartners, 'from_partner');
+      const toPartner = alias(printPartners, 'to_partner');
+      const [sectionRows, ruleRows, paymentRows, statusRows, jobRows, eventRows, printRows, ticketRows, partnerRows, assignmentRows] =
+        await Promise.all([
         itemIds.length === 0
           ? []
           : db
@@ -664,6 +759,39 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .innerJoin(orders, eq(orders.id, orderTickets.orderId))
           .where(eq(orderTickets.orderId, order.id))
           .limit(1),
+        order.printPartnerId === null
+          ? []
+          : db
+              .select({
+                id: printPartners.id,
+                name: printPartners.name,
+                cityName: cities.nameFa,
+                provinceName: provinces.nameFa,
+                active: sql<boolean>`${printPartners.deactivatedAt} IS NULL`,
+                isDefault: printPartners.isDefault,
+              })
+              .from(printPartners)
+              .innerJoin(cities, eq(cities.id, printPartners.cityId))
+              .innerJoin(provinces, eq(provinces.id, printPartners.provinceId))
+              .where(eq(printPartners.id, order.printPartnerId))
+              .limit(1),
+        db
+          .select({
+            id: orderAssignments.id,
+            at: orderAssignments.at,
+            fromName: fromPartner.name,
+            toName: toPartner.name,
+            actor: orderAssignments.actor,
+            adminName: adminUsers.displayName,
+            rule: orderAssignments.rule,
+            reason: orderAssignments.reason,
+          })
+          .from(orderAssignments)
+          .innerJoin(toPartner, eq(toPartner.id, orderAssignments.toPartnerId))
+          .leftJoin(fromPartner, eq(fromPartner.id, orderAssignments.fromPartnerId))
+          .leftJoin(adminUsers, eq(adminUsers.id, orderAssignments.adminUserId))
+          .where(eq(orderAssignments.orderId, order.id))
+          .orderBy(asc(orderAssignments.id)),
       ]);
 
       const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
@@ -711,6 +839,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         ticketJob: jobOf(PREPARE_TICKET_JOB),
         ticket: ticketRows[0] ?? null,
         events: eventRows,
+        partner: partnerRows[0] ?? null,
+        assignments: assignmentRows.map((row) => ({
+          ...row,
+          actor: row.actor === 'admin' ? ('admin' as const) : ('system' as const),
+          rule: (row.rule as AssignmentRule | null) ?? null,
+        })),
       };
     },
 
@@ -818,18 +952,28 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       return db.transaction(async (tx): Promise<PanelWrite> => {
         // دو کلیک هم‌زمان: دومی پشت قفل ردیف می‌ماند و بعد شرط `status = from` را دوباره می‌سنجد، که دیگر نمی‌خواند.
         // کارگری که فایل‌ها را پاک می‌کند هم ردیف را قفل می‌کند (ADR-044): پس از او شرط فایل دیگر نمی‌خواند.
+        // «شروع چاپ» از چاپخانه‌ای که ادمین دید: جابه‌جایی هم‌زمان همین ردیف را قفل می‌کند، پس یکی از دو کار شرطش را نمی‌یابد.
+        const partner =
+          change.partnerId === undefined
+            ? undefined
+            : change.partnerId === null
+              ? isNull(orders.printPartnerId)
+              : eq(orders.printPartnerId, change.partnerId);
         const [order] = await tx
           .update(orders)
           .set({ status: change.to, handedToPostAt: change.to === 'handed_to_post' ? change.at : null })
-          .where(and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt)))
+          .where(and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt), partner))
           .returning();
         if (!order) {
           const [current] = await tx
-            .select({ status: orders.status, filesDeletedAt: orders.filesDeletedAt })
+            .select({ status: orders.status, filesDeletedAt: orders.filesDeletedAt, printPartnerId: orders.printPartnerId })
             .from(orders)
             .where(eq(orders.id, change.orderId))
             .limit(1);
           if (current?.filesDeletedAt) return { ok: false, current: current.status, filesDeleted: true };
+          if (current && current.status === change.from && partner !== undefined && current.printPartnerId !== change.partnerId) {
+            return { ok: false, current: current.status, partnerChanged: true };
+          }
           return { ok: false, current: current?.status ?? null };
         }
         await tx.insert(orderStatusEvents).values({
@@ -854,15 +998,9 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         const changed = (['recipientName', 'addressText', 'postalCode'] as const).filter((key) => order[key] !== recipient[key]);
         if (changed.length === 0) return { ok: true as const, order, changed };
         const [updated] = await tx.update(orders).set(recipient).where(eq(orders.id, orderId)).returning();
-        // برگه با نام و نشانی تازه: کار تمام‌شده یا شکست‌خورده دوباره در صف، مثل `queue_job` کارگر. کاری که همین حالا
-        // در صف است دادهٔ تازه را می‌خواند؛ کاری که کارگر رویش است، پیش از ثبت اثر انگشت را زیر قفل همین ردیف دوباره
-        // می‌سنجد و با دادهٔ تازه از نو می‌سازد (`docworker/ticket.py`).
-        await tx.execute(sql`
-          INSERT INTO jobs (kind, order_id) VALUES (${PREPARE_TICKET_JOB}, ${orderId})
-          ON CONFLICT (order_id, kind) DO UPDATE
-             SET status = 'queued', attempts = 0, run_after = now(), locked_by = NULL, locked_until = NULL,
-                 last_error = NULL, finished_at = NULL, updated_at = now()
-           WHERE jobs.status IN ('done', 'failed')`);
+        // برگه با نام و نشانی تازه: کار تمام‌شده یا شکست‌خورده دوباره در صف. کاری که کارگر رویش است، پیش از ثبت اثر
+        // انگشت را زیر قفل همین ردیف دوباره می‌سنجد و با دادهٔ تازه از نو می‌سازد (`docworker/ticket.py`).
+        await requeueTicket(tx, orderId);
         await tx.insert(adminEvents).values(
           adminEventRow({
             ...event,
@@ -874,6 +1012,80 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           }),
         );
         return { ok: true as const, order: updated!, changed };
+      });
+    },
+
+    async partnerOptions() {
+      return db
+        .select({
+          id: printPartners.id,
+          name: printPartners.name,
+          cityName: cities.nameFa,
+          isDefault: printPartners.isDefault,
+          openOrders: sql<number>`(SELECT count(*)::int FROM orders o
+            WHERE o.print_partner_id = ${printPartners.id} AND o.status IN ('paid', 'printing'))`,
+        })
+        .from(printPartners)
+        .innerJoin(cities, eq(cities.id, printPartners.cityId))
+        .where(isNull(printPartners.deactivatedAt))
+        .orderBy(desc(printPartners.isDefault), asc(printPartners.createdAt), asc(printPartners.id));
+    },
+
+    async assignPartner(input) {
+      return db.transaction(async (tx): Promise<PanelAssignWrite> => {
+        // چاپخانهٔ تازه تا پایان تراکنش فعال می‌ماند: غیرفعال کردنش پشت این قفل منتظر می‌ماند و بعد سفارش باز را می‌بیند.
+        const [target] = await tx
+          .select({ id: printPartners.id, name: printPartners.name })
+          .from(printPartners)
+          .where(and(eq(printPartners.id, input.to), isNull(printPartners.deactivatedAt)))
+          .limit(1)
+          .for('share');
+        if (!target) return { ok: false, reason: 'partner_inactive' };
+        const [order] = await tx
+          .update(orders)
+          .set({ printPartnerId: input.to })
+          .where(
+            and(
+              eq(orders.id, input.orderId),
+              eq(orders.status, 'paid'),
+              input.from === null ? isNull(orders.printPartnerId) : eq(orders.printPartnerId, input.from),
+            ),
+          )
+          .returning();
+        if (!order) {
+          const [current] = await tx
+            .select({ status: orders.status, printPartnerId: orders.printPartnerId })
+            .from(orders)
+            .where(eq(orders.id, input.orderId))
+            .limit(1);
+          return { ok: false, reason: 'changed', current: current?.status ?? null, partnerId: current?.printPartnerId ?? null };
+        }
+        await tx.insert(orderAssignments).values({
+          orderId: input.orderId,
+          fromPartnerId: input.from,
+          toPartnerId: input.to,
+          at: input.at,
+          actor: 'admin',
+          adminUserId: input.adminUserId,
+          reason: input.reason,
+        });
+        await requeueTicket(tx, input.orderId);
+        const [from] =
+          input.from === null
+            ? [null]
+            : await tx.select({ name: printPartners.name }).from(printPartners).where(eq(printPartners.id, input.from)).limit(1);
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...input.event,
+            detail: {
+              ...(input.event.detail as Record<string, unknown> | undefined),
+              from: input.from === null ? null : { id: input.from, name: from?.name ?? null },
+              to: { id: target.id, name: target.name },
+              reason: input.reason,
+            },
+          }),
+        );
+        return { ok: true, order };
       });
     },
 

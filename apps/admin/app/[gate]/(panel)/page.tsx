@@ -14,12 +14,12 @@ import { requirePanel, requireSession } from '../../../lib/server/context';
 
 export const metadata: Metadata = { title: 'پیشخوان' };
 
-/** «10031»، «10031 و 10040»، «10031، 10040 و 10052»: هر شماره پیوند سفارش خودش. */
-function OrderLinks({ gate, numbers }: { gate: string; numbers: readonly number[] }) {
+/** «10031»، «10031 و 10040»، «10031، 10040 و 10052»: هر شماره پیوند سفارش خودش (`query` کار همان صفحه، مثل `?do=assign`). */
+function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: readonly number[]; query?: string }) {
   return numbers.map((n, i) => (
     <Fragment key={n}>
       {i === 0 ? '' : i === numbers.length - 1 ? ' و ' : '، '}
-      <Link className="jy-link" href={panelPath(gate, `/orders/${n}`)}>
+      <Link className="jy-link" href={`${panelPath(gate, `/orders/${n}`)}${query}`}>
         <span className="num">{n}</span>
       </Link>
     </Fragment>
@@ -28,8 +28,8 @@ function OrderLinks({ gate, numbers }: { gate: string; numbers: readonly number[
 
 /**
  * پیشخوان (طرح پنل، ADR-039): چهار کاشی مهلت تحویل به پست به روز تهران (سفارش‌هایی که هنوز به پست نرسیده‌اند)، سطر آمار
- * (چندتا در حال چاپ است، و هفتهٔ گذشته چندتا به‌موقع به پست رسید)، هشدارها (PDF جزوه‌ای که ساخته نشد، پرداخت بی برگشت)،
- * و صف تحویل به ترتیب مهلت.
+ * (چندتا در حال چاپ است، و هفتهٔ گذشته چندتا به‌موقع به پست رسید)، هشدارها (PDF جزوه‌ای که ساخته نشد، پرداخت بی برگشت، و از ۵٫۲
+ * سفارش «در صف چاپ» بی چاپخانه)، و صف تحویل به ترتیب مهلت.
  */
 export default async function Dashboard({ params }: { params: Promise<{ gate: string }> }) {
   const { gate } = await params;
@@ -54,6 +54,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   const ordersHref = panelPath(gate, '/orders');
   const unreturned = alerts.unreturned.reduce((sum, u) => sum + u.attempts, 0);
   const oneFailed = alerts.failedPdf.length === 1;
+  const oneUnassigned = alerts.unassigned.length === 1;
 
   return (
     <>
@@ -84,7 +85,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
         ) : null}
       </section>
 
-      {alerts.failedPdf.length > 0 || unreturned > 0 ? (
+      {alerts.failedPdf.length > 0 || unreturned > 0 || alerts.unassigned.length > 0 ? (
         <div className="ad-alerts">
           {alerts.failedPdf.length > 0 ? (
             <p className="jy-note jy-note--error" data-alert="pdf">
@@ -110,6 +111,19 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
                   <span className="num">{formatNumber(unreturned)}</span> تلاش پرداخت
                 </Link>{' '}
                 از درگاه برنگشت.
+              </span>
+            </p>
+          ) : null}
+          {alerts.unassigned.length > 0 ? (
+            // همان الگوی «PDF ساخته نشد» (۵٫۲): هر شماره پیوند سفارش، این‌بار یکراست به فرم انتخاب چاپخانه.
+            <p className="jy-note jy-note--warning" data-alert="partner">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                {oneUnassigned ? 'سفارش ' : 'سفارش‌های '}
+                <OrderLinks gate={gate} numbers={alerts.unassigned} query={can(session, 'orders.assign') ? '?do=assign' : ''} />{' '}
+                {oneUnassigned
+                  ? 'چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.'
+                  : 'چاپخانه ندارند: هنگام پرداختشان هیچ چاپخانهٔ فعالی نبود. برای هر کدام یکی انتخاب کن.'}
               </span>
             </p>
           ) : null}

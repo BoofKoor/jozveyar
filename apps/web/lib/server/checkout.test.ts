@@ -390,12 +390,57 @@ describe('مسیر خرید روی سرور', () => {
       expect(sms.messages[0]!.body).toContain('دوشنبه 6 مهر');
     });
 
+    it('پرداخت چاپخانه را هم انتخاب می‌کند (برش ۵٫۲): هم‌شهر، وگرنه هم‌استان، وگرنه پیش‌فرض؛ کرایه همان', async () => {
+      /** سفارش در یک جا، با قیمت همان جا. */
+      async function placedAt(place: { provinceId: number; cityId: number | null }) {
+        const documentIds = [doc(10)];
+        const priced = await service.quote(ME, { items: [item(documentIds)], place });
+        if (!priced.ok) throw new Error(priced.error);
+        const result = await service.placeOrder(ME, SARA, {
+          items: [item(documentIds)],
+          place,
+          recipient,
+          checkoutKey: randomUUID(),
+          expectedTotalRials: priced.value.breakdown.totalRials,
+        });
+        if (!result.ok) throw new Error(result.error);
+        await pay(result.value.payment!.redirectUrl, 'success');
+        return orders.orders.find((o) => o.publicToken === result.value.order.token)!;
+      }
+      orders.partners.push({ id: 'partner-noor', name: 'چاپ نور', cityId: 1326, provinceId: 11, isDefault: false, createdAt: clock, active: true });
+      const tehran = await placedAt(TEHRAN);
+      const mashhad = await placedAt(MASHHAD);
+      const neyshabur = await placedAt({ provinceId: 11, cityId: 1447 });
+      const shiraz = await placedAt({ provinceId: 17, cityId: 911 });
+      expect([tehran, mashhad, neyshabur, shiraz].map((o) => o.printPartnerId)).toEqual([
+        'partner-jozveyar',
+        'partner-noor',
+        'partner-noor',
+        'partner-jozveyar',
+      ]);
+      expect(orders.assignments.map((a) => a.rule)).toEqual(['city', 'city', 'province', 'default']);
+      // کرایهٔ مشتری همان کرایهٔ استانش است، هر جا چاپ شود (ADR-042).
+      expect(mashhad.shippingZoneId).toBe('other');
+      expect(tehran.shippingZoneId).toBe('tehran');
+    });
+
+    it('بی چاپخانهٔ فعال پرداخت همان است و سفارش بی چاپخانه می‌ماند، نه بن‌بست (برش ۵٫۲)', async () => {
+      orders.partners[0]!.active = false;
+      const { order, payment } = await placed([doc(10)]);
+      expect(await pay(payment!.redirectUrl, 'success')).toEqual({ ok: true, value: { token: order.token, payment: 'succeeded' } });
+      expect(orders.orders[0]).toMatchObject({ status: 'paid', printPartnerId: null });
+      expect(orders.assignments).toEqual([]);
+      expect(orders.jobs).toHaveLength(2);
+      expect(sms.messages).toHaveLength(1);
+    });
+
     it('برگشت تکراری (رفرش) همان نتیجه است: پیامک و کار دوم نمی‌سازد', async () => {
       const { payment } = await placed([doc(10)]);
       await pay(payment!.redirectUrl, 'success');
       const authority = payment!.redirectUrl.split('/').at(-1)!;
       expect(await service.settle(authority, 'OK')).toMatchObject({ ok: true, value: { payment: 'succeeded' } });
       expect(orders.jobs).toHaveLength(2);
+      expect(orders.assignments).toHaveLength(1);
       expect(sms.messages).toHaveLength(1);
     });
 

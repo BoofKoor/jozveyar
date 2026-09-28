@@ -22,6 +22,8 @@ export * from './orders.js';
 export * from './sms.js';
 export * from './admin.js';
 export * from './panel.js';
+export * from './assignment.js';
+export * from './partners.js';
 export * from './tariff.js';
 export * from './settings.js';
 export * from './secrets.js';

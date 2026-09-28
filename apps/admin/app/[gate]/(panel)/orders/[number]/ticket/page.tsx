@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 import { NoAccess } from '../../../../../../components/NoAccess';
 import { panelPath } from '../../../../../../lib/gate';
-import { orderNumberOf, ticketFileName, ticketView } from '../../../../../../lib/orders';
+import { TICKET_UPDATING_WITH, orderNumberOf, ticketFileName, ticketView } from '../../../../../../lib/orders';
 import { can } from '../../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../../lib/server/context';
 
@@ -14,7 +14,6 @@ export async function generateMetadata({ params }: { params: Promise<{ number: s
 
 /** وقتی برگه آماده نیست: چرا، و راه جلو (همان ردیف صفحهٔ سفارش). */
 const NOT_READY = {
-  updating: 'برگه با نام و نشانی تازه در حال به‌روز شدن است؛ چند ثانیهٔ دیگر دوباره باز کن.',
   building: 'برگه در حال ساختن است؛ چند ثانیهٔ دیگر دوباره باز کن.',
   failed: 'برگه ساخته نشد؛ از صفحهٔ سفارش «دوباره بساز» را بزن.',
   closed: 'برگهٔ این سفارش ساخته نشد و سفارش دیگر چاپ نمی‌شود.',
@@ -66,7 +65,11 @@ export default async function TicketPage({ params }: { params: Promise<{ gate: s
           <h1 id="t-ticket" className="jy-card__title">
             برگهٔ سفارش <span className="num">{orderNumber}</span>
           </h1>
-          <p className="ad-lead">{NOT_READY[view.kind]}</p>
+          <p className="ad-lead">
+            {view.kind === 'updating'
+              ? `برگه ${TICKET_UPDATING_WITH[view.cause]} در حال به‌روز شدن است؛ چند ثانیهٔ دیگر دوباره باز کن.`
+              : NOT_READY[view.kind]}
+          </p>
         </section>
       </>
     );

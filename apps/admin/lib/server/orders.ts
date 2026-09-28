@@ -2,7 +2,8 @@
  * سفارش‌ها در پنل (برش ۴٫۲ و ۴٫۳؛ ADR-039): پیشخوان، فهرست با جست‌وجو و چیپ وضعیت، جزئیات، دانلود PDF جزوه و «دوباره
  * بساز» آن، و از ۴٫۳ وضعیت سفارش («شروع چاپ»، «تحویل پست شد»، لغو، برگرداندن یک قدم) و ویرایش گیرنده. از ۵٫۱ (ADR-043 و
  * ۰۴۴): فایل چاپ هر جلد و برگهٔ سفارش با دانلود و «دوباره بساز» هر کدام، «شروع چاپ» فقط با فایل چاپ همهٔ جزوه‌ها، و سفارشی
- * که فایل‌هایش پاک شد نه دانلود دارد، نه برمی‌گردد.
+ * که فایل‌هایش پاک شد نه دانلود دارد، نه برمی‌گردد. از ۵٫۲ (ADR-042): چاپخانهٔ سفارش و جابه‌جایی‌اش با دلیل (`orders.assign`)،
+ * فقط در «در صف چاپ» و از چاپخانه‌ای که ادمین دید؛ و «شروع چاپ» فقط با چاپخانه، آن هم از همان که ادمین دید.
  *
  * - **مجوز در سرور** (ADR-038)، نه فقط پنهان کردن دکمه: دیدن با `orders.read`، و دانلود و «دوباره بساز» با
  *   `files.download` (کسی که فایل را می‌گیرد، ساختن دوباره‌اش را هم می‌تواند بخواهد). وضعیت با `orders.status`،
@@ -35,6 +36,7 @@ import {
   type PanelOrderDetails,
   type PanelOrderLine,
   type PanelOrderStore,
+  type PanelPartnerOption,
   type PanelSearch,
 } from '@jozveyar/db';
 import type { StorageDriver } from '@jozveyar/storage';
@@ -119,13 +121,25 @@ export interface OrderDetailsView {
   revertTo: OrderStatus | null;
   /** ویرایش گیرنده: مجوزش، و فقط تا پیش از پست. */
   canEditRecipient: boolean;
+  /** جابه‌جایی چاپخانه (۵٫۲): مجوزش، فقط «در صف چاپ»، و فقط وقتی چاپخانهٔ فعال دیگری هست. */
+  canAssign: boolean;
+  /** چاپخانه‌های فعالی که سفارش به آن‌ها می‌رود (جز چاپخانهٔ امروزش)؛ فقط با `canAssign`. */
+  partnerOptions: PanelPartnerOption[];
 }
 
-/** فرم لغو یا برگرداندن: کار، وضعیتی که ادمین دید، و دلیل. */
+/** فرم لغو یا برگرداندن: کار، وضعیتی که ادمین دید، و دلیل. «شروع چاپ» چاپخانه‌ای را هم دارد که ادمین دید (۵٫۲). */
 export interface StatusForm {
   action: unknown;
   from: unknown;
   reason?: unknown;
+  partner?: unknown;
+}
+
+/** فرم جابه‌جایی چاپخانه (۵٫۲): چاپخانه‌ای که ادمین دید (خالی یعنی بی چاپخانه)، چاپخانهٔ تازه، و دلیل. */
+export interface AssignForm {
+  from: unknown;
+  to: unknown;
+  reason: unknown;
 }
 
 /** فرم ویرایش گیرنده. موبایل، استان و شهر اینجا نیستند: عوض نمی‌شوند (ADR-034). */
@@ -137,6 +151,9 @@ export interface RecipientForm {
 
 const STATUSES: readonly OrderStatus[] = ['awaiting_payment', 'paid', 'expired', 'printing', 'handed_to_post', 'cancelled'];
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** شناسهٔ چاپخانه از فرم؛ خالی یا بدشکل null. */
+const partnerIdOf = (value: unknown) => (typeof value === 'string' && UUID.test(value) ? value : null);
 
 export function createPanelOrders(deps: PanelOrdersDeps) {
   const now = deps.now ?? (() => new Date());
@@ -196,6 +213,10 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const { status } = details.order;
       // سفارشی که فایل‌هایش پاک شد به صف چاپ برنمی‌گردد (ADR-044).
       const revertTo = details.order.filesDeletedAt ? null : transitionOf('revert', status, details.statusEvents);
+      const partnerOptions =
+        can(session, 'orders.assign') && status === 'paid'
+          ? (await store.partnerOptions()).filter((partner) => partner.id !== details.order.printPartnerId)
+          : [];
       return ok({
         bounds: dayBounds(now()),
         details,
@@ -204,6 +225,8 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         canRevert: can(session, 'orders.revert') && revertTo !== null,
         revertTo,
         canEditRecipient: can(session, 'orders.address') && (RECIPIENT_EDITABLE as readonly OrderStatus[]).includes(status),
+        canAssign: partnerOptions.length > 0,
+        partnerOptions,
       });
     },
 
@@ -233,6 +256,10 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         if (reason.length > REASON_MAX) return fail(400, 'reason_too_long');
       }
       if (details.order.filesDeletedAt) return fail(409, 'files_deleted');
+      // «شروع چاپ» فقط با چاپخانه (۵٫۲)، و از همان که ادمین دید: جابه‌جایی هم‌زمان و «شروع چاپ» فقط یکی می‌شوند.
+      const partner = action === 'start_print' ? partnerIdOf(form.partner) : undefined;
+      if (action === 'start_print' && !details.order.printPartnerId) return fail(409, 'print_needs_partner');
+      if (action === 'start_print' && partner !== details.order.printPartnerId) return fail(409, 'order_partner_changed');
       if (action === 'start_print' && !printReady(details)) return fail(409, 'print_needs_pdf');
 
       const at = now();
@@ -240,6 +267,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         orderId: details.order.id,
         from,
         to,
+        ...(partner !== undefined ? { partnerId: partner } : {}),
         at,
         adminUserId: session.userId,
         note: reason ? { reason } : null,
@@ -256,7 +284,52 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (written.ok) return ok({ status: to });
       // هم‌زمان: کارگر همین حالا فایل‌ها را پاک کرد، کلیک دیگری همین کار را کرد، یا سفارش را جای دیگری برد.
       if (written.filesDeleted) return fail(409, 'files_deleted');
+      if (written.partnerChanged) return fail(409, 'order_partner_changed');
       return written.current === to ? ok({ status: to }) : fail(409, 'status_changed', { current: written.current });
+    },
+
+    /**
+     * جابه‌جایی چاپخانه (۵٫۲، ADR-042؛ طرح `m-order-assign`): مالک و متصدی (`orders.assign`)، فقط در «در صف چاپ»، به چاپخانهٔ
+     * فعال، با دلیل ۱ تا ۵۰۰ نویسه، بی کد تازه (برگشت‌پذیر است). از چاپخانه‌ای که ادمین دید؛ سفارشی که همین حالا جای دیگری رفت
+     * یا چاپش شروع شد، جابه‌جا نمی‌شود. سفارش، ردیف تخصیص، کار برگه و رویداد در یک تراکنش. کرایهٔ مشتری عوض نمی‌شود.
+     */
+    async assign(session: AdminSession, numberParam: string, form: AssignForm, ip: string): Promise<Result<{ to: string }>> {
+      if (!can(session, 'orders.assign')) return fail(403, 'forbidden');
+      const orderNumber = orderNumberOf(numberParam);
+      const details = orderNumber === null ? null : await store.details(orderNumber);
+      if (!details) return fail(404, 'order_not_found');
+      const from = partnerIdOf(form.from);
+      const to = partnerIdOf(form.to);
+      if (from !== details.order.printPartnerId) return fail(409, 'order_partner_changed');
+      if (details.order.status !== 'paid') return fail(409, 'assign_closed', { current: details.order.status });
+      if (!to || to === from) return fail(400, 'partner_required');
+      const reason = tidyInputFa(text(form.reason));
+      if (!reason) return fail(400, 'reason_required');
+      if (reason.length > REASON_MAX) return fail(400, 'reason_too_long');
+
+      const at = now();
+      const written = await store.assignPartner({
+        orderId: details.order.id,
+        from,
+        to,
+        at,
+        adminUserId: session.userId,
+        reason,
+        event: {
+          adminUserId: session.userId,
+          action: 'orders.assign',
+          targetType: 'order',
+          targetId: details.order.id,
+          ipHash: ipHashOf(deps.secret, ip),
+          detail: { orderNumber: details.order.orderNumber },
+          at,
+        },
+      });
+      if (written.ok) return ok({ to });
+      if (written.reason === 'partner_inactive') return fail(409, 'partner_inactive');
+      // دو کلیک هم‌زمان به یک مقصد: دومی همان را می‌بیند که خواست.
+      if (written.current === 'paid' && written.partnerId === to) return ok({ to });
+      return written.current === 'paid' ? fail(409, 'order_partner_changed') : fail(409, 'assign_closed', { current: written.current });
     },
 
     /**

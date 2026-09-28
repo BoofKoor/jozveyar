@@ -10,7 +10,7 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { S3Driver } from '@jozveyar/storage';
 import { tehranDayStart } from '@jozveyar/text';
 
-import { alertOf, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
  * خروجی چاپ در پنل، سرتاسری (برش ۵٫۱؛ طرح `docs/ui/mockups/admin.html`، ADR-043 و ADR-044): «در حال ساختن» و «شروع چاپ» بسته
@@ -147,6 +147,7 @@ async function paidOrder(
               WHERE id = ${row!.id}`;
     await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor, note)
              VALUES (${row!.id}, 'awaiting_payment', 'paid', ${paidAt}, 'gateway', ${tx.json({ paymentId: payment!.id })})`;
+    await assignAtPayment(tx, row!.id, paidAt);
     await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${row!.id}), ('prepare_ticket', ${row!.id})`;
     if (hold) await holdIn(tx, row!.id, hold);
     return { number: row!.order_number, id: row!.id };
@@ -359,7 +360,7 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     await ownerPage.goto(at(`/orders/${n}/ticket/pdf`));
     await expect(ownerPage).toHaveURL(new RegExp(`/orders/${n}\\?e=ticket_not_ready$`));
     await expect(alertOf(ownerPage)).toHaveText(
-      'برگهٔ سفارش هنوز ساخته نشده، یا با نام و نشانی تازه در حال به‌روز شدن است. چند ثانیهٔ دیگر دوباره باز کن.',
+      'برگهٔ سفارش هنوز ساخته نشده، یا با دادهٔ تازهٔ سفارش در حال به‌روز شدن است. چند ثانیهٔ دیگر دوباره باز کن.',
     );
     expect((await ownerContext.request.get(at(`/orders/${n}/ticket/preview`))).status()).toBe(409);
     await ownerPage.goto(at(`/orders/${n}/ticket`));

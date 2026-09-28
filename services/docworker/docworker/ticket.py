@@ -1,14 +1,15 @@
 """
 برگهٔ سفارش (برش ۵٫۱، ADR-043): یک برگ A4، سیاه روی سفید، جدا از فایل‌های جزوه (نه در قیمت، نه در صحافی).
 
-بالا: شمارهٔ سفارش درشت، مهلت تحویل به پست، و برای هر جزوه فایل‌ها با بازهٔ صفحه، صفحه و برگ، دورو یا یکرو، رنگ، کاغذ،
-صحافی و جلدها، و تعداد نسخه. پایین، برای بریدن: برچسب پست با نام گیرنده و شمارهٔ سفارش کنارش («مریم کاظمی 10027»)،
-همان که متصدی پست در «نام گ» می‌نویسد و برش ۶ کد رهگیری را با آن پیدا می‌کند (ADR-010)؛ نشانی، کد پستی و موبایل. بی مبلغ.
+بالا: شمارهٔ سفارش درشت، مهلت تحویل به پست، چاپخانهٔ سفارش با شهرش (از برش ۵٫۲، ADR-042)، و برای هر جزوه فایل‌ها با بازهٔ
+صفحه، صفحه و برگ، دورو یا یکرو، رنگ، کاغذ، صحافی و جلدها، و تعداد نسخه. پایین، برای بریدن: برچسب پست با نام گیرنده و شمارهٔ
+سفارش کنارش («مریم کاظمی 10027»)، همان که متصدی پست در «نام گ» می‌نویسد و برش ۶ کد رهگیری را با آن پیدا می‌کند (ADR-010)؛
+نشانی، کد پستی و موبایل. بی مبلغ.
 
 کار جدای `prepare_ticket`، تا شکستش PDF جزوه را «ساخته نشد» نکند. PDF با وزیرمتن همان ایمیج (`insert_htmlbox`)، و پیش‌نمایش
-PNG همان صفحه برای پنل. برگه با دادهٔ امروز سفارش ساخته می‌شود: اثر انگشت آن داده (`order_ticket_stamp`، مهاجرت 0016) پیش از
-ثبت، زیر قفل اشتراکی ردیف سفارش، دوباره سنجیده می‌شود؛ ویرایشی که وسط ساختن رسید برگه را از نو می‌سازد، و ویرایشی که بعد
-از ثبت برسد کار را خودش دوباره در صف می‌گذارد (`packages/db/src/panel.ts`).
+PNG همان صفحه برای پنل. برگه با دادهٔ امروز سفارش ساخته می‌شود: اثر انگشت آن داده (`order_ticket_stamp`، مهاجرت 0016، و از 0018
+با نام و شهر چاپخانه) پیش از ثبت، زیر قفل اشتراکی ردیف سفارش، دوباره سنجیده می‌شود؛ ویرایشی که وسط ساختن رسید برگه را از نو
+می‌سازد، و ویرایشی که بعد از ثبت برسد کار را خودش دوباره در صف می‌گذارد (`packages/db/src/panel.ts` و `partners.ts`).
 """
 
 from __future__ import annotations
@@ -94,6 +95,8 @@ class TicketData:
     postal_code: str | None
     shipping: str
     items: list[TicketItem] = field(default_factory=list)
+    # چاپخانهٔ سفارش (برش ۵٫۲): (نام، شهر)؛ None یعنی بی چاپخانه (هنگام پرداخت هیچ چاپخانهٔ فعالی نبود، یا پیش از ۵٫۲).
+    partner: tuple[str, str] | None = None
 
 
 def font_dir() -> str:
@@ -214,11 +217,13 @@ def ticket_html(data: TicketData, fonts: str) -> tuple[str, str]:
     """دو تکهٔ برگه: بالا (سر و جزوه‌ها) و پایین (برچسب پست). هر رشته‌ای که از کاربر یا ادمین آمده escape می‌شود."""
     bold = fitz.Font(fontfile=os.path.join(fonts, FONT_FILES[1]))
     paid = f"پرداخت {jalali.format_weekday(data.paid)}، {jalali.format_time(data.paid)}" if data.paid else ""
+    # زیر مهلت، مثل طرح: «چاپ نور، مشهد · پرداخت شنبه 11 مهر، 14:05». نام چاپخانه را مالک نوشته، پس escape.
+    partner = f"{html.escape(data.partner[0])}، {html.escape(data.partner[1])}" if data.partner else ""
     top = f"""
 <p class="k">جزوه‌یار · برگهٔ سفارش</p>
 <p class="no">{data.order_number}</p>
 <p class="due">تحویل به پست تا {jalali.deadline_day(data.due)}</p>
-<p class="k">{paid}</p>
+<p class="k">{" · ".join(part for part in (partner, paid) if part)}</p>
 <div class="rule"></div>
 {"".join(_item_html(data, item, bold) for item in data.items)}"""
     # هر تکه یکجا (فاصلهٔ نشکن) و شکستن فقط میان تکه‌ها، مثل ردیف flex-wrap طرح: «پست / پیشتاز» دو خط نمی‌شود.
@@ -273,17 +278,19 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
     order = conn.execute(
         """SELECT o.order_number, o.status::text, o.post_handoff_due_at, o.paid_at, o.recipient_name, o.recipient_phone,
                   o.address_text, o.postal_code, p.name_fa, c.name_fa, coalesce(m.name_fa, o.shipping_method_id),
-                  o.price_breakdown, order_ticket_stamp(o)
+                  o.price_breakdown, order_ticket_stamp(o), pp.name, pc.name_fa
              FROM orders o
              JOIN provinces p ON p.id = o.province_id
              LEFT JOIN cities c ON c.id = o.city_id
              LEFT JOIN shipping_methods m ON m.price_list_version = o.price_list_version AND m.id = o.shipping_method_id
+             LEFT JOIN print_partners pp ON pp.id = o.print_partner_id
+             LEFT JOIN cities pc ON pc.id = pp.city_id
             WHERE o.id = %s""",
         (order_id,),
     ).fetchone()
     if order is None:
         raise PermanentFailure("order_missing")
-    number, status, due, paid, name, phone, address, postal, province, city, shipping, breakdown, stamp = order
+    number, status, due, paid, name, phone, address, postal, province, city, shipping, breakdown, stamp, partner, partner_city = order
     if status in UNPAID:
         raise PermanentFailure("order_not_paid")
     if status not in PRINTABLE:
@@ -323,6 +330,7 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
         address="، ".join(part for part in (province, city, address) if part),
         postal_code=postal,
         shipping=shipping,
+        partner=(partner, partner_city) if partner else None,
     )
     for item_id, seq, pages, copies, sides, binding in items:
         ranges = plan_volumes(breakdown, seq, pages, sides)
