@@ -42,6 +42,7 @@ import {
 import { normalizeIranMobile, tidyInputFa } from '@jozveyar/text/input';
 
 import { tehranDay } from './format';
+import { assignmentText } from './partners';
 
 /** تکهٔ متن: رشته، عدد (`.num`)، یا نام لاتین (`bdi`). */
 export type Seg = string | { num: string } | { ltr: string };
@@ -269,10 +270,14 @@ export const STATE_LABELS: Record<OrderState, string> = {
 /** «باز»: در صف چاپ یا در حال چاپ؛ مهلت تحویل به پست فقط برای این‌ها معنا دارد. */
 export const isOpen = (status: OrderRow['status']) => (OPEN_STATUSES as readonly OrderStatus[]).includes(status);
 
-/** ستون وضعیت ردیف؛ کاری که متصدی باید بکند آیکون دارد. */
-export function rowState(line: PanelOrderLine): { label: string; icon: 'error' | 'info' | null } {
+/**
+ * ستون وضعیت ردیف؛ کاری که متصدی باید بکند آیکون دارد: PDF ساخته نشد، و از ۵٫۲ سفارش «در صف چاپ» بی چاپخانه (همان هشدار
+ * پیشخوان، با آیکون هشدار).
+ */
+export function rowState(line: PanelOrderLine): { label: string; icon: 'error' | 'warning' | 'info' | null } {
   const state = orderState(line.status, line.stale);
   if ((state === 'queued' || state === 'printing') && line.pdfJob === 'failed') return { label: 'PDF ساخته نشد', icon: 'error' };
+  if (state === 'queued' && line.printPartnerId === null) return { label: 'بی چاپخانه', icon: 'warning' };
   if (state === 'awaiting' && line.unreturnedPayments > 0) return { label: 'پرداخت بی برگشت', icon: 'info' };
   return { label: STATE_LABELS[state], icon: null };
 }
@@ -725,18 +730,25 @@ export function changesNote(item: PanelOrderItem): Seg[] {
 }
 
 
+/**
+ * چرا برگهٔ ساخته‌شده دیگر با دادهٔ امروز سفارش نمی‌خواند (`order_ticket_stamp`): گیرنده ویرایش شد، چاپخانهٔ سفارش جابه‌جا شد
+ * (۵٫۲)، یا چیز دیگری از داده‌اش، مثل نام یا شهر خود چاپخانه.
+ */
+export type TicketStaleCause = 'recipient' | 'partner' | 'data';
+
 export type TicketView =
   | { kind: 'unpaid' }
   | { kind: 'purged' }
   | { kind: 'closed' }
   | { kind: 'ready'; bytes: number; builtAt: Date }
-  | { kind: 'updating' }
+  | { kind: 'updating'; cause: TicketStaleCause }
   | { kind: 'building'; retrying: boolean }
   | ({ kind: 'failed' } & JobFailure);
 
 /**
- * برگهٔ سفارش (ADR-043): ساخته شده با دادهٔ امروز سفارش (دیدن و دانلود)، در حال به‌روز شدن (برگه‌ای هست ولی نام یا نشانی
- * پس از آن عوض شد)، در حال ساختن، یا ساخته نشد با «دوباره بساز». برگهٔ کهنه هرگز داده نمی‌شود.
+ * برگهٔ سفارش (ADR-043): ساخته شده با دادهٔ امروز سفارش (دیدن و دانلود)، در حال به‌روز شدن (برگه‌ای هست ولی نام، نشانی یا
+ * چاپخانه پس از آن عوض شد؛ تازه‌ترین تغییر پس از ساختنش علت را می‌گوید)، در حال ساختن، یا ساخته نشد با «دوباره بساز». برگهٔ
+ * کهنه هرگز داده نمی‌شود.
  */
 export function ticketView(details: PanelOrderDetails): TicketView {
   const { order, ticket, ticketJob } = details;
@@ -744,9 +756,23 @@ export function ticketView(details: PanelOrderDetails): TicketView {
   if (order.filesDeletedAt) return { kind: 'purged' };
   if (ticket?.fresh) return { kind: 'ready', bytes: ticket.sizeBytes, builtAt: ticket.builtAt };
   if (!isOpen(order.status)) return { kind: 'closed' };
-  if (busy(ticketJob)) return ticket ? { kind: 'updating' } : { kind: 'building', retrying: Boolean(ticketJob!.attempts > 0 && ticketJob!.lastError) };
+  if (busy(ticketJob)) {
+    if (!ticket) return { kind: 'building', retrying: Boolean(ticketJob!.attempts > 0 && ticketJob!.lastError) };
+    const after = (at: Date | undefined) => (at && at.getTime() >= ticket.builtAt.getTime() ? at.getTime() : -1);
+    const moved = after(details.assignments.at(-1)?.at);
+    const edited = after(details.events.filter((event) => event.action === 'orders.recipient').at(-1)?.at);
+    const cause: TicketStaleCause = moved < 0 && edited < 0 ? 'data' : moved > edited ? 'partner' : 'recipient';
+    return { kind: 'updating', cause };
+  }
   return { kind: 'failed', ...failureOf(ticketJob) };
 }
+
+/** «با …»ی برگه‌ای که در حال به‌روز شدن است: ردیف برگه در صفحهٔ سفارش («در حال به‌روز شدن با …») و صفحهٔ برگه. */
+export const TICKET_UPDATING_WITH: Record<TicketStaleCause, string> = {
+  recipient: 'با نام و نشانی تازه',
+  partner: 'با چاپخانهٔ تازه',
+  data: 'با دادهٔ تازهٔ سفارش',
+};
 
 /** «فایل‌های این سفارش … سه‌شنبه 7 مهر پاک شد: 30 روز پس از تحویل پست.» (طرح پنل، ADR-044). */
 export function purgedNote(details: PanelOrderDetails): Seg[] | null {
@@ -778,8 +804,9 @@ export interface TimelineEntry {
 
 /**
  * رویدادهای سفارش به ترتیب زمان (طرح پنل): تغییر وضعیت‌ها (از ۴٫۳ با ادمین: «در صف چاپ ← در حال چاپ»، «لغو شد»، و
- * برگرداندن با دلیلش)، PDF جزوه (ساخته شد، یا ماند)، و کار ادمین‌ها روی همین سفارش (دانلود، «دوباره بساز»، ویرایش
- * گیرنده). تغییر وضعیت ادمین رویداد ادمین هم دارد، ولی یک بار نشان داده می‌شود.
+ * برگرداندن با دلیلش)، PDF جزوه (ساخته شد، یا ماند)، تخصیص چاپخانه (از ۵٫۲: «به چاپ نور سپرده شد، هم‌شهر مشتری» و جابه‌جایی
+ * با دلیلش)، و کار ادمین‌ها روی همین سفارش (دانلود، «دوباره بساز»، ویرایش گیرنده). تغییر وضعیت و جابه‌جایی ادمین رویداد ادمین
+ * هم دارند، ولی یک بار نشان داده می‌شوند.
  */
 export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
@@ -799,6 +826,9 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
       });
     } else if (to === 'cancelled') entries.push({ at: event.at, text: ['لغو شد'], who });
     else entries.push({ at: event.at, text: [`${STATUS_LABELS[from]} ← ${STATUS_LABELS[to]}`], who });
+  }
+  for (const assignment of details.assignments) {
+    entries.push({ at: assignment.at, text: assignmentText(assignment), who: assignment.actor === 'system' ? 'سیستم' : assignment.adminName ?? 'ادمین' });
   }
   const many = details.items.length > 1;
   const jozve = (seq: number): Seg[] => (many ? ['جزوهٔ ', num(seq)] : ['جزوه']);
@@ -829,7 +859,7 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     const seq = typeof detail.item === 'number' ? detail.item : 1;
     const volume = typeof detail.volume === 'number' && typeof detail.volumes === 'number' && detail.volumes > 1 ? detail.volume : null;
     const who = event.adminName ?? 'ادمین';
-    if (event.action === 'orders.status') continue; // همان رویداد وضعیت بالا
+    if (event.action === 'orders.status' || event.action === 'orders.assign') continue; // همان رویداد وضعیت و تخصیص بالا
     if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF اصلی ', ...jozve(seq), ' دانلود شد'], who });
     else if (event.action === 'orders.print_download') {
       entries.push({ at: event.at, text: ['فایل چاپ', ...ofJozve(seq), ...(volume ? [' جلد ', num(volume)] : []), ' دانلود شد'], who });

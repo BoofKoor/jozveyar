@@ -10,9 +10,11 @@
 
 import { redirect } from 'next/navigation';
 
+import { findCity } from '@jozveyar/geo';
 import { formatTehranTime } from '@jozveyar/text';
 
 import { panelPath } from '../../lib/gate';
+import { cityLabel } from '../../lib/partners';
 import { draftFormFromEntries, type DraftIssue } from '../../lib/tariff';
 import type { IssuedInvite } from '../../lib/server/auth';
 import {
@@ -152,15 +154,21 @@ export async function rebuildPdfAction(form: FormData): Promise<void> {
 }
 
 /**
- * «شروع چاپ» و «تحویل پست شد» (۴٫۳): دکمهٔ اصلی ستون کنار، از وضعیتی که ادمین دید (`from`). برگشت به همان سفارش با
- * وضعیت تازه؛ شکست با پیامش (`?e=`). کد تازه نمی‌خواهد (چیزی پاک نمی‌کند و پولی جابه‌جا نمی‌کند)؛ مجوز و رویدادش در سرویس.
+ * «شروع چاپ» و «تحویل پست شد» (۴٫۳): دکمهٔ اصلی ستون کنار، از وضعیتی که ادمین دید (`from`)، و «شروع چاپ» از چاپخانه‌ای هم که
+ * دید (`partner`، ۵٫۲). برگشت به همان سفارش با وضعیت تازه؛ شکست با پیامش (`?e=`). کد تازه نمی‌خواهد (چیزی پاک نمی‌کند و پولی
+ * جابه‌جا نمی‌کند)؛ مجوز و رویدادش در سرویس.
  */
 export async function advanceOrderAction(form: FormData): Promise<void> {
   const gate = field(form, 'gate');
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
   const number = field(form, 'number');
-  const result = await orders.changeStatus(session, number, { action: field(form, 'action'), from: field(form, 'from') }, await requestIp());
+  const result = await orders.changeStatus(
+    session,
+    number,
+    { action: field(form, 'action'), from: field(form, 'from'), partner: field(form, 'partner') },
+    await requestIp(),
+  );
   const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
   redirect(result.ok ? back : `${back}?e=${result.error}`);
 }
@@ -388,4 +396,97 @@ export async function keyAction(_state: FormState, form: FormData): Promise<Form
     redirect(`${home}?e=${result.error}&${doneMark()}${anchor}`);
   }
   return failure(result);
+}
+
+/* ───────────────────────── چاپخانه‌ها (۵٫۲) ───────────────────────── */
+
+export interface AssignState {
+  error?: AdminErrorCode;
+  /** چاپخانه‌ای که انتخاب شد و دلیلی که نوشته شد، تا پس از خطا بمانند. */
+  to?: string;
+  reason?: string;
+}
+
+/**
+ * جابه‌جایی چاپخانهٔ سفارش (۵٫۲، طرح `m-order-assign`): خطای انتخاب و دلیل همین‌جا با نوشته‌ها؛ چاپخانه‌ای که همین حالا غیرفعال
+ * شد، به همان فرم با گزینه‌های تازه؛ بقیه (چاپخانه یا وضعیت همین حالا عوض شد، بی مجوز) به صفحهٔ سفارش با پیامش. کد تازه
+ * نمی‌خواهد: برگشت‌پذیر است (ADR-042)؛ مجوز و رویدادش در سرویس.
+ */
+export async function assignPartnerAction(_state: AssignState, form: FormData): Promise<AssignState> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const values = { to: field(form, 'to').slice(0, 64), reason: field(form, 'reason').slice(0, 2000) };
+  const result = await orders.assign(session, number, { from: field(form, 'from'), ...values }, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
+  if (result.ok) redirect(back);
+  if (result.error === 'partner_required' || result.error === 'reason_required' || result.error === 'reason_too_long') {
+    return { error: result.error, ...values };
+  }
+  if (result.error === 'partner_inactive') redirect(`${back}?do=assign&e=partner_inactive`);
+  redirect(`${back}?e=${result.error}`);
+}
+
+export interface PartnerState {
+  error?: AdminErrorCode;
+  /** فیلدی که خطا دارد. */
+  field?: 'name' | 'city';
+  /** شهرهایی که به متن فیلد می‌خورند («مشهد، خراسان رضوی»)، برای خطای شهر. */
+  suggestions?: string[];
+  values?: { name: string; city: string };
+}
+
+/**
+ * افزودن و ویرایش چاپخانه (۵٫۲، طرح `m-partner-edit`): خطای نام یا شهر همین‌جا با نوشته‌ها و پیشنهادهای شهر؛ چاپخانه‌ای که همین
+ * حالا جای دیگری عوض شد به همان فرم با نام و شهر تازه؛ موفق به فهرست با پیام. کد تازه نمی‌خواهد (سؤال ۳۵).
+ */
+export async function savePartnerAction(_state: PartnerState, form: FormData): Promise<PartnerState> {
+  const gate = field(form, 'gate');
+  const { partners } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const values = { name: field(form, 'name').slice(0, 400), city: field(form, 'city').slice(0, 400) };
+  const result = id
+    ? await partners.update(session, id, { ...values, seenName: field(form, 'seenName'), seenCity: field(form, 'seenCity') }, await requestIp())
+    : await partners.create(session, values, await requestIp());
+  const home = panelPath(gate, '/partners');
+  if (result.ok) redirect(`${home}?done=${id ? 'update' : 'create'}&p=${encodeURIComponent(id || ('id' in result.value ? result.value.id : ''))}&${doneMark()}`);
+  if (result.error === 'partner_changed') redirect(`${panelPath(gate, `/partners/${encodeURIComponent(id)}`)}?e=partner_changed`);
+  if (result.error === 'partner_not_found' || result.error === 'forbidden') redirect(`${home}?e=${result.error}&${doneMark()}`);
+  const suggestions = Array.isArray(result.suggestions)
+    ? result.suggestions.flatMap((cityId) => {
+        const city = typeof cityId === 'number' ? findCity(cityId) : undefined;
+        return city ? [cityLabel(city)] : [];
+      })
+    : undefined;
+  return {
+    error: result.error,
+    ...(result.field === 'name' || result.field === 'city' ? { field: result.field } : {}),
+    ...(suggestions ? { suggestions } : {}),
+    values,
+  };
+}
+
+/**
+ * «پیش‌فرض کن»، «غیرفعال کن» و «فعال کن» در فهرست چاپخانه‌ها (۵٫۲): بی پرسش، چون هر سه برگشت‌پذیرند؛ برگشت به فهرست با پیام،
+ * یا با دلیل اینکه چرا نشد (سفارش باز، پیش‌فرض).
+ */
+export async function partnerStateAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { partners } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const intent = field(form, 'intent');
+  const home = panelPath(gate, '/partners');
+  if (intent !== 'default' && intent !== 'deactivate' && intent !== 'activate') redirect(home);
+  const ip = await requestIp();
+  const result =
+    intent === 'default'
+      ? await partners.setDefault(session, id, ip)
+      : intent === 'deactivate'
+        ? await partners.deactivate(session, id, ip)
+        : await partners.activate(session, id, ip);
+  const target = `p=${encodeURIComponent(id.slice(0, 64))}`;
+  redirect(result.ok ? `${home}?done=${intent}&${target}&${doneMark()}` : `${home}?e=${result.error}&${target}&${doneMark()}`);
 }

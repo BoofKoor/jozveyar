@@ -279,8 +279,35 @@ describe('رویدادها', () => {
       ['کلید «قالب کد پیامکی کاوه‌نگار» وارد شد'],
       ['کلید «کلید API کاوه‌نگار» به ', { ltr: '.env' }, ' برگشت'],
     ]);
-    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'تعرفه', 'تنظیمات و کلیدها', 'ادمین‌ها']);
-    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'tariff', 'settings', 'admins']);
+    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'تعرفه', 'تنظیمات و کلیدها', 'چاپخانه‌ها', 'ادمین‌ها']);
+    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'tariff', 'settings', 'partners', 'admins']);
+  });
+
+  it('چاپخانه‌ها (۵٫۲): افزودن، ویرایش با قبل و بعد، پیش‌فرض، غیرفعال و فعال؛ جابه‌جایی سفارش زیر «سفارش» با نام همان روز و دلیل', () => {
+    const partner = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'partner', detail });
+    const lines = eventLines([
+      partner('partners.create', { name: 'چاپ نور', city: 'مشهد' }),
+      partner('partners.update', { name: 'چاپ نور مشهد', city: 'نیشابور', changed: ['name', 'city'], previous: { name: 'چاپ نور', city: 'مشهد' } }),
+      partner('partners.update', { name: 'چاپ نور', city: 'مشهد', changed: [], previous: { name: 'چاپ نور', city: 'مشهد' } }),
+      partner('partners.default', { name: 'چاپ نور', previous: { name: 'چاپخانهٔ جزوه‌یار' } }),
+      partner('partners.deactivate', { name: 'چاپ نور' }),
+      partner('partners.activate', { name: 'چاپ نور' }),
+      event('orders.assign', {
+        targetType: 'order',
+        detail: { orderNumber: 10027, from: { id: 'p1', name: 'چاپ نور' }, to: { id: 'p2', name: 'چاپخانهٔ جزوه‌یار' }, reason: 'دستگاه خراب است' },
+      }),
+      event('orders.assign', { targetType: 'order', detail: { orderNumber: 10037, from: null, to: { id: 'p1', name: 'چاپ نور' }, reason: 'تازه آمد' } }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['چاپخانهٔ «چاپ نور» در مشهد افزوده شد'],
+      ['چاپخانهٔ «چاپ نور مشهد» ویرایش شد: نام «چاپ نور» ← «چاپ نور مشهد»، شهر مشهد ← نیشابور'],
+      ['چاپخانهٔ «چاپ نور» ویرایش شد'],
+      ['چاپخانهٔ «چاپ نور» پیش‌فرض شد، به جای «چاپخانهٔ جزوه‌یار»'],
+      ['چاپخانهٔ «چاپ نور» غیرفعال شد'],
+      ['چاپخانهٔ «چاپ نور» دوباره فعال شد'],
+      ['سفارش ', { ltr: '10027' }, ' از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه خراب است'],
+      ['سفارش ', { ltr: '10037' }, ' به «چاپ نور» سپرده شد؛ تازه آمد'],
+    ]);
   });
 });
 

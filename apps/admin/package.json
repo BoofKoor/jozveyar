@@ -14,6 +14,7 @@
     "@jozveyar/analysis": "workspace:*",
     "@jozveyar/contracts": "workspace:*",
     "@jozveyar/db": "workspace:*",
+    "@jozveyar/geo": "workspace:*",
     "@jozveyar/pricing": "workspace:*",
     "@jozveyar/storage": "workspace:*",
     "@jozveyar/text": "workspace:*",
@@ -25,7 +26,6 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@jozveyar/geo": "workspace:*",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.13.1",
     "@types/qrcode": "1.5.6",

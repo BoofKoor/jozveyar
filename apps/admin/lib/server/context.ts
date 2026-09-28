@@ -7,7 +7,15 @@ import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
-import { createAdminStore, createPanelOrderStore, createSecretStore, createSettingsStore, createTariffStore, getDb } from '@jozveyar/db';
+import {
+  createAdminStore,
+  createPanelOrderStore,
+  createPartnerStore,
+  createSecretStore,
+  createSettingsStore,
+  createTariffStore,
+  getDb,
+} from '@jozveyar/db';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
@@ -15,6 +23,7 @@ import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
 import { adminConfig, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
 import { createPanelOrders, type PanelOrders } from './orders';
+import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelTariff, type PanelTariff } from './tariff';
@@ -25,6 +34,7 @@ interface Panel {
   orders: PanelOrders;
   tariff: PanelTariff;
   settings: PanelSettings;
+  partners: PanelPartners;
 }
 
 let cached: Panel | null | undefined;
@@ -56,6 +66,8 @@ function build(config: AdminConfig): Panel {
       env: process.env,
       secret: config.secret,
     }),
+    // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
+    partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),
   };
 }
 

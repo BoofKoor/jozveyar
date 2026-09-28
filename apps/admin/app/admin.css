@@ -474,6 +474,9 @@
   .ad-row__state--info .jy-icon {
     color: var(--color-info-text);
   }
+  .ad-row__state--warning .jy-icon {
+    color: var(--color-warning-text);
+  }
   .ad-list .ad-pager {
     flex-wrap: wrap;
     align-items: center;
@@ -769,6 +772,52 @@
     font-size: var(--text-small);
     line-height: 1.7;
     color: var(--color-muted);
+  }
+
+  /* ===== چاپخانه‌ها (۵٫۲، طرح پنل برش ۵): کارت چاپخانهٔ سفارش، فهرست «چاپخانه‌ها» و فیلد شهر ===== */
+  .ad-partner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+  }
+  .ad-partner b {
+    overflow-wrap: anywhere;
+  }
+  .ad-partners > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding-block: 14px;
+  }
+  .ad-partners > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-partners__name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .ad-partners__meta {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-partners .jy-badge {
+    margin-inline-start: 4px;
+    vertical-align: 1px;
+  }
+  @media (max-width: 520px) {
+    .ad-partners > li {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .ad-select {
+    max-width: 22rem;
+  }
+  /* فهرست شهرها (`datalist`) هنگام تایپ پیشنهاد می‌دهد؛ پیکان خود مرورگر نه، مثل طرح: آیکون جست‌وجو همان نشانه است. */
+  .ad-select .jy-input::-webkit-calendar-picker-indicator {
+    display: none !important;
   }
 
   /* ===== ادمین‌ها و پیوند یک‌باره ===== */

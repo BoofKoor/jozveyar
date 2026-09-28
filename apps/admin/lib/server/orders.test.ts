@@ -43,6 +43,10 @@ function session(permissions: string[] = ['orders.read', 'files.download']): Adm
   };
 }
 
+/** دو چاپخانه (۵٫۲): پیش‌فرض تهران، و چاپ نور مشهد. */
+const PARTNER_A = '11111111-1111-4111-8111-111111111111';
+const PARTNER_B = '22222222-2222-4222-8222-222222222222';
+
 const SUMMARY: PanelDueSummary = { overdue: 1, today: 3, tomorrow: 4, later: 2, overdueRange: null, laterRange: null };
 
 /** پایگاه دادهٔ ساختگی: هر فراخوانی ثبت می‌شود و پاسخ‌ها از پیش گذاشته‌اند. */
@@ -57,7 +61,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     };
   const store: PanelOrderStore = {
     dueSummary: record('dueSummary', SUMMARY),
-    alerts: record('alerts', { failedPdf: [10031], unreturned: [{ orderNumber: 10030, attempts: 2 }] }),
+    alerts: record('alerts', { failedPdf: [10031], unreturned: [{ orderNumber: 10030, attempts: 2 }], unassigned: [10037] }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
     stats: record('stats', { printing: 2, handed: 42, onTime: 41 }),
@@ -84,6 +88,15 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       return { ok: true, order: {} as never, changed: ['addressText'] };
     },
     setting: record('setting', undefined),
+    partnerOptions: record('partnerOptions', [
+      { id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 8 },
+      { id: PARTNER_B, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, openOrders: 2 },
+    ]),
+    assignPartner: async (input) => {
+      calls.push({ method: 'assignPartner', args: [input] });
+      events.push(input.event);
+      return { ok: true, order: { printPartnerId: input.to } as never };
+    },
     ...over,
   };
   return { store, calls, events };
@@ -127,6 +140,9 @@ function failedDetails(
     pdfJob: job ? { status: job, attempts: 3, maxAttempts: 3, lastError: 'x', createdAt: NOW, updatedAt: NOW, finishedAt: NOW } : null,
     ticketJob: { status: over.ticket === 'stale' ? 'queued' : 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: NOW },
     ticket: over.ticket ? { sizeBytes: 38_000, builtAt: NOW, fresh: over.ticket === 'fresh' } : null,
+    events: [],
+    partner: null,
+    assignments: [],
   } as unknown as PanelOrderDetails;
 }
 
@@ -368,13 +384,21 @@ describe('دانلود PDF جزوه', () => {
 /* ───────────── وضعیت سفارش و گیرنده (۴٫۳) ───────────── */
 
 /** سفارشی با وضعیت دلخواه، PDF ساخته‌شده، و رویدادهای وضعیت. */
-function orderDetails(status: OrderStatus, over: { ready?: boolean; events?: Partial<PanelStatusEvent>[]; filesDeletedAt?: Date } = {}) {
+function orderDetails(
+  status: OrderStatus,
+  over: { ready?: boolean; events?: Partial<PanelStatusEvent>[]; filesDeletedAt?: Date; partner?: string | null } = {},
+) {
+  // چاپخانهٔ سفارش (۵٫۲): پیش‌فرض همان چاپخانهٔ جزوه‌یار، مثل تخصیص در پرداخت.
+  const partner = over.partner === undefined ? PARTNER_A : over.partner;
   return {
+    partner: partner ? { id: partner, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', provinceName: 'تهران', active: true, isDefault: true } : null,
+    assignments: [],
     order: {
       id: 'order-1',
       orderNumber: 10027,
       status,
       filesDeletedAt: over.filesDeletedAt ?? null,
+      printPartnerId: partner,
       recipientName: 'مریم کاظمی',
       addressText: 'بلوار سجاد، سجاد 18، پلاک 42، واحد 6',
       postalCode: null,
@@ -425,15 +449,19 @@ describe('وضعیت سفارش', () => {
 
   it('«شروع چاپ» و «تحویل پست شد»: از وضعیتی که ادمین دید، با رویداد کننده و هش IP؛ IP خام هرگز', async () => {
     const { orders, calls, events } = service({ details: async () => orderDetails('paid') });
-    expect(await orders.changeStatus(session(OPERATOR), '10027', { action: 'start_print', from: 'paid' }, '1.2.3.4')).toEqual({
+    expect(
+      await orders.changeStatus(session(OPERATOR), '10027', { action: 'start_print', from: 'paid', partner: PARTNER_A }, '1.2.3.4'),
+    ).toEqual({
       ok: true,
       value: { status: 'printing' },
     });
+    // «شروع چاپ» از چاپخانه‌ای که ادمین دید (۵٫۲)؛ بقیهٔ گذارها چاپخانه را نمی‌سنجند (پایین).
     expect(changes(calls)).toEqual([
       {
         orderId: 'order-1',
         from: 'paid',
         to: 'printing',
+        partnerId: PARTNER_A,
         at: NOW,
         adminUserId: 'admin-1',
         note: null,
@@ -454,12 +482,35 @@ describe('وضعیت سفارش', () => {
       ok: true,
       value: { status: 'handed_to_post' },
     });
+    expect(changes(printing.calls)[0]).not.toHaveProperty('partnerId');
+  });
+
+  it('«شروع چاپ» فقط با چاپخانه (۵٫۲)، و از همان که ادمین دید؛ جابه‌جایی هم‌زمان «چاپخانه عوض شد» است، نه «وضعیت عوض شد»', async () => {
+    const run = async (details: PanelOrderDetails, partner: unknown, write?: PanelOrderStore['changeStatus']) => {
+      const { orders, calls } = service({ details: async () => details, ...(write ? { changeStatus: write } : {}) });
+      const result = await orders.changeStatus(session(OPERATOR), '10027', { action: 'start_print', from: 'paid', partner }, 'ip');
+      return [result.ok ? 'ok' : `${result.status} ${result.error}`, changes(calls).length];
+    };
+    // بی چاپخانه، حتی با فایل چاپ؛ و پیش از سنجش فایل چاپ (شاهد: بی فایل چاپ هم همین).
+    expect(await run(orderDetails('paid', { partner: null }), '')).toEqual(['409 print_needs_partner', 0]);
+    expect(await run(orderDetails('paid', { partner: null, ready: false }), '')).toEqual(['409 print_needs_partner', 0]);
+    // چاپخانه‌ای که ادمین دید دیگر نیست، یا فرم کهنه چاپخانه نداشت.
+    expect(await run(orderDetails('paid'), PARTNER_B)).toEqual(['409 order_partner_changed', 0]);
+    expect(await run(orderDetails('paid'), undefined)).toEqual(['409 order_partner_changed', 0]);
+    expect(await run(orderDetails('paid'), 'not-a-uuid')).toEqual(['409 order_partner_changed', 0]);
+    // بین خواندن و نوشتن جابه‌جا شد: پایگاه داده شرط چاپخانه را نیافت.
+    expect(await run(orderDetails('paid'), PARTNER_A, async () => ({ ok: false, current: 'paid', partnerChanged: true }))).toEqual([
+      '409 order_partner_changed',
+      0,
+    ]);
+    // شاهد: همان چاپخانه.
+    expect(await run(orderDetails('paid'), PARTNER_A)).toEqual(['ok', 1]);
   });
 
   it('«شروع چاپ» پیش از فایل چاپ نه (PDF جزوه به‌تنهایی نه)؛ کار ناشناس، وضعیت ناشناس یا گذار نادرست نه؛ سفارشی که نیست ۴۰۴', async () => {
     const run = async (details: PanelOrderDetails | null, form: { action: unknown; from: unknown; reason?: unknown }) => {
       const { orders, calls } = service({ details: async () => details });
-      const result = await orders.changeStatus(session(OWNER), '10027', form, 'ip');
+      const result = await orders.changeStatus(session(OWNER), '10027', { partner: PARTNER_A, ...form }, 'ip');
       return [result.ok ? 'ok' : `${result.status} ${result.error}`, changes(calls).length];
     };
     expect(await run(orderDetails('paid', { ready: false }), { action: 'start_print', from: 'paid' })).toEqual(['409 print_needs_pdf', 0]);
@@ -524,7 +575,7 @@ describe('وضعیت سفارش', () => {
       service({ details: async () => orderDetails('paid'), changeStatus: async () => ({ ok: false, current }) }).orders.changeStatus(
         session(OWNER),
         '10027',
-        { action: 'start_print', from: 'paid' },
+        { action: 'start_print', from: 'paid', partner: PARTNER_A },
         'ip',
       );
     expect(await raced('printing')).toEqual({ ok: true, value: { status: 'printing' } });
@@ -733,5 +784,107 @@ describe('دانلود فایل چاپ و برگه', () => {
     expect(await run({ ...TICKET, key: null, previewKey: null, bytes: null, fresh: false }, 'pdf')).toEqual(['409 ticket_not_ready', []]);
     expect(await run({ ...TICKET, status: 'handed_to_post', filesDeletedAt: NOW }, 'preview')).toEqual(['410 files_deleted', []]);
     expect(await run(null, 'pdf')).toEqual(['404 order_not_found', []]);
+  });
+});
+
+/* ───────────── چاپخانهٔ سفارش و جابه‌جایی (۵٫۲) ───────────── */
+
+describe('جابه‌جایی چاپخانه', () => {
+  const ASSIGNER = ['orders.read', 'orders.assign'];
+  const form = (over: Record<string, unknown> = {}) => ({ from: PARTNER_A, to: PARTNER_B, reason: '  دستگاه   خراب است ', ...over });
+
+  it('گزینه‌ها فقط با `orders.assign` و فقط در «در صف چاپ»: چاپخانه‌های فعال جز همین؛ بی گزینه، بی «جابه‌جایی»', async () => {
+    const run = async (details: PanelOrderDetails, permissions = ASSIGNER, options?: Awaited<ReturnType<PanelOrderStore['partnerOptions']>>) => {
+      const { orders, calls } = service({
+        details: async () => details,
+        ...(options ? { partnerOptions: async () => (calls.push({ method: 'partnerOptions', args: [] }), options) } : {}),
+      });
+      const result = await orders.details(session(permissions), '10027');
+      if (!result.ok) throw new Error(result.error);
+      return [result.value.canAssign, result.value.partnerOptions.map((p) => p.id), calls.filter((c) => c.method === 'partnerOptions').length];
+    };
+    expect(await run(orderDetails('paid'))).toEqual([true, [PARTNER_B], 1]);
+    // بی چاپخانه: همهٔ فعال‌ها، پیش‌فرض اول (ترتیب ذخیره‌گاه).
+    expect(await run(orderDetails('paid', { partner: null }))).toEqual([true, [PARTNER_A, PARTNER_B], 1]);
+    expect(await run(orderDetails('paid'), ['orders.read'])).toEqual([false, [], 0]);
+    for (const status of ['printing', 'handed_to_post', 'cancelled', 'awaiting_payment'] as const) {
+      expect(await run(orderDetails(status))).toEqual([false, [], 0]);
+    }
+    // تنها چاپخانهٔ فعال همین است: جایی برای رفتن نیست.
+    expect(await run(orderDetails('paid'), ASSIGNER, [{ id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 1 }])).toEqual([
+      false,
+      [],
+      1,
+    ]);
+  });
+
+  it('با دلیل فارسی‌نرمال و رویداد سفارش، از چاپخانه‌ای که ادمین دید؛ بی مجوز، سفارش ناموجود، دلیل خالی یا بلند نه', async () => {
+    const run = async (details: PanelOrderDetails | null, over: Record<string, unknown> = {}, permissions = ASSIGNER) => {
+      const { orders, calls, events } = service({ details: async () => details });
+      const result = await orders.assign(session(permissions), '10027', form(over), '1.2.3.4');
+      return { result: result.ok ? 'ok' : `${result.status} ${result.error}`, calls: calls.filter((c) => c.method === 'assignPartner'), events };
+    };
+    const done = await run(orderDetails('paid'));
+    expect(done.result).toBe('ok');
+    expect(done.calls[0]!.args[0]).toEqual({
+      orderId: 'order-1',
+      from: PARTNER_A,
+      to: PARTNER_B,
+      at: NOW,
+      adminUserId: 'admin-1',
+      reason: 'دستگاه خراب است',
+      event: {
+        adminUserId: 'admin-1',
+        action: 'orders.assign',
+        targetType: 'order',
+        targetId: 'order-1',
+        ipHash,
+        detail: { orderNumber: 10027 },
+        at: NOW,
+      },
+    });
+    // سفارش بی چاپخانه: «از» خالی.
+    const chosen = await run(orderDetails('paid', { partner: null }), { from: '' });
+    expect([chosen.result, (chosen.calls[0]!.args[0] as { from: unknown }).from]).toEqual(['ok', null]);
+    expect((await run(orderDetails('paid'), {}, ['orders.read', 'orders.status'])).result).toBe('403 forbidden');
+    expect((await run(null)).result).toBe('404 order_not_found');
+    expect((await run(orderDetails('paid'), { reason: '   ' })).result).toBe('400 reason_required');
+    expect((await run(orderDetails('paid'), { reason: 'د'.repeat(501) })).result).toBe('400 reason_too_long');
+    expect((await run(orderDetails('paid'), { reason: 'د'.repeat(500) })).result).toBe('ok');
+    // چاپخانهٔ تازه‌ای انتخاب نشده، یا همان امروزی.
+    expect((await run(orderDetails('paid'), { to: '' })).result).toBe('400 partner_required');
+    expect((await run(orderDetails('paid'), { to: 'not-a-uuid' })).result).toBe('400 partner_required');
+    expect((await run(orderDetails('paid'), { to: PARTNER_A })).result).toBe('400 partner_required');
+    // هیچ‌کدام به ذخیره‌گاه نرسید.
+    for (const over of [{ reason: '' }, { to: '' }]) expect((await run(orderDetails('paid'), over)).calls).toEqual([]);
+  });
+
+  it('فقط در «در صف چاپ» و از همان چاپخانه‌ای که دیده شد؛ پس از خواندن هم: پایگاه داده شرط را نیافت', async () => {
+    const run = async (details: PanelOrderDetails, over: Record<string, unknown> = {}, write?: PanelOrderStore['assignPartner']) => {
+      const { orders, calls } = service({ details: async () => details, ...(write ? { assignPartner: write } : {}) });
+      const result = await orders.assign(session(ASSIGNER), '10027', form(over), 'ip');
+      return [result.ok ? 'ok' : `${result.status} ${result.error}`, calls.filter((c) => c.method === 'assignPartner').length];
+    };
+    // صفحه چاپخانهٔ دیگری را نشان داد (یا هیچ)، یا فرم کهنه چاپخانه نداشت.
+    expect(await run(orderDetails('paid'), { from: PARTNER_B, to: PARTNER_A })).toEqual(['409 order_partner_changed', 0]);
+    expect(await run(orderDetails('paid'), { from: '' })).toEqual(['409 order_partner_changed', 0]);
+    expect(await run(orderDetails('paid', { partner: null }))).toEqual(['409 order_partner_changed', 0]);
+    // چاپ شروع شد، یا بسته است.
+    for (const status of ['printing', 'handed_to_post', 'cancelled'] as const) {
+      expect(await run(orderDetails(status))).toEqual(['409 assign_closed', 0]);
+    }
+    // بین خواندن و نوشتن: چاپخانهٔ مقصد غیرفعال شد؛ جای دیگری جابه‌جا شد؛ چاپ شروع شد؛ دو کلیک به یک مقصد.
+    expect(await run(orderDetails('paid'), {}, async () => ({ ok: false, reason: 'partner_inactive' }))).toEqual(['409 partner_inactive', 0]);
+    expect(await run(orderDetails('paid'), {}, async () => ({ ok: false, reason: 'changed', current: 'paid', partnerId: PARTNER_A }))).toEqual([
+      '409 order_partner_changed',
+      0,
+    ]);
+    expect(await run(orderDetails('paid'), {}, async () => ({ ok: false, reason: 'changed', current: 'printing', partnerId: PARTNER_A }))).toEqual([
+      '409 assign_closed',
+      0,
+    ]);
+    expect(await run(orderDetails('paid'), {}, async () => ({ ok: false, reason: 'changed', current: 'paid', partnerId: PARTNER_B }))).toEqual(['ok', 0]);
+    // شاهد: همان سفارش و همان چاپخانه.
+    expect(await run(orderDetails('paid'))).toEqual(['ok', 1]);
   });
 });

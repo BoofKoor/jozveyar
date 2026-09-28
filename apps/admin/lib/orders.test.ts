@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   OrderRow,
+  PanelAssignment,
   PanelOrderDetails,
   PanelOrderItem,
   PanelOrderLine,
@@ -244,6 +245,7 @@ function line(over: Partial<PanelOrderLine> = {}): PanelOrderLine {
     colorModes: ['bw'],
     sidesModes: ['double'],
     pdfJob: 'done',
+    printPartnerId: 'partner-noor',
     unreturnedPayments: 0,
     stale: false,
     filesExpireAt: null,
@@ -276,6 +278,10 @@ describe('ردیف فهرست', () => {
       icon: null,
     });
     expect(rowState(line({ status: 'expired', pdfJob: null }))).toEqual({ label: 'رهاشده', icon: null });
+    // بی چاپخانه (۵٫۲): فقط در صف چاپ؛ PDF ساخته‌نشده مهم‌تر است، چون چاپخانه را هم که انتخاب کنی، چیزی برای چاپ نیست.
+    expect(rowState(line({ printPartnerId: null }))).toEqual({ label: 'بی چاپخانه', icon: 'warning' });
+    expect(rowState(line({ printPartnerId: null, pdfJob: 'failed' }))).toEqual({ label: 'PDF ساخته نشد', icon: 'error' });
+    expect(rowState(line({ status: 'cancelled', printPartnerId: null }))).toEqual({ label: 'لغو شد', icon: null });
     expect([orderState('paid', true), orderState('awaiting_payment', false), orderState('expired', false)]).toEqual([
       'queued',
       'awaiting',
@@ -357,6 +363,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     postHandoffDueAt: END_MONDAY,
     handedToPostAt: null,
     filesDeletedAt: null,
+    printPartnerId: 'partner-noor',
     shippingMethodId: 'post',
     shippingZoneId: 'other',
     provinceId: 11,
@@ -382,6 +389,19 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     ticketJob: null,
     ticket: null,
     events: [],
+    partner: { id: 'partner-noor', name: 'چاپ نور', cityName: 'مشهد', provinceName: 'خراسان رضوی', active: true, isDefault: false },
+    assignments: [
+      {
+        id: 1,
+        at: tehran('2026-10-03 14:05'),
+        fromName: null,
+        toName: 'چاپ نور',
+        actor: 'system',
+        adminName: null,
+        rule: 'city',
+        reason: null,
+      },
+    ],
     ...over.rest,
   };
 }
@@ -566,7 +586,23 @@ describe('جزئیات سفارش', () => {
     const view = (rest: Partial<PanelOrderDetails>, order: Partial<OrderRow> = {}) => ticketView(details({ order, rest }));
     const fresh = { sizeBytes: 38_000, builtAt: NOW, fresh: true };
     expect(view({ ticket: fresh, ticketJob: job('done') })).toEqual({ kind: 'ready', bytes: 38_000, builtAt: NOW });
-    expect(view({ ticket: { ...fresh, fresh: false }, ticketJob: job('queued', { attempts: 0 }) })).toEqual({ kind: 'updating' });
+    // در حال به‌روز شدن، با علت (۵٫۲): تازه‌ترین تغییر پس از ساختن برگه؛ نام تازهٔ خود چاپخانه یا تغییری که رویداد سفارش ندارد، «داده».
+    const queued = { ticket: { ...fresh, fresh: false }, ticketJob: job('queued', { attempts: 0 }) };
+    expect(view(queued)).toEqual({ kind: 'updating', cause: 'data' });
+    const moved = { ...details().assignments[0]!, id: 2, at: new Date(NOW.getTime() + 60_000), fromName: 'چاپ نور', toName: 'چاپخانهٔ جزوه‌یار' };
+    const edited = { id: 9, at: new Date(NOW.getTime() + 120_000), action: 'orders.recipient', adminName: 'سارا', detail: null };
+    expect(view({ ...queued, assignments: [...details().assignments, moved] })).toEqual({ kind: 'updating', cause: 'partner' });
+    expect(view({ ...queued, events: [edited] })).toEqual({ kind: 'updating', cause: 'recipient' });
+    expect(view({ ...queued, assignments: [...details().assignments, moved], events: [edited] })).toEqual({ kind: 'updating', cause: 'recipient' });
+    expect(view({ ...queued, assignments: [...details().assignments, { ...moved, at: new Date(NOW.getTime() + 180_000) }], events: [edited] })).toEqual({
+      kind: 'updating',
+      cause: 'partner',
+    });
+    // تغییری پیش از ساختن برگه علت نیست: برگه آن را دارد.
+    expect(view({ ...queued, assignments: [...details().assignments, { ...moved, at: new Date(NOW.getTime() - 60_000) }] })).toEqual({
+      kind: 'updating',
+      cause: 'data',
+    });
     expect(view({ ticket: null, ticketJob: job('running') })).toEqual({ kind: 'building', retrying: false });
     expect(view({ ticket: null, ticketJob: job('failed', { lastError: 'font_missing: x' }) })).toMatchObject({
       kind: 'failed',
@@ -655,9 +691,11 @@ describe('جزئیات سفارش', () => {
       },
     });
     const entries = orderTimeline(d);
+    // تخصیص خودکار (۵٫۲) در همان تراکنش پرداخت و با همان زمان، پس درست پس از «پرداخت شد».
     expect(entries.map((e) => [text(e.text), e.who])).toEqual([
       ['سفارش ساخته شد', 'مشتری'],
       ['پرداخت شد', 'درگاه'],
+      ['به چاپ نور سپرده شد، هم‌شهر مشتری', 'سیستم'],
       ['PDF جزوه و فایل چاپ ساخته شد', 'سیستم'],
       ['ساختن دوبارهٔ فایل چاپ', 'سارا'],
       ['PDF اصلی جزوه دانلود شد', 'علی'],
@@ -665,18 +703,22 @@ describe('جزئیات سفارش', () => {
     expect(timelineWhen(entries)).toEqual([
       { day: 'شنبه 11 مهر', time: '13:57' },
       { day: null, time: '14:05' },
+      { day: null, time: '14:05' },
       { day: null, time: '14:06' },
       { day: null, time: '16:00' },
       { day: 'دوشنبه 13 مهر', time: '09:40' },
     ]);
     const failed = orderTimeline(
-      details({ rest: { pdfJob: { status: 'failed', attempts: 3, maxAttempts: 3, lastError: 'x', createdAt: NOW, updatedAt: NOW, finishedAt: NOW } } }),
+      details({
+        rest: { assignments: [], pdfJob: { status: 'failed', attempts: 3, maxAttempts: 3, lastError: 'x', createdAt: NOW, updatedAt: NOW, finishedAt: NOW } },
+      }),
     );
     expect(failed.map((e) => text(e.text))).toEqual(['ساختن فایل چاپ ناموفق ماند']);
     const expired = orderTimeline(
       details({
         rest: {
           pdfJob: null,
+          assignments: [],
           statusEvents: [statusEvent({ id: 3, fromStatus: 'awaiting_payment', toStatus: 'expired', at: NOW, actor: 'system' })],
         },
       }),
@@ -762,11 +804,26 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
     expect(printReady({ ...two, items: [] })).toBe(false);
   });
 
-  it('رویدادهای وضعیت با نام ادمین؛ برگرداندن با دلیلش؛ ویرایش گیرنده؛ رویداد ادمینِ وضعیت یک بار', () => {
+  it('رویدادهای وضعیت با نام ادمین؛ برگرداندن با دلیلش؛ ویرایش گیرنده؛ جابه‌جایی چاپخانه (۵٫۲)؛ رویداد ادمینِ وضعیت و جابه‌جایی یک بار', () => {
     const at = (time: string) => tehran(`2026-10-05 ${time}`);
+    const assignment = (over: Partial<PanelAssignment>): PanelAssignment => ({
+      id: 1,
+      at: tehran('2026-10-03 14:05'),
+      fromName: null,
+      toName: 'چاپ نور',
+      actor: 'system',
+      adminName: null,
+      rule: 'city',
+      reason: null,
+      ...over,
+    });
     const d = details({
       rest: {
         pdfJob: null,
+        assignments: [
+          assignment({}),
+          assignment({ id: 2, at: at('09:30'), fromName: 'چاپ نور', toName: 'چاپخانهٔ جزوه‌یار', actor: 'admin', adminName: 'علی', rule: null, reason: 'دستگاه خراب است' }),
+        ],
         statusEvents: [
           statusEvent({ id: 1, fromStatus: 'paid', toStatus: 'printing', at: at('10:05'), adminName: 'سارا' }),
           statusEvent({ id: 2, fromStatus: 'printing', toStatus: 'handed_to_post', at: at('16:40'), adminName: 'سارا' }),
@@ -781,6 +838,13 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
           statusEvent({ id: 4, fromStatus: 'printing', toStatus: 'cancelled', at: at('17:00'), adminName: 'سارا', note: { reason: 'مشتری خواست' } }),
         ],
         events: [
+          {
+            id: 6,
+            at: at('09:30'),
+            action: 'orders.assign',
+            detail: { orderNumber: 10027, from: { name: 'چاپ نور' }, to: { name: 'چاپخانهٔ جزوه‌یار' }, reason: 'دستگاه خراب است' },
+            adminName: 'علی',
+          },
           { id: 7, at: at('10:05'), action: 'orders.status', detail: { orderNumber: 10027, from: 'paid', to: 'printing' }, adminName: 'سارا' },
           {
             id: 8,
@@ -793,6 +857,8 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
       },
     });
     expect(orderTimeline(d).map((e) => [text(e.text), e.who])).toEqual([
+      ['به چاپ نور سپرده شد، هم‌شهر مشتری', 'سیستم'],
+      ['از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه خراب است', 'علی'],
       ['در صف چاپ ← در حال چاپ', 'سارا'],
       ['ویرایش گیرنده: نشانی، کد پستی', 'علی'],
       ['در حال چاپ ← تحویل پست شد', 'سارا'],
