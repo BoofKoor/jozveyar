@@ -2,7 +2,7 @@
 
 سند کامل معماری. دلیل هر تصمیم در `docs/DECISIONS.md`. تعرفه و فرمول قیمت در `docs/PRICING.md`.
 
-**وضعیت:** معماری تأیید شد. برش ۰ تا ۴ ساخته، تست و مستقر شده، و مرحلهٔ طراحی رابط کاربری جز قدم ۵ تمام است (`docs/UI.md`). برش ۵ (چاپخانه و خروجی چاپ) در حال ساخت است: برنامه و طرح نمونه‌اش تأیید شده و ۵٫۱ (خروجی چاپ) ساخته شده (#48)؛ برنامه و وضعیتش در بخش ۸، «برش ۵».
+**وضعیت:** معماری تأیید شد. برش ۰ تا ۴ ساخته، تست و مستقر شده، و مرحلهٔ طراحی رابط کاربری جز قدم ۵ تمام است (`docs/UI.md`). برش ۵ (چاپخانه و خروجی چاپ) در حال ساخت است: برنامه و طرح نمونه‌اش تأیید شده، ۵٫۱ (خروجی چاپ) ساخته و مستقر شده (#48)، و ۵٫۲ (چاپخانه‌ها و تخصیص) ساخته شده (#49)؛ برنامه و وضعیتش در بخش ۸، «برش ۵».
 
 ---
 
@@ -203,31 +203,35 @@ CREATE TABLE orders (
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
--- `print_partner_id` (ADR-012) با برش ۵ می‌آید، همراه جدول چاپخانه‌ها: برنامهٔ ۵٫۲ (ADR-042)، چاپخانهٔ امروز سفارش؛
--- با پرداخت پر می‌شود، فقط در paid عوض می‌شود و خالی نمی‌شود (تریگر).
+-- ✅ `print_partner_id` (ADR-012، ۵٫۲، ADR-042): چاپخانهٔ امروز سفارش ← print_partners؛ با پرداخت پر می‌شود، فقط وقتی سفارش
+-- paid است عوض می‌شود، فقط به چاپخانهٔ فعال، و خالی نمی‌شود (تریگر `orders_print_partner`)؛ سفارش پرداخت‌نشده ندارد
+-- (CHECK `orders_partner_paid`). ایندکس (چاپخانه، وضعیت) برای ۵٫۳.
 
--- برنامهٔ ۵٫۲ (ADR-042، ADR-012): چاپخانه شهر دارد، حتی وقتی همه در تهران‌اند. پاک نمی‌شود، غیرفعال می‌شود.
+-- ✅ چاپخانه‌ها (۵٫۲، ADR-042، ADR-012): چاپخانه شهر دارد، حتی وقتی همه در تهران‌اند. پاک نمی‌شود، غیرفعال می‌شود، و با سفارش
+-- باز نه (`print_partners_guard`؛ 0017_print_partners و 0018_print_partners_guards).
 CREATE TABLE print_partners (
-  id          uuid PRIMARY KEY,
-  name        text NOT NULL,
-  city_id     integer NOT NULL,             -- (شهر، استان) ← cities، مثل سفارش
-  province_id smallint NOT NULL,
-  is_active   boolean NOT NULL DEFAULT true,
-  is_default  boolean NOT NULL DEFAULT false, -- حداکثر یکی، و فقط فعال
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  created_by  uuid                          -- ادمین؛ بی کلید خارجی، مثل price_lists.created_by
+  id             uuid PRIMARY KEY,
+  name           text NOT NULL UNIQUE,          -- فارسی‌نرمال، ۱ تا ۱۰۰ نویسه
+  city_id        integer NOT NULL,              -- (شهر، استان) ← cities، مثل سفارش
+  province_id    smallint NOT NULL,
+  is_default     boolean NOT NULL DEFAULT false, -- حداکثر یکی (ایندکس یکتای جزئی)، و فقط فعال
+  deactivated_at timestamptz,                   -- null: فعال؛ زمانش برای «از … سفارش تازه نمی‌گیرد»
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  created_by     uuid                           -- ادمین؛ بی کلید خارجی، مثل price_lists.created_by
 );
 
--- هر تخصیص و جابه‌جایی چاپخانهٔ یک سفارش؛ فقط افزودنی (برنامهٔ ۵٫۲).
+-- ✅ هر تخصیص و جابه‌جایی چاپخانهٔ یک سفارش (۵٫۲). زنجیره: هر ردیف از همان چاپخانه‌ای که ردیف قبلی به آن رسید، و در COMMIT
+-- آخرین ردیف همان `orders.print_partner_id` (تریگرهای معوق)؛ عوض و پاک نمی‌شود، جز با خود سفارش.
 CREATE TABLE order_assignments (
   id              bigserial PRIMARY KEY,
-  order_id        uuid NOT NULL REFERENCES orders(id),
+  order_id        uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   from_partner_id uuid REFERENCES print_partners(id),     -- null: اولین تخصیص
   to_partner_id   uuid NOT NULL REFERENCES print_partners(id),
   at              timestamptz NOT NULL,
   actor           text NOT NULL,                           -- system (هنگام پرداخت) | admin
   admin_user_id   uuid REFERENCES admin_users(id),         -- فقط و همیشه برای admin
-  note            jsonb                                    -- قاعده (city | province | default) یا دلیل جابه‌جایی
+  rule            text,                                    -- فقط system: city | province | default | oldest
+  reason          text                                     -- فقط admin: ۱ تا ۵۰۰ نویسه
 );
 
 -- ✅ فایل چاپ هر جلد هر جزوه (۵٫۱، ADR-043): A4 عمودی، جلدها با `sheetsPerVolume` ریز قیمت منجمد. ردیف ثبت‌شده عوض
@@ -268,7 +272,7 @@ CREATE TABLE order_tickets (
 | سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش. ✅ سرور در ۳ب: ساختن در یک تراکنش، برگشت از درگاه زیر قفل پرداخت و سفارش، و `prepare_order` کارگر (پایین، «۳ب»). ✅ ۴٫۳: `order_status_events.admin_user_id` برای گذار ادمین (CHECK `order_status_events_admin`: actor ادمین یعنی شناسهٔ ادمین)، و دلیل لغو و برگرداندن در `note`. ✅ ۵٫۱ (ADR-043): `order_print_files`، فایل چاپ هر جلد، و `order_tickets`، برگهٔ سفارش با کار جدای `prepare_ticket`؛ ADR-044: فایل‌های سفارش N روز پس از پست یا لغو پاک می‌شوند و `orders.files_deleted_at` ردش را نگه می‌دارد |
 | ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن). ✅ منطقه‌ها، استان‌ها و شهرها در ۳الف، از `@jozveyar/geo` (۳۱ استان، ۱۳۲۳ شهر)؛ منطقه مال استان است: استان تهران `tehran`، بقیه `other`. `shipments` با برش ۶ |
 | رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود |
-| دسترسی | `admin_users` `admin_invites` `admin_sessions` `admin_login_attempts` `roles` `permissions` `role_permissions` `admin_user_roles` `admin_events` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` (ADR-007). ✅ در ۴٫۱ (ADR-037، ADR-038): ادمین با رمز argon2id و رمز برنامهٔ تأیید مهروموم‌شده، پیوند ثبت یک‌باره، نشست و تلاش ورود فقط با هش؛ نقش‌ها از کد؛ رویداد فقط افزودنی، ادمین پاک‌نشدنی و پیوند مصرف‌شده دست‌نخوردنی با تریگر (`0008_admin_guards.sql`)؛ در ۴٫۲ نمایهٔ رویدادهای یک هدف، برای رویدادهای هر سفارش (`0009_admin_events_target.sql`). `scope` تا برش ۵ فقط `NULL`؛ `print_partners` و `order_assignments` با برش ۵. برنامهٔ ۵٫۲ و ۵٫۳ (ADR-042): دو جدول بالا، `orders.print_partner_id`، و `scope` jsonb جایش را به ستون نوع‌دار `admin_user_roles.print_partner_id` با کلید خارجی می‌دهد (CHECK: نقش چاپخانه یعنی دقیقاً یک چاپخانه) |
+| دسترسی | `admin_users` `admin_invites` `admin_sessions` `admin_login_attempts` `roles` `permissions` `role_permissions` `admin_user_roles` `admin_events` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` (ADR-007). ✅ در ۴٫۱ (ADR-037، ADR-038): ادمین با رمز argon2id و رمز برنامهٔ تأیید مهروموم‌شده، پیوند ثبت یک‌باره، نشست و تلاش ورود فقط با هش؛ نقش‌ها از کد؛ رویداد فقط افزودنی، ادمین پاک‌نشدنی و پیوند مصرف‌شده دست‌نخوردنی با تریگر (`0008_admin_guards.sql`)؛ در ۴٫۲ نمایهٔ رویدادهای یک هدف، برای رویدادهای هر سفارش (`0009_admin_events_target.sql`). `scope` تا برش ۵ فقط `NULL`. ✅ در ۵٫۲ (ADR-042): `print_partners`، `order_assignments` و `orders.print_partner_id` با محافظ‌هایشان (`0017`، `0018`)، و مجوزهای `orders.assign` و `partners.manage`. برنامهٔ ۵٫۳: `scope` jsonb جایش را به ستون نوع‌دار `admin_user_roles.print_partner_id` با کلید خارجی می‌دهد (CHECK: نقش چاپخانه یعنی دقیقاً یک چاپخانه) |
 | هویت | `users` `otp_requests` `sessions` | ✅ جدول‌ها در ۳الف، سرویس کد و نشست در ۳ب (ADR-033). موبایل نرمال‌شده. محدودیت نرخ روی شماره، IP و کل سایت، از شمردن `otp_requests` زیر یک قفل مشورتی. کد و IP فقط HMAC |
 | عملیات | `jobs` `sms_messages` `settings` `service_secrets` | پیامک توسعه در دیتابیس می‌نشیند (✅ `sms_messages` در ۳الف، پیامک کنسولی در ۳ب). `settings` کلید/مقدار تایپ‌شده با zod (✅ `SETTING_SCHEMAS` در قرارداد، ۳ب؛ مقدار خراب به پیش‌فرض برمی‌گردد و لاگ می‌شود؛ ✅ از ۴٫۶ از پنل، زیر قفل و با رویداد). ✅ ۴٫۶ (ADR-041): `service_secrets` کلیدهای سرویس‌ها که مالک از پنل گذاشته، مهروموم با `SECRETS_KEY` و جای ردیف؛ CHECK نام (فقط سه کلید) و شکل مهروموم (`0014_service_secrets.sql`)؛ مقدار پنل بر `.env` مقدم |
 | سئو و آمار | `landing_pages` `landing_templates` `flow_events` | `flow_events` قیف و نرخ رها کردن سبد را می‌سازد |
@@ -366,7 +370,7 @@ detection.sample_dpi                    = 40
 | 2 | سرور منبع حقیقت | ✅ اسکیمای سند و تعرفه، ✅ آپلود presigned و chunked (Garage)، ✅ تحلیل کامل کارگر پایتون و هم‌ترازی قیمت (ADR-025)؛ ۲ب: ✅ ایمیج پایه با LibreOffice و فونت‌ها (ADR-027)، ✅ تبدیل Word/PPT/عکس با پیش‌فاکتور فوری (ADR-028)، ✅ هشدارها با شمارهٔ صفحه، DPI از جای تصویر و فونت جایگزین (ADR-029)، ✅ چند فایل در یک جزوه، یک صحافی (ADR-030) |
 | 3 | ✅ سفارش کامل با پرداخت جعلی | ۳الف تا ۳د مستقر (#34 تا #38، پایین). شهر و آدرس، نرخ ارسال، OTP، ساخت سفارش، درگاه نمونه (فقط بیرون از سایت زنده، ADR-035)، صفحهٔ تأیید |
 | 4 | ✅ پنل ادمین نسخهٔ ۱ | TOTP روی ساب‌دامین جدا، فهرست و جزئیات سفارش، دانلود فایل، تغییر وضعیت، ویرایش تعرفه، ساعت SLA؛ و به خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۴) کلیدها و تنظیمات سرویس‌های بیرونی (پیامک، درگاه) که امروز در `.env`اند، دیدنی و تغییرپذیر از پنل. شش PR، #40 تا #46، همه ادغام و مستقر (پایین، «برش ۴») |
-| 5 | چاپخانه و خروجی چاپ — در حال ساخت | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ. سه PR، پس از طرح نمونه؛ ۵٫۱ ساخته شد (پایین، «برش ۵») |
+| 5 | چاپخانه و خروجی چاپ — در حال ساخت | نقش چاپخانه با دسترسی محدود، تخصیص سفارش، تولید PDF آمادهٔ چاپ. سه PR، پس از طرح نمونه؛ ۵٫۱ و ۵٫۲ ساخته شد (پایین، «برش ۵») |
 | 6 | ارسال و رهگیری | ورود فایل پست، تطبیق، صف تأیید، نمایش رهگیری، گزارش حاشیهٔ ارسال |
 | 7 | پیامک و درگاه واقعی | جایگزینی آداپتورها — تغییر `.env` و یک کلاس |
 | 8 | پنل کاربری و آمار | سفارش‌های قبلی، سفارش مجدد، پیگیری زنده، داشبورد قیف و درآمد |
@@ -634,8 +638,8 @@ detection.sample_dpi                    = 40
 | PR | دامنه | وضعیت |
 |---|---|---|
 | سند | همین برنامه: ADR-042 تا ۰۴۴، سؤال‌های ۲۹ تا ۳۸، و «ادغام و مستقر شد» #46 | #47، ادغام شد |
-| ۵٫۱ | خروجی چاپ: کارگر فایل چاپ هر جلد را می‌سازد (A4 عمودی، چرخش صفحهٔ افقی، حاشیه‌نویسی‌ها، جلدها با ریز قیمت منجمد، بی بازنویسی وقتی فرقی نیست) و برگهٔ سفارش با برچسب پست (`prepare_ticket`)؛ در جزئیات سفارش پنل کارت فایل چاپ و برگه، با دانلود جریانی و رویداد؛ «شروع چاپ» فقط با فایل چاپ؛ نگهداری فایل‌های سفارش و عددش در «تنظیمات» | #48، باز (پایین) |
-| ۵٫۲ | چاپخانه‌ها و تخصیص: `print_partners`، `orders.print_partner_id`، `order_assignments` و محافظ‌ها؛ «چاپخانهٔ جزوه‌یار» در دادهٔ پایه؛ تخصیص خودکار در پرداخت؛ جابه‌جایی با دلیل (`orders.assign`)؛ زبانهٔ «چاپخانه‌ها» (`partners.manage`)؛ هشدار «بی چاپخانه»؛ چاپخانه روی برگه | مانده |
+| ۵٫۱ | خروجی چاپ: کارگر فایل چاپ هر جلد را می‌سازد (A4 عمودی، چرخش صفحهٔ افقی، حاشیه‌نویسی‌ها، جلدها با ریز قیمت منجمد، بی بازنویسی وقتی فرقی نیست) و برگهٔ سفارش با برچسب پست (`prepare_ticket`)؛ در جزئیات سفارش پنل کارت فایل چاپ و برگه، با دانلود جریانی و رویداد؛ «شروع چاپ» فقط با فایل چاپ؛ نگهداری فایل‌های سفارش و عددش در «تنظیمات» | #48، ادغام و مستقر شد (پایین) |
+| ۵٫۲ | چاپخانه‌ها و تخصیص: `print_partners`، `orders.print_partner_id`، `order_assignments` و محافظ‌ها؛ «چاپخانهٔ جزوه‌یار» در دادهٔ پایه؛ تخصیص خودکار در پرداخت؛ جابه‌جایی با دلیل (`orders.assign`)؛ زبانهٔ «چاپخانه‌ها» (`partners.manage`)؛ هشدار «بی چاپخانه»؛ چاپخانه روی برگه | #49، باز (پایین) |
 | ۵٫۳ | نقش چاپخانه: نقش سوم و محدوده (`admin_user_roles.print_partner_id`)، مجوزهای تازهٔ `orders.cancel` و `orders.money`، محدودهٔ اجباری در هر کوئری پنل، پنل از چشم چاپخانه (بی مبلغ، بی لغو)، و افزودن کاربر چاپخانه در «ادمین‌ها» | مانده |
 
 تصمیم‌های ۱۴۰۵/۰۷/۰۵، همه طبق پیشنهاد:
@@ -674,7 +678,7 @@ detection.sample_dpi                    = 40
 **کار دستی صاحب پروژه:** پس از ۵٫۲، اگر نام دیگری می‌خواهی، نام «چاپخانهٔ جزوه‌یار» از زبانهٔ «چاپخانه‌ها»؛ پس از ۵٫۳، کاربر هر
 چاپخانهٔ طرف قرارداد از «ادمین‌ها»؛ و با پایان همکاری با یک چاپخانه، غیرفعال کردن کاربرانش و `ADMIN_BASE_PATH` تازه.
 
-#### ۵٫۱: خروجی چاپ (#48، باز)
+#### ۵٫۱: خروجی چاپ (#48، ادغام و مستقر شد)
 
 | جا | کار |
 |---|---|
@@ -692,6 +696,24 @@ detection.sample_dpi                    = 40
   کارگر فایل چاپ و برگهٔ سفارش‌های پیش از ۵٫۱ را هم می‌سازد. سفارش پیش از ۵٫۱ که بسته است، فایل چاپ و برگه نمی‌گیرد؛ PDF جزوه‌اش
   همان است.
 - تصمیم‌های اجرا و سنجش‌ها در ADR-043 و ADR-044، «اجرا در ۵٫۱»؛ رابط و فرق‌ها با طرح در `docs/UI.md`، «۵٫۱».
+
+#### ۵٫۲: چاپخانه‌ها و تخصیص (#49، باز)
+
+| جا | کار |
+|---|---|
+| `packages/db`: `schema.ts`، `0017_print_partners.sql` (تولیدی)، `0018_print_partners_guards.sql` (دست‌نویس) | `print_partners`، `order_assignments` و `orders.print_partner_id`؛ ایندکس یکتای «یک پیش‌فرض» و CHECKهای نام، پیش‌فرض فعال، کننده و «جابه‌جا می‌کند»؛ تریگرهای `orders_print_partner` (خالی نه، فقط در صف، فقط فعال با `FOR SHARE`)، `order_assignments_chain`، معوق `orders_partner_recorded` و `order_assignments_recorded`، `order_assignments_append_only` و `print_partners_guard`؛ `order_ticket_stamp` با چاپخانه؛ ارتقا: برگهٔ سفارش‌های باز دوباره |
+| `packages/db/src/assignment.ts`، `orders.ts`، `panel.ts`، `partners.ts`، `reference.ts`، `admin.ts` | `choosePartner` و `assignAtPayment` در تراکنش `settlePayment`؛ پنل: کارت چاپخانه، تاریخچهٔ تخصیص، گزینه‌ها، `assignPartner`، «شروع چاپ» از چاپخانهٔ دیده‌شده و هشدار `unassigned`؛ ذخیره‌گاه زبانهٔ «چاپخانه‌ها» زیر قفل مشورتی، ویرایشی که کار برگه را دوباره در صف می‌گذارد؛ «چاپخانهٔ جزوه‌یار» در دادهٔ پایه؛ مجوزهای `orders.assign` (مالک و متصدی) و `partners.manage` (مالک) |
+| `services/docworker/docworker/ticket.py` | «چاپ نور، مشهد · پرداخت …» زیر مهلت برگه |
+| `apps/admin/lib/partners.ts`، `lib/server/partners.ts`، `lib/orders.ts`، `lib/server/orders.ts`، `lib/events.ts` | شهر از فهرست سایت (`pickCity`)، متن‌های کارت و تاریخچه؛ سرویس زبانه؛ جابه‌جایی و دروازهٔ «شروع چاپ»؛ ستون «بی چاپخانه» و علت برگهٔ در حال به‌روز شدن؛ رویدادها و چیپ «چاپخانه‌ها» |
+| `apps/admin/app/[gate]/(panel)/…` | کارت «چاپخانه» و فرم جابه‌جایی (`?do=assign`) در سفارش، هشدار پیشخوان، زبانهٔ «چاپخانه‌ها» (`partners`، `partners/new`، `partners/[id]`) |
+| `apps/web/lib/server/testing.ts` و تست‌ها | ذخیره‌گاه حافظه‌ای با همان `choosePartner`؛ کد مرورگری سایت دست نخورد |
+| CI | «پنل، سرتاسری» با `partners.spec.ts` |
+
+- باندل اولیهٔ سایت همان ۱۰۷٬۶۳۳ بایت؛ کرایهٔ مشتری و ایمیج پایهٔ کارگر دست نخوردند.
+- **پس از استقرار، خودکار:** دادهٔ پایه «چاپخانهٔ جزوه‌یار» را در تهران و پیش‌فرض می‌نشاند (لاگ وب: «اولین چاپخانه: …»)، و مهاجرت
+  `0018` برگهٔ سفارش‌های باز را دوباره می‌سازد. سفارش باز پیش از ۵٫۲ بی چاپخانه می‌ماند و هشدار می‌گیرد؛ سایت زنده (`off`) سفارشی
+  ندارد.
+- تصمیم‌های اجرا و سنجش‌ها در ADR-042، «اجرا در ۵٫۲»؛ رابط و فرق‌ها با طرح در `docs/UI.md`، «۵٫۲».
 
 ---
 
