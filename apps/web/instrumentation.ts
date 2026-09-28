@@ -51,6 +51,7 @@ export async function register() {
     const extra = [
       seeded.priceListInserted !== null ? `تعرفهٔ ${seeded.priceListInserted} درج شد` : null,
       seeded.settingsInserted.length > 0 ? `تنظیم‌های تازه: ${seeded.settingsInserted.join('، ')}` : null,
+      seeded.partnerInserted !== null ? `اولین چاپخانه: ${seeded.partnerInserted}` : null,
     ].filter(Boolean);
     console.log(`✓ دادهٔ پایه: ${seeded.provinces} استان و ${seeded.cities} شهر${extra.length ? `؛ ${extra.join('؛ ')}` : ''}.`);
   } catch (error) {

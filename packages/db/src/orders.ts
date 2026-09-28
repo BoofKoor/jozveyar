@@ -8,12 +8,14 @@
  *  - `createOrder` کل سفارش را در **یک تراکنش** می‌سازد: سفارش، قلم‌ها، بخش‌ها، قاعده‌ها و رویداد
  *    وضعیت. محافظ معوق `order_items_cover_pages` در پایان همین تراکنش پوشش صفحه‌ها را می‌سنجد (0006).
  *  - `settlePayment` برگشت از درگاه را زیر قفل ردیف پرداخت و سفارش انجام می‌دهد: دو برگشت هم‌زمان
- *    (رفرش، دو زبانه) پشت‌سرهم اجرا می‌شوند و دومی نتیجهٔ اولی را می‌بیند.
+ *    (رفرش، دو زبانه) پشت‌سرهم اجرا می‌شوند و دومی نتیجهٔ اولی را می‌بیند. از برش ۵٫۲ چاپخانهٔ سفارش هم در همین
+ *    تراکنش انتخاب می‌شود (`assignAtPayment`، ADR-042).
  */
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
 
+import { assignAtPayment } from './assignment.js';
 import type { DocumentRow } from './documents.js';
 import type { Database } from './index.js';
 import {
@@ -39,6 +41,22 @@ export const PREPARE_ORDER_JOB = 'prepare_order';
  * تغییر داده‌اش (ویرایش گیرنده) دوباره. همین رشته در services/docworker.
  */
 export const PREPARE_TICKET_JOB = 'prepare_ticket';
+
+type Tx = Parameters<Parameters<Database['db']['transaction']>[0]>[0];
+
+/**
+ * کار برگهٔ یک سفارش دوباره در صف، اگر تمام شده یا شکست خورده: دادهٔ روی برگه عوض شد (ویرایش گیرنده، و از ۵٫۲ جابه‌جایی
+ * چاپخانه و ویرایش نام یا شهرش). کاری که همین حالا در صف است دادهٔ تازه را می‌خواند؛ کاری که کارگر رویش است، اثر انگشت را
+ * پیش از ثبت زیر قفل ردیف سفارش دوباره می‌سنجد و با دادهٔ تازه از نو می‌سازد (`docworker/ticket.py`). مثل `queue_job` کارگر.
+ */
+export async function requeueTicket(tx: Tx, orderId: string): Promise<void> {
+  await tx.execute(sql`
+    INSERT INTO jobs (kind, order_id) VALUES (${PREPARE_TICKET_JOB}, ${orderId})
+    ON CONFLICT (order_id, kind) DO UPDATE
+       SET status = 'queued', attempts = 0, run_after = now(), locked_by = NULL, locked_until = NULL,
+           last_error = NULL, finished_at = NULL, updated_at = now()
+     WHERE jobs.status IN ('done', 'failed')`);
+}
 
 /**
  * پرداخت شروع نمی‌شود اگر کمتر از این تا پاک شدن فایلی مانده باشد (ADR-034). مسیر خرید سایت با همین
@@ -171,7 +189,8 @@ export interface OrderStore {
   /**
    * برگشت از درگاه، زیر قفل ردیف پرداخت و سفارش. `decide` فقط برای پرداخت در انتظار صدا زده می‌شود و
    * همان‌جا درگاه را می‌سنجد؛ موفق یعنی در همان تراکنش: پرداخت موفق، سفارش `paid` با تاریخ و مهلت،
-   * رویداد وضعیت، و کار `prepare_order`. null یعنی چنین پرداختی نیست.
+   * رویداد وضعیت، چاپخانهٔ سفارش با ردیف تخصیص (برش ۵٫۲؛ بی چاپخانهٔ فعال، بی چاپخانه)، و کارهای `prepare_order` و
+   * `prepare_ticket`. null یعنی چنین پرداختی نیست.
    */
   settlePayment(
     provider: string,
@@ -432,6 +451,8 @@ export function createOrderStore({ db }: Database): OrderStore {
           actor: 'gateway',
           note: { paymentId: payment.id, provider, refId: outcome.refId },
         });
+        // چاپخانه پیش از کار برگه: برگه نام و شهرش را دارد. بی چاپخانهٔ فعال سفارش بی چاپخانه می‌ماند (هشدار پیشخوان).
+        const assigned = await assignAtPayment(tx, paid, outcome.paidAt);
         // برگشت دوباره از درگاه کار دوم نمی‌سازد: شاخص یکتای (سفارش، نوع) جلویش را می‌گیرد.
         await tx
           .insert(jobs)
@@ -440,7 +461,7 @@ export function createOrderStore({ db }: Database): OrderStore {
             { kind: PREPARE_TICKET_JOB, orderId: order!.id },
           ])
           .onConflictDoNothing();
-        return { payment: succeeded!, order: paid, settled: true };
+        return { payment: succeeded!, order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid, settled: true };
       });
     },
 

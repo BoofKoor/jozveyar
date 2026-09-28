@@ -462,6 +462,47 @@ export const cities = pgTable(
   ],
 );
 
+/* ──────────────────────────── چاپخانه‌ها (برش ۵٫۲، ADR-042) ──────────────────────────── */
+
+/**
+ * چاپخانه‌ای که سفارش‌ها را چاپ می‌کند؛ مدل برای چند چاپخانه از روز اول (ADR-012). اولین ردیف «چاپخانهٔ جزوه‌یار» در
+ * تهران است، پیش‌فرض، و دادهٔ پایه وقتی جدول خالی است می‌نشاندش (`seedReferenceData`).
+ *
+ * - شهر و استان با کلید خارجی دوستونی به `cities`، مثل سفارش: تخصیص خودکار در پرداخت با همین دو (همان شهر، وگرنه همان
+ *   استان، وگرنه پیش‌فرض؛ `choosePartner`).
+ * - حداکثر یک پیش‌فرض (`print_partners_one_default`)، و پیش‌فرض فعال است (`print_partners_default_active`).
+ * - پاک نمی‌شود، غیرفعال می‌شود (`deactivated_at`): سفارش‌ها و تاریخچهٔ تخصیص به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی
+ *   سفارش باز ندارد؛ هر دو را تریگر `print_partners_guard` هم می‌سنجد (0018).
+ * - `created_by` بی کلید خارجی، مثل `price_lists.created_by`؛ null یعنی دادهٔ پایه.
+ */
+export const printPartners = pgTable(
+  'print_partners',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** فارسی‌نرمال؛ یکتا، تا دو کلیک «افزودن» دو چاپخانه نسازد و هر رویداد یک نام را بگوید. */
+    name: text('name').notNull().unique(),
+    provinceId: smallint('province_id')
+      .notNull()
+      .references(() => provinces.id),
+    cityId: integer('city_id').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    /** از این لحظه سفارش تازه نمی‌گیرد؛ null یعنی فعال. */
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by'),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.cityId, t.provinceId],
+      foreignColumns: [cities.id, cities.provinceId],
+      name: 'print_partners_city_province_fk',
+    }),
+    uniqueIndex('print_partners_one_default').on(t.isDefault).where(sql`${t.isDefault}`),
+    check('print_partners_name', sql`length(btrim(${t.name})) BETWEEN 1 AND 100`),
+    check('print_partners_default_active', sql`NOT ${t.isDefault} OR ${t.deactivatedAt} IS NULL`),
+  ],
+);
+
 /* ──────────────────────────── هویت (برش ۳، ADR-033) ──────────────────────────── */
 
 /**
@@ -612,6 +653,13 @@ export const orders = pgTable(
      * پس از آن وضعیت عوض نمی‌شود (تریگر `orders_files_deleted`، 0016). ردیف‌ها، مشخصات و ریز قیمت می‌مانند.
      */
     filesDeletedAt: timestamp('files_deleted_at', { withTimezone: true }),
+    /**
+     * چاپخانهٔ امروز سفارش (برش ۵٫۲، ADR-042): با پرداخت، خودکار (همان تراکنش `settlePayment`)، و بعد با جابه‌جایی پنل. هر
+     * تخصیص یک ردیف `order_assignments` دارد. null یعنی بی چاپخانه: پرداخت‌نشده، سفارش پیش از ۵٫۲، یا هنگام پرداخت هیچ
+     * چاپخانهٔ فعالی نبود (هشدار پیشخوان). فقط وقتی سفارش «در صف چاپ» است عوض می‌شود، فقط به چاپخانهٔ فعال، و خالی
+     * نمی‌شود (تریگر `orders_print_partner`، 0018).
+     */
+    printPartnerId: uuid('print_partner_id').references(() => printPartners.id),
 
     shippingMethodId: text('shipping_method_id').notNull(),
     /** منطقهٔ کرایه در لحظهٔ سفارش؛ کرایه با همین منجمد شده. */
@@ -643,6 +691,8 @@ export const orders = pgTable(
      * همهٔ سفارش‌ها را می‌خواندند.
      */
     index('orders_price_list').on(t.priceListVersion),
+    /** سفارش‌های باز هر چاپخانه: فهرست «چاپخانه‌ها»، غیرفعال کردن، و از ۵٫۳ محدودهٔ هر کوئری پنل. */
+    index('orders_print_partner').on(t.printPartnerId, t.status),
     foreignKey({
       columns: [t.cityId, t.provinceId],
       foreignColumns: [cities.id, cities.provinceId],
@@ -672,6 +722,11 @@ export const orders = pgTable(
     check(
       'orders_files_deleted_closed',
       sql`${t.filesDeletedAt} IS NULL OR ${t.status}::text IN ('handed_to_post', 'cancelled')`,
+    ),
+    // سفارش پرداخت‌نشده چاپخانه ندارد (ADR-042): تخصیص با پرداخت است. `::text`، به همان دلیل.
+    check(
+      'orders_partner_paid',
+      sql`${t.printPartnerId} IS NULL OR ${t.status}::text NOT IN ('awaiting_payment', 'expired')`,
     ),
     check('orders_sla_positive', sql`${t.slaDays} > 0`),
     check('orders_phone_normalized', sql`${t.recipientPhone} ~ '^09[0-9]{9}$'`),
@@ -857,6 +912,46 @@ export const orderStatusEvents = pgTable(
   (t) => [
     index('order_status_events_order').on(t.orderId, t.at),
     check('order_status_events_admin', sql`(${t.actor} = 'admin') = (${t.adminUserId} IS NOT NULL)`),
+  ],
+);
+
+/**
+ * هر تخصیص چاپخانه به سفارش (برش ۵٫۲، ADR-042): از کدام، به کدام، کی، و سیستم با قاعده‌اش یا ادمین با دلیلش. فقط افزودنی،
+ * مثل `order_status_events` (تریگر `order_assignments_append_only`؛ پاک شدن فقط با خود سفارش)، و آخرین ردیف هر سفارش همان
+ * `orders.print_partner_id` است (تریگر معوق `orders_partner_recorded`، 0018).
+ *
+ * - سیستم فقط در پرداخت: از هیچ، با `rule` — `city` هم‌شهر مشتری، `province` هم‌استان، `default` چاپخانهٔ پیش‌فرض، و
+ *   `oldest` قدیمی‌ترین چاپخانهٔ فعال وقتی پیش‌فرضی نیست.
+ * - ادمین (جابه‌جایی، یا چاپخانهٔ سفارشی که نداشت): با `admin_user_id` و دلیل ۱ تا ۵۰۰ نویسه، که فقط در پنل دیده می‌شود.
+ */
+export const orderAssignments = pgTable(
+  'order_assignments',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    fromPartnerId: uuid('from_partner_id').references(() => printPartners.id),
+    toPartnerId: uuid('to_partner_id')
+      .notNull()
+      .references(() => printPartners.id),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    /** `system` یا `admin`. */
+    actor: text('actor').notNull(),
+    adminUserId: uuid('admin_user_id').references(() => adminUsers.id),
+    rule: text('rule'),
+    reason: text('reason'),
+  },
+  (t) => [
+    index('order_assignments_order').on(t.orderId, t.id),
+    check('order_assignments_moves', sql`${t.fromPartnerId} IS DISTINCT FROM ${t.toPartnerId}`),
+    check(
+      'order_assignments_actor',
+      sql`(${t.actor} = 'system' AND ${t.adminUserId} IS NULL AND ${t.fromPartnerId} IS NULL AND ${t.reason} IS NULL
+            AND ${t.rule} IN ('city', 'province', 'default', 'oldest'))
+       OR (${t.actor} = 'admin' AND ${t.adminUserId} IS NOT NULL AND ${t.rule} IS NULL
+            AND length(btrim(${t.reason})) BETWEEN 1 AND 500)`,
+    ),
   ],
 );
 

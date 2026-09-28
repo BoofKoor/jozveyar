@@ -40,11 +40,15 @@ export const ADMIN_PERMISSIONS = {
   /** برگرداندن وضعیت اشتباه، یک قدم، با دلیل: فقط مالک (سؤال ۲۶، ADR-038؛ ۴٫۳). */
   'orders.revert': 'برگرداندن وضعیت سفارش',
   'orders.address': 'ویرایش نشانی گیرنده',
+  /** جابه‌جایی چاپخانهٔ سفارش، فقط در «در صف چاپ»، با دلیل (برش ۵٫۲، ADR-042): مالک و متصدی. */
+  'orders.assign': 'جابه‌جایی چاپخانهٔ سفارش',
   'files.download': 'دانلود PDF جزوه',
   'tariff.read': 'دیدن تعرفه',
   'tariff.edit': 'ساختن و فعال کردن تعرفه',
   'settings.edit': 'تنظیمات',
   'secrets.edit': 'کلیدهای سرویس‌ها',
+  /** زبانهٔ «چاپخانه‌ها»: افزودن، ویرایش، پیش‌فرض و غیرفعال کردن (برش ۵٫۲): فقط مالک. */
+  'partners.manage': 'چاپخانه‌ها',
   'admins.manage': 'ادمین‌ها',
   'events.read': 'رویدادها',
 } as const;
@@ -53,12 +57,15 @@ export type AdminPermission = keyof typeof ADMIN_PERMISSIONS;
 
 const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
 
-/** نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز؛ متصدی سفارش، وضعیت، نشانی، دانلود و دیدن تعرفه. چاپخانه با برش ۵. */
+/**
+ * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز؛ متصدی سفارش، وضعیت، نشانی، جابه‌جایی چاپخانه (۵٫۲)، دانلود و دیدن تعرفه. نقش
+ * «چاپخانه» با ۵٫۳.
+ */
 export const ADMIN_ROLES = {
   owner: { nameFa: 'مالک', permissions: ALL_PERMISSIONS },
   operator: {
     nameFa: 'متصدی',
-    permissions: ['orders.read', 'orders.status', 'orders.address', 'files.download', 'tariff.read'] as AdminPermission[],
+    permissions: ['orders.read', 'orders.status', 'orders.address', 'orders.assign', 'files.download', 'tariff.read'] as AdminPermission[],
   },
 } as const satisfies Record<string, { nameFa: string; permissions: readonly AdminPermission[] }>;
 

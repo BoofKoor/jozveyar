@@ -4,7 +4,9 @@
  *  - منطقه‌های کرایه، استان‌ها و شهرها، از `@jozveyar/geo` — سفارش به شهر و استان کلید خارجی دارد؛
  *  - تعرفهٔ پایه، اگر هنوز هیچ تعرفه‌ای نیست — قیمت قطعی سرور از تعرفهٔ پایگاه داده است (قاعدهٔ ۲)؛
  *  - پیش‌فرض‌های `settings`: روز کاری تحویل به پست و تعطیلی‌های رسمی؛
- *  - نقش‌ها و مجوزهای پنل ادمین (`ADMIN_ROLES`، برش ۴): همیشه دقیقاً همان کد.
+ *  - نقش‌ها و مجوزهای پنل ادمین (`ADMIN_ROLES`، برش ۴): همیشه دقیقاً همان کد؛
+ *  - اولین چاپخانه، «چاپخانهٔ جزوه‌یار» در تهران و پیش‌فرض، اگر هنوز هیچ چاپخانه‌ای نیست (برش ۵٫۲، ADR-042): تخصیص سفارش
+ *    در پرداخت از روز اول جایی برای رفتن دارد. نامش از زبانهٔ «چاپخانه‌ها» عوض‌شدنی است و استقرار بعدی برش نمی‌گرداند.
  *
  * هنگام بالا آمدن سرور، بعد از مهاجرت‌ها اجرا می‌شود (`instrumentation.ts`) و idempotent است. شهر و
  * استان با شناسه به‌روز می‌شوند و **هیچ‌وقت پاک نمی‌شوند** (سفارش به آنها اشاره می‌کند). تعرفه و
@@ -16,13 +18,13 @@
  */
 
 import { count, sql } from 'drizzle-orm';
-import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
+import { CITIES, PROVINCES, SHIPPING_ZONES, findCity } from '@jozveyar/geo';
 import { SETTING_SCHEMAS, type PriceList, type SettingKey, type SettingValue } from '@jozveyar/contracts';
 
 import { seedAdminRoles } from './admin.js';
 import { OFFICIAL_HOLIDAYS } from './holidays.js';
 import type { Database } from './index.js';
-import { cities, priceLists, provinces, settings, shippingZones } from './schema.js';
+import { cities, priceLists, printPartners, provinces, settings, shippingZones } from './schema.js';
 import { seedPriceList } from './seed.js';
 
 /** کلید قفل مشورتی دادهٔ پایه: «jozv» به عدد. */
@@ -61,6 +63,14 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
 };
 
 /**
+ * اولین چاپخانه (سؤال ۲۹): چاپخانهٔ خود جزوه‌یار، در شهر تهران (مرکز استان تهران)، پیش‌فرض. همان «چاپخانهٔ جزوه‌یار» طرح پنل.
+ */
+export const FIRST_PARTNER = {
+  name: 'چاپخانهٔ جزوه‌یار',
+  cityId: PROVINCES.find((province) => province.name === 'تهران')!.capitalId,
+} as const;
+
+/**
  * خواندن یک تنظیم با شکل قرارداد (`SETTING_SCHEMAS`). نبودنش یعنی پیش‌فرض (`DEFAULT_SETTINGS`)؛ مقدار خراب هم
  * پیش‌فرض است، ولی بلند لاگ می‌شود: تعطیلی‌های خراب نباید پرداخت یک سفارش واقعی، یا پیشخوان پنل، را بشکند.
  * سایت و پنل هر دو همین را می‌خوانند.
@@ -86,6 +96,8 @@ export interface ReferenceSeedResult {
   priceListInserted: number | null;
   /** تنظیم‌هایی که نبودند و پیش‌فرضشان نشست. */
   settingsInserted: string[];
+  /** نام اولین چاپخانه، اگر همین حالا نشست؛ null یعنی از قبل چاپخانه بود. */
+  partnerInserted: string | null;
 }
 
 export async function seedReferenceData(
@@ -128,6 +140,15 @@ export async function seedReferenceData(
 
     await seedAdminRoles(tx as unknown as Database['db']);
 
+    // پس از شهرها (کلید خارجی دوستونی). فقط وقتی جدول خالی است: چاپخانه‌ای که مالک ویرایش یا اضافه کرده دست نمی‌خورد.
+    const [partners] = await tx.select({ n: count() }).from(printPartners);
+    let partnerInserted: string | null = null;
+    if (partners!.n === 0) {
+      const city = findCity(FIRST_PARTNER.cityId)!;
+      await tx.insert(printPartners).values({ name: FIRST_PARTNER.name, provinceId: city.provinceId, cityId: city.id, isDefault: true });
+      partnerInserted = FIRST_PARTNER.name;
+    }
+
     const inserted = await tx
       .insert(settings)
       .values(Object.entries(DEFAULT_SETTINGS).map(([key, value]) => ({ key, value })))
@@ -139,6 +160,7 @@ export async function seedReferenceData(
       cities: CITIES.length,
       priceListInserted,
       settingsInserted: inserted.map((row) => row.key).sort(),
+      partnerInserted,
     };
   });
 }
