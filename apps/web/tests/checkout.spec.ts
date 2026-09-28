@@ -258,6 +258,15 @@ test.describe.serial('سفارش کامل', () => {
     // کارگر PDF جزوه و فایل چاپ (`prepare_order`) و برگهٔ سفارش (`prepare_ticket`، برش ۵٫۱) را می‌سازد.
     const jobs = await sql()`select kind from jobs where order_id = ${order!.id} order by kind`;
     expect(jobs.map((job) => job.kind)).toEqual(['prepare_order', 'prepare_ticket']);
+    // چاپخانه در همان تراکنش پرداخت (برش ۵٫۲): تنها چاپخانهٔ دادهٔ پایه در تهران است و سفارش به مشهد، پس «پیش‌فرض»؛ کرایه
+    // همان کرایهٔ مشهد.
+    const assigned = await sql()`
+      select p.name, a.rule, a.actor, a.from_partner_id, o.print_partner_id = p.id as current, o.shipping_zone_id
+      from order_assignments a join print_partners p on p.id = a.to_partner_id join orders o on o.id = a.order_id
+      where a.order_id = ${order!.id}`;
+    expect(assigned).toEqual([
+      { name: 'چاپخانهٔ جزوه‌یار', rule: 'default', actor: 'system', from_partner_id: null, current: true, shipping_zone_id: 'other' },
+    ]);
   });
 
   test('غریبه فقط شماره، وضعیت و روز تحویل را می‌بیند', async ({ browser }) => {

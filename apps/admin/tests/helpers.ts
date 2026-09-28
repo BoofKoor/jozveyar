@@ -1,6 +1,7 @@
 /**
- * ابزارهای مشترک تست‌های سرتاسری پنل (`admin.spec.ts`، `orders.spec.ts`، `status.spec.ts`): دستور سرور، کد برنامهٔ تأیید مثل گوشی،
- * مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، و ورود. طرز اجرا بالای `admin.spec.ts`.
+ * ابزارهای مشترک تست‌های سرتاسری پنل (`admin.spec.ts`، `orders.spec.ts`، `status.spec.ts`، …): دستور سرور، کد برنامهٔ تأیید مثل
+ * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، و تخصیص چاپخانه در پرداخت (۵٫۲). طرز اجرا بالای
+ * `admin.spec.ts`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -8,6 +9,7 @@ import { randomInt } from 'node:crypto';
 import { join } from 'node:path';
 
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import type postgres from 'postgres';
 
 import { base32Decode, hotp, totpStep } from '../lib/server/totp';
 
@@ -118,4 +120,26 @@ export async function layoutProblems(page: Page): Promise<{ overflow: number; sm
       .map((el) => el.className),
   );
   return { overflow, small, blank };
+}
+
+/**
+ * چاپخانهٔ سفارش، همان که برگشت درگاه در همان تراکنش پرداخت می‌نویسد (`assignAtPayment`، برش ۵٫۲، ADR-042): چاپخانهٔ فعال همان
+ * شهر، وگرنه همان استان، وگرنه پیش‌فرض، وگرنه قدیمی‌ترین؛ و ردیف تخصیص با قاعده‌اش. هیچ چاپخانهٔ فعالی نیست؟ بی چاپخانه (null).
+ * تست‌ها سفارش را با SQL می‌نشانند، چون Playwright ماژول ESM `@jozveyar/db` را بار نمی‌کند؛ پایگاه داده جابه‌جایی بی ردیف تخصیص را
+ * رد می‌کند (`order_assignments_recorded`).
+ */
+export async function assignAtPayment(tx: postgres.TransactionSql, orderId: string, at: Date): Promise<string | null> {
+  const [chosen] = await tx<{ id: string; rule: string }[]>`
+    SELECT p.id,
+           CASE WHEN p.city_id = o.city_id THEN 'city' WHEN p.province_id = o.province_id THEN 'province'
+                WHEN p.is_default THEN 'default' ELSE 'oldest' END AS rule
+      FROM print_partners p, orders o
+     WHERE o.id = ${orderId} AND p.deactivated_at IS NULL
+     ORDER BY p.city_id = o.city_id DESC NULLS LAST, p.province_id = o.province_id DESC, p.is_default DESC, p.created_at, p.id
+     LIMIT 1`;
+  if (!chosen) return null;
+  await tx`UPDATE orders SET print_partner_id = ${chosen.id} WHERE id = ${orderId}`;
+  await tx`INSERT INTO order_assignments (order_id, to_partner_id, at, actor, rule)
+           VALUES (${orderId}, ${chosen.id}, ${at}, 'system', ${chosen.rule})`;
+  return chosen.id;
 }

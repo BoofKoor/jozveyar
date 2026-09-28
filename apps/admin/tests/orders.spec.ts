@@ -10,7 +10,7 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { S3Driver } from '@jozveyar/storage';
 import { formatTomans, tehranDayStart } from '@jozveyar/text';
 
-import { at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
  * سفارش‌ها در پنل، سرتاسری (برش ۴٫۲؛ طرح `docs/ui/mockups/admin.html`، ADR-039): پیشخوان با کاشی‌های مهلت و
@@ -129,7 +129,10 @@ async function attempt(o: Seeded, createdAt: Date) {
             VALUES (${o.id}, 'mock', ${o.totalRials}, ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`}, ${createdAt})`;
 }
 
-/** پرداخت موفق، مثل برگشت درگاه (`settlePayment`): در یک تراکنش پرداخت، سفارش با مهلت، رویداد، و کارهای `prepare_order` و `prepare_ticket`. */
+/**
+ * پرداخت موفق، مثل برگشت درگاه (`settlePayment`): در یک تراکنش پرداخت، سفارش با مهلت، رویداد، چاپخانه (۵٫۲)، و کارهای
+ * `prepare_order` و `prepare_ticket`.
+ */
 async function pay(o: Seeded, due: Date) {
   const paidAt = new Date(Date.now() - 60 * MINUTE);
   await sql.begin(async (tx) => {
@@ -141,6 +144,7 @@ async function pay(o: Seeded, due: Date) {
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${due} WHERE id = ${o.id}`;
     await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor, note)
              VALUES (${o.id}, 'awaiting_payment', 'paid', ${paidAt}, 'gateway', ${tx.json({ paymentId: payment!.id })})`;
+    await assignAtPayment(tx, o.id, paidAt);
     await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${o.id}), ('prepare_ticket', ${o.id})`;
   });
 }

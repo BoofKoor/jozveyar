@@ -10,7 +10,7 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { S3Driver } from '@jozveyar/storage';
 import { formatTomans, tehranDayStart } from '@jozveyar/text';
 
-import { alertOf, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
  * وضعیت سفارش در پنل، سرتاسری (برش ۴٫۳؛ طرح `docs/ui/mockups/admin.html`، ADR-039): «شروع چاپ» (بسته تا فایل چاپ ساخته
@@ -54,7 +54,7 @@ interface Seeded {
 }
 
 /**
- * سفارش پرداخت‌شده، همان ردیف‌هایی که سرور می‌نویسد (سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد و کارهای
+ * سفارش پرداخت‌شده، همان ردیف‌هایی که سرور می‌نویسد (سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد، چاپخانه و کارهای
  * `prepare_order` و `prepare_ticket`)؛ ۱۰ صفحهٔ سیاه‌سفید، فایلش در Garage تا کارگر فایل چاپ را بسازد، یا بی فایل تا نسازد.
  */
 async function paidOrder(name: string, phone: string, due: Date, withFile = true): Promise<Seeded> {
@@ -104,6 +104,7 @@ async function paidOrder(name: string, phone: string, due: Date, withFile = true
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${due} WHERE id = ${row!.id}`;
     await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor, note)
              VALUES (${row!.id}, 'awaiting_payment', 'paid', ${paidAt}, 'gateway', ${tx.json({ paymentId: payment!.id })})`;
+    await assignAtPayment(tx, row!.id, paidAt);
     await tx`INSERT INTO jobs (kind, order_id) VALUES ('prepare_order', ${row!.id}), ('prepare_ticket', ${row!.id})`;
     return { number: row!.order_number, id: row!.id, totalRials: Number(row!.total_rials) };
   });
