@@ -23,6 +23,7 @@ import {
   bigserial,
   boolean,
   check,
+  customType,
   doublePrecision,
   foreignKey,
   index,
@@ -406,6 +407,8 @@ export const jobs = pgTable(
      * یک سند است یا یک سفارش، نه هر دو.
      */
     orderId: uuid('order_id').references(() => orders.id, { onDelete: 'cascade' }),
+    /** ورود فایل پستی که کار رویش است: خواندن جدول‌هایش (`read_post_file`، برش ۶٫۱، ADR-045). */
+    shipmentImportId: uuid('shipment_import_id').references(() => shipmentImports.id, { onDelete: 'cascade' }),
     payload: jsonb('payload').notNull().default({}),
     status: jobStatus('status').notNull().default('queued'),
     attempts: integer('attempts').notNull().default(0),
@@ -425,7 +428,10 @@ export const jobs = pgTable(
     uniqueIndex('jobs_document_kind').on(t.documentId, t.kind),
     /** همین برای سفارش: برگشت دوباره از درگاه، PDF دوم نمی‌سازد. */
     uniqueIndex('jobs_order_kind').on(t.orderId, t.kind),
-    check('jobs_one_target', sql`${t.documentId} IS NULL OR ${t.orderId} IS NULL`),
+    /** و برای ورود فایل پست: یک فایل یک بار خوانده می‌شود. */
+    uniqueIndex('jobs_shipment_import_kind').on(t.shipmentImportId, t.kind),
+    /** هر کار مال یک چیز است: سند، سفارش یا ورود فایل پست. */
+    check('jobs_one_target', sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}) <= 1`),
   ],
 );
 
@@ -1220,5 +1226,207 @@ export const serviceSecrets = pgTable(
   (t) => [
     check('service_secrets_name', sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'PAYMENT_MERCHANT_ID')`),
     check('service_secrets_sealed', sql`${t.sealed} ~ '^v1[.][A-Za-z0-9_-]{16}[.][A-Za-z0-9_-]{22,}$'`),
+  ],
+);
+
+/* ──────────────────────────── ارسال: ورود فایل پست و مرسوله‌ها (برش ۶٫۱، ADR-045، ADR-046) ──────────────────────────── */
+
+/** بایت خام؛ drizzle نوع آماده‌اش را ندارد. postgres.js آن را `Buffer` می‌دهد و می‌گیرد. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/** سقف فایل پست (ADR-045): فایل ۴۱ بسته‌ای چند ده کیلوبایت است. همان سقف پنل و کارگر. */
+export const POST_FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * یک فایل پست که به پنل داده شد (ADR-045)، با بایت‌های خامش؛ کارگر جدول‌هایش را می‌خواند (`read_post_file`) و پنل
+ * تفسیر، پیش‌نمایش و «ثبت» می‌کند. تا «ثبت» جز خود فایل چیزی نوشته نمی‌شود.
+ *
+ * - وضعیت: `reading` ← `read` یا `unreadable` (کارگر)؛ `read` ← `committed` («ثبت») یا `discarded` («دور بینداز»، یا
+ *   پیش‌نویسی که N روز ماند)؛ `committed` ← `reverted` (یک بار، مالک، با دلیل). گذار دیگر را تریگر
+ *   `shipment_imports_flow` رد می‌کند (0022).
+ * - همان فایل (sha256) یک بار: ایندکس یکتای جزئی `shipment_imports_one_file`، جز ورودی که برگشت، دور انداخته یا
+ *   خوانده نشد؛ پس فایلی که اشتباه وارد و برگردانده شد دوباره واردشدنی است.
+ * - `raw` و `tables` N روز پس از ورود پاک می‌شوند (`order.files_retention_days`، ADR-044؛ کارگر، `purged_at`)؛ بایت
+ *   دیگری جای `raw` نمی‌نشیند.
+ * - `print_partner_id`: واردکنندهٔ چاپخانه (۶٫۲)؛ از ورودش فقط مرسولهٔ سفارش‌های همان چاپخانه پذیرفته می‌شود
+ *   (تریگر `shipments_partner_scope`).
+ * - ورود پاک نمی‌شود: سابقهٔ پیامکی که رفت و مرسولهٔ کنارگذاشته به آن اشاره می‌کنند.
+ */
+export const shipmentImports = pgTable(
+  'shipment_imports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** حامل، پشت `ShippingCarrier` (قاعدهٔ ۷، ADR-008): امروز فقط «پست ایران». */
+    carrier: text('carrier').notNull(),
+    filename: text('filename').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    raw: bytea('raw'),
+    status: text('status').notNull().default('reading'),
+    /** از محتوا، نه پسوند: `html`، `csv` یا `xlsx`. */
+    format: text('format'),
+    /** جدول‌هایی که کارگر خواند: هر جدول سطرها، هر سطر خانه‌های متنی، همان‌طور که در فایل بودند. */
+    tables: jsonb('tables').$type<string[][][]>(),
+    /** خوانده نشد: `xls_binary`، `no_table`، `too_large`، `bad_xlsx`، `too_many_rows` یا `read_failed`. */
+    errorCode: text('error_code'),
+    printPartnerId: uuid('print_partner_id').references(() => printPartners.id),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    committedBy: uuid('committed_by').references(() => adminUsers.id),
+    committedAt: timestamp('committed_at', { withTimezone: true }),
+    /** null با `discarded_at` یعنی کارگر: پیش‌نویسی که N روز ثبت نشد. */
+    discardedBy: uuid('discarded_by').references(() => adminUsers.id),
+    discardedAt: timestamp('discarded_at', { withTimezone: true }),
+    revertedBy: uuid('reverted_by').references(() => adminUsers.id),
+    revertedAt: timestamp('reverted_at', { withTimezone: true }),
+    revertReason: text('revert_reason'),
+    purgedAt: timestamp('purged_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('shipment_imports_created').on(t.createdAt),
+    uniqueIndex('shipment_imports_one_file')
+      .on(t.sha256)
+      .where(sql`${t.status} IN ('reading', 'read', 'committed')`),
+    check('shipment_imports_carrier', sql`${t.carrier} = 'iran_post'`),
+    check(
+      'shipment_imports_status',
+      sql`${t.status} IN ('reading', 'read', 'unreadable', 'committed', 'discarded', 'reverted')`,
+    ),
+    check('shipment_imports_format', sql`${t.format} IS NULL OR ${t.format} IN ('html', 'csv', 'xlsx')`),
+    check('shipment_imports_filename', sql`char_length(${t.filename}) BETWEEN 1 AND 255`),
+    check('shipment_imports_size', sql`${t.sizeBytes} BETWEEN 1 AND ${sql.raw(String(POST_FILE_MAX_BYTES))}`),
+    check('shipment_imports_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+    /** بایت خام همان فایل است یا هیچ (پاک‌شده). */
+    check('shipment_imports_raw', sql`${t.raw} IS NULL OR octet_length(${t.raw}) = ${t.sizeBytes}`),
+    /** جدول‌ها فقط وقتی خوانده شد؛ کد خطا فقط وقتی نشد. */
+    check('shipment_imports_read', sql`(${t.status} = 'unreadable') = (${t.errorCode} IS NOT NULL)`),
+    check(
+      'shipment_imports_committed',
+      sql`(${t.status} IN ('committed', 'reverted')) = (${t.committedAt} IS NOT NULL) AND (${t.committedAt} IS NULL) = (${t.committedBy} IS NULL)`,
+    ),
+    check('shipment_imports_discarded', sql`(${t.status} = 'discarded') = (${t.discardedAt} IS NOT NULL)`),
+    check(
+      'shipment_imports_reverted',
+      sql`(${t.status} = 'reverted') = (${t.revertedAt} IS NOT NULL) AND (${t.revertedAt} IS NULL) = (${t.revertedBy} IS NULL) AND (${t.revertedAt} IS NULL) = (${t.revertReason} IS NULL)`,
+    ),
+    check('shipment_imports_revert_reason', sql`${t.revertReason} IS NULL OR length(btrim(${t.revertReason})) BETWEEN 1 AND 500`),
+  ],
+);
+
+/**
+ * همهٔ سطرهای ورودی که ثبت شد، با حکم و دلیل (ADR-046). در تراکنش «ثبت» نوشته می‌شوند، فقط برای ورود «ثبت شد»
+ * (تریگر `shipment_import_rows_insert`)، و بعد عوض و پاک نمی‌شوند (`shipment_import_rows_frozen`)، جز:
+ * - متن سطری که مرسولهٔ ما نشد (`cells`، `name_g`، `destination`؛ نام و مقصد مشتری‌های دیگر چاپخانه) N روز بعد پاک
+ *   می‌شود (ADR-045، کارگر)؛
+ * - و حکم صف تأیید در ۶٫۲.
+ *
+ * حکم‌ها: `matched` (قطعی)، `review` (صف تأیید)، `unmatched` (پیدا نشد)، `duplicate` (تکراری)، `invalid` (خوانده نشد)،
+ * `inactive` (وضعیتش در پست «فعال» نیست؛ سؤال ۷۱) و `total` (ردیف «جمع کل»).
+ */
+export const shipmentImportRows = pgTable(
+  'shipment_import_rows',
+  {
+    importId: uuid('import_id')
+      .notNull()
+      .references(() => shipmentImports.id),
+    /** شمارهٔ سطر در جدول فایل، سرستون صفر. */
+    rowNo: integer('row_no').notNull(),
+    /** خانه‌های خام همان سطر. */
+    cells: jsonb('cells').$type<string[]>(),
+    barcode: text('barcode'),
+    /** فقط از «نام گ» و فقط عدد انتهای آن (ADR-010). */
+    orderNumber: integer('order_number'),
+    nameG: text('name_g'),
+    destination: text('destination'),
+    weightGrams: integer('weight_grams'),
+    fareRials: bigint('fare_rials', { mode: 'number' }),
+    taxRials: bigint('tax_rials', { mode: 'number' }),
+    /** آغاز روز «تاریخ ثبت» همین بسته به وقت تهران (سؤال ۷۰): پست آن روز بسته را از ما گرفت. */
+    postDay: timestamp('post_day', { withTimezone: true }),
+    /** ستون «وضعیت» فایل؛ فقط «فعال» ثبت‌شدنی است (سؤال ۷۱). */
+    postStatus: text('post_status'),
+    verdict: text('verdict').notNull(),
+    /** چرا این حکم: `name_mismatch`، `cancelled`، `queued`، `manual_code`… (پنل برای هر کدام پیام دارد). */
+    reason: text('reason'),
+    /** سفارشی که سطر به آن نشست یا اشاره کرد (قطعی، تکراری، یا شمارهٔ صف تأیید). */
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.importId, t.rowNo] }),
+    index('shipment_import_rows_order').on(t.orderId),
+    check('shipment_import_rows_row_no', sql`${t.rowNo} > 0`),
+    check(
+      'shipment_import_rows_verdict',
+      sql`${t.verdict} IN ('matched', 'review', 'unmatched', 'duplicate', 'invalid', 'inactive', 'total')`,
+    ),
+    check('shipment_import_rows_barcode', sql`${t.barcode} IS NULL OR ${t.barcode} ~ '^[0-9]{24}$'`),
+    /** قطعی یعنی بارکد درست، سفارش، وزن، کرایه، مالیات و روز. */
+    check(
+      'shipment_import_rows_matched',
+      sql`${t.verdict} <> 'matched' OR (${t.barcode} IS NOT NULL AND ${t.orderId} IS NOT NULL AND ${t.weightGrams} > 0 AND ${t.fareRials} >= 0 AND ${t.taxRials} >= 0 AND ${t.postDay} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * مرسوله: یک بسته که به پست رسید، با کد رهگیری، وزن، کرایه و مالیات واقعی (ADR-045، ADR-048). از یک سطر ورود ثبت‌شده.
+ *
+ * - بارکد دقیقاً ۲۴ رقم (CHECK)، و یکتا میان مرسوله‌های زنده (`shipments_live_barcode`)؛ یک سطر یک مرسولهٔ زنده.
+ * - «زنده» یعنی کنار گذاشته نشده. مرسولهٔ زنده فقط برای سفارش «تحویل پست شد»، و سفارشی که مرسولهٔ زنده دارد از آن بیرون
+ *   نمی‌رود: هر دو سو در COMMIT (`shipments_order_handed` و `orders_shipments_handed`، 0022؛ مثل تاریخچهٔ تخصیص، ADR-042).
+ * - فقط افزودنی: عوض و پاک نمی‌شود (`shipments_frozen`)، جز «کنار گذاشتن» یک بار (`voided_*`).
+ * - `handed_order`: همین مرسوله سفارش را از «در حال چاپ» «تحویل پست شد» کرد (کد رهگیری یعنی تحویل پست شد، سؤال ۵۲)؛
+ *   برگرداندن ورود همین‌ها را به «در حال چاپ» برمی‌گرداند.
+ */
+export const shipments = pgTable(
+  'shipments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    barcode: text('barcode').notNull(),
+    importId: uuid('import_id').notNull(),
+    rowNo: integer('row_no').notNull(),
+    weightGrams: integer('weight_grams').notNull(),
+    fareRials: bigint('fare_rials', { mode: 'number' }).notNull(),
+    taxRials: bigint('tax_rials', { mode: 'number' }).notNull(),
+    postDay: timestamp('post_day', { withTimezone: true }).notNull(),
+    /** `rule` (قطعی)، `review` (تأیید صف، ۶٫۲) یا `manual` (دادن دستی، ۶٫۲). */
+    matchedBy: text('matched_by').notNull(),
+    handedOrder: boolean('handed_order').notNull().default(false),
+    /** کسی که ثبت یا تأیید کرد. */
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidedBy: uuid('voided_by').references(() => adminUsers.id),
+    voidReason: text('void_reason'),
+  },
+  (t) => [
+    index('shipments_order').on(t.orderId),
+    uniqueIndex('shipments_live_barcode')
+      .on(t.barcode)
+      .where(sql`${t.voidedAt} IS NULL`),
+    uniqueIndex('shipments_live_row')
+      .on(t.importId, t.rowNo)
+      .where(sql`${t.voidedAt} IS NULL`),
+    foreignKey({
+      columns: [t.importId, t.rowNo],
+      foreignColumns: [shipmentImportRows.importId, shipmentImportRows.rowNo],
+      name: 'shipments_row_fk',
+    }),
+    check('shipments_barcode', sql`${t.barcode} ~ '^[0-9]{24}$'`),
+    check('shipments_matched_by', sql`${t.matchedBy} IN ('rule', 'review', 'manual')`),
+    check('shipments_measures', sql`${t.weightGrams} > 0 AND ${t.fareRials} >= 0 AND ${t.taxRials} >= 0`),
+    check(
+      'shipments_voided',
+      sql`(${t.voidedAt} IS NULL) = (${t.voidedBy} IS NULL) AND (${t.voidedAt} IS NULL) = (${t.voidReason} IS NULL)`,
+    ),
+    check('shipments_void_reason', sql`${t.voidReason} IS NULL OR length(btrim(${t.voidReason})) BETWEEN 1 AND 500`),
   ],
 );

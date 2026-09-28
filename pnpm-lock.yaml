@@ -169,6 +169,9 @@ importers:
       '@jozveyar/geo':
         specifier: workspace:*
         version: link:../geo
+      '@jozveyar/text':
+        specifier: workspace:*
+        version: link:../text
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(postgres@3.4.9)

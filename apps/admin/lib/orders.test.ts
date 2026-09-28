@@ -416,6 +416,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
         reason: null,
       },
     ],
+    shipments: [],
     ...over.rest,
   };
 }

@@ -1,5 +1,7 @@
 /** تاریخ شمسی و روز کاری (ADR-013)، به وقت تهران. */
 
+import { toLatinDigits } from './normalize.js';
+
 /* ───────────────────────── تاریخ شمسی ───────────────────────── */
 
 const JALALI_MONTHS = [
@@ -156,4 +158,33 @@ export function tehranDayStart(date: Date, days = 0): Date {
 /** روزی که یک مهلت انحصاری (مثل `postHandoffDue`) در آن تمام می‌شود: «دوشنبه 6 مهر». */
 export function formatDeadlineDay(deadline: Date): string {
   return formatJalaliWeekday(new Date(deadline.getTime() - 1));
+}
+
+/**
+ * نیمه‌شب نوروز ۱۴۰۵ به وقت تهران: ۲۰:۳۰ UTC روز ۲۰ مارس ۲۰۲۶ (`jalaliYear`). عدد، نه `Date.UTC(…)`: این ماژول در
+ * باندل اولیهٔ سایت است و فراخوانی سطح ماژول با tree-shaking نمی‌افتد.
+ */
+const NOWRUZ_1405 = 1_774_038_600_000;
+
+/**
+ * تاریخ شمسی عددی، مثل ستون «تاریخ ثبت» فایل پست (`1405/06/22`)، به آغاز همان روز تهران؛ `null` اگر چنین روزی
+ * نیست (ماه ۱۳، ۳۱ مهر، ۳۰ اسفند سال غیرکبیسه) یا شکلش این نیست (برش ۶). برعکس `formatJalaliNumeric` و با همان
+ * تقویم `Intl`: تخمین از نوروز ۱۴۰۵، بعد سنجیدن چند روز دوروبرش؛ پس کتابخانهٔ تبدیل تقویم لازم نیست.
+ */
+export function parseJalaliNumeric(text: string): Date | null {
+  const match = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(toLatinDigits(text).trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > (month <= 6 ? 31 : 30)) return null;
+  const want = `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+  const dayOfYear = month <= 6 ? (month - 1) * 31 + day - 1 : 186 + (month - 7) * 30 + day - 1;
+  const guess = NOWRUZ_1405 + (Math.round((year - 1405) * 365.2422) + dayOfYear) * DAY_MS;
+  // میانگین سال شمسی ۳۶۵٫۲۴۲۲ روز است و سال واقعی ۳۶۵ یا ۳۶۶؛ فاصلهٔ تخمین تا روز درست از یکی دو روز بیشتر نمی‌شود.
+  for (const offset of [0, -1, 1, -2, 2, -3, 3]) {
+    const start = tehranDayStart(new Date(guess + offset * DAY_MS + DAY_MS / 2));
+    if (formatJalaliNumeric(start) === want) return start;
+  }
+  return null;
 }

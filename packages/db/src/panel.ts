@@ -23,6 +23,8 @@
  *  - **چاپخانهٔ سفارش** (برش ۵٫۲، ADR-042): جابه‌جایی فقط از چاپخانه‌ای که ادمین دید و فقط در «در صف چاپ»، با ردیف
  *    `order_assignments`، کار برگه و رویداد ادمین در همان تراکنش؛ «شروع چاپ» هم از چاپخانه‌ای که ادمین دید. پس جابه‌جایی و
  *    «شروع چاپ» هم‌زمان فقط یکی می‌شوند: هر دو ردیف سفارش را قفل می‌کنند و دومی شرطش را دیگر نمی‌یابد.
+ *  - **بسته‌های پستی** (برش ۶٫۱، ADR-046): جزئیات سفارش مرسوله‌هایش را دارد، و جست‌وجو کد رهگیری را هم می‌شناسد؛ ورود فایل
+ *    پست خودش در `shipments.ts` است.
  *  - **محدوده** (برش ۵٫۳، ADR-042): هر تابعی که سفارش می‌خواند یا می‌نویسد، محدوده را آرگومان اول و اجباری می‌گیرد (`PanelScope`:
  *    همه، یا یک چاپخانه) و در همان کوئری شرطش می‌کند، نه پس از آن؛ پس کوئری بی محدوده خطای تایپ است، و سفارش بیرون از محدوده
  *    همان «نیست» است. نوشتن‌ها شرط را زیر قفل ردیف سفارش دوباره می‌سنجند: سفارشی که همین حالا به چاپخانهٔ دیگری رفت، دیگر
@@ -64,6 +66,8 @@ import {
   printRules,
   provinces,
   settings,
+  shipmentImports,
+  shipments,
   shippingMethods,
   shippingZones,
 } from './schema.js';
@@ -91,6 +95,9 @@ function inScope(scope: PanelScope): SQL | undefined {
   }
 }
 
+/** همان شرط، برای ذخیره‌گاه‌های دیگری که سفارش می‌خوانند (ارسال، برش ۶٫۱). */
+export const ordersInScope = inScope;
+
 /** چیپ‌های فهرست سفارش‌ها، به ترتیب طرح پنل. */
 export const PANEL_BUCKETS = ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] as const;
 export type PanelBucket = (typeof PANEL_BUCKETS)[number];
@@ -112,7 +119,9 @@ export interface PanelRecipient {
 export type PanelSearch =
   | { kind: 'digits'; orderNumber: number | null; phoneSuffix: string | null }
   | { kind: 'mobile'; mobile: string }
-  | { kind: 'name'; text: string };
+  | { kind: 'name'; text: string }
+  /** کد رهگیری ۲۴ رقمی (برش ۶٫۱): سفارشی که مرسوله‌ای با همین بارکد دارد، زنده یا کنارگذاشته. */
+  | { kind: 'barcode'; barcode: string };
 
 /** «حالا» و دو مرزی که با آن ساخته می‌شوند. */
 export interface PanelClock {
@@ -292,6 +301,29 @@ export interface PanelPartnerOption {
   openOrders: number;
 }
 
+/**
+ * یک بستهٔ پستی سفارش (برش ۶٫۱، ADR-045): کد رهگیری، وزن، کرایه و مالیات واقعی، و ورود فایل پستی که آورد؛ کنارگذاشته هم، با
+ * دلیلش.
+ */
+export interface PanelShipment {
+  id: string;
+  barcode: string;
+  weightGrams: number;
+  fareRials: number;
+  taxRials: number;
+  postDay: Date;
+  /** همین مرسوله سفارش را «تحویل پست شد» کرد. */
+  handedOrder: boolean;
+  createdAt: Date;
+  adminName: string | null;
+  importId: string;
+  filename: string;
+  rowNo: number;
+  voidedAt: Date | null;
+  voidedByName: string | null;
+  voidReason: string | null;
+}
+
 /** یک تغییر وضعیت، با نام ادمینی که عوضش کرد (از ۴٫۳). */
 export type PanelStatusEvent = typeof orderStatusEvents.$inferSelect & { adminName: string | null };
 
@@ -327,6 +359,8 @@ export interface PanelOrderDetails {
   partner: PanelPartnerRef | null;
   /** تاریخچهٔ تخصیص، به ترتیب زمان. */
   assignments: PanelAssignment[];
+  /** بسته‌های پستی (برش ۶٫۱)، به ترتیب ثبت. */
+  shipments: PanelShipment[];
 }
 
 /** سفارشِ یک فایل: برای مجوز وضعیت و «پاک شد». */
@@ -388,7 +422,7 @@ export interface PanelStatusChange {
  */
 export type PanelWrite =
   | { ok: true; order: OrderRow }
-  | { ok: false; current: OrderStatus | null; filesDeleted?: boolean; partnerChanged?: boolean };
+  | { ok: false; current: OrderStatus | null; filesDeleted?: boolean; partnerChanged?: boolean; hasShipment?: boolean };
 
 /** جابه‌جایی چاپخانهٔ سفارش (برش ۵٫۲): از چاپخانه‌ای که ادمین دید (`from`؛ null یعنی سفارش بی چاپخانه بود)، با دلیل. */
 export interface PanelAssign {
@@ -442,7 +476,8 @@ export interface PanelOrderStore {
   /**
    * تغییر وضعیت در یک تراکنش: `UPDATE … WHERE status = from` (دو کلیک هم‌زمان یک بار؛ دومی `ok: false` با وضعیت
    * تازه)، و فقط اگر فایل‌های سفارش پاک نشده (`filesDeleted`)؛ زمان تحویل به پست فقط در «تحویل پست شد»، یک ردیف
-   * `order_status_events` با ادمین و یادداشت، و رویداد ادمین.
+   * `order_status_events` با ادمین و یادداشت، و رویداد ادمین. سفارشی که کد رهگیری زنده دارد از «تحویل پست شد» بیرون نمی‌رود
+   * (`hasShipment`، برش ۶٫۱): تریگر معوق `shipments_order_handed` در COMMIT ردش می‌کند.
    */
   changeStatus(scope: PanelScope, change: PanelStatusChange): Promise<PanelWrite>;
   /**
@@ -485,6 +520,14 @@ export function pdfErrorCode(lastError: string | null): string | null {
 }
 
 const ts = (value: Date) => sql`${value.toISOString()}::timestamptz`;
+
+type PgError = { code?: string; constraint_name?: string; cause?: PgError };
+
+/** نام محدودیتی که پستگرس رد کرد؛ drizzle خطای درایور را در `cause` می‌پیچد. */
+function constraintOf(error: unknown): string | undefined {
+  const pg = error as PgError;
+  return pg?.cause?.constraint_name ?? pg?.constraint_name;
+}
 
 /** یکی از فایل‌های جزوه پاک شده، بی مهلت است، یا پیش از `staleBefore` پاک می‌شود. */
 function staleFiles(staleBefore: Date): SQL {
@@ -532,6 +575,8 @@ function searchWhere(search: PanelSearch | null): SQL | undefined {
     }
     case 'name':
       return sql`${orders.recipientName} ILIKE ${`%${likeText(search.text)}%`} ESCAPE '\\'`;
+    case 'barcode':
+      return sql`EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = ${orders.id} AND s.barcode = ${search.barcode})`;
   }
 }
 
@@ -731,8 +776,19 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
       const fromPartner = alias(printPartners, 'from_partner');
       const toPartner = alias(printPartners, 'to_partner');
-      const [sectionRows, ruleRows, paymentRows, statusRows, jobRows, eventRows, printRows, ticketRows, partnerRows, assignmentRows] =
-        await Promise.all([
+      const [
+        sectionRows,
+        ruleRows,
+        paymentRows,
+        statusRows,
+        jobRows,
+        eventRows,
+        printRows,
+        ticketRows,
+        partnerRows,
+        assignmentRows,
+        shipmentRows,
+      ] = await Promise.all([
         itemIds.length === 0
           ? []
           : db
@@ -835,6 +891,29 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(adminUsers, eq(adminUsers.id, orderAssignments.adminUserId))
           .where(eq(orderAssignments.orderId, order.id))
           .orderBy(asc(orderAssignments.id)),
+        db
+          .select({
+            id: shipments.id,
+            barcode: shipments.barcode,
+            weightGrams: shipments.weightGrams,
+            fareRials: shipments.fareRials,
+            taxRials: shipments.taxRials,
+            postDay: shipments.postDay,
+            handedOrder: shipments.handedOrder,
+            createdAt: shipments.createdAt,
+            adminName: adminUsers.displayName,
+            importId: shipments.importId,
+            filename: shipmentImports.filename,
+            rowNo: shipments.rowNo,
+            voidedAt: shipments.voidedAt,
+            voidedByName: sql<string | null>`(SELECT u.display_name FROM admin_users u WHERE u.id = ${shipments.voidedBy})`,
+            voidReason: shipments.voidReason,
+          })
+          .from(shipments)
+          .innerJoin(shipmentImports, eq(shipmentImports.id, shipments.importId))
+          .leftJoin(adminUsers, eq(adminUsers.id, shipments.adminUserId))
+          .where(eq(shipments.orderId, order.id))
+          .orderBy(asc(shipments.createdAt), asc(shipments.rowNo)),
       ]);
 
       const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
@@ -888,6 +967,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           actor: row.actor === 'admin' ? ('admin' as const) : ('system' as const),
           rule: (row.rule as AssignmentRule | null) ?? null,
         })),
+        shipments: shipmentRows,
       };
     },
 
@@ -1001,49 +1081,55 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     },
 
     async changeStatus(scope, change) {
-      return db.transaction(async (tx): Promise<PanelWrite> => {
-        // دو کلیک هم‌زمان: دومی پشت قفل ردیف می‌ماند و بعد شرط `status = from` را دوباره می‌سنجد، که دیگر نمی‌خواند.
-        // کارگری که فایل‌ها را پاک می‌کند هم ردیف را قفل می‌کند (ADR-044): پس از او شرط فایل دیگر نمی‌خواند.
-        // «شروع چاپ» از چاپخانه‌ای که ادمین دید: جابه‌جایی هم‌زمان همین ردیف را قفل می‌کند، پس یکی از دو کار شرطش را نمی‌یابد.
-        // محدوده هم همین‌طور (۵٫۳): سفارشی که همین حالا به چاپخانهٔ دیگری رفت، شرط محدوده را دیگر نمی‌خواند.
-        const partner =
-          change.partnerId === undefined
-            ? undefined
-            : change.partnerId === null
-              ? isNull(orders.printPartnerId)
-              : eq(orders.printPartnerId, change.partnerId);
-        const [order] = await tx
-          .update(orders)
-          .set({ status: change.to, handedToPostAt: change.to === 'handed_to_post' ? change.at : null })
-          .where(
-            and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt), partner, inScope(scope)),
-          )
-          .returning();
-        if (!order) {
-          // بیرون از محدوده «نیست» (`current: null`)، نه وضعیت امروزش.
-          const [current] = await tx
-            .select({ status: orders.status, filesDeletedAt: orders.filesDeletedAt, printPartnerId: orders.printPartnerId })
-            .from(orders)
-            .where(and(eq(orders.id, change.orderId), inScope(scope)))
-            .limit(1);
-          if (current?.filesDeletedAt) return { ok: false, current: current.status, filesDeleted: true };
-          if (current && current.status === change.from && partner !== undefined && current.printPartnerId !== change.partnerId) {
-            return { ok: false, current: current.status, partnerChanged: true };
+      try {
+        return await db.transaction(async (tx): Promise<PanelWrite> => {
+          // دو کلیک هم‌زمان: دومی پشت قفل ردیف می‌ماند و بعد شرط `status = from` را دوباره می‌سنجد، که دیگر نمی‌خواند.
+          // کارگری که فایل‌ها را پاک می‌کند هم ردیف را قفل می‌کند (ADR-044): پس از او شرط فایل دیگر نمی‌خواند.
+          // «شروع چاپ» از چاپخانه‌ای که ادمین دید: جابه‌جایی هم‌زمان همین ردیف را قفل می‌کند، پس یکی از دو کار شرطش را نمی‌یابد.
+          // محدوده هم همین‌طور (۵٫۳): سفارشی که همین حالا به چاپخانهٔ دیگری رفت، شرط محدوده را دیگر نمی‌خواند.
+          const partner =
+            change.partnerId === undefined
+              ? undefined
+              : change.partnerId === null
+                ? isNull(orders.printPartnerId)
+                : eq(orders.printPartnerId, change.partnerId);
+          const [order] = await tx
+            .update(orders)
+            .set({ status: change.to, handedToPostAt: change.to === 'handed_to_post' ? change.at : null })
+            .where(
+              and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt), partner, inScope(scope)),
+            )
+            .returning();
+          if (!order) {
+            // بیرون از محدوده «نیست» (`current: null`)، نه وضعیت امروزش.
+            const [current] = await tx
+              .select({ status: orders.status, filesDeletedAt: orders.filesDeletedAt, printPartnerId: orders.printPartnerId })
+              .from(orders)
+              .where(and(eq(orders.id, change.orderId), inScope(scope)))
+              .limit(1);
+            if (current?.filesDeletedAt) return { ok: false, current: current.status, filesDeleted: true };
+            if (current && current.status === change.from && partner !== undefined && current.printPartnerId !== change.partnerId) {
+              return { ok: false, current: current.status, partnerChanged: true };
+            }
+            return { ok: false, current: current?.status ?? null };
           }
-          return { ok: false, current: current?.status ?? null };
-        }
-        await tx.insert(orderStatusEvents).values({
-          orderId: change.orderId,
-          fromStatus: change.from,
-          toStatus: change.to,
-          at: change.at,
-          actor: 'admin',
-          adminUserId: change.adminUserId,
-          note: change.note,
+          await tx.insert(orderStatusEvents).values({
+            orderId: change.orderId,
+            fromStatus: change.from,
+            toStatus: change.to,
+            at: change.at,
+            actor: 'admin',
+            adminUserId: change.adminUserId,
+            note: change.note,
+          });
+          await tx.insert(adminEvents).values(adminEventRow(change.event));
+          return { ok: true, order };
         });
-        await tx.insert(adminEvents).values(adminEventRow(change.event));
-        return { ok: true, order };
-      });
+      } catch (error) {
+        // سفارشی که کد رهگیری زنده دارد از «تحویل پست شد» بیرون نمی‌رود (0022، در COMMIT): مرسوله‌ای که همین حالا نشست.
+        if (constraintOf(error) === 'shipments_order_handed') return { ok: false, current: change.from, hasShipment: true };
+        throw error;
+      }
     },
 
     async editRecipient(scope, { orderId, editable, recipient, event }) {

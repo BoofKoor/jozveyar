@@ -19,6 +19,7 @@
   "dependencies": {
     "@jozveyar/contracts": "workspace:*",
     "@jozveyar/geo": "workspace:*",
+    "@jozveyar/text": "workspace:*",
     "drizzle-orm": "0.45.3",
     "postgres": "3.4.9"
   },
