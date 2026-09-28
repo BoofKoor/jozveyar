@@ -2,14 +2,15 @@ import { Logo } from '@jozveyar/ui';
 
 import { PanelNav } from '../../../components/PanelNav';
 import { panelPath } from '../../../lib/gate';
-import { roleName } from '../../../lib/messages';
+import { roleLabel } from '../../../lib/messages';
 import { can } from '../../../lib/server/auth';
 import { requireSession } from '../../../lib/server/context';
 import { logoutAction } from '../actions';
 
 /**
- * پوستهٔ پنل (طرح پنل، تصمیم ۲۴): سربرگ سفید با لوگو، «پنل مدیریت»، نام و نقش ادمین و «خروج»، و زبانه‌ها.
- * هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
+ * پوستهٔ پنل (طرح پنل، تصمیم ۲۴): سربرگ سفید با لوگو، «پنل مدیریت»، نام و نقش ادمین و «خروج»، و زبانه‌ها. کاربر چاپخانه (برش
+ * ۵٫۳) به جای نقش نام چاپخانه‌اش را دارد («حسن · چاپ نور») و فقط «پیشخوان» و «سفارش‌ها». هر صفحه هم خودش نشست و مجوز را
+ * می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
  */
 export default async function PanelLayout({ children, params }: { children: React.ReactNode; params: Promise<{ gate: string }> }) {
   const { gate } = await params;
@@ -37,7 +38,7 @@ export default async function PanelLayout({ children, params }: { children: Reac
           </div>
           <div className="ad-user">
             <span>
-              {session.displayName} · {roleName(session.roles)}
+              {session.displayName} · {roleLabel(session.roles, session.partner)}
             </span>
             <form action={logoutAction}>
               <input type="hidden" name="gate" value={gate} />

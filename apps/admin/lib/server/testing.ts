@@ -5,10 +5,12 @@
 
 import {
   ADMIN_ROLES,
+  PARTNER_ROLE,
   isAdminRole,
   type AdminEventInput,
   type AdminEventRow,
   type AdminInviteRow,
+  type AdminPartnerChoice,
   type AdminStore,
   type AdminUserRow,
 } from '@jozveyar/db';
@@ -35,6 +37,9 @@ interface AttemptRow {
 export function memoryAdminStore(): AdminStore & {
   users: Map<string, AdminUserRow>;
   roles: Map<string, string[]>;
+  /** چاپخانه‌ها (برش ۵٫۳)، و چاپخانهٔ هر کاربر چاپخانه. */
+  partners: Map<string, AdminPartnerChoice & { active: boolean }>;
+  partnerOf: Map<string, string>;
   invites: AdminInviteRow[];
   sessions: SessionRow[];
   attempts: AttemptRow[];
@@ -42,6 +47,8 @@ export function memoryAdminStore(): AdminStore & {
 } {
   const users = new Map<string, AdminUserRow>();
   const roles = new Map<string, string[]>();
+  const partners = new Map<string, AdminPartnerChoice & { active: boolean }>();
+  const partnerOf = new Map<string, string>();
   const invites: AdminInviteRow[] = [];
   const sessions: SessionRow[] = [];
   const attempts: AttemptRow[] = [];
@@ -84,9 +91,23 @@ export function memoryAdminStore(): AdminStore & {
 
   const byUsername = (username: string) => [...users.values()].find((u) => u.username === username) ?? null;
 
+  const partnerRef = (userId: string) => {
+    const partner = partners.get(partnerOf.get(userId) ?? '');
+    return partner ? { id: partner.id, name: partner.name } : null;
+  };
+
+  /** نقش تازه، مثل ردیف `admin_user_roles`: نقش چاپخانه با چاپخانه‌اش، بقیه بی آن. */
+  const setRole = (userId: string, role: string, partnerId: string | null) => {
+    roles.set(userId, [role]);
+    if (role === PARTNER_ROLE && partnerId) partnerOf.set(userId, partnerId);
+    else partnerOf.delete(userId);
+  };
+
   return {
     users,
     roles,
+    partners,
+    partnerOf,
     invites,
     sessions,
     attempts,
@@ -166,6 +187,7 @@ export function memoryAdminStore(): AdminStore & {
         user: { ...user },
         roles: [...(roles.get(user.id) ?? [])].sort(),
         permissions: permissionsOf(user.id),
+        partner: partnerRef(user.id),
       };
     },
 
@@ -186,6 +208,13 @@ export function memoryAdminStore(): AdminStore & {
     },
 
     async createInvite(input) {
+      let partner: AdminPartnerChoice | null = null;
+      if (input.role === PARTNER_ROLE) {
+        if (!input.partnerId) return { ok: false, reason: 'partner_required' };
+        const active = partners.get(input.partnerId);
+        if (!active?.active) return { ok: false, reason: 'partner_inactive' };
+        partner = active;
+      }
       const existing = byUsername(input.username);
       let userId: string;
       if (existing) {
@@ -201,7 +230,7 @@ export function memoryAdminStore(): AdminStore & {
         });
         revokeSessionsOf(userId, input.at);
         revokeOpen(userId, input.at);
-        if (input.role) roles.set(userId, [input.role]);
+        if (input.role) setRole(userId, input.role, partner?.id ?? null);
       } else {
         if (!input.role) return { ok: false, reason: 'role_required' };
         if (!/^[a-z][a-z0-9_.-]{2,31}$/.test(input.username)) throw new Error('admin_users_username');
@@ -220,7 +249,7 @@ export function memoryAdminStore(): AdminStore & {
           createdBy: input.createdBy,
           lastLoginAt: null,
         });
-        roles.set(userId, [input.role]);
+        setRole(userId, input.role, partner?.id ?? null);
       }
       invites.push({
         id: input.inviteId,
@@ -237,7 +266,11 @@ export function memoryAdminStore(): AdminStore & {
         ...input.event,
         targetId: userId,
         at: input.at,
-        detail: { ...(input.event.detail as object), reset: Boolean(existing) },
+        detail: {
+          ...(input.event.detail as object),
+          ...(partner ? { partner: { id: partner.id, name: partner.name } } : {}),
+          reset: Boolean(existing),
+        },
       });
       return { ok: true, userId, reset: Boolean(existing) };
     },
@@ -246,7 +279,7 @@ export function memoryAdminStore(): AdminStore & {
       const invite = invites.find((i) => i.tokenHash === tokenHash);
       if (!invite) return null;
       const user = users.get(invite.adminUserId)!;
-      return { invite: { ...invite }, user: { ...user }, roles: [...(roles.get(user.id) ?? [])].sort() };
+      return { invite: { ...invite }, user: { ...user }, roles: [...(roles.get(user.id) ?? [])].sort(), partner: partnerRef(user.id) };
     },
 
     async completeInvite(input) {
@@ -285,8 +318,20 @@ export function memoryAdminStore(): AdminStore & {
           const open = invites
             .filter((i) => i.adminUserId === user.id && !i.usedAt && !i.revokedAt && i.expiresAt.getTime() > at.getTime())
             .sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0];
-          return { user: { ...user }, roles: [...(roles.get(user.id) ?? [])].sort(), invite: open ? { expiresAt: open.expiresAt } : null };
+          return {
+            user: { ...user },
+            roles: [...(roles.get(user.id) ?? [])].sort(),
+            partner: partnerRef(user.id),
+            invite: open ? { expiresAt: open.expiresAt } : null,
+          };
         });
+    },
+
+    async partnerChoices() {
+      return [...partners.values()]
+        .filter((partner) => partner.active)
+        .sort((a, b) => Number(a.isDefault) - Number(b.isDefault))
+        .map(({ active: _active, ...partner }) => partner);
     },
 
     async disableUser(userId, at, event) {

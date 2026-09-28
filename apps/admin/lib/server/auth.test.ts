@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { unseal } from '@jozveyar/db';
 import { toPersianDigits } from '@jozveyar/text';
 
-import { createAdminAuth, type AdminSession, userTotpContext } from './auth';
+import { createAdminAuth, scopeOf, type AdminSession, userTotpContext } from './auth';
 import { normalizePassword, type Passwords } from './password';
 import { memoryAdminStore } from './testing';
 import { base32Decode, totpAt } from './totp';
@@ -34,7 +34,18 @@ const IDLE = HOUR;
 const INVITE = 15 * MINUTE;
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 200;
-const OPERATOR_PERMISSIONS = ['files.download', 'orders.address', 'orders.assign', 'orders.read', 'orders.status', 'tariff.read'];
+// لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را. چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042).
+const OPERATOR_PERMISSIONS = [
+  'files.download',
+  'orders.address',
+  'orders.assign',
+  'orders.cancel',
+  'orders.money',
+  'orders.read',
+  'orders.status',
+  'tariff.read',
+];
+const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status'];
 
 /** argon2 جدا در `password.test.ts`؛ اینجا همان قرارداد، سریع، با شمارش صدازدن‌ها. */
 function fakePasswords() {
@@ -533,6 +544,110 @@ describe('ورود پنل و ادمین‌ها', () => {
       expect(admin.ok && admin.value.map((e) => e.action)).toEqual(['admins.enroll', 'admins.invite']);
       const odd = await auth.listEvents(sara.session, { kind: "a'; --" });
       expect(odd.ok && odd.value).toHaveLength(50);
+    });
+  });
+
+  describe('کاربر چاپخانه (۵٫۳)', () => {
+    const NOOR = '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e0002';
+    const FIRST = '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e0001';
+    const AFTAB = '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e0003';
+    beforeEach(() => {
+      store.partners.set(FIRST, { id: FIRST, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, active: true });
+      store.partners.set(NOOR, { id: NOOR, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, active: true });
+      store.partners.set(AFTAB, { id: AFTAB, name: 'چاپ آفتاب', cityName: 'اصفهان', isDefault: false, active: false });
+    });
+
+    it('با پیوند یک‌باره و کد تازه، مثل متصدی؛ نشست محدودهٔ چاپخانه و فقط سه مجوز دارد؛ رویداد با نام چاپخانه', async () => {
+      const sara = await enroll('sara');
+      later(STEP);
+      const invited = await auth.inviteAdmin(
+        sara.session,
+        { username: 'hasan.noor', displayName: 'حسن نوری', role: 'print_partner', partner: NOOR, code: codeOf(sara.secret) },
+        IP,
+      );
+      expect(invited).toMatchObject({ ok: true, value: { username: 'hasan.noor', reset: false } });
+      if (!invited.ok) return;
+      expect(store.roles.get(invited.value.userId)).toEqual(['print_partner']);
+      expect(store.events.at(-1)).toMatchObject({
+        action: 'admins.invite',
+        detail: { username: 'hasan.noor', role: 'print_partner', partner: { id: NOOR, name: 'چاپ نور' }, reset: false },
+      });
+      const info = await auth.inviteInfo(invited.value.token);
+      expect(info).toMatchObject({ ok: true, value: { role: 'print_partner', partnerName: 'چاپ نور', creatorName: 'sara' } });
+      if (!info.ok) return;
+      const done = await auth.completeInvite(invited.value.token, { password: PASSWORD, confirm: PASSWORD, code: codeOf(info.value.secret) }, IP);
+      if (!done.ok) throw new Error(done.error);
+      const hasan = await auth.authenticate(done.value.token);
+      expect(hasan).toMatchObject({ roles: ['print_partner'], permissions: PARTNER_PERMISSIONS, partner: { id: NOOR, name: 'چاپ نور' } });
+      expect(scopeOf(hasan!)).toEqual({ kind: 'partner', partnerId: NOOR });
+      // مالک و متصدی: همه (شاهد محدوده).
+      expect(scopeOf(sara.session)).toEqual({ kind: 'all' });
+      const admins = await auth.listAdmins(sara.session);
+      expect(admins.ok && admins.value.map((a) => [a.user.username, a.partner?.name ?? null])).toEqual([
+        ['sara', null],
+        ['hasan.noor', 'چاپ نور'],
+      ]);
+      // کاربر چاپخانه ادمین نمی‌سازد و چاپخانه‌ها را نمی‌بیند.
+      later(STEP);
+      expect(await auth.partnerChoices(hasan!)).toEqual({ ok: false, status: 403, error: 'forbidden' });
+      expect(
+        await auth.inviteAdmin(hasan!, { username: 'ali', displayName: 'علی', role: 'print_partner', partner: NOOR, code: codeOf(info.value.secret) }, IP),
+      ).toEqual({ ok: false, status: 403, error: 'forbidden' });
+    });
+
+    it('بی چاپخانه، چاپخانهٔ غیرفعال یا ناموجود: پیش از کد، و کد هدر نمی‌رود؛ چاپخانهٔ نقش‌های دیگر نادیده', async () => {
+      const sara = await enroll('sara');
+      later(STEP);
+      const form = { username: 'hasan', displayName: 'حسن', role: 'print_partner', code: codeOf(sara.secret) };
+      expect(await auth.inviteAdmin(sara.session, form, IP)).toMatchObject({ status: 400, error: 'partner_required' });
+      expect(await auth.inviteAdmin(sara.session, { ...form, partner: '' }, IP)).toMatchObject({ status: 400, error: 'partner_required' });
+      expect(await auth.inviteAdmin(sara.session, { ...form, partner: AFTAB }, IP)).toMatchObject({ status: 409, error: 'partner_inactive' });
+      expect(await auth.inviteAdmin(sara.session, { ...form, partner: 'nope' }, IP)).toMatchObject({ status: 409, error: 'partner_inactive' });
+      expect(store.users.get(sara.userId)!.failedAttempts).toBe(0);
+      expect(store.users.size).toBe(1);
+      // همین حالا غیرفعال شد، بین سنجش و ساختن: خود ذخیره‌گاه زیر قفل رد می‌کند.
+      const choices = store.partnerChoices.bind(store);
+      store.partnerChoices = async () => {
+        const list = await choices();
+        store.partners.get(NOOR)!.active = false;
+        return list;
+      };
+      expect(await auth.inviteAdmin(sara.session, { ...form, partner: NOOR }, IP)).toMatchObject({ status: 409, error: 'partner_inactive' });
+      expect(store.users.size).toBe(1);
+      store.partnerChoices = choices;
+      store.partners.get(NOOR)!.active = true;
+      // متصدی با چاپخانه در فرم: چاپخانه نادیده، نقش بی محدوده.
+      later(STEP);
+      const operator = await auth.inviteAdmin(
+        sara.session,
+        { username: 'ali', displayName: 'علی', role: 'operator', partner: NOOR, code: codeOf(sara.secret) },
+        IP,
+      );
+      if (!operator.ok) throw new Error(operator.error);
+      expect([store.roles.get(operator.value.userId), store.partnerOf.get(operator.value.userId)]).toEqual([['operator'], undefined]);
+    });
+
+    it('فرم «افزودن ادمین»: چاپخانه‌های فعال، طرف قرارداد اول و پیش‌فرض آخر؛ فقط با `admins.manage`', async () => {
+      const sara = await enroll('sara');
+      const choices = await auth.partnerChoices(sara.session);
+      expect(choices.ok && choices.value.map((c) => [c.name, c.isDefault])).toEqual([
+        ['چاپ نور', false],
+        ['چاپخانهٔ جزوه‌یار', true],
+      ]);
+    });
+
+    it('دستور سرور کاربر چاپخانه نمی‌سازد (چاپخانه را فرم پنل انتخاب می‌کند)؛ کد ورود تازه‌اش همان نقش و چاپخانه را نگه می‌دارد', async () => {
+      expect(await auth.serverInvite({ username: 'hasan', role: 'print_partner' })).toMatchObject({ status: 400, error: 'invalid_role' });
+      const sara = await enroll('sara');
+      later(STEP);
+      const invited = await auth.inviteAdmin(
+        sara.session,
+        { username: 'hasan', displayName: 'حسن', role: 'print_partner', partner: NOOR, code: codeOf(sara.secret) },
+        IP,
+      );
+      if (!invited.ok) throw new Error(invited.error);
+      expect(await auth.serverInvite({ username: 'hasan' })).toMatchObject({ ok: true, value: { reset: true } });
+      expect([store.roles.get(invited.value.userId), store.partnerOf.get(invited.value.userId)]).toEqual([['print_partner'], NOOR]);
     });
   });
 

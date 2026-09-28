@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { PANEL_BUCKETS, type PanelBucket } from '@jozveyar/db';
+import type { PanelBucket } from '@jozveyar/db';
 import { formatNumber } from '@jozveyar/text';
 
 import { NoAccess } from '../../../../components/NoAccess';
@@ -37,7 +37,8 @@ const one = (value: string | string[] | undefined) => (typeof value === 'string'
 /**
  * سفارش‌ها (طرح پنل): جست‌وجو (شماره، موبایل یا نام گیرنده)، چیپ‌های وضعیت با شمار (باز، تحویل پست شد، لغو شد، در
  * انتظار پرداخت، رهاشده، همه)، و ردیف‌ها؛ صفحه‌ای ۵۰ تا. همه در نشانی (`?q=&status=&page=`)، بی JS. جست‌وجو در همهٔ
- * سفارش‌هاست و چیپ‌ها شمار همان جست‌وجو را می‌گویند.
+ * سفارش‌هاست و چیپ‌ها شمار همان جست‌وجو را می‌گویند. کاربر چاپخانه (۵٫۳، طرح `m-orders` با نقش «چاپخانه») فقط سفارش‌های
+ * چاپخانهٔ خودش را دارد، با چهار چیپ (باز، تحویل پست شد، لغو شد، همه)، بی ستون مبلغ و بی یادداشت «رهاشده».
  */
 export default async function OrdersPage({
   params,
@@ -50,10 +51,11 @@ export default async function OrdersPage({
   const query = await searchParams;
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'orders.read')) return <NoAccess gate={gate} />;
+  if (!can(session, 'orders.read')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await orders.list(session, { status: one(query.status), q: one(query.q), page: one(query.page) });
-  if (!result.ok) return <NoAccess gate={gate} />;
-  const { bucket, q, counts, page, pages, rows, bounds } = result.value;
+  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  const { buckets, bucket, q, counts, page, pages, rows, bounds } = result.value;
+  const money = can(session, 'orders.money');
   const base = panelPath(gate, '/orders');
   const hrefOf = (params: Record<string, string | number | undefined>) => {
     const search = new URLSearchParams(
@@ -82,24 +84,24 @@ export default async function OrdersPage({
         />
       </form>
       <nav className="ad-chips" aria-label="وضعیت سفارش">
-        {PANEL_BUCKETS.map((b) => (
+        {buckets.map((b) => (
           <Link key={b} className="ad-chip" href={hrefOf({ status: b, q })} aria-current={b === bucket ? 'page' : undefined}>
             {BUCKET_LABELS[b]} <span className="num">{formatNumber(counts[b])}</span>
           </Link>
         ))}
       </nav>
-      <section className="jy-card ad-list" aria-label={`سفارش‌های ${BUCKET_LABELS[bucket]}`}>
+      <section className={`jy-card ad-list${money ? '' : ' ad-list--nosum'}`} aria-label={`سفارش‌های ${BUCKET_LABELS[bucket]}`}>
         {rows.length > 0 ? (
           <>
             <div className="ad-cols" aria-hidden="true">
               <span>سفارش</span>
               <span>گیرنده</span>
               <span>جزوه</span>
-              <span>مبلغ (تومان)</span>
+              {money ? <span>مبلغ (تومان)</span> : null}
               <span>وضعیت</span>
               <span>{last.head}</span>
             </div>
-            <OrderRows gate={gate} rows={rows} bounds={bounds} dates={last.dates} />
+            <OrderRows gate={gate} rows={rows} bounds={bounds} dates={last.dates} money={money} />
           </>
         ) : (
           <p className="ad-empty">
@@ -140,9 +142,11 @@ export default async function OrdersPage({
           </div>
         ) : null}
       </section>
-      <p className="ad-meta ad-gap">
-        «رهاشده»: سفارشی که پرداخت نشد و فایل‌هایش دیگر روی سرور نیست، یا تا یک ساعت دیگر پاک می‌شود؛ از فهرست باز جداست.
-      </p>
+      {buckets.includes('abandoned') ? (
+        <p className="ad-meta ad-gap">
+          «رهاشده»: سفارشی که پرداخت نشد و فایل‌هایش دیگر روی سرور نیست، یا تا یک ساعت دیگر پاک می‌شود؛ از فهرست باز جداست.
+        </p>
+      ) : null}
     </>
   );
 }

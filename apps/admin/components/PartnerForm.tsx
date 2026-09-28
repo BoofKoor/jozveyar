@@ -32,7 +32,7 @@ export function PartnerForm({ gate, back, citiesList, partner }: Props) {
       <h1 id="t-pedit" className="jy-card__title">
         {partner ? 'ویرایش چاپخانه' : 'افزودن چاپخانه'}
       </h1>
-      <p className="ad-lead">چاپخانه به‌تنهایی به کسی دسترسی نمی‌دهد.</p>
+      <p className="ad-lead">چاپخانه به‌تنهایی به کسی دسترسی نمی‌دهد؛ کاربرش را بعد از «ادمین‌ها» می‌سازی.</p>
       {other ? <Alert tone="error">{other}</Alert> : null}
       <form action={action}>
         <input type="hidden" name="gate" value={gate} />

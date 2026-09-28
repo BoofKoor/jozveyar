@@ -116,10 +116,13 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
           ...(detail.locked === true ? ['؛ حساب قفل و نشست‌ها بسته شد'] : []),
         ],
       };
-    case 'admins.invite':
+    case 'admins.invite': {
+      // کاربر چاپخانه (۵٫۳) با نام چاپخانه‌اش، طرح: «پیوند ثبت برای حسن (چاپخانه، چاپ نور) ساخته شد».
+      const partner = str((detail.partner as Detail | undefined)?.name);
       return detail.reset === true
         ? { badge: null, text: ['کد ورود تازه برای ', { ltr: name }, ' ساخته شد'] }
-        : { badge: null, text: ['پیوند ثبت برای ', { ltr: name }, role ? ` (${role})` : '', ' ساخته شد'] };
+        : { badge: null, text: ['پیوند ثبت برای ', { ltr: name }, role ? ` (${role}${partner ? `، ${partner}` : ''})` : '', ' ساخته شد'] };
+    }
     case 'admins.enroll':
       return { badge: null, text: ['ثبت: رمز و برنامهٔ تأیید گذاشته شد'] };
     case 'admins.disable':

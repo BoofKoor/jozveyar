@@ -40,7 +40,7 @@ export default async function TariffVersionPage({
   const query = await searchParams;
   const { tariff } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'tariff.read')) return <NoAccess gate={gate} />;
+  if (!can(session, 'tariff.read')) return <NoAccess gate={gate} partner={session.partner} />;
   const home = panelPath(gate, '/tariff');
   const back = (
     <Link href={home} className="ad-back">
@@ -50,7 +50,7 @@ export default async function TariffVersionPage({
   );
   const result = await tariff.version(session, param);
   if (!result.ok) {
-    if (result.error === 'forbidden') return <NoAccess gate={gate} />;
+    if (result.error === 'forbidden') return <NoAccess gate={gate} partner={session.partner} />;
     return (
       <>
         {back}

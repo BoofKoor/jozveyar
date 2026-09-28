@@ -24,6 +24,7 @@ import { postHandoffDue } from '@jozveyar/text';
 
 import {
   bucketOf,
+  bucketsOf,
   changesNote,
   dayBounds,
   dueBadge,
@@ -34,11 +35,13 @@ import {
   filesUntil,
   isRevert,
   jozveSegs,
+  linesWithoutMoney,
   orderNumberOf,
   orderState,
   orderTimeline,
   pageOf,
   parseSearch,
+  partnerView,
   paymentView,
   pdfFileName,
   printReady,
@@ -55,6 +58,7 @@ import {
   transitionOf,
   volumeFileName,
   volumesSegs,
+  withoutMoney,
   type Seg,
 } from './orders';
 
@@ -100,6 +104,15 @@ describe('فهرست: پارامترهای نشانی و جست‌وجو', () =>
     expect(bucketOf('abandoned', false)).toBe('abandoned');
     expect(bucketOf('paid', false)).toBe('open');
     expect(bucketOf('constructor', true)).toBe('all');
+  });
+
+  it('چیپ‌های کاربر چاپخانه (۵٫۳): باز، تحویل پست شد، لغو شد و همه؛ چیپ مالک و متصدی که او ندارد یعنی «باز»', () => {
+    const partner = bucketsOf({ kind: 'partner', partnerId: 'p2' });
+    expect(partner).toEqual(['open', 'handed', 'cancelled', 'all']);
+    expect(bucketsOf({ kind: 'all' })).toEqual(['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all']);
+    expect(bucketOf('awaiting', false, partner)).toBe('open');
+    expect(bucketOf('abandoned', true, partner)).toBe('all');
+    expect(bucketOf('cancelled', false, partner)).toBe('cancelled');
   });
 
   it('صفحه و شمارهٔ سفارش نشانی فقط عدد مثبت', () => {
@@ -186,7 +199,7 @@ describe('مهلت تحویل به پست، به روز تهران', () => {
   it('کاشی‌ها با چند روز و بی سفارش', () => {
     const texts = (summary: Parameters<typeof dueTiles>[0]) => dueTiles(summary, bounds).map((t) => t.text);
     const empty = { overdue: 0, today: 0, tomorrow: 0, later: 0, overdueRange: null, laterRange: null };
-    expect(texts(empty)).toEqual(['هیچ سفارشی دیر نشده', 'تا پایان امروز، دوشنبه', 'تا پایان سه‌شنبه 14 مهر', 'پس از فردا']);
+    expect(texts(empty)).toEqual(['هیچ سفارشی دیر نشده', 'تا پایان امروز، دوشنبه', 'تا پایان سه‌شنبه 14 مهر', 'سفارشی نیست']);
     expect(
       texts({
         ...empty,
@@ -395,6 +408,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
         id: 1,
         at: tehran('2026-10-03 14:05'),
         fromName: null,
+        toPartnerId: 'partner-noor',
         toName: 'چاپ نور',
         actor: 'system',
         adminName: null,
@@ -810,6 +824,7 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
       id: 1,
       at: tehran('2026-10-03 14:05'),
       fromName: null,
+      toPartnerId: 'partner-noor',
       toName: 'چاپ نور',
       actor: 'system',
       adminName: null,
@@ -865,5 +880,71 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
       ['برگرداندن: تحویل پست شد ← در حال چاپ؛ اشتباه زدم', 'مالک'],
       ['لغو شد', 'سارا'],
     ]);
+  });
+});
+
+/* ───────────────────────── بی مبلغ، و از چشم چاپخانه (۵٫۳) ───────────────────────── */
+
+describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
+  /** هر مقدار پولی که صفر نیست، در هر عمقی. */
+  const money = (value: unknown): string[] =>
+    [...JSON.stringify(value).matchAll(/"(\w*Rials)":(-?\d+)/g)].filter(([, , amount]) => amount !== '0').map(([, key]) => key!);
+
+  it('بی مبلغ: هر مبلغ سفارش و ریز قیمت منجمدش صفر، پرداخت‌ها هیچ؛ مشخصات چاپ و تاریخ‌ها همان', () => {
+    const paid = details({ rest: { payments: [{ id: 'pay', amountRials: BREAKDOWN.totalRials } as PaymentRow] } });
+    expect(money(paid).length).toBeGreaterThan(5);
+    const hidden = withoutMoney(paid);
+    expect(money(hidden)).toEqual([]);
+    expect(hidden.payments).toEqual([]);
+    expect(hidden.order.paidAt).toEqual(paid.order.paidAt);
+    expect(hidden.order.paidAt).toBeInstanceOf(Date);
+    // مشخصات چاپ از همان ریز قیمت (جلد و برگ) دست نخورده.
+    const priced = (d: PanelOrderDetails) => (d.order.priceBreakdown as typeof BREAKDOWN).items[0]!;
+    expect([priced(hidden).volumes, priced(hidden).sheets, priced(hidden).sheetsPerVolume]).toEqual([
+      priced(paid).volumes,
+      priced(paid).sheets,
+      priced(paid).sheetsPerVolume,
+    ]);
+    expect(specFacts(hidden.items[0]!, priced(hidden))).toEqual(specFacts(paid.items[0]!, priced(paid)));
+    // خود جزئیات دست نخورد (شاهد: همان مبلغ هنوز آنجاست).
+    expect(paid.order.totalRials).toBe(BREAKDOWN.totalRials);
+    const line = { orderNumber: 10027, totalRials: 3_747_500, pageCount: 120 } as PanelOrderLine;
+    expect(linesWithoutMoney([line])).toEqual([{ orderNumber: 10027, totalRials: 0, pageCount: 120 }]);
+  });
+
+  it('از چشم چاپخانه: بی دلیل، بی چاپخانهٔ دیگر، و رویدادهای سفارش فقط با آنچه سطرشان می‌گوید', () => {
+    const d = details({
+      order: { status: 'cancelled' },
+      rest: {
+        statusEvents: [
+          statusEvent({ fromStatus: 'paid', toStatus: 'printing', adminName: 'حسن' }),
+          statusEvent({ fromStatus: 'printing', toStatus: 'paid', adminName: 'سارا', note: { reason: 'اشتباه زد' } }),
+          statusEvent({ fromStatus: 'paid', toStatus: 'cancelled', adminName: 'سارا', note: { reason: 'مشتری خواست؛ 374,750 تومان برگشت' } }),
+        ],
+        assignments: [
+          { id: 1, at: tehran('2026-10-03 14:05'), fromName: null, toPartnerId: 'partner-aftab', toName: 'چاپ آفتاب', actor: 'system', adminName: null, rule: 'province', reason: null },
+          { id: 2, at: tehran('2026-10-04 09:00'), fromName: 'چاپ آفتاب', toPartnerId: 'partner-noor', toName: 'چاپ نور', actor: 'admin', adminName: 'سارا', rule: null, reason: 'آفتاب کند است' },
+        ],
+        events: [
+          { id: 7, at: tehran('2026-10-04 09:00'), action: 'orders.assign', detail: { reason: 'آفتاب کند است' }, adminName: 'سارا' },
+          { id: 8, at: tehran('2026-10-04 10:00'), action: 'orders.pdf_download', detail: { orderNumber: 10027, item: 1 }, adminName: 'حسن' },
+        ],
+      },
+    });
+    const seen = partnerView(d, 'partner-noor');
+    const lines = orderTimeline(seen).map((entry) => `${entry.text.join('')} · ${entry.who}`);
+    // به ترتیب زمان: جابه‌جایی و دانلود دیروز، وضعیت‌ها امروز.
+    expect(lines).toEqual([
+      'به چاپ نور سپرده شد · سارا',
+      'PDF اصلی جزوه دانلود شد · حسن',
+      'در صف چاپ ← در حال چاپ · حسن',
+      'برگرداندن: در حال چاپ ← در صف چاپ · سارا',
+      'لغو شد · سارا',
+    ]);
+    for (const hidden of ['اشتباه زد', 'مشتری خواست', 'آفتاب']) expect(JSON.stringify(seen)).not.toContain(hidden);
+    // شاهد: مالک و متصدی همه را دارند.
+    const all = orderTimeline(d).map((entry) => entry.text.join(''));
+    expect(all).toContain('برگرداندن: در حال چاپ ← در صف چاپ؛ اشتباه زد');
+    expect(all).toContain('از «چاپ آفتاب» به «چاپ نور» رفت؛ آفتاب کند است');
   });
 });

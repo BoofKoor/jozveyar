@@ -38,7 +38,8 @@ export default async function InvitePage({ params }: { params: Promise<{ gate: s
   }
 
   const { value } = info;
-  const role = value.role ? ROLE_NAMES[value.role] : 'ادمین';
+  // کاربر چاپخانه (۵٫۳) با نام چاپخانه‌اش: «سارا تو را کاربر چاپ نور در پنل جزوه‌یار کرده است.»
+  const role = value.partnerName ? `کاربر ${value.partnerName} در` : value.role ? ROLE_NAMES[value.role] : 'ادمین';
   const lead = value.reset
     ? 'کد ورودت از نو ساخته شد. رمز تازه بگذار و برنامهٔ تأیید گوشی را دوباره وصل کن؛ حساب قبلی برنامه دیگر کار نمی‌کند.'
     : value.creatorName

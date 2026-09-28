@@ -51,18 +51,18 @@ function doneNote(done: string, partner: PartnerView | undefined) {
 }
 
 /**
- * چاپخانه‌ها (طرح پنل `m-partners`، برش ۵٫۲، ADR-042): فقط مالک. هر چاپخانه با شهر، سفارش‌های باز و کاربرها؛ «ویرایش» نام و
- * شهر، «پیش‌فرض کن» در خود فهرست، «غیرفعال کن» فقط برای چاپخانه‌ای که پیش‌فرض نیست و سفارش باز ندارد، و «فعال کن» برای
- * غیرفعال. سرور هر کار را خودش هم می‌سنجد.
+ * چاپخانه‌ها (طرح پنل `m-partners`، برش ۵٫۲، ADR-042): فقط مالک. هر چاپخانه با شهر، سفارش‌های باز و کاربرها (از ۵٫۳ کاربرهای
+ * نقش «چاپخانه»؛ بی آن‌ها همان مالک و متصدی)؛ «ویرایش» نام و شهر، «پیش‌فرض کن» در خود فهرست، «غیرفعال کن» فقط برای چاپخانه‌ای که
+ * پیش‌فرض نیست و سفارش باز ندارد، و «فعال کن» برای غیرفعال. سرور هر کار را خودش هم می‌سنجد.
  */
 export default async function PartnersPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
   const query = await searchParams;
   const { partners } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} />;
+  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await partners.list(session);
-  if (!result.ok) return <NoAccess gate={gate} />;
+  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
   const list = result.value;
   const error = one(query, 'e');
   const target = list.find((partner) => partner.id === one(query, 'p'));
@@ -125,7 +125,8 @@ export default async function PartnersPage({ params, searchParams }: { params: P
           ))}
         </ul>
         <p className="ad-hint ad-gap">
-          چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد.
+          چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد. کاربر
+          چاپخانه را از «ادمین‌ها» بساز.
         </p>
       </section>
     </>

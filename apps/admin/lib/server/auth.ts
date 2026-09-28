@@ -22,15 +22,20 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 
 import {
+  ALL_ORDERS,
+  PARTNER_ROLE,
   isAdminRole,
   seal,
   unseal,
   type AdminEventView,
   type AdminListItem,
+  type AdminPartnerChoice,
+  type AdminPartnerRef,
   type AdminPermission,
   type AdminRole,
   type AdminStore,
   type AdminUserRow,
+  type PanelScope,
 } from '@jozveyar/db';
 import { toLatinDigits } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
@@ -67,9 +72,18 @@ export interface AdminSession {
   roles: string[];
   permissions: string[];
   expiresAt: Date;
+  /** چاپخانهٔ کاربر چاپخانه (برش ۵٫۳): محدودهٔ سفارش‌هایش، و نامش در سربرگ؛ null یعنی همهٔ سفارش‌ها. */
+  partner: AdminPartnerRef | null;
 }
 
 export const can = (session: AdminSession, permission: AdminPermission) => session.permissions.includes(permission);
+
+/**
+ * محدودهٔ سفارش‌های این نشست (برش ۵٫۳، ADR-042): کاربر چاپخانه فقط سفارش‌هایی که امروز به چاپخانهٔ خودش سپرده شده‌اند، مالک و
+ * متصدی همه. هر خواندن و نوشتن ذخیره‌گاه سفارش‌های پنل همین را آرگومان اجباری می‌گیرد.
+ */
+export const scopeOf = (session: AdminSession): PanelScope =>
+  session.partner ? { kind: 'partner', partnerId: session.partner.id } : ALL_ORDERS;
 
 export interface AdminAuthDeps {
   store: AdminStore;
@@ -122,6 +136,8 @@ export interface InviteInfo {
   username: string;
   displayName: string;
   role: AdminRole | null;
+  /** چاپخانهٔ کاربر چاپخانه (برش ۵٫۳): «… تو را کاربر چاپ نور در پنل جزوه‌یار کرده است». */
+  partnerName: string | null;
   /** چه کسی پیوند را ساخت؛ null یعنی دستور روی سرور. */
   creatorName: string | null;
   /** ادمینی که قبلاً وارد شده بود (کد ورود تازه). */
@@ -192,6 +208,8 @@ export function createAdminAuth(deps: AdminAuthDeps) {
     username: string;
     displayName: string;
     role: AdminRole | null;
+    /** چاپخانهٔ نقش «چاپخانه» (۵٫۳). */
+    partnerId?: string | null;
     createdBy: string | null;
     allowExisting: boolean;
     ip: string | null;
@@ -205,6 +223,7 @@ export function createAdminAuth(deps: AdminAuthDeps) {
       username: input.username,
       displayName: input.displayName,
       role: input.role,
+      partnerId: input.partnerId ?? null,
       tokenHash: tokenHash(token),
       totpSealed: seal(deps.secretsKey, makeSecret(), inviteTotpContext(inviteId)),
       at,
@@ -219,7 +238,18 @@ export function createAdminAuth(deps: AdminAuthDeps) {
         detail: { username: input.username, role: input.role },
       },
     });
-    if (!created.ok) return fail(409, created.reason === 'username_taken' ? 'username_taken' : 'invalid_role');
+    if (!created.ok) {
+      switch (created.reason) {
+        case 'username_taken':
+          return fail(409, 'username_taken');
+        case 'partner_required':
+          return fail(400, 'partner_required');
+        case 'partner_inactive':
+          return fail(409, 'partner_inactive');
+        case 'role_required':
+          return fail(409, 'invalid_role');
+      }
+    }
     return ok({
       token,
       expiresAt: later(at, INVITE_TTL_MS),
@@ -329,6 +359,7 @@ export function createAdminAuth(deps: AdminAuthDeps) {
         roles: view.roles,
         permissions: view.permissions,
         expiresAt: view.expiresAt,
+        partner: view.partner,
       };
     },
 
@@ -343,12 +374,13 @@ export function createAdminAuth(deps: AdminAuthDeps) {
 
     /**
      * دستور روی سرور (`infra/admin-invite.sh`): اولین ادمین، یا کد ورود تازهٔ هر ادمین (مالکی که گوشی‌اش
-     * گم شد). ادمین تازه بی نقش صریح مالک است؛ ادمین موجود نقش و نامش را نگه می‌دارد مگر نقش صریح بیاید.
+     * گم شد). ادمین تازه بی نقش صریح مالک است؛ ادمین موجود نقش و نامش را نگه می‌دارد مگر نقش صریح بیاید. نقش «چاپخانه» نه:
+     * چاپخانه‌اش را فرم «افزودن ادمین» پنل انتخاب می‌کند (۵٫۳)؛ کد ورود تازهٔ کاربر چاپخانهٔ موجود همان نقش و چاپخانه را نگه می‌دارد.
      */
     async serverInvite(input: { username: string; displayName?: string; role?: string }): Promise<Result<IssuedInvite>> {
       const username = normalizeUsername(input.username);
       if (!username) return fail(400, 'invalid_username');
-      if (input.role !== undefined && !isAdminRole(input.role)) return fail(400, 'invalid_role');
+      if (input.role !== undefined && (!isAdminRole(input.role) || input.role === PARTNER_ROLE)) return fail(400, 'invalid_role');
       const displayName = tidyInputFa(input.displayName ?? username);
       if (!displayName || displayName.length > DISPLAY_NAME_MAX) return fail(400, 'invalid_display_name');
       const existing = await store.findUserByUsername(username);
@@ -362,10 +394,13 @@ export function createAdminAuth(deps: AdminAuthDeps) {
       });
     },
 
-    /** «افزودن متصدی» (یا مالک) از پنل، با کد تازهٔ برنامهٔ تأیید. */
+    /**
+     * «افزودن ادمین» از پنل (طرح `m-admin-invite`): متصدی، چاپخانه (۵٫۳، با انتخاب یکی از چاپخانه‌های فعال) یا مالک، با کد تازهٔ
+     * برنامهٔ تأیید. هر سنجشی که بی کد جواب دارد پیش از کد؛ چاپخانه‌ای که همین حالا غیرفعال شد را خود `createInvite` زیر قفل می‌گیرد.
+     */
     async inviteAdmin(
       session: AdminSession,
-      form: { username: unknown; displayName: unknown; role: unknown; code: unknown },
+      form: { username: unknown; displayName: unknown; role: unknown; partner?: unknown; code: unknown },
       ip: string,
     ): Promise<Result<IssuedInvite>> {
       const denied = requirePermission(session, 'admins.manage');
@@ -375,11 +410,25 @@ export function createAdminAuth(deps: AdminAuthDeps) {
       const username = normalizeUsername(form.username);
       if (!username) return fail(400, 'invalid_username');
       if (!isAdminRole(form.role)) return fail(400, 'invalid_role');
+      let partnerId: string | null = null;
+      if (form.role === PARTNER_ROLE) {
+        const chosen = typeof form.partner === 'string' ? form.partner : '';
+        if (!chosen) return fail(400, 'partner_required');
+        if (!(await store.partnerChoices()).some((partner) => partner.id === chosen)) return fail(409, 'partner_inactive');
+        partnerId = chosen;
+      }
       // پیش از کد: نام تکراری کد را هدر نمی‌دهد (مسابقه را خود `createInvite` زیر قفل می‌گیرد).
       if (await store.findUserByUsername(username)) return fail(409, 'username_taken');
       const stepped = await stepUp(session, form.code, ip);
       if (!stepped.ok) return stepped;
-      return issueInvite({ username, displayName, role: form.role, createdBy: session.userId, allowExisting: false, ip });
+      return issueInvite({ username, displayName, role: form.role, partnerId, createdBy: session.userId, allowExisting: false, ip });
+    },
+
+    /** چاپخانه‌های فعالی که فرم «افزودن ادمین» برای نقش «چاپخانه» پیشنهاد می‌دهد (۵٫۳). */
+    async partnerChoices(session: AdminSession): Promise<Result<AdminPartnerChoice[]>> {
+      const denied = requirePermission(session, 'admins.manage');
+      if (denied) return denied;
+      return ok(await store.partnerChoices());
     },
 
     /** «کد ورود تازه»: پیوند ثبت تازه برای ادمین دیگر؛ رمز و برنامهٔ تأیید قبلی و نشست‌هایش باطل. */
@@ -460,6 +509,7 @@ export function createAdminAuth(deps: AdminAuthDeps) {
         username: row.user.username,
         displayName: row.user.displayName,
         role,
+        partnerName: row.partner?.name ?? null,
         creatorName: creator?.displayName ?? null,
         reset: row.user.lastLoginAt !== null,
         secret,

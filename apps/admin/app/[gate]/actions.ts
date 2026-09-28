@@ -105,7 +105,12 @@ export async function inviteAdminAction(_state: LinkState, form: FormData): Prom
   const gate = field(form, 'gate');
   const { auth } = requirePanel(gate);
   const session = await requireSession(gate);
-  const values = { displayName: field(form, 'displayName'), username: field(form, 'username'), role: field(form, 'role') };
+  const values = {
+    displayName: field(form, 'displayName'),
+    username: field(form, 'username'),
+    role: field(form, 'role'),
+    partner: field(form, 'partner').slice(0, 64),
+  };
   const result = await auth.inviteAdmin(session, { ...values, code: form.get('code') }, await requestIp());
   if (!result.ok) return failure(result, values);
   return { link: await linkOf(gate, result.value) };

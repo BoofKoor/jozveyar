@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 
 import { NoAccess } from '../../../../../../components/NoAccess';
 import { panelPath } from '../../../../../../lib/gate';
@@ -29,24 +30,10 @@ export default async function TicketPage({ params }: { params: Promise<{ gate: s
   const { gate, number } = await params;
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'orders.read') || !can(session, 'files.download')) return <NoAccess gate={gate} />;
+  if (!can(session, 'orders.read') || !can(session, 'files.download')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await orders.details(session, number);
-  if (!result.ok) {
-    return (
-      <>
-        <Link href={panelPath(gate, '/orders')} className="ad-back">
-          <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
-          سفارش‌ها
-        </Link>
-        <section className="jy-card ad-noaccess" aria-labelledby="t-missing">
-          <h1 id="t-missing" className="jy-card__title">
-            این سفارش پیدا نشد
-          </h1>
-          <p className="ad-lead">شماره را در فهرست سفارش‌ها جست‌وجو کن.</p>
-        </section>
-      </>
-    );
-  }
+  // سفارشی که نیست یا بیرون از محدوده است (۵٫۳): همان ۴۰۴ صفحهٔ سفارش.
+  if (!result.ok) notFound();
   const { details } = result.value;
   const orderNumber = details.order.orderNumber;
   const self = panelPath(gate, `/orders/${orderNumber}/ticket`);

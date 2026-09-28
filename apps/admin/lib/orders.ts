@@ -26,6 +26,7 @@ import {
   type PanelOrderItem,
   type PanelOrderLine,
   type PanelPdfJob,
+  type PanelScope,
   type PanelSearch,
   type PanelSection,
   type PanelStatusEvent,
@@ -70,9 +71,18 @@ export const BUCKET_LABELS: Record<PanelBucket, string> = {
   all: 'همه',
 };
 
-/** چیپ نشانی؛ بی چیپ، «باز»، مگر جست‌وجو باشد که در همه می‌گردد. */
-export function bucketOf(status: string | undefined, searching: boolean): PanelBucket {
-  return (PANEL_BUCKETS as readonly string[]).includes(status ?? '') ? (status as PanelBucket) : searching ? 'all' : 'open';
+/**
+ * چیپ‌های کاربر چاپخانه (طرح `m-orders`، برش ۵٫۳): سفارش پرداخت‌نشده هرگز به چاپخانه نمی‌رسد، پس «در انتظار پرداخت» و «رهاشده»
+ * نیست.
+ */
+export const PARTNER_BUCKETS = ['open', 'handed', 'cancelled', 'all'] as const satisfies readonly PanelBucket[];
+
+/** چیپ‌های هر محدوده، به ترتیب طرح. */
+export const bucketsOf = (scope: PanelScope): readonly PanelBucket[] => (scope.kind === 'partner' ? PARTNER_BUCKETS : PANEL_BUCKETS);
+
+/** چیپ نشانی از میان چیپ‌های همین محدوده؛ بی چیپ (یا چیپی که نیست)، «باز»، مگر جست‌وجو باشد که در همه می‌گردد. */
+export function bucketOf(status: string | undefined, searching: boolean, buckets: readonly PanelBucket[] = PANEL_BUCKETS): PanelBucket {
+  return (buckets as readonly string[]).includes(status ?? '') ? (status as PanelBucket) : searching ? 'all' : 'open';
 }
 
 /** شمارهٔ صفحهٔ فهرست؛ هر چیز دیگر یعنی صفحهٔ اول. */
@@ -150,7 +160,7 @@ export interface DueTile {
 
 /**
  * چهار کاشی پیشخوان (طرح پنل): شمارش و یک خط دربارهٔ مهلت. دیرشده‌ها روزی را می‌گویند که مهلتشان تمام شد
- * («دیروز»)، و «بعدتر» روز یا بازهٔ روزها.
+ * («دیروز»)، و «بعدتر» روز یا بازهٔ روزها؛ «بعدتر» خالی «سفارشی نیست»، مثل پیشخوان چاپخانه در طرح (۵٫۳؛ تا ۵٫۲ «پس از فردا»).
  */
 export function dueTiles(summary: PanelDueSummary, bounds: DayBounds): DueTile[] {
   const dayOf = (due: Date) => (due.getTime() === bounds.todayStart.getTime() ? 'دیروز' : formatDeadlineDay(due));
@@ -163,7 +173,7 @@ export function dueTiles(summary: PanelDueSummary, bounds: DayBounds): DueTile[]
         ? `${theirs(summary.overdue)} ${dayOf(earliest)} تمام شد`
         : `مهلت قدیمی‌ترینشان ${dayOf(earliest)} تمام شد`;
   }
-  let later = 'پس از فردا';
+  let later = 'سفارشی نیست';
   if (summary.laterRange) {
     const { earliest, latest } = summary.laterRange;
     const [from, to] = [formatDeadlineDay(earliest), formatDeadlineDay(latest)];
@@ -872,6 +882,53 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     } else entries.push({ at: event.at, text: [event.action], who });
   }
   return entries.map((entry, i) => ({ entry, i })).sort((a, b) => a.entry.at.getTime() - b.entry.at.getTime() || a.i - b.i).map(({ entry }) => entry);
+}
+
+/* ───────────────────────── بی مبلغ، و از چشم چاپخانه (۵٫۳) ───────────────────────── */
+
+/** هر مقدار پول، در هر عمقی، صفر: نام پول همیشه به `Rials` ختم می‌شود (قاعدهٔ ۳). تاریخ‌ها و بقیه همان. */
+function zeroRials<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(zeroRials) as T;
+  if (value === null || typeof value !== 'object' || value instanceof Date) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, inner]) => [key, key.endsWith('Rials') && typeof inner === 'number' ? 0 : zeroRials(inner)]),
+  ) as T;
+}
+
+/**
+ * جزئیات بی مبلغ (برش ۵٫۳، ADR-042؛ نشستی که `orders.money` ندارد): پرداخت‌ها هیچ، و هر مبلغ سفارش و ریز قیمت منجمدش صفر؛
+ * شمار جلد و برگ هر جلد می‌ماند، چون مشخصات چاپ است. سرویس پیش از صفحه می‌کندش، پس صفحه‌ای که اشتباهاً مبلغ بکشد هم عددی
+ * ندارد.
+ */
+export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
+  return { ...details, order: zeroRials(details.order), payments: [] };
+}
+
+/** ردیف‌های فهرست و صف پیشخوان بی مبلغ؛ همان `withoutMoney`. */
+export const linesWithoutMoney = (lines: readonly PanelOrderLine[]): PanelOrderLine[] => lines.map(zeroRials);
+
+/** جزئیات رویدادهای ادمین که رویدادهای سفارش لازم دارد؛ بقیه (مقدار پیشین گیرنده، دلیل‌ها) از چشم چاپخانه نه. */
+const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed'];
+
+/**
+ * جزئیات از چشم چاپخانه (برش ۵٫۳، ADR-042): یادداشت‌های درونی نه (دلیل لغو، که برگشت پول را می‌گوید، و دلیل برگرداندن و
+ * جابه‌جایی)، و از تاریخچهٔ تخصیص فقط ردیف‌هایی که سفارش را به خود همین چاپخانه رساند، بی نام چاپخانهٔ قبلی: چاپخانهٔ دیگر و
+ * سفارش‌هایش بیرون از محدوده‌اند.
+ */
+export function partnerView(details: PanelOrderDetails, partnerId: string): PanelOrderDetails {
+  return {
+    ...details,
+    statusEvents: details.statusEvents.map((event) => ({ ...event, note: null })),
+    assignments: details.assignments
+      .filter((assignment) => assignment.toPartnerId === partnerId)
+      .map((assignment) => ({ ...assignment, fromName: null, reason: null })),
+    events: details.events
+      .filter((event) => event.action !== 'orders.assign')
+      .map((event) => {
+        const detail = (event.detail ?? {}) as Record<string, unknown>;
+        return { ...event, detail: Object.fromEntries(EVENT_DETAIL_KEYS.filter((key) => key in detail).map((key) => [key, detail[key]])) };
+      }),
+  };
 }
 
 /** زمان هر سطر رویداد: اولین سطر هر روز با روز («شنبه 11 مهر 13:57»)، بقیهٔ همان روز فقط ساعت («14:05»). */

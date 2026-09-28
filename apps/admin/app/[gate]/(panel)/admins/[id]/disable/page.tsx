@@ -10,8 +10,8 @@ export const metadata: Metadata = { title: 'غیرفعال کردن ادمین' 
 
 export default async function DisableAdminPage({ params }: { params: Promise<{ gate: string; id: string }> }) {
   const { gate, id } = await params;
-  const { target, back } = await adminTarget(gate, id);
-  if (!target) return <NoAccess gate={gate} />;
+  const { session, target, back } = await adminTarget(gate, id);
+  if (!target) return <NoAccess gate={gate} partner={session.partner} />;
   if (target.user.disabledAt) notFound();
   const name = target.user.displayName;
   return (

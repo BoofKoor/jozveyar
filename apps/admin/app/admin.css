@@ -246,6 +246,13 @@
   .ad-roles {
     margin-block-start: 4px;
   }
+  /* «کدام چاپخانه» فقط با نقش «چاپخانه» (۵٫۳، طرح `m-admin-invite`)، بی JS */
+  .jy-field.ad-if-partner {
+    display: none;
+  }
+  .ad-roles-form:has(.ad-role-partner:checked) .jy-field.ad-if-partner {
+    display: flex;
+  }
   .ad-form fieldset {
     border: 0;
   }
@@ -525,6 +532,21 @@
     }
     .ad-empty {
       padding: 16px;
+    }
+  }
+  /* فهرست کاربر چاپخانه (۵٫۳، طرح): بی ستون مبلغ */
+  .ad-list--nosum :is(.ad-cols, .ad-row) {
+    grid-template-columns: 64px minmax(0, 1.2fr) minmax(0, 1.4fr) 112px 156px;
+    grid-template-areas: 'id who what state due';
+  }
+  @media (width <= 860px) {
+    .ad-list--nosum .ad-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: 'id who due' 'what what what' 'state state state';
+    }
+    .ad-list--nosum .ad-row__state {
+      justify-self: start;
+      text-align: start;
     }
   }
 

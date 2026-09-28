@@ -61,15 +61,28 @@ export const RULE_TEXT: Record<AssignmentRule, string> = {
   oldest: 'قدیمی‌ترین چاپخانهٔ فعال',
 };
 
+/** «کاربر: حسن نوری»، «کاربرها: حسن نوری، رضا کریمی»؛ چاپخانهٔ بی کاربر را همان مالک و متصدی می‌گردانند (برش ۵٫۳). */
+function usersText(users: readonly string[]): string {
+  if (users.length === 0) return 'کاربرها: همان مالک و متصدی';
+  return `${users.length === 1 ? 'کاربر' : 'کاربرها'}: ${users.join('، ')}`;
+}
+
 /**
- * خط دوم فهرست «چاپخانه‌ها» (طرح): «تهران · 8 سفارش باز · کاربرها: همان مالک و متصدی»، و برای غیرفعال «اصفهان · از
- * 1405/07/01 سفارش تازه نمی‌گیرد». تا ۵٫۳ (نقش چاپخانه) هر چاپخانه را همان مالک و متصدی می‌گردانند.
+ * خط دوم فهرست «چاپخانه‌ها» (طرح): «تهران · 8 سفارش باز · کاربرها: همان مالک و متصدی»، «مشهد · 2 سفارش باز · کاربر: حسن نوری»،
+ * و برای غیرفعال «اصفهان · از 1405/07/01 سفارش تازه نمی‌گیرد»؛ غیرفعالی که هنوز کاربر فعال دارد، نامشان را هم («· کاربر: …»)،
+ * تا با پایان همکاری غیرفعال شوند (ADR-042).
  */
 export function partnerMeta(partner: PartnerView): Seg[] {
   if (partner.deactivatedAt) {
-    return [partner.cityName, ' · از ', { num: formatJalaliNumeric(partner.deactivatedAt) }, ' سفارش تازه نمی‌گیرد'];
+    return [
+      partner.cityName,
+      ' · از ',
+      { num: formatJalaliNumeric(partner.deactivatedAt) },
+      ' سفارش تازه نمی‌گیرد',
+      ...(partner.users.length > 0 ? [` · ${usersText(partner.users)}`] : []),
+    ];
   }
-  return [partner.cityName, ' · ', { num: formatNumber(partner.openOrders) }, ' سفارش باز · کاربرها: همان مالک و متصدی'];
+  return [partner.cityName, ' · ', { num: formatNumber(partner.openOrders) }, ` سفارش باز · ${usersText(partner.users)}`];
 }
 
 /**
