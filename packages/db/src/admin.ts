@@ -22,7 +22,9 @@ import {
   adminSessions,
   adminUserRoles,
   adminUsers,
+  cities,
   permissions,
+  printPartners,
   rolePermissions,
   roles,
 } from './schema.js';
@@ -36,12 +38,17 @@ const ADMIN_LOCK = 0x61646d;
  */
 export const ADMIN_PERMISSIONS = {
   'orders.read': 'دیدن سفارش‌ها',
+  /** «شروع چاپ» و «تحویل پست شد»؛ از ۵٫۳ لغو مجوز خودش را دارد (`orders.cancel`). */
   'orders.status': 'تغییر وضعیت سفارش',
+  /** لغو سفارش با دلیل (برش ۵٫۳، ADR-042): مالک و متصدی، نه چاپخانه. */
+  'orders.cancel': 'لغو سفارش',
   /** برگرداندن وضعیت اشتباه، یک قدم، با دلیل: فقط مالک (سؤال ۲۶، ADR-038؛ ۴٫۳). */
   'orders.revert': 'برگرداندن وضعیت سفارش',
   'orders.address': 'ویرایش نشانی گیرنده',
   /** جابه‌جایی چاپخانهٔ سفارش، فقط در «در صف چاپ»، با دلیل (برش ۵٫۲، ADR-042): مالک و متصدی. */
   'orders.assign': 'جابه‌جایی چاپخانهٔ سفارش',
+  /** مبلغ و پرداخت‌های سفارش (برش ۵٫۳، ADR-042): مالک و متصدی؛ چاپخانه چاپ و ارسال را بی مبلغ می‌کند. */
+  'orders.money': 'دیدن مبلغ و پرداخت‌ها',
   'files.download': 'دانلود PDF جزوه',
   'tariff.read': 'دیدن تعرفه',
   'tariff.edit': 'ساختن و فعال کردن تعرفه',
@@ -58,21 +65,50 @@ export type AdminPermission = keyof typeof ADMIN_PERMISSIONS;
 const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
 
 /**
- * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز؛ متصدی سفارش، وضعیت، نشانی، جابه‌جایی چاپخانه (۵٫۲)، دانلود و دیدن تعرفه. نقش
- * «چاپخانه» با ۵٫۳.
+ * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز؛ متصدی سفارش، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه (۵٫۲)، مبلغ، دانلود و دیدن تعرفه.
+ * «چاپخانه» (برش ۵٫۳، ADR-042) فقط دیدن، «شروع چاپ» و «تحویل پست شد»، و دانلود و «دوباره بساز» فایل‌ها، همه فقط روی سفارش‌هایی
+ * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش.
  */
 export const ADMIN_ROLES = {
   owner: { nameFa: 'مالک', permissions: ALL_PERMISSIONS },
   operator: {
     nameFa: 'متصدی',
-    permissions: ['orders.read', 'orders.status', 'orders.address', 'orders.assign', 'files.download', 'tariff.read'] as AdminPermission[],
+    permissions: [
+      'orders.read',
+      'orders.status',
+      'orders.cancel',
+      'orders.address',
+      'orders.assign',
+      'orders.money',
+      'files.download',
+      'tariff.read',
+    ] as AdminPermission[],
+  },
+  print_partner: {
+    nameFa: 'چاپخانه',
+    permissions: ['orders.read', 'orders.status', 'files.download'] as AdminPermission[],
   },
 } as const satisfies Record<string, { nameFa: string; permissions: readonly AdminPermission[] }>;
 
 export type AdminRole = keyof typeof ADMIN_ROLES;
 
+/** نقشی که محدودهٔ چاپخانه دارد: فقط سفارش‌های یک چاپخانه (`admin_user_roles.print_partner_id`). */
+export const PARTNER_ROLE = 'print_partner' satisfies AdminRole;
+
 export const isAdminRole = (value: unknown): value is AdminRole =>
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(ADMIN_ROLES, value);
+
+/** چاپخانهٔ کاربر چاپخانه: شناسه برای محدوده، نام برای سربرگ و فهرست ادمین‌ها. */
+export interface AdminPartnerRef {
+  id: string;
+  name: string;
+}
+
+/** چاپخانهٔ فعالی که کاربر چاپخانهٔ تازه به آن سپرده می‌شود (فرم «افزودن ادمین»، برش ۵٫۳). */
+export interface AdminPartnerChoice extends AdminPartnerRef {
+  cityName: string;
+  isDefault: boolean;
+}
 
 export type AdminUserRow = typeof adminUsers.$inferSelect;
 export type AdminInviteRow = typeof adminInvites.$inferSelect;
@@ -98,11 +134,15 @@ export interface AdminSessionView {
   user: AdminUserRow;
   roles: string[];
   permissions: string[];
+  /** چاپخانهٔ کاربر چاپخانه (برش ۵٫۳): محدودهٔ سفارش‌هایش؛ null یعنی همهٔ سفارش‌ها. */
+  partner: AdminPartnerRef | null;
 }
 
 export interface AdminListItem {
   user: AdminUserRow;
   roles: string[];
+  /** چاپخانهٔ کاربر چاپخانه (برش ۵٫۳). */
+  partner: AdminPartnerRef | null;
   /** پیوند ثبتی که هنوز زنده است. */
   invite: { expiresAt: Date } | null;
 }
@@ -120,6 +160,8 @@ export interface NewInvite {
   displayName: string;
   /** null برای ادمین موجود یعنی همان نقش‌های قبلی. */
   role: AdminRole | null;
+  /** چاپخانهٔ نقش «چاپخانه» (برش ۵٫۳)؛ باید فعال باشد. برای نقش‌های دیگر نادیده. */
+  partnerId?: string | null;
   tokenHash: string;
   totpSealed: string;
   at: Date;
@@ -132,7 +174,7 @@ export interface NewInvite {
 
 export type CreatedInvite =
   | { ok: true; userId: string; reset: boolean }
-  | { ok: false; reason: 'username_taken' | 'role_required' };
+  | { ok: false; reason: 'username_taken' | 'role_required' | 'partner_required' | 'partner_inactive' };
 
 export interface CompletedInvite {
   inviteId: string;
@@ -188,16 +230,24 @@ export interface AdminStore {
   revokeUserSessions(userId: string, at: Date): Promise<void>;
   /**
    * پیوند ثبت، در یک تراکنش زیر قفل: ادمین تازه با نقشش، یا برای ادمین موجود (بازیابی) رمز و برنامهٔ تأییدش
-   * پاک، نشست‌ها و پیوندهای زنده‌اش باطل، و دوباره فعال. بعد خود پیوند و رویداد.
+   * پاک، نشست‌ها و پیوندهای زنده‌اش باطل، و دوباره فعال. بعد خود پیوند و رویداد. نقش «چاپخانه» چاپخانهٔ فعال می‌خواهد، که
+   * تا پایان تراکنش `FOR SHARE` فعال می‌ماند (برش ۵٫۳).
    */
   createInvite(input: NewInvite): Promise<CreatedInvite>;
-  findInvite(tokenHash: string): Promise<{ invite: AdminInviteRow; user: AdminUserRow; roles: string[] } | null>;
+  findInvite(
+    tokenHash: string,
+  ): Promise<{ invite: AdminInviteRow; user: AdminUserRow; roles: string[]; partner: AdminPartnerRef | null } | null>;
   /**
    * ثبت با پیوند، در یک تراکنش: پیوند مصرف می‌شود (فقط اگر هنوز زنده است)، رمز و برنامهٔ تأیید می‌نشینند،
    * نشست تازه و دو رویداد. false یعنی پیوند دیگر زنده نبود.
    */
   completeInvite(input: CompletedInvite): Promise<boolean>;
   listAdmins(at: Date): Promise<AdminListItem[]>;
+  /**
+   * چاپخانه‌های فعال برای فرم «افزودن ادمین» (برش ۵٫۳): طرف قرارداد اول و پیش‌فرض آخر، چون سفارش‌های پیش‌فرض را معمولاً همان
+   * مالک و متصدی می‌گردانند؛ در هر دسته قدیمی‌ترین اول.
+   */
+  partnerChoices(): Promise<AdminPartnerChoice[]>;
   /**
    * غیرفعال کردن در یک تراکنش زیر قفل: نشست‌ها و پیوندهای زنده باطل، و رویداد. آخرین مالک فعال غیرفعال
    * نمی‌شود.
@@ -223,17 +273,34 @@ export const adminEventRow = (event: AdminEventInput) => ({
 export function createAdminStore({ db }: Database): AdminStore {
   type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-  async function rolesIn(tx: Tx | typeof db, userIds: string[]): Promise<Map<string, string[]>> {
-    const map = new Map<string, string[]>();
+  /** نقش‌های هر ادمین، و چاپخانهٔ کاربر چاپخانه (برش ۵٫۳). */
+  async function rolesIn(
+    tx: Tx | typeof db,
+    userIds: string[],
+  ): Promise<Map<string, { roles: string[]; partner: AdminPartnerRef | null }>> {
+    const map = new Map<string, { roles: string[]; partner: AdminPartnerRef | null }>();
     if (userIds.length === 0) return map;
     const rows = await tx
-      .select({ userId: adminUserRoles.adminUserId, roleId: adminUserRoles.roleId })
+      .select({
+        userId: adminUserRoles.adminUserId,
+        roleId: adminUserRoles.roleId,
+        partnerId: printPartners.id,
+        partnerName: printPartners.name,
+      })
       .from(adminUserRoles)
+      .leftJoin(printPartners, eq(printPartners.id, adminUserRoles.printPartnerId))
       .where(inArray(adminUserRoles.adminUserId, userIds))
       .orderBy(adminUserRoles.roleId);
-    for (const row of rows) map.set(row.userId, [...(map.get(row.userId) ?? []), row.roleId]);
+    for (const row of rows) {
+      const entry = map.get(row.userId) ?? { roles: [], partner: null };
+      entry.roles.push(row.roleId);
+      if (row.partnerId && row.partnerName !== null) entry.partner = { id: row.partnerId, name: row.partnerName };
+      map.set(row.userId, entry);
+    }
     return map;
   }
+  /** ادمین بی ردیف نقش؛ هر بار تازه، تا آرایهٔ مشترکی بیرون نرود. */
+  const noRoles = () => ({ roles: [] as string[], partner: null });
 
   async function activeOwners(tx: Tx): Promise<string[]> {
     const rows = await tx
@@ -265,7 +332,7 @@ export function createAdminStore({ db }: Database): AdminStore {
     },
 
     async rolesOf(userId) {
-      return (await rolesIn(db, [userId])).get(userId) ?? [];
+      return (await rolesIn(db, [userId])).get(userId)?.roles ?? [];
     },
 
     async countAttempts(ipHash, since) {
@@ -355,6 +422,7 @@ export function createAdminStore({ db }: Database): AdminStore {
         .from(adminUserRoles)
         .innerJoin(rolePermissions, eq(rolePermissions.roleId, adminUserRoles.roleId))
         .where(eq(adminUserRoles.adminUserId, row.user.id));
+      const assigned = (await rolesIn(db, [row.user.id])).get(row.user.id) ?? noRoles();
       return {
         sessionId: row.session.id,
         createdAt: row.session.createdAt,
@@ -362,8 +430,9 @@ export function createAdminStore({ db }: Database): AdminStore {
         lastSeenAt: row.session.lastSeenAt,
         revokedAt: row.session.revokedAt,
         user: row.user,
-        roles: (await rolesIn(db, [row.user.id])).get(row.user.id) ?? [],
+        roles: assigned.roles,
         permissions: perms.map((p) => p.id).sort(),
+        partner: assigned.partner,
       };
     },
 
@@ -391,8 +460,22 @@ export function createAdminStore({ db }: Database): AdminStore {
     },
 
     async createInvite(input) {
-      return db.transaction(async (tx) => {
+      return db.transaction(async (tx): Promise<CreatedInvite> => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${ADMIN_LOCK})`);
+        // نقش چاپخانه (۵٫۳): چاپخانهٔ فعال، که تا پایان تراکنش فعال می‌ماند؛ غیرفعال کردن هم‌زمانش پشت این قفل منتظر است.
+        let partner: AdminPartnerRef | null = null;
+        if (input.role === PARTNER_ROLE) {
+          if (!input.partnerId) return { ok: false, reason: 'partner_required' };
+          const [active] = await tx
+            .select({ id: printPartners.id, name: printPartners.name })
+            .from(printPartners)
+            .where(and(eq(printPartners.id, input.partnerId), isNull(printPartners.deactivatedAt)))
+            .limit(1)
+            .for('share');
+          if (!active) return { ok: false, reason: 'partner_inactive' };
+          partner = active;
+        }
+        const role = input.role ? { roleId: input.role, printPartnerId: partner?.id ?? null } : null;
         const [existing] = await tx
           .select()
           .from(adminUsers)
@@ -401,7 +484,7 @@ export function createAdminStore({ db }: Database): AdminStore {
           .for('update');
         let userId: string;
         if (existing) {
-          if (!input.allowExisting) return { ok: false, reason: 'username_taken' } as const;
+          if (!input.allowExisting) return { ok: false, reason: 'username_taken' };
           userId = existing.id;
           await tx
             .update(adminUsers)
@@ -412,12 +495,12 @@ export function createAdminStore({ db }: Database): AdminStore {
             .set({ revokedAt: input.at })
             .where(and(eq(adminSessions.adminUserId, userId), isNull(adminSessions.revokedAt)));
           await revokeOpenInvites(tx, userId, input.at);
-          if (input.role) {
+          if (role) {
             await tx.delete(adminUserRoles).where(eq(adminUserRoles.adminUserId, userId));
-            await tx.insert(adminUserRoles).values({ adminUserId: userId, roleId: input.role });
+            await tx.insert(adminUserRoles).values({ adminUserId: userId, ...role });
           }
         } else {
-          if (!input.role) return { ok: false, reason: 'role_required' } as const;
+          if (!role) return { ok: false, reason: 'role_required' };
           userId = input.newUserId;
           await tx.insert(adminUsers).values({
             id: userId,
@@ -426,7 +509,7 @@ export function createAdminStore({ db }: Database): AdminStore {
             createdAt: input.at,
             createdBy: input.createdBy,
           });
-          await tx.insert(adminUserRoles).values({ adminUserId: userId, roleId: input.role });
+          await tx.insert(adminUserRoles).values({ adminUserId: userId, ...role });
         }
         await tx.insert(adminInvites).values({
           id: input.inviteId,
@@ -438,9 +521,14 @@ export function createAdminStore({ db }: Database): AdminStore {
           createdBy: input.createdBy,
         });
         await tx.insert(adminEvents).values(
-          adminEventRow({ ...input.event, targetId: userId, at: input.at, detail: { ...(input.event.detail as object), reset: Boolean(existing) } }),
+          adminEventRow({
+            ...input.event,
+            targetId: userId,
+            at: input.at,
+            detail: { ...(input.event.detail as object), ...(partner ? { partner } : {}), reset: Boolean(existing) },
+          }),
         );
-        return { ok: true, userId, reset: Boolean(existing) } as const;
+        return { ok: true, userId, reset: Boolean(existing) };
       });
     },
 
@@ -452,7 +540,7 @@ export function createAdminStore({ db }: Database): AdminStore {
         .where(eq(adminInvites.tokenHash, tokenHash))
         .limit(1);
       if (!row) return null;
-      return { ...row, roles: (await rolesIn(db, [row.user.id])).get(row.user.id) ?? [] };
+      return { ...row, ...((await rolesIn(db, [row.user.id])).get(row.user.id) ?? noRoles()) };
     },
 
     async completeInvite(input) {
@@ -509,8 +597,17 @@ export function createAdminStore({ db }: Database): AdminStore {
         .orderBy(desc(adminInvites.expiresAt));
       return users.map((user) => {
         const invite = open.find((row) => row.userId === user.id);
-        return { user, roles: byUser.get(user.id) ?? [], invite: invite ? { expiresAt: invite.expiresAt } : null };
+        return { user, ...(byUser.get(user.id) ?? noRoles()), invite: invite ? { expiresAt: invite.expiresAt } : null };
       });
+    },
+
+    async partnerChoices() {
+      return db
+        .select({ id: printPartners.id, name: printPartners.name, cityName: cities.nameFa, isDefault: printPartners.isDefault })
+        .from(printPartners)
+        .innerJoin(cities, eq(cities.id, printPartners.cityId))
+        .where(isNull(printPartners.deactivatedAt))
+        .orderBy(printPartners.isDefault, printPartners.createdAt, printPartners.id);
     },
 
     async disableUser(userId, at, event) {

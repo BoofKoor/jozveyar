@@ -12,10 +12,10 @@
 
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
-import { adminEventRow, type AdminEventInput } from './admin.js';
+import { adminEventRow, PARTNER_ROLE, type AdminEventInput } from './admin.js';
 import type { Database } from './index.js';
 import { requeueTicket } from './orders.js';
-import { adminEvents, cities, orderAssignments, orders, printPartners, provinces } from './schema.js';
+import { adminEvents, adminUserRoles, adminUsers, cities, orderAssignments, orders, printPartners, provinces } from './schema.js';
 
 /** کلید قفل مشورتی کار روی چاپخانه‌ها: «prnt» به عدد. */
 const PARTNERS_LOCK = 0x70726e74;
@@ -46,6 +46,8 @@ export interface PartnerView {
   createdAt: Date;
   /** در صف چاپ و در حال چاپ. */
   openOrders: number;
+  /** نام کاربرهای این چاپخانه که غیرفعال نشده‌اند (برش ۵٫۳)، به ترتیب ساختن؛ خالی یعنی همان مالک و متصدی. */
+  users: string[];
 }
 
 export interface NewPartner {
@@ -100,6 +102,10 @@ function constraintOf(error: unknown): string | undefined {
 export function createPartnerStore({ db }: Database): PartnerStore {
   const openOrders = sql<number>`(SELECT count(*)::int FROM orders o
     WHERE o.print_partner_id = ${printPartners.id} AND o.status IN ('paid', 'printing'))`;
+  // کاربرهای چاپخانه (نقش «چاپخانه» با همین چاپخانه)، جز غیرفعال‌ها؛ دعوت‌شده‌ای که هنوز ثبت نکرده هم کاربر است.
+  const users = sql<string[]>`(SELECT coalesce(array_agg(u.display_name ORDER BY u.created_at, u.id), '{}'::text[])
+    FROM ${adminUserRoles} r JOIN ${adminUsers} u ON u.id = r.admin_user_id
+    WHERE r.print_partner_id = ${printPartners.id} AND r.role_id = ${PARTNER_ROLE} AND u.disabled_at IS NULL)`;
 
   function select(where?: ReturnType<typeof eq>) {
     return db
@@ -114,6 +120,7 @@ export function createPartnerStore({ db }: Database): PartnerStore {
         deactivatedAt: printPartners.deactivatedAt,
         createdAt: printPartners.createdAt,
         openOrders,
+        users,
       })
       .from(printPartners)
       .innerJoin(provinces, eq(provinces.id, printPartners.provinceId))

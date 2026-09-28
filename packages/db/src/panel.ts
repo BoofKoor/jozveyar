@@ -23,6 +23,10 @@
  *  - **چاپخانهٔ سفارش** (برش ۵٫۲، ADR-042): جابه‌جایی فقط از چاپخانه‌ای که ادمین دید و فقط در «در صف چاپ»، با ردیف
  *    `order_assignments`، کار برگه و رویداد ادمین در همان تراکنش؛ «شروع چاپ» هم از چاپخانه‌ای که ادمین دید. پس جابه‌جایی و
  *    «شروع چاپ» هم‌زمان فقط یکی می‌شوند: هر دو ردیف سفارش را قفل می‌کنند و دومی شرطش را دیگر نمی‌یابد.
+ *  - **محدوده** (برش ۵٫۳، ADR-042): هر تابعی که سفارش می‌خواند یا می‌نویسد، محدوده را آرگومان اول و اجباری می‌گیرد (`PanelScope`:
+ *    همه، یا یک چاپخانه) و در همان کوئری شرطش می‌کند، نه پس از آن؛ پس کوئری بی محدوده خطای تایپ است، و سفارش بیرون از محدوده
+ *    همان «نیست» است. نوشتن‌ها شرط را زیر قفل ردیف سفارش دوباره می‌سنجند: سفارشی که همین حالا به چاپخانهٔ دیگری رفت، دیگر
+ *    نوشتنی نیست.
  */
 
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
@@ -66,6 +70,26 @@ import {
 
 /** دو کار سفارش پس از پرداخت: PDF جزوه و فایل چاپ، و برگهٔ سفارش. */
 export type OrderJobKind = typeof PREPARE_ORDER_JOB | typeof PREPARE_TICKET_JOB;
+
+/**
+ * محدودهٔ سفارش‌های پنل (برش ۵٫۳، ADR-042): همهٔ سفارش‌ها (مالک و متصدی)، یا فقط سفارش‌هایی که امروز به یک چاپخانه سپرده شده‌اند
+ * (نقش «چاپخانه»، `admin_user_roles.print_partner_id`). سفارش پرداخت‌نشده چاپخانه ندارد (`orders_partner_paid`)، پس در محدودهٔ
+ * هیچ چاپخانه‌ای نیست؛ سفارشی که به چاپخانهٔ دیگری جابه‌جا شد، از همان لحظه بیرون است.
+ */
+export type PanelScope = { readonly kind: 'all' } | { readonly kind: 'partner'; readonly partnerId: string };
+
+/** محدودهٔ مالک و متصدی: همهٔ سفارش‌ها. */
+export const ALL_ORDERS: PanelScope = Object.freeze({ kind: 'all' });
+
+/** شرط محدوده روی `orders`، در خود کوئری. */
+function inScope(scope: PanelScope): SQL | undefined {
+  switch (scope.kind) {
+    case 'all':
+      return undefined;
+    case 'partner':
+      return eq(orders.printPartnerId, scope.partnerId);
+  }
+}
 
 /** چیپ‌های فهرست سفارش‌ها، به ترتیب طرح پنل. */
 export const PANEL_BUCKETS = ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] as const;
@@ -250,6 +274,8 @@ export interface PanelAssignment {
   id: number;
   at: Date;
   fromName: string | null;
+  /** چاپخانه‌ای که سفارش به آن رفت؛ از چشم چاپخانه (۵٫۳) فقط ردیف‌هایی که به خودش رسید. */
+  toPartnerId: string;
   toName: string;
   actor: 'system' | 'admin';
   adminName: string | null;
@@ -384,53 +410,66 @@ export type PanelAssignWrite =
   | { ok: false; reason: 'partner_inactive' }
   | { ok: false; reason: 'changed'; current: OrderStatus | null; partnerId: string | null };
 
+/**
+ * ذخیره‌گاه سفارش‌های پنل. هر تابعی که سفارش می‌خواند یا می‌نویسد، محدوده (`PanelScope`) را آرگومان اول می‌گیرد؛ سفارش بیرون از
+ * محدوده همان «نیست» است (null، `not_found`، یا `current: null`). فقط `logEvent` (ردیف `admin_events`، پس از خواندنی که در محدوده
+ * بود) و `setting` محدوده نمی‌خواهند: سفارشی نمی‌خوانند.
+ */
 export interface PanelOrderStore {
-  dueSummary(bounds: { at: Date; tomorrowStart: Date; dayAfterStart: Date }): Promise<PanelDueSummary>;
+  dueSummary(scope: PanelScope, bounds: { at: Date; tomorrowStart: Date; dayAfterStart: Date }): Promise<PanelDueSummary>;
   /** در حال چاپ‌ها، و تحویل‌های پست از `since` تا `at`. */
-  stats(window: { since: Date; at: Date }): Promise<PanelDashboardStats>;
-  alerts(clock: PanelClock): Promise<PanelAlerts>;
+  stats(scope: PanelScope, window: { since: Date; at: Date }): Promise<PanelDashboardStats>;
+  alerts(scope: PanelScope, clock: PanelClock): Promise<PanelAlerts>;
   /** یک صفحه از یک سطل؛ «باز» به ترتیب مهلت، بقیه تازه‌ترین اول. */
-  list(query: { bucket: PanelBucket; search: PanelSearch | null; clock: PanelClock; limit: number; offset: number }): Promise<
-    PanelOrderLine[]
-  >;
+  list(
+    scope: PanelScope,
+    query: { bucket: PanelBucket; search: PanelSearch | null; clock: PanelClock; limit: number; offset: number },
+  ): Promise<PanelOrderLine[]>;
   /** شمارش هر سطل با همان جست‌وجو. */
-  counts(query: { search: PanelSearch | null; clock: PanelClock }): Promise<Record<PanelBucket, number>>;
-  details(orderNumber: number): Promise<PanelOrderDetails | null>;
-  /** null یعنی چنین سفارش یا جزوه‌ای نیست. */
-  jozveFile(orderNumber: number, itemSeq: number): Promise<PanelJozveFile | null>;
-  printVolume(orderNumber: number, itemSeq: number, volume: number): Promise<PanelVolumeFile | null>;
-  ticketFile(orderNumber: number): Promise<PanelTicketFile | null>;
+  counts(scope: PanelScope, query: { search: PanelSearch | null; clock: PanelClock }): Promise<Record<PanelBucket, number>>;
+  details(scope: PanelScope, orderNumber: number): Promise<PanelOrderDetails | null>;
+  /** null یعنی چنین سفارش یا جزوه‌ای (در این محدوده) نیست. */
+  jozveFile(scope: PanelScope, orderNumber: number, itemSeq: number): Promise<PanelJozveFile | null>;
+  printVolume(scope: PanelScope, orderNumber: number, itemSeq: number, volume: number): Promise<PanelVolumeFile | null>;
+  ticketFile(scope: PanelScope, orderNumber: number): Promise<PanelTicketFile | null>;
   /**
    * «دوباره بساز»: کار `prepare_order` یا `prepare_ticket` از نو در صف (یا تازه، اگر نبود)، با رویداد در همان تراکنش. کار
    * قبلی (تعداد تلاش و کد خطا، بی متن خام) در جزئیات رویداد می‌ماند، چون ردیف کار از نو می‌شود. `busy`: کار همین حالا
-   * در صف است یا کارگر رویش است (دو کلیک: دومی). اینکه کی ساختن دوباره معنا دارد را سرویس می‌گوید.
+   * در صف است یا کارگر رویش است (دو کلیک: دومی). `not_found`: سفارش (دیگر) در محدوده نیست؛ ردیفش `FOR SHARE` قفل است، پس
+   * جابه‌جایی هم‌زمان پیش یا پس از این است، نه وسطش. اینکه کی ساختن دوباره معنا دارد را سرویس می‌گوید.
    */
-  requeue(orderId: string, kind: OrderJobKind, event: AdminEventInput): Promise<'ok' | 'busy'>;
+  requeue(scope: PanelScope, orderId: string, kind: OrderJobKind, event: AdminEventInput): Promise<'ok' | 'busy' | 'not_found'>;
   /**
    * تغییر وضعیت در یک تراکنش: `UPDATE … WHERE status = from` (دو کلیک هم‌زمان یک بار؛ دومی `ok: false` با وضعیت
    * تازه)، و فقط اگر فایل‌های سفارش پاک نشده (`filesDeleted`)؛ زمان تحویل به پست فقط در «تحویل پست شد»، یک ردیف
    * `order_status_events` با ادمین و یادداشت، و رویداد ادمین.
    */
-  changeStatus(change: PanelStatusChange): Promise<PanelWrite>;
+  changeStatus(scope: PanelScope, change: PanelStatusChange): Promise<PanelWrite>;
   /**
    * گیرندهٔ تازه، زیر قفل ردیف سفارش و فقط اگر وضعیت سفارش هنوز در `editable` است. رویداد ادمین با نام فیلدهای
    * عوض‌شده و مقدار پیشینشان (سابقه‌ای که بعداً بگوید پیش از ویرایش چه بود)؛ بی تغییر، بی رویداد. برگهٔ سفارش نام و
    * نشانی را دارد، پس کارش در همان تراکنش دوباره در صف می‌رود (برش ۵٫۱).
    */
-  editRecipient(input: {
-    orderId: string;
-    editable: readonly OrderStatus[];
-    recipient: PanelRecipient;
-    event: AdminEventInput;
-  }): Promise<PanelWrite & { changed?: (keyof PanelRecipient)[] }>;
-  /** چاپخانه‌های فعال برای جابه‌جایی: پیش‌فرض اول، بعد قدیمی‌ترین. */
-  partnerOptions(): Promise<PanelPartnerOption[]>;
+  editRecipient(
+    scope: PanelScope,
+    input: {
+      orderId: string;
+      editable: readonly OrderStatus[];
+      recipient: PanelRecipient;
+      event: AdminEventInput;
+    },
+  ): Promise<PanelWrite & { changed?: (keyof PanelRecipient)[] }>;
+  /**
+   * چاپخانه‌های فعال برای جابه‌جایی: پیش‌فرض اول، بعد قدیمی‌ترین، هر کدام با سفارش‌های بازش؛ در محدودهٔ یک چاپخانه فقط همان
+   * (چاپخانه‌های دیگر و سفارش‌هایشان بیرون از محدوده‌اند).
+   */
+  partnerOptions(scope: PanelScope): Promise<PanelPartnerOption[]>;
   /**
    * جابه‌جایی در یک تراکنش: چاپخانهٔ تازه `FOR SHARE` (فعال بماند)، `UPDATE … WHERE status = 'paid' AND چاپخانه = from`، ردیف
    * `order_assignments` با ادمین و دلیل، کار برگه دوباره در صف (نام و شهر چاپخانه روی برگه است)، و رویداد ادمین با نام هر دو
    * چاپخانه و دلیل. دو کلیک هم‌زمان یک بار؛ دومی `changed` با چاپخانهٔ تازه.
    */
-  assignPartner(input: PanelAssign): Promise<PanelAssignWrite>;
+  assignPartner(scope: PanelScope, input: PanelAssign): Promise<PanelAssignWrite>;
   logEvent(event: AdminEventInput): Promise<void>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
@@ -536,7 +575,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
   const pdfJobJoin = and(eq(jobs.orderId, orders.id), eq(jobs.kind, PREPARE_ORDER_JOB));
 
   return {
-    async dueSummary({ at, tomorrowStart, dayAfterStart }) {
+    async dueSummary(scope, { at, tomorrowStart, dayAfterStart }) {
       const due = orders.postHandoffDueAt;
       const overdue = sql`${due} <= ${ts(at)}`;
       const today = sql`${due} > ${ts(at)} AND ${due} <= ${ts(tomorrowStart)}`;
@@ -554,7 +593,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           laterLatest: sql<Date | null>`max(${due}) FILTER (WHERE ${later})`.mapWith(due),
         })
         .from(orders)
-        .where(openOrder());
+        .where(and(openOrder(), inScope(scope)));
       const range = (earliest: Date | null, latest: Date | null) => (earliest && latest ? { earliest, latest } : null);
       return {
         overdue: row?.overdue ?? 0,
@@ -566,7 +605,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       };
     },
 
-    async stats({ since, at }) {
+    async stats(scope, { since, at }) {
       // «تحویل پست شد» همیشه زمانش را دارد و فقط همان (`orders_handed_at`)؛ برگشته از پست دیگر شمرده نمی‌شود.
       const handedIn = sql`(${orders.handedToPostAt} > ${ts(since)} AND ${orders.handedToPostAt} <= ${ts(at)})`;
       const printing = eq(orders.status, 'printing');
@@ -577,18 +616,19 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           onTime: sql<number>`count(*) FILTER (WHERE ${handedIn} AND ${orders.handedToPostAt} < ${orders.postHandoffDueAt})::int`,
         })
         .from(orders)
-        .where(or(printing, handedIn));
+        .where(and(or(printing, handedIn), inScope(scope)));
       return { printing: row?.printing ?? 0, handed: row?.handed ?? 0, onTime: row?.onTime ?? 0 };
     },
 
-    async alerts(clock) {
+    async alerts(scope, clock) {
       const [failed, unreturned, unassigned] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
           .innerJoin(jobs, pdfJobJoin)
-          .where(and(openOrder(), eq(jobs.status, 'failed')))
+          .where(and(openOrder(), eq(jobs.status, 'failed'), inScope(scope)))
           .orderBy(asc(orders.postHandoffDueAt), asc(orders.orderNumber)),
+        // پرداخت‌نشده چاپخانه ندارد، پس در محدودهٔ چاپخانه این دو همیشه خالی‌اند؛ شرط همان‌جاست تا هیچ کوئری‌ای بی آن نماند.
         db
           .select({ orderNumber: orders.orderNumber, attempts: sql<number>`count(*)::int` })
           .from(payments)
@@ -599,6 +639,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
               lt(payments.createdAt, clock.unreturnedBefore),
               eq(orders.status, 'awaiting_payment'),
               sql`NOT ${staleFiles(clock.staleBefore)}`,
+              inScope(scope),
             ),
           )
           .groupBy(orders.orderNumber)
@@ -606,20 +647,20 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
-          .where(and(eq(orders.status, 'paid'), isNull(orders.printPartnerId)))
+          .where(and(eq(orders.status, 'paid'), isNull(orders.printPartnerId), inScope(scope)))
           .orderBy(asc(orders.postHandoffDueAt), asc(orders.orderNumber)),
       ]);
       return { failedPdf: failed.map((row) => row.orderNumber), unreturned, unassigned: unassigned.map((row) => row.orderNumber) };
     },
 
-    async list({ bucket, search, clock, limit, offset }) {
+    async list(scope, { bucket, search, clock, limit, offset }) {
       const rows = await db
         .select(lineFields(clock))
         .from(orders)
         .innerJoin(provinces, eq(provinces.id, orders.provinceId))
         .leftJoin(cities, eq(cities.id, orders.cityId))
         .leftJoin(jobs, pdfJobJoin)
-        .where(and(bucketWhere(bucket, clock.staleBefore), searchWhere(search)))
+        .where(and(bucketWhere(bucket, clock.staleBefore), searchWhere(search), inScope(scope)))
         .orderBy(
           ...(bucket === 'open'
             ? [asc(orders.postHandoffDueAt), asc(orders.paidAt), asc(orders.orderNumber)]
@@ -630,7 +671,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       return rows.map((row) => ({ ...row, pdfJob: row.pdfJob ?? null }));
     },
 
-    async counts({ search, clock }) {
+    async counts(scope, { search, clock }) {
       const staleBefore = clock.staleBefore;
       const filtered = (bucket: PanelBucket) => sql<number>`count(*) FILTER (WHERE ${bucketWhere(bucket, staleBefore)})::int`;
       const [row] = await db
@@ -643,7 +684,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           all: sql<number>`count(*)::int`,
         })
         .from(orders)
-        .where(searchWhere(search));
+        .where(and(searchWhere(search), inScope(scope)));
       return {
         open: row?.open ?? 0,
         handed: row?.handed ?? 0,
@@ -654,7 +695,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       };
     },
 
-    async details(orderNumber) {
+    async details(scope, orderNumber) {
       const [head] = await db
         .select({
           order: orders,
@@ -671,8 +712,9 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           shippingMethods,
           and(eq(shippingMethods.priceListVersion, orders.priceListVersion), eq(shippingMethods.id, orders.shippingMethodId)),
         )
-        .where(eq(orders.orderNumber, orderNumber))
+        .where(and(eq(orders.orderNumber, orderNumber), inScope(scope)))
         .limit(1);
+      // بیرون از محدوده همان «نیست» است؛ بقیهٔ کوئری‌ها فقط با شناسهٔ همین سفارش.
       if (!head) return null;
       const { order } = head;
 
@@ -780,6 +822,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             id: orderAssignments.id,
             at: orderAssignments.at,
             fromName: fromPartner.name,
+            toPartnerId: orderAssignments.toPartnerId,
             toName: toPartner.name,
             actor: orderAssignments.actor,
             adminName: adminUsers.displayName,
@@ -848,7 +891,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       };
     },
 
-    async jozveFile(orderNumber, itemSeq) {
+    async jozveFile(scope, orderNumber, itemSeq) {
       const [row] = await db
         .select({
           orderId: orders.id,
@@ -862,12 +905,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         })
         .from(orderItems)
         .innerJoin(orders, eq(orders.id, orderItems.orderId))
-        .where(and(eq(orders.orderNumber, orderNumber), eq(orderItems.seq, itemSeq)))
+        .where(and(eq(orders.orderNumber, orderNumber), eq(orderItems.seq, itemSeq), inScope(scope)))
         .limit(1);
       return row ?? null;
     },
 
-    async printVolume(orderNumber, itemSeq, volume) {
+    async printVolume(scope, orderNumber, itemSeq, volume) {
       const [row] = await db
         .select({
           orderId: orders.id,
@@ -882,12 +925,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         .from(orderItems)
         .innerJoin(orders, eq(orders.id, orderItems.orderId))
         .leftJoin(orderPrintFiles, and(eq(orderPrintFiles.orderItemId, orderItems.id), eq(orderPrintFiles.volume, volume)))
-        .where(and(eq(orders.orderNumber, orderNumber), eq(orderItems.seq, itemSeq)))
+        .where(and(eq(orders.orderNumber, orderNumber), eq(orderItems.seq, itemSeq), inScope(scope)))
         .limit(1);
       return row ? { ...row, volume } : null;
     },
 
-    async ticketFile(orderNumber) {
+    async ticketFile(scope, orderNumber) {
       const [row] = await db
         .select({
           orderId: orders.id,
@@ -901,13 +944,22 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         })
         .from(orders)
         .leftJoin(orderTickets, eq(orderTickets.orderId, orders.id))
-        .where(eq(orders.orderNumber, orderNumber))
+        .where(and(eq(orders.orderNumber, orderNumber), inScope(scope)))
         .limit(1);
       return row ?? null;
     },
 
-    async requeue(orderId, kind, event) {
+    async requeue(scope, orderId, kind, event) {
       return db.transaction(async (tx) => {
+        // سفارش در محدوده، زیر قفل اشتراکی: جابه‌جایی هم‌زمان (که ردیف را قفل می‌کند) یا پیش از این commit شده و سفارش دیگر در
+        // محدوده نیست، یا پشت این می‌ماند. ترتیب قفل‌ها همان کارگر و ویرایش گیرنده: اول سفارش، بعد کار.
+        const [order] = await tx
+          .select({ id: orders.id })
+          .from(orders)
+          .where(and(eq(orders.id, orderId), inScope(scope)))
+          .limit(1)
+          .for('share');
+        if (!order) return 'not_found' as const;
         const [job] = await tx
           .select()
           .from(jobs)
@@ -948,11 +1000,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       });
     },
 
-    async changeStatus(change) {
+    async changeStatus(scope, change) {
       return db.transaction(async (tx): Promise<PanelWrite> => {
         // دو کلیک هم‌زمان: دومی پشت قفل ردیف می‌ماند و بعد شرط `status = from` را دوباره می‌سنجد، که دیگر نمی‌خواند.
         // کارگری که فایل‌ها را پاک می‌کند هم ردیف را قفل می‌کند (ADR-044): پس از او شرط فایل دیگر نمی‌خواند.
         // «شروع چاپ» از چاپخانه‌ای که ادمین دید: جابه‌جایی هم‌زمان همین ردیف را قفل می‌کند، پس یکی از دو کار شرطش را نمی‌یابد.
+        // محدوده هم همین‌طور (۵٫۳): سفارشی که همین حالا به چاپخانهٔ دیگری رفت، شرط محدوده را دیگر نمی‌خواند.
         const partner =
           change.partnerId === undefined
             ? undefined
@@ -962,13 +1015,16 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         const [order] = await tx
           .update(orders)
           .set({ status: change.to, handedToPostAt: change.to === 'handed_to_post' ? change.at : null })
-          .where(and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt), partner))
+          .where(
+            and(eq(orders.id, change.orderId), eq(orders.status, change.from), isNull(orders.filesDeletedAt), partner, inScope(scope)),
+          )
           .returning();
         if (!order) {
+          // بیرون از محدوده «نیست» (`current: null`)، نه وضعیت امروزش.
           const [current] = await tx
             .select({ status: orders.status, filesDeletedAt: orders.filesDeletedAt, printPartnerId: orders.printPartnerId })
             .from(orders)
-            .where(eq(orders.id, change.orderId))
+            .where(and(eq(orders.id, change.orderId), inScope(scope)))
             .limit(1);
           if (current?.filesDeletedAt) return { ok: false, current: current.status, filesDeleted: true };
           if (current && current.status === change.from && partner !== undefined && current.printPartnerId !== change.partnerId) {
@@ -990,9 +1046,14 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       });
     },
 
-    async editRecipient({ orderId, editable, recipient, event }) {
+    async editRecipient(scope, { orderId, editable, recipient, event }) {
       return db.transaction(async (tx) => {
-        const [order] = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for('update');
+        const [order] = await tx
+          .select()
+          .from(orders)
+          .where(and(eq(orders.id, orderId), inScope(scope)))
+          .limit(1)
+          .for('update');
         if (!order) return { ok: false as const, current: null };
         if (!editable.includes(order.status)) return { ok: false as const, current: order.status };
         const changed = (['recipientName', 'addressText', 'postalCode'] as const).filter((key) => order[key] !== recipient[key]);
@@ -1015,7 +1076,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       });
     },
 
-    async partnerOptions() {
+    async partnerOptions(scope) {
       return db
         .select({
           id: printPartners.id,
@@ -1027,11 +1088,11 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         })
         .from(printPartners)
         .innerJoin(cities, eq(cities.id, printPartners.cityId))
-        .where(isNull(printPartners.deactivatedAt))
+        .where(and(isNull(printPartners.deactivatedAt), scope.kind === 'partner' ? eq(printPartners.id, scope.partnerId) : undefined))
         .orderBy(desc(printPartners.isDefault), asc(printPartners.createdAt), asc(printPartners.id));
     },
 
-    async assignPartner(input) {
+    async assignPartner(scope, input) {
       return db.transaction(async (tx): Promise<PanelAssignWrite> => {
         // چاپخانهٔ تازه تا پایان تراکنش فعال می‌ماند: غیرفعال کردنش پشت این قفل منتظر می‌ماند و بعد سفارش باز را می‌بیند.
         const [target] = await tx
@@ -1049,6 +1110,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
               eq(orders.id, input.orderId),
               eq(orders.status, 'paid'),
               input.from === null ? isNull(orders.printPartnerId) : eq(orders.printPartnerId, input.from),
+              inScope(scope),
             ),
           )
           .returning();
@@ -1056,7 +1118,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           const [current] = await tx
             .select({ status: orders.status, printPartnerId: orders.printPartnerId })
             .from(orders)
-            .where(eq(orders.id, input.orderId))
+            .where(and(eq(orders.id, input.orderId), inScope(scope)))
             .limit(1);
           return { ok: false, reason: 'changed', current: current?.status ?? null, partnerId: current?.printPartnerId ?? null };
         }

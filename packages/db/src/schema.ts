@@ -1117,7 +1117,7 @@ export const adminLoginAttempts = pgTable(
 );
 
 /**
- * نقش‌ها و مجوزها (ADR-007): نقش می‌گوید «چه کاری»، `scope` روی انتساب می‌گوید «روی کدام سفارش‌ها».
+ * نقش‌ها و مجوزها (ADR-007): نقش می‌گوید «چه کاری»، محدودهٔ انتساب (`print_partner_id`) می‌گوید «روی کدام سفارش‌ها».
  * نقش‌ها و مجوزها در کد تعریف شده‌اند (`ADMIN_ROLES`) و `seedReferenceData` اینجا می‌نشاندشان.
  */
 export const roles = pgTable('roles', {
@@ -1143,6 +1143,15 @@ export const rolePermissions = pgTable(
   (t) => [primaryKey({ columns: [t.roleId, t.permissionId] })],
 );
 
+/**
+ * نقش هر ادمین و محدوده‌اش (برش ۵٫۳، ADR-042): نقش «چاپخانه» (`print_partner`) فقط سفارش‌هایی را دارد که امروز به همین
+ * چاپخانه سپرده شده‌اند؛ نقش‌های دیگر همهٔ سفارش‌ها. ستون نوع‌دار با کلید خارجی، به جای `scope` jsonb که تا ۵٫۲ فقط null بود:
+ * چاپخانهٔ ناموجود ممکن نیست، و CHECK یک خط است.
+ *
+ * - نقش چاپخانه یعنی دقیقاً یک چاپخانه، و نقش‌های دیگر هیچ (`admin_user_roles_partner`).
+ * - کاربر چاپخانه فقط همین نقش را دارد (`admin_user_roles_partner_alone`، EXCLUDE در 0020): مالک یا متصدی‌ای که نقش چاپخانه هم
+ *   داشت، محدوده‌اش معلوم نبود. یک چاپخانه چند کاربر می‌تواند داشته باشد.
+ */
 export const adminUserRoles = pgTable(
   'admin_user_roles',
   {
@@ -1152,12 +1161,12 @@ export const adminUserRoles = pgTable(
     roleId: text('role_id')
       .notNull()
       .references(() => roles.id),
-    /** null یعنی همهٔ سفارش‌ها. محدودسازی سطر (چاپخانه) با برش ۵؛ تا آن موقع فقط null. */
-    scope: jsonb('scope'),
+    /** چاپخانه‌ای که این نقش فقط سفارش‌های آن را دارد؛ null یعنی همهٔ سفارش‌ها. */
+    printPartnerId: uuid('print_partner_id').references(() => printPartners.id),
   },
   (t) => [
     primaryKey({ columns: [t.adminUserId, t.roleId] }),
-    check('admin_user_roles_scope', sql`${t.scope} IS NULL`),
+    check('admin_user_roles_partner', sql`(${t.roleId} = 'print_partner') = (${t.printPartnerId} IS NOT NULL)`),
   ],
 );
 
