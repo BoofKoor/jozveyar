@@ -14,6 +14,10 @@
   برش ۵ (docs/UI.md، بخش ۸؛ ADR-042 تا ۰۴۴): فایل چاپ هر جلد و برگهٔ سفارش با برچسب پست در جزئیات سفارش، پیش‌نمایش برگه،
   جزوهٔ دو جلدی، فایل‌های پاک‌شده، چاپخانهٔ سفارش و جابه‌جایی، زبانهٔ «چاپخانه‌ها»، کاربر با نقش «چاپخانه»، نگهداری فایل‌ها در
   تنظیمات، و نقش سوم «چاپخانه» در منوی طرح: پیشخوان و سفارش‌های خودش، بی مبلغ و بی لغو.
+  برش ۶ (docs/UI.md، بخش ۹؛ ADR-045 تا ۰۴۸): زبانهٔ «ارسال» با بارگذاری فایل پست و خطاهایش، پیش‌نمایش با حکم هر سطر، نتیجهٔ
+  «ثبت» و برگرداندن ورود، صف تأیید با نامزدها، بستهٔ پستی و کد رهگیری در جزئیات سفارش، هشدار «کد رهگیری ندارد»، گزارش
+  ارسال (مالک)، فایل پست از چشم چاپخانه، و گام «کد رهگیری پست» در صفحهٔ سفارش مشتری، برای صاحب سفارش و غریبه. جزء تازهٔ
+  کیت: jy-barcode (بارکد ۲۴ رقمی در شش گروه، کپی پشت‌سرهم).
   به زبان کیت: packages/ui/src/base.css و components.css مستقیم بار می‌شوند و توکن‌ها از docs/brand/jozveyar-colors.css
   می‌آیند؛ اینجا هیچ کد رنگی نیست. اجزای تازهٔ کیت نام jy- دارند (دکمهٔ کار برگشت‌ناپذیر، نشان خنثی، آیکون دانلود)؛
   چیدمان پنل ad- است، و صفحهٔ مشتری همان site- و ck- طرح مسیر خرید.
@@ -120,6 +124,7 @@
   .jy-icon-plus { mask-image: url('../../brand/icons/plus.svg'); }
   .jy-icon-minus { mask-image: url('../../brand/icons/minus.svg'); }
   .jy-icon-tag { mask-image: url('../../brand/icons/tag.svg'); }
+  .jy-icon-upload { mask-image: url('../../brand/icons/upload.svg'); }
   .jy-icon-download { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 3v10M6 9l4 4 4-4M3.5 13.5v2.5h13v-2.5'/%3E%3C/svg%3E"); }
 
   /* ===== تازه برای کیت ===== */
@@ -128,6 +133,13 @@
   .jy-btn--danger:hover, .jy-btn--danger:active { background: var(--color-error-bg); }
   /* نشان خنثی: چیزی که وضعیت نیست ولی برچسب می‌خواهد (پیش‌نویس، بعدتر، بی برگشت، منبع کلید) */
   .jy-badge--neutral { background: var(--color-green-100); color: var(--color-green-800); }
+  /*
+   * بارکد پست (برش ۶): ۲۴ رقم در شش گروه چهارتایی برای خواندن. فاصله در ::after است، نه در متن، پس کپی همان ۲۴ رقم
+   * پشت‌سرهم است و یک کلیک همه را انتخاب می‌کند. در جای تنگ فقط میان گروه‌ها می‌شکند، و فاصلهٔ ته خط می‌افتد.
+   */
+  .jy-barcode { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; user-select: all; }
+  .jy-barcode > span:not(:last-child)::after { content: ' '; word-spacing: .15em; }
+  .jy-barcode--lg { font-size: var(--text-h4); font-weight: 600; line-height: 1.5; }
 
   /* ===== پوستهٔ پنل: سربرگ سفید با ناوبری زبانه‌ای، و صفحه green-50 با کارت‌های سفید ===== */
   body { background: var(--color-band); }
@@ -430,6 +442,79 @@
   .tk-label__row { display: flex; flex-wrap: wrap; gap: 1cqi 5cqi; margin-block-start: 1.5cqi; font-size: 3cqi; }
   .tk-foot { margin-block-start: 2cqi; font-size: 1.9cqi; }
 
+  /* ===== برش ۶: ارسال — بارگذاری فایل پست، ورودها، سطرهای فایل با حکم، صف تأیید، بستهٔ پستی و گزارش ===== */
+  .ad-upload .jy-drop { padding-block: 28px 24px; }
+  .ad-upstate { display: flex; flex-direction: column; gap: 12px; }
+  .ad-fileline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .ad-fileline > .jy-icon { color: var(--color-green-600); }
+  .ad-fileline__name, .ad-fname, .ad-imp__name { direction: ltr; unicode-bidi: isolate; overflow-wrap: anywhere; }
+  .ad-fileline__name { font-weight: 600; }
+  .ad-need { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--text-small); line-height: 1.8; }
+  .ad-need li { display: inline-flex; align-items: center; gap: 6px; }
+  .ad-need .jy-icon { width: 16px; height: 16px; }
+  .ad-need .jy-icon-success { color: var(--color-success-text); }
+  .ad-need .jy-icon-error { color: var(--color-error-text); }
+  .ad-imp { display: flex; flex-direction: column; gap: 2px; padding: 14px 24px; color: inherit; text-decoration: none; cursor: pointer; }
+  .ad-imp:hover { background: var(--color-green-50); }
+  .ad-imp__head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .ad-imp__name { font-weight: 600; }
+  .ad-imp__meta { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-imp__counts { font-size: var(--text-small); line-height: 1.7; }
+  .ad-counts { margin-block-start: 0; }
+  .ad-commit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .ad-commit__note { flex: 1; min-width: 12rem; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-list__sub { padding: 0 24px 8px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); overflow-wrap: anywhere; }
+  /* سطر فایل پست: شماره، «نام گ» و مقصد با بارکد زیرش، سفارشی که نشست یا دلیل، و وزن با کرایه */
+  .ad-prow {
+    display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1.3fr) 200px;
+    grid-template-areas: 'n file match w' 'n bc match fare'; column-gap: 16px; align-items: start; padding: 12px 24px;
+  }
+  .ad-prow__n { grid-area: n; color: var(--color-muted); }
+  .ad-prow__file { grid-area: file; min-width: 0; }
+  .ad-prow__bc { grid-area: bc; font-size: var(--text-small); color: var(--color-muted); }
+  .ad-prow__match { grid-area: match; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ad-prow__w { grid-area: w; text-align: end; }
+  .ad-prow__fare { grid-area: fare; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); text-align: end; }
+  .ad-prow__to { display: flex; align-items: flex-start; gap: 6px; }
+  .ad-prow__to .jy-icon { width: 16px; height: 16px; margin-block-start: 5px; color: var(--color-green-700); }
+  .ad-prow__why { font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .ad-prow__sms { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; font-size: var(--text-small); font-weight: 600; color: var(--color-error-text); }
+  .ad-prow__sms .jy-icon { width: 16px; height: 16px; }
+  .ad-prow__sms .jy-btn, .ad-prow__act .jy-btn { margin-block: -6px; margin-inline-start: -12px; }
+  @media (width <= 860px) {
+    .ad-prow {
+      grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-areas: 'n file w' '. bc bc' '. match match' '. fare fare';
+      column-gap: 10px; padding-inline: 16px;
+    }
+    .ad-prow__match { margin-block-start: 4px; }
+    .ad-prow__fare { text-align: start; }
+    .ad-list__sub { padding-inline: 16px; }
+    .ad-imp { padding-inline: 16px; }
+  }
+  /* صف تأیید */
+  .ad-rv__file { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-block-start: 4px; font-size: var(--text-small); color: var(--color-muted); }
+  .ad-rv .jy-tile__note b { font-weight: 600; color: var(--color-ink); }
+  .ad-rv__no { max-width: 12rem; margin-block-start: 6px; }
+  /* بستهٔ پستی در جزئیات سفارش */
+  .ad-parcel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block: 12px 4px; padding: 12px 16px; background: var(--color-green-50); border-radius: var(--radius-md); }
+  /* گزارش ارسال: جدول در دسکتاپ؛ در گوشی هر ردیف یک کارت کوچک، هر عدد با برچسبش */
+  .ad-tiles--money .ad-tile__n { font-size: var(--text-h2); }
+  .ad-table--margin :is(th, td) { white-space: nowrap; }
+  .ad-table--margin tbody th { white-space: normal; }
+  .ad-table--margin .ad-total > * { border-block-start: 1px solid var(--color-line); }
+  .ad-pct { font-size: var(--text-small); color: var(--color-muted); }
+  @media (max-width: 520px) {
+    .ad-tiles--money .ad-tile__n { font-size: var(--text-h4); }
+    .ad-table--margin thead { display: none; }
+    .ad-table--margin, .ad-table--margin tbody { display: block; }
+    .ad-table--margin tr { display: flex; flex-direction: column; padding-block: 10px; border-block-end: 1px solid var(--color-green-100); }
+    .ad-table--margin tr:last-child { border-block-end: 0; }
+    .ad-table--margin :is(th, td) { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; border: 0; white-space: normal; }
+    .ad-table--margin .ad-total > * { border: 0; }
+    .ad-table--margin tbody th { font-weight: 600; }
+    .ad-table--margin td::before { content: attr(data-k); font-size: var(--text-small); color: var(--color-muted); }
+  }
+
   /* ===== ادمین‌ها و پیوند یک‌باره ===== */
   .ad-people > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding-block: 14px; }
   .ad-people > li + li { border-block-start: 1px solid var(--color-green-100); }
@@ -486,6 +571,10 @@
   .ck-steps b { line-height: 1.6; }
   .ck-steps__t { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
   .ck-card-note { margin-block-start: 16px; }
+  /* برش ۶: کد رهگیری زیر گام خودش، با پیوند سایت پست؛ و نمای غریبه تک‌ستونی، مثل سایت */
+  .ck-track { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block-start: 10px; padding: 12px 16px; background: var(--color-green-50); border-radius: var(--radius-md); }
+  .ck-solo { max-width: calc(640px + 2 * var(--jy-gutter)); padding-block: 8px 64px; }
+  .ck-solo .ck-sub + .ck-sub { margin-block-start: 8px; }
   .home-sum__lines { margin-block-start: 8px; }
   .home-sum__lines > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 6px; }
   .home-sum__lines dt { color: var(--color-muted); }
@@ -509,8 +598,8 @@
 .scr, .st { display: none; }
 /* سه پوسته: ورود و ثبت، پنل، صفحهٔ مشتری */
 body:has(:is(#m-login, #m-login-error, #m-login-locked, #m-invite, #m-invite-expired):checked) .scr-auth { display: block; }
-body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .scr-shell { display: block; }
-body:has(:is(#m-c-print, #m-c-handed, #m-c-cancelled):checked) .scr-site { display: block; }
+body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped):checked) .scr-shell { display: block; }
+body:has(:is(#m-c-print, #m-c-handed, #m-c-cancelled, #m-c-shipped, #m-c-guest):checked) .scr-site { display: block; }
 
 body:has(#m-login:checked) :is(.st-login, .st-login-any),
 body:has(#m-login-error:checked) :is(.st-login-error, .st-login-any),
@@ -545,24 +634,41 @@ body:has(#m-admin-link:checked) .st-admin-link,
 body:has(#m-events:checked) .st-events,
 body:has(#m-c-print:checked) :is(.st-c-print, .st-cust),
 body:has(#m-c-handed:checked) :is(.st-c-handed, .st-cust),
-body:has(#m-c-cancelled:checked) :is(.st-c-cancelled, .st-cust) { display: contents; }
+body:has(#m-c-cancelled:checked) :is(.st-c-cancelled, .st-cust),
+body:has(:is(#m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup):checked) .st-ship-page,
+body:has(#m-ship:checked) .st-ship,
+body:has(#m-ship-reading:checked) .st-ship-reading,
+body:has(#m-ship-error:checked) .st-ship-error,
+body:has(#m-ship-cols:checked) .st-ship-cols,
+body:has(#m-ship-dup:checked) .st-ship-dup,
+body:has(:is(#m-ship-preview, #m-ship-done):checked) .st-ship-file,
+body:has(#m-ship-preview:checked) .st-ship-preview,
+body:has(#m-ship-done:checked) .st-ship-done,
+body:has(#m-ship-revert:checked) .st-ship-revert,
+body:has(#m-ship-review:checked) .st-ship-review,
+body:has(#m-ship-report:checked) .st-ship-report,
+body:has(#m-order-shipped:checked) :is(.st-order-shipped, .st-o27, .st-pdf-ok, .st-rcpt, .st-printed, .st-prt-card),
+body:has(#m-c-shipped:checked) :is(.st-c-shipped, .st-cust),
+body:has(#m-c-guest:checked) .st-c-guest { display: contents; }
 
 /* ردیف جدول و ردیف رویدادی که فقط در یک حالت هست: جعبهٔ خودش را نگه می‌دارد، نه contents */
 body:has(#m-tariff-invalid:checked) tr.st-tariff-invalid { display: table-row; }
 body:has(:is(#m-order-print, #m-order-handed):checked) .ad-log > li.st-printed,
 body:has(:is(#m-order, #m-order-edit, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled):checked) .ad-log > li.st-pdf-ok,
 body:has(#m-order-handed:checked) .ad-log > li.st-order-handed,
-body:has(#m-order-cancelled:checked) .ad-log > li.st-order-cancelled { display: grid; }
+body:has(#m-order-cancelled:checked) .ad-log > li.st-order-cancelled,
+body:has(#m-order-shipped:checked) .ad-log > li:is(.st-printed, .st-pdf-ok, .st-order-shipped) { display: grid; }
 
 /* زبانهٔ جاری (در سایت aria-current، اینجا فقط ظاهر) */
 body:has(#m-dash:checked) .ad-nav [data-tab='dash'],
-body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged):checked) .ad-nav [data-tab='orders'],
+body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-order-shipped):checked) .ad-nav [data-tab='orders'],
+body:has(:is(#m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-nav [data-tab='ship'],
 body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-nav [data-tab='tariff'],
 body:has(:is(#m-settings, #m-key-edit):checked) .ad-nav [data-tab='settings'],
 body:has(:is(#m-partners, #m-partner-edit):checked) .ad-nav [data-tab='partners'],
 body:has(:is(#m-admins, #m-admin-invite, #m-admin-link):checked) .ad-nav [data-tab='admins'],
 body:has(#m-events:checked) .ad-nav [data-tab='events'],
-body:has(:is(#m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
+body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
 
 /*
  * نقش: متصدی تعرفه را فقط می‌بیند، و تنظیمات، چاپخانه‌ها، ادمین‌ها و رویدادها را ندارد. چاپخانه (برش ۵، ADR-042) فقط پیشخوان و
@@ -574,11 +680,12 @@ body:has(:is(#r-operator, #r-partner):checked) .own { display: none; }
 body:has(#r-operator:checked) .opr { display: contents; }
 body:has(#r-partner:checked) .staff { display: none; }
 body:has(#r-partner:checked) .prt { display: contents; }
+.ad-facts > div.staff { display: grid; }
 body:has(:is(#r-operator, #r-partner):checked) .st-ownpage { display: none !important; }
 body:has(#r-partner:checked) .st-staffpage { display: none !important; }
-body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-noaccess { display: block; }
+body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report):checked) .ad-noaccess { display: block; }
 .ad-noaccess-prt, .ad-notfound { display: none; max-width: 32rem; }
-body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign):checked) .ad-noaccess-prt { display: block; }
+body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-noaccess-prt { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged):checked) .ad-notfound { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged, #m-order-edit, #m-order-cancel, #m-order-assign):checked) :is(.st-o27, .st-order-unpaid, .st-order-vols, .st-order-purged) { display: none; }
 
@@ -616,6 +723,19 @@ body:has(#m-order-vols:checked) .mock [for='m-order-vols'],
 body:has(#m-order-purged:checked) .mock [for='m-order-purged'],
 body:has(#m-partners:checked) .mock [for='m-partners'],
 body:has(#m-partner-edit:checked) .mock [for='m-partner-edit'],
+body:has(#m-ship:checked) .mock [for='m-ship'],
+body:has(#m-ship-reading:checked) .mock [for='m-ship-reading'],
+body:has(#m-ship-error:checked) .mock [for='m-ship-error'],
+body:has(#m-ship-cols:checked) .mock [for='m-ship-cols'],
+body:has(#m-ship-dup:checked) .mock [for='m-ship-dup'],
+body:has(#m-ship-preview:checked) .mock [for='m-ship-preview'],
+body:has(#m-ship-done:checked) .mock [for='m-ship-done'],
+body:has(#m-ship-revert:checked) .mock [for='m-ship-revert'],
+body:has(#m-ship-review:checked) .mock [for='m-ship-review'],
+body:has(#m-ship-report:checked) .mock [for='m-ship-report'],
+body:has(#m-order-shipped:checked) .mock [for='m-order-shipped'],
+body:has(#m-c-shipped:checked) .mock [for='m-c-shipped'],
+body:has(#m-c-guest:checked) .mock [for='m-c-guest'],
 body:has(#r-owner:checked) .mock [for='r-owner'],
 body:has(#r-operator:checked) .mock [for='r-operator'],
 body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-green-700); }
@@ -664,6 +784,19 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
   <input type="radio" name="m" id="m-order-purged" tabindex="-1">
   <input type="radio" name="m" id="m-partners" tabindex="-1">
   <input type="radio" name="m" id="m-partner-edit" tabindex="-1">
+  <input type="radio" name="m" id="m-ship" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-reading" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-error" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-cols" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-dup" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-preview" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-done" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-revert" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-review" tabindex="-1">
+  <input type="radio" name="m" id="m-ship-report" tabindex="-1">
+  <input type="radio" name="m" id="m-order-shipped" tabindex="-1">
+  <input type="radio" name="m" id="m-c-shipped" tabindex="-1">
+  <input type="radio" name="m" id="m-c-guest" tabindex="-1">
   <input type="radio" name="r" id="r-owner" checked tabindex="-1">
   <input type="radio" name="r" id="r-operator" tabindex="-1">
   <input type="radio" name="r" id="r-partner" tabindex="-1">
@@ -695,6 +828,18 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     <label for="m-order-assign">جابه‌جایی چاپخانه</label>
     <label for="m-partners">چاپخانه‌ها</label>
     <label for="m-partner-edit">افزودن چاپخانه</label>
+    <hr><p>ارسال و رهگیری (برش ۶)</p>
+    <label for="m-ship">ارسال</label>
+    <label for="m-ship-reading">در حال خواندن</label>
+    <label for="m-ship-error">اکسل واقعی</label>
+    <label for="m-ship-cols">ستون کم</label>
+    <label for="m-ship-dup">همان فایل</label>
+    <label for="m-ship-preview">پیش‌نمایش</label>
+    <label for="m-ship-done">ثبت شد</label>
+    <label for="m-ship-revert">برگرداندن ورود</label>
+    <label for="m-ship-review">صف تأیید</label>
+    <label for="m-order-shipped">بستهٔ پستی</label>
+    <label for="m-ship-report">گزارش ارسال</label>
     <hr><p>تعرفه و تنظیمات</p>
     <label for="m-tariff">تعرفه</label>
     <label for="m-tariff-draft">نسخهٔ تازه</label>
@@ -710,6 +855,8 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     <label for="m-c-print">در حال چاپ</label>
     <label for="m-c-handed">تحویل پست شد</label>
     <label for="m-c-cancelled">لغو شد</label>
+    <label for="m-c-shipped">کد رهگیری</label>
+    <label for="m-c-guest">غریبه</label>
     <hr><p>نقش</p>
     <label for="r-owner">مالک</label>
     <label for="r-operator">متصدی</label>
@@ -822,16 +969,19 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     <nav class="ad-wrap ad-nav" aria-label="بخش‌های پنل">
       <label for="m-dash" data-tab="dash">پیشخوان</label>
       <label for="m-orders" data-tab="orders">سفارش‌ها</label>
-      <span class="staff"><label for="m-tariff" data-tab="tariff">تعرفه</label></span>
+      <label for="m-ship" data-tab="ship">ارسال</label>
+      <span class="own"><label for="m-tariff" data-tab="tariff" class="ad-nav__wide">تعرفه</label></span>
+      <span class="opr"><label for="m-tariff" data-tab="tariff">تعرفه</label></span>
       <span class="own">
         <label for="m-settings" data-tab="settings" class="ad-nav__wide">تنظیمات</label>
         <label for="m-partners" data-tab="partners" class="ad-nav__wide">چاپخانه‌ها</label>
         <label for="m-admins" data-tab="admins" class="ad-nav__wide">ادمین‌ها</label>
         <label for="m-events" data-tab="events" class="ad-nav__wide">رویدادها</label>
-        <!-- گوشی: بخش‌های مالک زیر «بیشتر»، تا زبانهٔ جاری همیشه دیده شود -->
+        <!-- گوشی: بخش‌های مالک زیر «بیشتر»، تا زبانهٔ جاری همیشه دیده شود؛ از برش ۶ «تعرفه» هم -->
         <details class="ad-more">
           <summary data-tab="more">بیشتر<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
           <div class="ad-more__list">
+            <label for="m-tariff">تعرفه</label>
             <label for="m-settings">تنظیمات</label>
             <label for="m-partners">چاپخانه‌ها</label>
             <label for="m-admins">ادمین‌ها</label>
@@ -846,14 +996,14 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     <!-- متصدی به بخش‌های مالک نمی‌رسد -->
     <section class="jy-card ad-noaccess" aria-labelledby="t-noaccess">
       <h1 id="t-noaccess" class="jy-card__title">این بخش فقط برای مالک است</h1>
-      <p class="ck-sub">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها و رویدادها با مالک پنل است.</p>
+      <p class="ck-sub">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، برگرداندن ورود فایل پست و گزارش ارسال با مالک پنل است.</p>
       <div class="ad-actions"><label for="m-dash" class="jy-btn jy-btn--secondary">پیشخوان</label></div>
     </section>
 
     <!-- چاپخانه (برش ۵) فقط سفارش‌های خودش را دارد -->
     <section class="jy-card ad-noaccess-prt" aria-labelledby="t-noaccess-prt">
       <h1 id="t-noaccess-prt" class="jy-card__title">این بخش برای چاپخانه باز نیست</h1>
-      <p class="ck-sub">سفارش‌هایی که به چاپ نور سپرده شده‌اند در «سفارش‌ها»ست. لغو، ویرایش نشانی، تعرفه و بقیه با جزوه‌یار است.</p>
+      <p class="ck-sub">سفارش‌هایی که به چاپ نور سپرده شده‌اند در «سفارش‌ها»ست. لغو، ویرایش نشانی، صف تأیید فایل پست، تعرفه و بقیه با جزوه‌یار است.</p>
       <div class="ad-actions"><label for="m-orders" class="jy-btn jy-btn--secondary">سفارش‌ها</label></div>
     </section>
     <section class="jy-card ad-notfound" aria-labelledby="t-notfound">
@@ -887,6 +1037,8 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
       <div class="ad-alerts">
         <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>PDF جزوهٔ <label for="m-order-pdf" class="jy-link">سفارش <span class="num">10031</span></label> ساخته نشد؛ پیش از چاپ دوباره بسازش.</span></p>
         <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><label for="m-order-unpaid" class="jy-link"><span class="num">2</span> تلاش پرداخت</label> از درگاه برنگشت.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-ship-review" class="jy-link"><span class="num">5</span> سطر فایل پست</label> منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>کد رهگیری سفارش <label for="m-orders" class="jy-link"><span class="num">10009</span></label> و <label for="m-orders" class="jy-link"><span class="num">10025</span></label> نرسیده، با اینکه دو روز کاری از تحویل پستشان (چهارشنبه <span class="num">8</span> مهر) گذشته. فایل پست آن روز را <label for="m-ship" class="jy-link">وارد کن</label>.</span></p>
         <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-order-assign" class="jy-link">سفارش <span class="num">10037</span></label> چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.</span></p>
       </div>
 
@@ -919,6 +1071,9 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
           </ul>
           <p class="ad-meta ad-gap">از این <span class="num">2</span> سفارش، هنوز هیچ‌کدام در حال چاپ نیست.</p>
         </section>
+        <div class="ad-alerts">
+          <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>کد رهگیری سفارش <label for="m-orders" class="jy-link"><span class="num">10025</span></label> نرسیده، با اینکه دو روز کاری از تحویل پستش (چهارشنبه <span class="num">8</span> مهر) گذشته. فایل پست آن روز را <label for="m-ship" class="jy-link">بده</label>.</span></p>
+        </div>
         <section class="jy-card ad-list ad-list--nosum ad-gap" aria-labelledby="t-queue-p">
           <div class="jy-card__head"><h2 id="t-queue-p" class="jy-card__title">صف تحویل به پست</h2></div>
           <ul class="ad-rows">
@@ -934,7 +1089,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
       <div class="ad-pagehead"><h1 class="ad-title">سفارش‌ها</h1></div>
       <div class="ad-search">
         <span class="jy-icon jy-icon-search" aria-hidden="true"></span>
-        <input class="jy-input" type="search" placeholder="شمارهٔ سفارش، موبایل یا نام گیرنده" aria-label="جست‌وجوی سفارش">
+        <input class="jy-input" type="search" placeholder="شمارهٔ سفارش، موبایل، نام گیرنده یا کد رهگیری" aria-label="جست‌وجوی سفارش">
       </div>
       <div class="staff">
       <nav class="ad-chips" aria-label="وضعیت سفارش">
@@ -992,6 +1147,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
           <div class="st st-order-print"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-printer" aria-hidden="true"></span>در حال چاپ</span></div>
           <div class="st st-order-handed"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>تحویل پست شد</span></div>
           <div class="st st-order-cancelled"><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>لغو شد</span></div>
+          <div class="st st-order-shipped"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>تحویل پست شد</span></div>
         </div>
       </div>
 
@@ -1051,6 +1207,16 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <p class="ad-meta">دوشنبه <span class="num">13</span> مهر، <span class="num">16:40</span>، سارا</p>
               <div class="ad-status__badges"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>به‌موقع</span></div>
               <p class="jy-note ad-gap">کد رهگیری را فایل پست می‌آورد و به موبایل مشتری پیامک می‌شود.</p>
+            </section>
+          </div>
+
+          <!-- برش ۶: کد رهگیری از فایل پست؛ فایل «در حال چاپ» را «تحویل پست شد» هم کرد (ADR-046) -->
+          <div class="st st-order-shipped">
+            <section class="jy-card ad-status" aria-labelledby="t-st5">
+              <h2 id="t-st5" class="jy-card__title">به پست رسید</h2>
+              <p class="ad-meta">دوشنبه <span class="num">13</span> مهر، <span class="num">18:32</span> · فایل پست، حسن</p>
+              <div class="ad-status__badges"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>به‌موقع</span></div>
+              <p class="jy-note ad-gap">کد رهگیری <span class="jy-barcode"><span>1188</span><span>0000</span><span>0000</span><span>0000</span><span>0000</span><span>0101</span></span> به موبایل مشتری پیامک شد.</p>
             </section>
           </div>
 
@@ -1161,6 +1327,28 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               </dl>
             </section>
           </div>
+          <!-- برش ۶: بستهٔ پستی (ADR-047)؛ کرایه و مالیات فقط با orders.money، کنار گذاشتن فقط مالک -->
+          <div class="st st-order-shipped">
+            <section class="jy-card" aria-labelledby="t-parcel">
+              <div class="jy-card__head">
+                <h2 id="t-parcel" class="jy-card__title">بستهٔ پستی</h2>
+                <span class="jy-card__meta">پست پیشتاز · یک بسته</span>
+              </div>
+              <div class="ad-parcel">
+                <span class="jy-barcode jy-barcode--lg"><span>1188</span><span>0000</span><span>0000</span><span>0000</span><span>0000</span><span>0101</span></span>
+                <!-- پیوند فقط a است (قاعدهٔ ۸)؛ نشانی دقیقش با یک بارکد واقعی سنجیده می‌شود -->
+                <a class="jy-btn jy-btn--secondary" href="#" target="_blank" rel="noopener noreferrer">رهگیری در سایت پست<span class="sr-only"> (زبانهٔ تازه)</span></a>
+              </div>
+              <dl class="ad-facts">
+                <div><dt>وزن</dt><dd><span class="num">520</span> گرم · برآورد <span class="num">459</span> گرم</dd></div>
+                <div class="staff"><dt>کرایهٔ پست</dt><dd><span class="num">137,750</span> + مالیات <span class="num">13,775</span> تومان</dd></div>
+                <div><dt>فایل پست</dt><dd><bdi>FileName-1984.xls</bdi>، سطر <span class="num">2</span> · حسن، دوشنبه <span class="num">13</span> مهر، <span class="num">18:30</span></dd></div>
+                <div><dt>پیامک</dt><dd>به <span class="num">0915 234 5678</span> رفت، <span class="num">18:32</span></dd></div>
+              </dl>
+              <div class="own"><div class="ad-actions"><button type="button" class="jy-btn jy-btn--text">کنار گذاشتن این کد…</button></div></div>
+            </section>
+          </div>
+
           <div class="st st-order-edit">
             <section class="jy-card" aria-labelledby="t-edit">
               <h2 id="t-edit" class="jy-card__title">ویرایش نشانی</h2>
@@ -1228,6 +1416,9 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <li class="st st-printed"><span class="ad-log__when"><span class="num">10:05</span></span><span>در صف چاپ ← در حال چاپ <span class="ad-log__who">· سارا</span></span></li>
               <li class="st st-order-handed"><span class="ad-log__when"><span class="num">16:40</span></span><span>در حال چاپ ← تحویل پست شد <span class="ad-log__who">· سارا</span></span></li>
               <li class="st st-order-cancelled"><span class="ad-log__when"><span class="num">11:24</span></span><span>لغو شد <span class="ad-log__who">· سارا</span></span></li>
+              <li class="st st-order-shipped"><span class="ad-log__when"><span class="num">18:32</span></span><span>در حال چاپ ← تحویل پست شد <span class="ad-log__who">· حسن، فایل پست</span></span></li>
+              <li class="st st-order-shipped"><span class="ad-log__when"><span class="num">18:32</span></span><span>کد رهگیری <span class="jy-barcode"><span>1188</span><span>0000</span><span>0000</span><span>0000</span><span>0000</span><span>0101</span></span> از <bdi>FileName-1984.xls</bdi> <span class="ad-log__who">· حسن</span></span></li>
+              <li class="st st-order-shipped"><span class="ad-log__when"><span class="num">18:32</span></span><span>پیامک رهگیری به مشتری رفت <span class="ad-log__who">· سیستم</span></span></li>
             </ol>
           </section>
         </div>
@@ -1403,6 +1594,579 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
         </dl>
         <p class="jy-note ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>فایل‌های این سفارش (PDF جزوه، فایل چاپ و برگه) سه‌شنبه <span class="num">7</span> مهر پاک شد: <span class="num">30</span> روز پس از تحویل پست. مشخصات، مبلغ و رویدادها می‌مانند.</span></p>
       </section>
+    </div>
+
+
+    <!-- ===================== برش ۶: زبانهٔ «ارسال» (ADR-045): بارگذاری فایل پست و ورودها ===================== -->
+    <div class="st st-ship-page">
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">ارسال</h1>
+          <p class="ad-sub"><span class="staff">فایل پست کد رهگیری، وزن و کرایهٔ هر بسته را می‌آورد؛ کد به موبایل مشتری پیامک می‌شود.</span><span class="prt">فایل پست بسته‌هایت را بده؛ کد رهگیری سفارش‌های چاپ نور ثبت و به مشتری پیامک می‌شود.</span></p>
+        </div>
+        <span class="own"><label for="m-ship-report" class="jy-btn jy-btn--secondary">گزارش ارسال</label></span>
+      </div>
+      <div class="ad-stack">
+        <div class="st st-ship">
+          <!-- در سایت برچسب ورودی فایل؛ در طرح برچسب حالت «در حال خواندن» -->
+          <label class="jy-upload ad-upload" for="m-ship-reading">
+            <span class="jy-drop">
+              <span class="jy-drop__title">فایل پست را اینجا بینداز</span>
+              <span class="jy-drop__sub">همان فایلی که از پست گرفتی، دست‌نخورده؛ پیش از ثبت، هر سطر را با حکمش می‌بینی.</span>
+              <span class="jy-drop__formats"><span class="jy-drop__format ltr">.xls</span><span class="jy-drop__format ltr">.html</span><span class="jy-drop__format ltr">.csv</span><span class="jy-drop__format ltr">.xlsx</span></span>
+            </span>
+            <span class="jy-upload__foot">
+              <span class="jy-btn jy-btn--primary"><span class="jy-icon jy-icon-upload" aria-hidden="true"></span>انتخاب فایل</span>
+              <span class="jy-upload__hint">تا <span class="num">2</span> مگابایت.<span class="prt"> فقط بسته‌های سفارش‌های چاپ نور ثبت می‌شوند.</span></span>
+            </span>
+          </label>
+        </div>
+        <div class="st st-ship-reading">
+          <section class="jy-card ad-upstate" aria-label="خواندن فایل پست">
+            <p class="ad-fileline"><span class="jy-icon jy-icon-file" aria-hidden="true"></span><bdi class="ad-fileline__name"><span class="staff">FileName-1981.xls</span><span class="prt">FileName-1984.xls</span></bdi><span class="ad-meta"><span class="num">16</span> کیلوبایت</span></p>
+            <button type="button" class="jy-btn jy-btn--primary jy-btn--block is-loading" aria-disabled="true">در حال خواندن فایل…</button>
+            <p class="ad-hint">چند ثانیه؛ بعد هر سطر را با حکمش می‌بینی. تا «ثبت» چیزی عوض نمی‌شود.</p>
+          </section>
+        </div>
+        <div class="st st-ship-error">
+          <section class="jy-card ad-upstate" aria-labelledby="t-fail">
+            <h2 id="t-fail" class="jy-card__title">این فایل خوانده نشد</h2>
+            <p class="ad-fileline"><span class="jy-icon jy-icon-file" aria-hidden="true"></span><bdi class="ad-fileline__name"><span class="staff">FileName-1981.xls</span><span class="prt">FileName-1984.xls</span></bdi><span class="ad-meta"><span class="num">16</span> کیلوبایت</span><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>خوانده نشد</span></p>
+            <p class="jy-note jy-note--error" role="alert"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>این فایل اکسل واقعی است، نه فایلی که پست می‌دهد؛ احتمالاً یک بار در Excel باز و ذخیره شده، و Excel کد رهگیری <span class="num">24</span> رقمی را گرد و خراب می‌کند. همان فایلی را بده که از پست گرفتی، دست‌نخورده.</span></p>
+            <div class="ad-actions"><label for="m-ship" class="jy-btn jy-btn--secondary"><span class="jy-icon jy-icon-upload" aria-hidden="true"></span>فایل دیگری بده</label></div>
+          </section>
+        </div>
+        <div class="st st-ship-cols">
+          <section class="jy-card ad-upstate" aria-labelledby="t-cols">
+            <h2 id="t-cols" class="jy-card__title">این فایل خوانده نشد</h2>
+            <p class="ad-fileline"><span class="jy-icon jy-icon-file" aria-hidden="true"></span><bdi class="ad-fileline__name"><span class="staff">FileName-1981.xls</span><span class="prt">FileName-1984.xls</span></bdi><span class="ad-meta"><span class="num">16</span> کیلوبایت</span><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>خوانده نشد</span></p>
+            <p class="jy-note jy-note--error" role="alert"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>ستون «بارکد» در این فایل نیست، پس کد رهگیری ندارد. همان فایلی را بده که از پست گرفتی. اگر همان است، شاید پست شکل فایلش را عوض کرده؛<span class="staff"> این فایل را نگه دار: خواندنش تغییر پنل می‌خواهد.</span><span class="prt"> به جزوه‌یار خبر بده.</span></span></p>
+            <ul class="ad-need" aria-label="ستون‌های لازم"><li><span class="jy-icon jy-icon-error" aria-hidden="true"></span>بارکد<span class="sr-only">، نیست</span></li><li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>نام گ<span class="sr-only">، هست</span></li><li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>مقصد<span class="sr-only">، هست</span></li><li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>وزن<span class="sr-only">، هست</span></li><li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>کرایه پستی<span class="sr-only">، هست</span></li><li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>مالیات<span class="sr-only">، هست</span></li></ul>
+            <div class="ad-actions"><label for="m-ship" class="jy-btn jy-btn--secondary"><span class="jy-icon jy-icon-upload" aria-hidden="true"></span>فایل دیگری بده</label></div>
+          </section>
+        </div>
+        <div class="st st-ship-dup">
+          <section class="jy-card ad-upstate" aria-labelledby="t-dup">
+            <h2 id="t-dup" class="jy-card__title">این فایل پیش‌تر وارد شده</h2>
+            <p class="ad-fileline"><span class="jy-icon jy-icon-file" aria-hidden="true"></span><bdi class="ad-fileline__name"><span class="staff">FileName-1981.xls</span><span class="prt">FileName-1984.xls</span></bdi><span class="ad-meta"><span class="num">16</span> کیلوبایت</span><span class="jy-badge jy-badge--neutral">تکراری</span></p>
+            <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><span class="staff">همین فایل امروز <span class="num">11:05</span> با سارا وارد و ثبت شد: <label for="m-ship-done" class="jy-link"><bdi>FileName-1981.xls</bdi></label>. یک فایل دو بار ثبت نمی‌شود؛ اگر آن ورود اشتباه بود، مالک برش می‌گرداند و بعد همین فایل دوباره وارد می‌شود.</span><span class="prt">همین فایل یکشنبه <span class="num">12</span> مهر، <span class="num">18:10</span> وارد و ثبت شد: <label for="m-ship-done" class="jy-link"><bdi>FileName-1977.xls</bdi></label>. یک فایل دو بار ثبت نمی‌شود.</span></span></p>
+            <div class="ad-actions"><label for="m-ship" class="jy-btn jy-btn--secondary"><span class="jy-icon jy-icon-upload" aria-hidden="true"></span>فایل دیگری بده</label></div>
+          </section>
+        </div>
+
+        <!-- صف تأیید فقط با مالک و متصدی -->
+        <div class="staff"><p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-ship-review" class="jy-link"><span class="num">5</span> سطر</label> از فایل‌های پست منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.</span></p></div>
+
+        <section class="jy-card ad-list" aria-labelledby="t-imports">
+          <div class="jy-card__head"><h2 id="t-imports" class="jy-card__title">ورودها</h2><span class="jy-card__meta">تازه‌ترین اول</span></div>
+          <div class="staff">
+          <ul class="ad-rows">
+            <li><label for="m-ship-done" class="ad-imp">
+              <span class="ad-imp__head"><bdi class="ad-imp__name">FileName-1981.xls</bdi><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></span>
+              <span class="ad-imp__meta">امروز <span class="num">11:05</span> · سارا · روز فایل یکشنبه <span class="num">12</span> مهر</span>
+              <span class="ad-imp__counts"><span class="num">15</span> بسته: <span class="num">9</span> کد رهگیری · <span class="num">4</span> در صف تأیید · <span class="num">1</span> پیدا نشد · <span class="num">1</span> تکراری</span>
+            </label></li>
+            <li><a href="#" class="ad-imp">
+              <span class="ad-imp__head"><bdi class="ad-imp__name">FileName-1977.xls</bdi><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></span>
+              <span class="ad-imp__meta">یکشنبه <span class="num">12</span> مهر، <span class="num">18:10</span> · حسن، چاپ نور · روز فایل یکشنبه <span class="num">12</span> مهر</span>
+              <span class="ad-imp__counts"><span class="num">5</span> بسته: <span class="num">3</span> کد رهگیری · <span class="num">1</span> در صف تأیید · <span class="num">1</span> پیدا نشد</span>
+            </a></li>
+            <li><a href="#" class="ad-imp">
+              <span class="ad-imp__head"><bdi class="ad-imp__name">FileName-1968.xls</bdi><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></span>
+              <span class="ad-imp__meta">شنبه <span class="num">11</span> مهر، <span class="num">17:32</span> · علی · روز فایل شنبه <span class="num">11</span> مهر</span>
+              <span class="ad-imp__counts"><span class="num">11</span> بسته: <span class="num">11</span> کد رهگیری</span>
+            </a></li>
+            <li><a href="#" class="ad-imp">
+              <span class="ad-imp__head"><bdi class="ad-imp__name">FileName-1966.xls</bdi><span class="jy-badge jy-badge--neutral">برگشت</span></span>
+              <span class="ad-imp__meta">شنبه <span class="num">11</span> مهر، <span class="num">17:20</span> · علی · برگشت <span class="num">17:30</span> با سارا: «نسخهٔ ناقص فایل بود؛ کاملش وارد شد.»</span>
+              <span class="ad-imp__counts"><span class="num">6</span> بسته: <span class="num">6</span> کد رهگیری کنار رفت</span>
+            </a></li>
+          </ul>
+          </div>
+          <div class="prt">
+          <ul class="ad-rows">
+            <li><label for="m-ship-done" class="ad-imp">
+              <span class="ad-imp__head"><bdi class="ad-imp__name">FileName-1977.xls</bdi><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></span>
+              <span class="ad-imp__meta">یکشنبه <span class="num">12</span> مهر، <span class="num">18:10</span> · حسن · روز فایل یکشنبه <span class="num">12</span> مهر</span>
+              <span class="ad-imp__counts"><span class="num">5</span> بسته: <span class="num">3</span> کد رهگیری · <span class="num">1</span> در انتظار بررسی جزوه‌یار · <span class="num">1</span> پیدا نشد</span>
+            </label></li>
+            <li><a href="#" class="ad-imp">
+              <span class="ad-imp__head"><bdi class="ad-imp__name">FileName-1952.xls</bdi><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></span>
+              <span class="ad-imp__meta">سه‌شنبه <span class="num">7</span> مهر، <span class="num">18:05</span> · حسن · روز فایل سه‌شنبه <span class="num">7</span> مهر</span>
+              <span class="ad-imp__counts"><span class="num">2</span> بسته: <span class="num">2</span> کد رهگیری</span>
+            </a></li>
+          </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ===================== برش ۶: یک ورود فایل پست، پیش‌نمایش و پس از «ثبت» (ADR-045، ADR-046) ===================== -->
+    <div class="st st-ship-file">
+      <div class="staff">
+      <label for="m-ship" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>ارسال</label>
+      <div class="ad-pagehead">
+        <div>
+          <div class="ad-title-row">
+            <h1 class="ad-title"><bdi class="ad-fname">FileName-1981.xls</bdi></h1>
+            <div class="st st-ship-preview"><span class="jy-badge jy-badge--neutral">پیش‌نمایش</span></div>
+            <div class="st st-ship-done"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></div>
+          </div>
+          <p class="ad-sub">سارا، امروز <span class="num">11:05</span> · روز فایل یکشنبه <span class="num">12</span> مهر · <span class="num">15</span> بسته</p>
+        </div>
+        <div class="st st-ship-done"><span class="own"><label for="m-ship-revert" class="jy-btn jy-btn--text">برگرداندن این ورود</label></span></div>
+      </div>
+      <div class="ad-stack">
+        <div class="st st-ship-preview"><p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>هنوز چیزی ثبت نشده. با «ثبت»، <span class="num">9</span> کد رهگیری به سفارش‌ها می‌نشیند و برای هر کدام یک پیامک می‌رود؛ سفارش <span class="num">10013</span> و <span class="num">10017</span> هم از «در حال چاپ» «تحویل پست شد» می‌شوند، با روز فایل.</span></p></div>
+        <div class="st st-ship-done"><p class="jy-note jy-note--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span><span>امروز <span class="num">11:07</span> با سارا ثبت شد: <span class="num">9</span> کد رهگیری نشست و <span class="num">8</span> پیامک رفت؛ پیامک سفارش <span class="num">10018</span> نرفت. سفارش <span class="num">10013</span> و <span class="num">10017</span> «تحویل پست شد» شدند.</span></p></div>
+        <ul class="ad-tiles ad-counts">
+          <li><a class="ad-tile" href="#g81-ok"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>قطعی</span><span class="ad-tile__n num">9</span><span class="ad-tile__t"><span class="st st-ship-preview">کد رهگیری و پیامک، با «ثبت»</span><span class="st st-ship-done">کد رهگیری نشست</span></span></a></li>
+          <li><a class="ad-tile" href="#g81-review"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>صف تأیید</span><span class="ad-tile__n num">4</span><span class="ad-tile__t">تا تأیید مالک یا متصدی، بی کد و بی پیامک</span></a></li>
+          <li><a class="ad-tile" href="#g81-nf"><span class="jy-badge jy-badge--neutral">پیدا نشد</span><span class="ad-tile__n num">1</span><span class="ad-tile__t">سفارش ما نیست؛ ثبت نمی‌شود</span></a></li>
+          <li><a class="ad-tile" href="#g81-dup"><span class="jy-badge jy-badge--neutral">تکراری</span><span class="ad-tile__n num">1</span><span class="ad-tile__t">همین کد پیش‌تر آمده</span></a></li>
+        </ul>
+        <p class="ad-meta">جمع کل فایل با جمع سطرها می‌خواند: <span class="num">15</span> بسته، <span class="num">20.2</span> کیلوگرم، کرایه <span class="num">2,170,300</span> و مالیات <span class="num">217,030</span> تومان.</p>
+        <!-- «ثبت» و «دور بینداز» ثابت همین‌جا، زیر شمارها؛ نه نوار چسبان که در بعضی نمایشگرها وسط صفحه می‌افتاد (تصمیم ۱۴۰۵/۰۷/۰۶) -->
+        <div class="st st-ship-preview">
+          <div class="ad-commit">
+            <label for="m-ship-done" class="jy-btn jy-btn--primary">ثبت: <span class="num">9</span> کد رهگیری</label>
+            <label for="m-ship" class="jy-btn jy-btn--secondary">دور بینداز</label>
+            <p class="ad-commit__note">«ثبت» همین حکم‌ها را دوباره می‌سنجد؛ اگر در این فاصله سفارشی عوض شده باشد، پیش‌نمایش تازه می‌بینی.</p>
+          </div>
+        </div>
+        <section class="jy-card ad-list" id="g81-review" aria-labelledby="t-g81-review">
+          <div class="jy-card__head">
+            <h2 id="t-g81-review" class="jy-card__title">صف تأیید</h2><div class="st st-ship-done"><label for="m-ship-review" class="jy-btn jy-btn--text ad-card-head-btn">صف تأیید</label></div>
+          </div>
+          <p class="ad-list__sub">به سفارشی نشستند، ولی قطعی نیستند؛ کد رهگیری و پیامک با تأیید.</p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">6</span>
+              <p class="ad-prow__file"><b>رضایی <span class="num">10012</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3991</span><span>9948</span><span>7816</span><span>7153</span><span>2493</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why">سفارش <span class="num">10012</span> مال «علی کریمی» است و کد رهگیری‌اش شنبه آمد؛ نام نمی‌خواند. نامزد: <span class="num">10014</span>، سارا رضایی، تهران.</p></div>
+              <p class="ad-prow__w"><span class="num">910</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">9</span>
+              <p class="ad-prow__file"><b>احمدی</b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3970</span><span>9314</span><span>2507</span><span>1341</span><span>2926</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why">«نام گ» شماره ندارد. نامزدها: <span class="num">10016</span>، رضا احمدی، تهران؛ <span class="num">10009</span>، نرگس احمدی، کرج.</p></div>
+              <p class="ad-prow__w"><span class="num">1,850</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">133,666</span> · مالیات <span class="num">13,367</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">12</span>
+              <p class="ad-prow__file"><b>محمدی <span class="num">10019</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3059</span><span>0008</span><span>6675</span><span>8929</span><span>5734</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why">سفارش <span class="num">10019</span> (زهرا محمدی، تهران) هنوز «در صف چاپ» است؛ تأیید، «شروع چاپ» و «تحویل پست شد» را با هم می‌زند.</p></div>
+              <p class="ad-prow__w"><span class="num">560</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">15</span>
+              <p class="ad-prow__file"><b>قاسمی <span class="num">10026</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3034</span><span>6624</span><span>2692</span><span>6424</span><span>9653</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why">سفارش <span class="num">10026</span> (امین قاسمی، تهران) لغو شده؛ کد رهگیری به سفارش لغوشده نمی‌نشیند.</p></div>
+              <p class="ad-prow__w"><span class="num">690</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></p>
+            </li>
+          </ol>
+        </section>
+        <section class="jy-card ad-list" id="g81-nf" aria-labelledby="t-g81-nf">
+          <div class="jy-card__head">
+            <h2 id="t-g81-nf" class="jy-card__title">پیدا نشد</h2>
+          </div>
+          <p class="ad-list__sub">سفارش ما نیست یا پیدا نشد؛ ثبت نمی‌شود.<span class="st st-ship-done"> اگر مال ماست، دستی به سفارشی بده.</span></p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">13</span>
+              <p class="ad-prow__file"><b>طهماسبی <span class="num">6103</span></b> <span class="ad-row__city">مشهد</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3557</span><span>8277</span><span>9946</span><span>3672</span><span>0558</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why"><span class="num">6103</span> شمارهٔ سفارش سایت نیست (سفارش‌های سایت از <span class="num">10001</span>)؛ شاید سفارش دستی.</p><span class="st st-ship-done"><p class="ad-prow__act"><button type="button" class="jy-btn jy-btn--text">به سفارشی بده</button></p></span></div>
+              <p class="ad-prow__w"><span class="num">1,050</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">161,812</span> · مالیات <span class="num">16,181</span></p>
+            </li>
+          </ol>
+        </section>
+        <section class="jy-card ad-list" id="g81-dup" aria-labelledby="t-g81-dup">
+          <div class="jy-card__head">
+            <h2 id="t-g81-dup" class="jy-card__title">تکراری</h2>
+          </div>
+          <p class="ad-list__sub">همین کد پیش‌تر برای همین سفارش آمده؛ کاری نمی‌خواهد.</p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">4</span>
+              <p class="ad-prow__file"><b>مرادی <span class="num">10008</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3468</span><span>0156</span><span>9755</span><span>6838</span><span>0788</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why">همین کد شنبه <span class="num">11</span> مهر با <bdi>FileName-1968.xls</bdi> برای همین سفارش (<span class="num">10008</span>، بهاره مرادی) آمد؛ دوباره ثبت نمی‌شود.</p></div>
+              <p class="ad-prow__w"><span class="num">1,980</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">133,666</span> · مالیات <span class="num">13,367</span></p>
+            </li>
+          </ol>
+        </section>
+        <section class="jy-card ad-list" id="g81-ok" aria-labelledby="t-g81-ok">
+          <div class="jy-card__head">
+            <h2 id="t-g81-ok" class="jy-card__title">قطعی</h2>
+          </div>
+          <p class="ad-list__sub"><span class="st st-ship-preview">هر بسته کد رهگیری و یک پیامک می‌گیرد: «جزوه‌یار: سفارش <span class="num">10005</span> تحویل پست شد. کد رهگیری: <span class="num">118832198006260769886668</span> (<bdi>tracking.post.ir</bdi>)»</span><span class="st st-ship-done">پیامک: <span class="num">8</span> رفت، <span class="num">1</span> نرفت.</span></p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">1</span>
+              <p class="ad-prow__file"><b>رحمانی <span class="num">10005</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3219</span><span>8006</span><span>2607</span><span>6988</span><span>6668</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10005</span> · نگار رحمانی، تهران</span></p></div>
+              <p class="ad-prow__w"><span class="num">820</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">2</span>
+              <p class="ad-prow__file"><b>شریفی <span class="num">10006</span></b> <span class="ad-row__city">کرج</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3490</span><span>4592</span><span>4704</span><span>0143</span><span>9273</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10006</span> · امید شریفی، کرج</span></p></div>
+              <p class="ad-prow__w"><span class="num">1,240</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">161,812</span> · مالیات <span class="num">16,181</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">3</span>
+              <p class="ad-prow__file"><b>حیدری <span class="num">10007</span></b> <span class="ad-row__city">قزوین</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3767</span><span>1509</span><span>0233</span><span>4673</span><span>1437</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10007</span> · لیلا حیدری، قزوین</span></p></div>
+              <p class="ad-prow__w"><span class="num">640</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">137,750</span> · مالیات <span class="num">13,775</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">5</span>
+              <p class="ad-prow__file"><b>کاظمی <span class="num">10010</span></b> <span class="ad-row__city">رشت</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3152</span><span>7904</span><span>1903</span><span>9633</span><span>1443</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10010</span> · آرش کاظمی، رشت</span></p></div>
+              <p class="ad-prow__w"><span class="num">2,450</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">157,750</span> · مالیات <span class="num">15,775</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">7</span>
+              <p class="ad-prow__file"><b>طاهری <span class="num">10013</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3093</span><span>9025</span><span>5877</span><span>6048</span><span>4633</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10013</span> · مهسا طاهری، تهران</span></p><p class="ad-prow__why"><span class="st st-ship-preview">«در حال چاپ» است؛ با «ثبت» «تحویل پست شد» می‌شود، با روز فایل.</span><span class="st st-ship-done">در حال چاپ ← تحویل پست شد، یکشنبه <span class="num">12</span> مهر</span></p></div>
+              <p class="ad-prow__w"><span class="num">1,560</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">133,666</span> · مالیات <span class="num">13,367</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">8</span>
+              <p class="ad-prow__file"><b>نوروزی <span class="num">10015</span></b> <span class="ad-row__city">ساری</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3927</span><span>9794</span><span>2329</span><span>7304</span><span>8983</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10015</span> · حامد نوروزی، ساری</span></p></div>
+              <p class="ad-prow__w"><span class="num">1,120</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">161,812</span> · مالیات <span class="num">16,181</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">10</span>
+              <p class="ad-prow__file"><b>جلالی <span class="num">10017</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3083</span><span>6060</span><span>2645</span><span>3828</span><span>0493</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10017</span> · پریسا جلالی، تهران</span></p><p class="ad-prow__why"><span class="st st-ship-preview">«در حال چاپ» است؛ با «ثبت» «تحویل پست شد» می‌شود، با روز فایل.</span><span class="st st-ship-done">در حال چاپ ← تحویل پست شد، یکشنبه <span class="num">12</span> مهر</span></p></div>
+              <p class="ad-prow__w"><span class="num">700</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">11</span>
+              <p class="ad-prow__file"><b>صالحی <span class="num">10018</span></b> <span class="ad-row__city">اصفهان</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3207</span><span>3772</span><span>7210</span><span>5381</span><span>8859</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10018</span> · کامران صالحی، اصفهان</span></p><span class="st st-ship-done"><p class="ad-prow__sms"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>پیامک نرفت: پنل پیامک جواب نداد.</span><button type="button" class="jy-btn jy-btn--text">دوباره بفرست</button></p></span></div>
+              <p class="ad-prow__w"><span class="num">3,300</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">207,200</span> · مالیات <span class="num">20,720</span></p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">14</span>
+              <p class="ad-prow__file"><b>فرهادی <span class="num">10021</span></b> <span class="ad-row__city">تهران</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3901</span><span>6121</span><span>4523</span><span>2423</span><span>6114</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10021</span> · یاسمن فرهادی، تهران</span></p></div>
+              <p class="ad-prow__w"><span class="num">1,330</span> گرم</p>
+              <p class="ad-prow__fare">کرایه <span class="num">133,666</span> · مالیات <span class="num">13,367</span></p>
+            </li>
+          </ol>
+        </section>
+      </div>
+      </div>
+
+      <!-- چاپخانه: فایل پست خودش؛ فقط سفارش‌های چاپ نور ثبت می‌شوند، بی کرایه و بی مالیات -->
+      <div class="prt">
+      <label for="m-ship" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>ارسال</label>
+      <div class="ad-pagehead">
+        <div>
+          <div class="ad-title-row">
+            <h1 class="ad-title"><bdi class="ad-fname">FileName-1977.xls</bdi></h1>
+            <div class="st st-ship-preview"><span class="jy-badge jy-badge--neutral">پیش‌نمایش</span></div>
+            <div class="st st-ship-done"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ثبت شد</span></div>
+          </div>
+          <p class="ad-sub">حسن، یکشنبه <span class="num">12</span> مهر، <span class="num">18:10</span> · روز فایل یکشنبه <span class="num">12</span> مهر · <span class="num">5</span> بسته</p>
+        </div>
+      </div>
+      <div class="ad-stack">
+        <div class="st st-ship-preview"><p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>هنوز چیزی ثبت نشده. با «ثبت»، <span class="num">3</span> کد رهگیری به سفارش‌های چاپ نور می‌نشیند و برای هر کدام یک پیامک می‌رود؛ سفارش <span class="num">10023</span> هم از «در حال چاپ» «تحویل پست شد» می‌شود.</span></p></div>
+        <div class="st st-ship-done"><p class="jy-note jy-note--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span><span>یکشنبه <span class="num">12</span> مهر، <span class="num">18:12</span> ثبت شد: <span class="num">3</span> کد رهگیری نشست و <span class="num">3</span> پیامک رفت. یک سطر در انتظار بررسی جزوه‌یار است.</span></p></div>
+        <ul class="ad-tiles ad-counts">
+          <li><a class="ad-tile" href="#g77-ok"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>قطعی</span><span class="ad-tile__n num">3</span><span class="ad-tile__t"><span class="st st-ship-preview">کد رهگیری و پیامک، با «ثبت»</span><span class="st st-ship-done">کد رهگیری نشست</span></span></a></li>
+          <li><a class="ad-tile" href="#g77-review"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>بررسی جزوه‌یار</span><span class="ad-tile__n num">1</span><span class="ad-tile__t">جزوه‌یار تأیید یا کنار می‌گذارد</span></a></li>
+          <li><a class="ad-tile" href="#g77-nf"><span class="jy-badge jy-badge--neutral">پیدا نشد</span><span class="ad-tile__n num">1</span><span class="ad-tile__t">سفارش جزوه‌یار نیست؛ ثبت نمی‌شود</span></a></li>
+          <li><a class="ad-tile" href="#g77-ok"><span class="jy-badge jy-badge--neutral">تکراری</span><span class="ad-tile__n num">0</span><span class="ad-tile__t">هیچ کدی دو بار نیامده</span></a></li>
+        </ul>
+        <p class="ad-meta">جمع کل فایل با جمع سطرها می‌خواند: <span class="num">5</span> بسته، <span class="num">5.8</span> کیلوگرم.</p>
+        <div class="st st-ship-preview">
+          <div class="ad-commit">
+            <label for="m-ship-done" class="jy-btn jy-btn--primary">ثبت: <span class="num">3</span> کد رهگیری</label>
+            <label for="m-ship" class="jy-btn jy-btn--secondary">دور بینداز</label>
+          </div>
+        </div>
+        <section class="jy-card ad-list" id="g77-review" aria-labelledby="t-g77-review">
+          <div class="jy-card__head">
+            <h2 id="t-g77-review" class="jy-card__title">در انتظار بررسی جزوه‌یار</h2>
+          </div>
+          <p class="ad-list__sub">به سفارشی از چاپ نور نشست، ولی قطعی نیست؛ جزوه‌یار تأیید یا کنار می‌گذارد.</p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">3</span>
+              <p class="ad-prow__file"><b>اکبری <span class="num">10025</span></b> <span class="ad-row__city">مشهد</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3394</span><span>5208</span><span>5079</span><span>5773</span><span>0772</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why">سفارش <span class="num">10025</span> مال «رضا توکلی» است؛ نام نمی‌خواند. اگر بستهٔ مشتری دیگر خودت است، جزوه‌یار کنارش می‌گذارد.</p></div>
+              <p class="ad-prow__w"><span class="num">450</span> گرم</p>
+            </li>
+          </ol>
+        </section>
+        <section class="jy-card ad-list" id="g77-nf" aria-labelledby="t-g77-nf">
+          <div class="jy-card__head">
+            <h2 id="t-g77-nf" class="jy-card__title">پیدا نشد</h2>
+          </div>
+          <p class="ad-list__sub">سفارش جزوه‌یار نیست؛ ثبت نمی‌شود.</p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">4</span>
+              <p class="ad-prow__file"><b>نیک‌نام <span class="num">1204</span></b> <span class="ad-row__city">مشهد</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3289</span><span>4154</span><span>3682</span><span>8989</span><span>9816</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__why"><span class="num">1204</span> شمارهٔ سفارش جزوه‌یار نیست؛ این بسته ثبت نمی‌شود.</p></div>
+              <p class="ad-prow__w"><span class="num">2,200</span> گرم</p>
+            </li>
+          </ol>
+        </section>
+        <section class="jy-card ad-list" id="g77-ok" aria-labelledby="t-g77-ok">
+          <div class="jy-card__head">
+            <h2 id="t-g77-ok" class="jy-card__title">قطعی</h2>
+          </div>
+          <p class="ad-list__sub"><span class="st st-ship-preview">هر بسته کد رهگیری و یک پیامک به مشتری می‌گیرد.</span><span class="st st-ship-done">پیامک: <span class="num">3</span> رفت.</span></p>
+          <ol class="ad-rows">
+            <li class="ad-prow">
+              <span class="ad-prow__n num">1</span>
+              <p class="ad-prow__file"><b>کاظمی <span class="num">10022</span></b> <span class="ad-row__city">مشهد</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3324</span><span>2778</span><span>5436</span><span>6725</span><span>2186</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10022</span> · فرزانه کاظمی، مشهد</span></p></div>
+              <p class="ad-prow__w"><span class="num">760</span> گرم</p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">2</span>
+              <p class="ad-prow__file"><b>رستگار <span class="num">10023</span></b> <span class="ad-row__city">نیشابور</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3306</span><span>4498</span><span>3251</span><span>6610</span><span>2404</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10023</span> · علی رستگار، نیشابور</span></p><p class="ad-prow__why"><span class="st st-ship-preview">«در حال چاپ» است؛ با «ثبت» «تحویل پست شد» می‌شود.</span><span class="st st-ship-done">در حال چاپ ← تحویل پست شد، یکشنبه <span class="num">12</span> مهر، <span class="num">18:12</span></span></p></div>
+              <p class="ad-prow__w"><span class="num">1,410</span> گرم</p>
+            </li>
+            <li class="ad-prow">
+              <span class="ad-prow__n num">5</span>
+              <p class="ad-prow__file"><b>یوسفی <span class="num">10028</span></b> <span class="ad-row__city">مشهد</span></p>
+              <p class="ad-prow__bc"><span class="jy-barcode"><span>1188</span><span>3027</span><span>5163</span><span>6178</span><span>0509</span><span>8459</span></span></p>
+              <div class="ad-prow__match"><p class="ad-prow__to"><span class="jy-icon jy-icon-check" aria-hidden="true"></span><span>سفارش <span class="num">10028</span> · مینا یوسفی، مشهد</span></p></div>
+              <p class="ad-prow__w"><span class="num">980</span> گرم</p>
+            </li>
+          </ol>
+        </section>
+      </div>
+      </div>
+    </div>
+
+    <!-- ===================== برش ۶: برگرداندن یک ورود، فقط مالک، با دلیل و بی کد تازه ===================== -->
+    <div class="st st-ship-revert st-ownpage">
+      <label for="m-ship-done" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span><bdi>FileName-1981.xls</bdi></label>
+      <section class="jy-card" style="max-width: 36rem" aria-labelledby="t-revert">
+        <h1 id="t-revert" class="jy-card__title">برگرداندن <bdi>FileName-1981.xls</bdi></h1>
+        <ul class="ad-changes ad-gap">
+          <li><span class="ad-changes__k">کد رهگیری</span><span><span class="num">9</span> کد کنار می‌رود، پاک نمی‌شود</span></li>
+          <li><span class="ad-changes__k">وضعیت</span><span><span class="num">10013</span> و <span class="num">10017</span> به «در حال چاپ» برمی‌گردند</span></li>
+          <li><span class="ad-changes__k">صف تأیید</span><span><span class="num">4</span> سطر این فایل از صف بیرون می‌رود</span></li>
+          <li><span class="ad-changes__k">فایل</span><span>برای سابقه می‌ماند و دوباره واردشدنی است</span></li>
+        </ul>
+        <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>پیامکی که رفت برنمی‌گردد. این <span class="num">8</span> سفارش کد رهگیری را پیامک گرفته‌اند: <span class="num">10005</span>، <span class="num">10006</span>، <span class="num">10007</span>، <span class="num">10010</span>، <span class="num">10013</span>، <span class="num">10015</span>، <span class="num">10017</span>، <span class="num">10021</span>. اگر کدی اشتباه بود، خودت خبرشان کن. اگر همین کدها دوباره برای همان سفارش‌ها وارد شوند، پیامک دوباره نمی‌رود.</span></p>
+        <div class="ad-form">
+          <div class="jy-field">
+            <label class="jy-label" for="rv-why">دلیل</label>
+            <textarea id="rv-why" class="jy-input" rows="3" aria-describedby="rv-why-hint">فایل روز اشتباه بود؛ فایل یکشنبه را جایش می‌آورم.</textarea>
+            <p id="rv-why-hint" class="jy-hint">در رویدادها و فهرست ورودها می‌ماند.</p>
+          </div>
+        </div>
+        <div class="ad-actions">
+          <label for="m-ship" class="jy-btn jy-btn--danger"><span class="jy-icon jy-icon-close" aria-hidden="true"></span>این ورود را برگردان</label>
+          <label for="m-ship-done" class="jy-btn jy-btn--text">انصراف</label>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===================== برش ۶: صف تأیید (ADR-046)، مالک و متصدی ===================== -->
+    <div class="st st-ship-review st-staffpage">
+      <label for="m-ship" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>ارسال</label>
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">صف تأیید</h1>
+          <p class="ad-sub">سطرهایی از فایل پست که سفارششان قطعی نیست، قدیمی‌ترین اول. «همین است» کد رهگیری را به سفارش می‌نشاند و به مشتری پیامک می‌کند؛ «هیچ‌کدام» سطر را کنار می‌گذارد.</p>
+        </div>
+      </div>
+      <div class="ad-stack">
+        <section class="jy-card ad-rv" aria-labelledby="t-rv1">
+          <div class="jy-card__head">
+            <h2 id="t-rv1" class="jy-card__title">اکبری <span class="num">10025</span> <span class="ad-row__city">مشهد</span></h2>
+            <span class="jy-card__meta"><bdi>FileName-1977.xls</bdi>، سطر <span class="num">3</span> · حسن، چاپ نور، یکشنبه <span class="num">18:10</span></span>
+          </div>
+          <p class="ad-rv__file"><span class="jy-barcode"><span>1188</span><span>3394</span><span>5208</span><span>5079</span><span>5773</span><span>0772</span></span><span><span class="num">450</span> گرم</span><span>کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></span></p>
+          <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>سفارش <span class="num">10025</span> مال «رضا توکلی» است؛ نام نمی‌خواند. فایل از چاپ نور است و شاید بستهٔ مشتری دیگر خود چاپخانه باشد که شماره‌اش مثل سفارش ماست.</span></p>
+          <fieldset class="jy-field ad-gap">
+            <legend class="jy-label">کدام سفارش؟</legend>
+            <div class="jy-tiles ad-roles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="rv1"><span class="jy-tile__title">سفارش <span class="num">10025</span> · رضا توکلی، مشهد</span><span class="jy-tile__note"><b>می‌خواند:</b> شماره، شهر · <b>نمی‌خواند:</b> نام خانوادگی، وزن (برآورد <span class="num">1.3</span> کیلوگرم)، روز (تحویل پست چهارشنبه <span class="num">8</span> مهر)</span></label><label class="jy-tile"><input class="jy-radio" type="radio" name="rv1"><span class="jy-tile__title">سفارش دیگر</span><input class="jy-input jy-input--ltr ad-rv__no" inputmode="numeric" placeholder="شمارهٔ سفارش" aria-label="شمارهٔ سفارش دیگر"></label>
+            </div>
+          </fieldset>
+          <div class="ad-actions">
+            <button type="button" class="jy-btn jy-btn--primary">همین است</button>
+            <button type="button" class="jy-btn jy-btn--text">هیچ‌کدام</button>
+          </div>
+        </section>
+        <section class="jy-card ad-rv" aria-labelledby="t-rv2">
+          <div class="jy-card__head">
+            <h2 id="t-rv2" class="jy-card__title">رضایی <span class="num">10012</span> <span class="ad-row__city">تهران</span></h2>
+            <span class="jy-card__meta"><bdi>FileName-1981.xls</bdi>، سطر <span class="num">6</span> · سارا، امروز <span class="num">11:05</span></span>
+          </div>
+          <p class="ad-rv__file"><span class="jy-barcode"><span>1188</span><span>3991</span><span>9948</span><span>7816</span><span>7153</span><span>2493</span></span><span><span class="num">910</span> گرم</span><span>کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></span></p>
+          <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>سفارش <span class="num">10012</span> مال «علی کریمی» است و کد رهگیری‌اش شنبه آمد؛ نام نمی‌خواند.</span></p>
+          <fieldset class="jy-field ad-gap">
+            <legend class="jy-label">کدام سفارش؟</legend>
+            <div class="jy-tiles ad-roles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="rv2" checked><span class="jy-tile__title">سفارش <span class="num">10014</span> · سارا رضایی، تهران</span><span class="jy-tile__note"><b>می‌خواند:</b> نام خانوادگی، شهر، وزن (برآورد <span class="num">870</span> گرم)، روز (تحویل پست یکشنبه <span class="num">12</span> مهر) · <b>نمی‌خواند:</b> شماره؛ شاید اشتباه تایپی</span></label><label class="jy-tile"><input class="jy-radio" type="radio" name="rv2"><span class="jy-tile__title">سفارش دیگر</span><input class="jy-input jy-input--ltr ad-rv__no" inputmode="numeric" placeholder="شمارهٔ سفارش" aria-label="شمارهٔ سفارش دیگر"></label>
+            </div>
+          </fieldset>
+          <div class="ad-actions">
+            <button type="button" class="jy-btn jy-btn--primary">همین است</button>
+            <button type="button" class="jy-btn jy-btn--text">هیچ‌کدام</button>
+          </div>
+        </section>
+        <section class="jy-card ad-rv" aria-labelledby="t-rv3">
+          <div class="jy-card__head">
+            <h2 id="t-rv3" class="jy-card__title">احمدی <span class="ad-row__city">تهران</span></h2>
+            <span class="jy-card__meta"><bdi>FileName-1981.xls</bdi>، سطر <span class="num">9</span> · سارا، امروز <span class="num">11:05</span></span>
+          </div>
+          <p class="ad-rv__file"><span class="jy-barcode"><span>1188</span><span>3970</span><span>9314</span><span>2507</span><span>1341</span><span>2926</span></span><span><span class="num">1,850</span> گرم</span><span>کرایه <span class="num">133,666</span> · مالیات <span class="num">13,367</span></span></p>
+          <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>«نام گ» شماره ندارد.</span></p>
+          <fieldset class="jy-field ad-gap">
+            <legend class="jy-label">کدام سفارش؟</legend>
+            <div class="jy-tiles ad-roles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="rv3" checked><span class="jy-tile__title">سفارش <span class="num">10016</span> · رضا احمدی، تهران</span><span class="jy-tile__note"><b>می‌خواند:</b> نام خانوادگی، شهر، وزن (برآورد <span class="num">1.8</span> کیلوگرم)، روز (تحویل پست یکشنبه <span class="num">12</span> مهر)</span></label><label class="jy-tile"><input class="jy-radio" type="radio" name="rv3"><span class="jy-tile__title">سفارش <span class="num">10009</span> · نرگس احمدی، کرج</span><span class="jy-tile__note"><b>می‌خواند:</b> نام خانوادگی، وزن (برآورد <span class="num">2.0</span> کیلوگرم) · <b>نمی‌خواند:</b> شهر، روز (تحویل پست چهارشنبه <span class="num">8</span> مهر)</span></label><label class="jy-tile"><input class="jy-radio" type="radio" name="rv3"><span class="jy-tile__title">سفارش دیگر</span><input class="jy-input jy-input--ltr ad-rv__no" inputmode="numeric" placeholder="شمارهٔ سفارش" aria-label="شمارهٔ سفارش دیگر"></label>
+            </div>
+          </fieldset>
+          <div class="ad-actions">
+            <button type="button" class="jy-btn jy-btn--primary">همین است</button>
+            <button type="button" class="jy-btn jy-btn--text">هیچ‌کدام</button>
+          </div>
+        </section>
+        <section class="jy-card ad-rv" aria-labelledby="t-rv4">
+          <div class="jy-card__head">
+            <h2 id="t-rv4" class="jy-card__title">محمدی <span class="num">10019</span> <span class="ad-row__city">تهران</span></h2>
+            <span class="jy-card__meta"><bdi>FileName-1981.xls</bdi>، سطر <span class="num">12</span> · سارا، امروز <span class="num">11:05</span></span>
+          </div>
+          <p class="ad-rv__file"><span class="jy-barcode"><span>1188</span><span>3059</span><span>0008</span><span>6675</span><span>8929</span><span>5734</span></span><span><span class="num">560</span> گرم</span><span>کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></span></p>
+          <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>سفارش <span class="num">10019</span> هنوز «در صف چاپ» است.</span></p>
+          <fieldset class="jy-field ad-gap">
+            <legend class="jy-label">کدام سفارش؟</legend>
+            <div class="jy-tiles ad-roles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="rv4" checked><span class="jy-tile__title">سفارش <span class="num">10019</span> · زهرا محمدی، تهران</span><span class="jy-tile__note"><b>می‌خواند:</b> شماره، نام خانوادگی، شهر، وزن (برآورد <span class="num">520</span> گرم)</span></label><label class="jy-tile"><input class="jy-radio" type="radio" name="rv4"><span class="jy-tile__title">سفارش دیگر</span><input class="jy-input jy-input--ltr ad-rv__no" inputmode="numeric" placeholder="شمارهٔ سفارش" aria-label="شمارهٔ سفارش دیگر"></label>
+            </div>
+          </fieldset>
+          <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>تأیید، «شروع چاپ» و «تحویل پست شد» را با هم می‌زند، با روز فایل: یکشنبه <span class="num">12</span> مهر، یعنی در مهلت. فایل چاپ و چاپخانه‌اش آماده‌اند.</span></p>
+          <div class="ad-actions">
+            <button type="button" class="jy-btn jy-btn--primary">همین است</button>
+            <button type="button" class="jy-btn jy-btn--text">هیچ‌کدام</button>
+          </div>
+        </section>
+        <section class="jy-card ad-rv" aria-labelledby="t-rv5">
+          <div class="jy-card__head">
+            <h2 id="t-rv5" class="jy-card__title">قاسمی <span class="num">10026</span> <span class="ad-row__city">تهران</span></h2>
+            <span class="jy-card__meta"><bdi>FileName-1981.xls</bdi>، سطر <span class="num">15</span> · سارا، امروز <span class="num">11:05</span></span>
+          </div>
+          <p class="ad-rv__file"><span class="jy-barcode"><span>1188</span><span>3034</span><span>6624</span><span>2692</span><span>6424</span><span>9653</span></span><span><span class="num">690</span> گرم</span><span>کرایه <span class="num">129,500</span> · مالیات <span class="num">12,950</span></span></p>
+          <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>سفارش <span class="num">10026</span> یکشنبه <span class="num">12</span> مهر لغو شد. کد رهگیری به سفارش لغوشده نمی‌نشیند: اگر بسته واقعاً رفته، اول مالک لغو را برگرداند؛ وگرنه «هیچ‌کدام».</span></p>
+          <fieldset class="jy-field ad-gap">
+            <legend class="jy-label">کدام سفارش؟</legend>
+            <div class="jy-tiles ad-roles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="rv5" disabled><span class="jy-tile__title">سفارش <span class="num">10026</span> · امین قاسمی، تهران</span><span class="jy-tile__note">لغو شده</span></label><label class="jy-tile"><input class="jy-radio" type="radio" name="rv5"><span class="jy-tile__title">سفارش دیگر</span><input class="jy-input jy-input--ltr ad-rv__no" inputmode="numeric" placeholder="شمارهٔ سفارش" aria-label="شمارهٔ سفارش دیگر"></label>
+            </div>
+          </fieldset>
+          <div class="ad-actions">
+            <button type="button" class="jy-btn jy-btn--primary is-status" aria-disabled="true">اول لغو برگردد</button>
+            <button type="button" class="jy-btn jy-btn--text">هیچ‌کدام</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ===================== برش ۶: گزارش ارسال (ADR-048)، فقط مالک ===================== -->
+    <div class="st st-ship-report st-ownpage">
+      <label for="m-ship" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>ارسال</label>
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">گزارش ارسال</h1>
+          <p class="ad-sub">کرایه‌ای که مشتری داد، در برابر کرایه و مالیاتی که پست گرفت؛ سفارش‌هایی که کد رهگیری دارند، به روز «تحویل پست شد». مبلغ‌ها تومان.</p>
+        </div>
+      </div>
+      <nav class="ad-chips" aria-label="ماه">
+        <a class="ad-chip is-current" href="#" aria-current="page">مهر <span class="num">1405</span>، تا امروز</a>
+        <a class="ad-chip" href="#">شهریور <span class="num">1405</span></a>
+      </nav>
+      <ul class="ad-tiles ad-tiles--money">
+        <li><div class="ad-tile"><span class="jy-badge jy-badge--neutral">سفارش</span><span class="ad-tile__n num">24</span><span class="ad-tile__t"><span class="num">25</span> بسته، با کد رهگیری</span></div></li>
+        <li><div class="ad-tile"><span class="jy-badge jy-badge--neutral">مشتری داد</span><span class="ad-tile__n num">3,552,072</span><span class="ad-tile__t">کرایهٔ منجمد همین سفارش‌ها</span></div></li>
+        <li><div class="ad-tile"><span class="jy-badge jy-badge--neutral">پست گرفت</span><span class="ad-tile__n num">3,874,688</span><span class="ad-tile__t">کرایه <span class="num">3,522,444</span> + مالیات <span class="num">352,244</span></span></div></li>
+        <li><div class="ad-tile"><span class="jy-badge jy-badge--neutral">حاشیه</span><span class="ad-tile__n num">−322,616</span><span class="ad-tile__t"><span class="num">−9.1٪</span> کرایهٔ مشتری</span></div></li>
+      </ul>
+      <p class="ad-meta ad-gap">«بی کد رهگیری»: <span class="num">4</span> سفارش تحویل پست‌شدهٔ این ماه هنوز کد ندارند و در این جمع نیستند. لغوشده‌ها نه.</p>
+      <div class="ad-stack ad-gap">
+        <section class="jy-card" aria-labelledby="t-mz">
+          <h2 id="t-mz" class="jy-card__title">به تفکیک منطقه</h2>
+          <table class="ad-table ad-table--margin">
+            <thead><tr><th scope="col"><span class="sr-only">منطقه</span></th><th scope="col">سفارش</th><th scope="col">مشتری داد</th><th scope="col">پست گرفت</th><th scope="col">حاشیه</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">استان تهران</th><td data-k="سفارش"><span><span class="num">11</span> · <span class="num">12</span> بسته</span></td><td data-k="مشتری داد"><span class="num">1,547,500</span></td><td data-k="پست گرفت"><span class="num">1,732,313</span></td><td data-k="حاشیه"><span><span class="num">−184,813</span> <span class="ad-pct num">−11.9٪</span></span></td></tr>
+              <tr><th scope="row">بقیهٔ کشور</th><td data-k="سفارش"><span><span class="num">13</span> · <span class="num">13</span> بسته</span></td><td data-k="مشتری داد"><span class="num">2,004,572</span></td><td data-k="پست گرفت"><span class="num">2,142,375</span></td><td data-k="حاشیه"><span><span class="num">−137,803</span> <span class="ad-pct num">−6.9٪</span></span></td></tr>
+              <tr class="ad-total"><th scope="row">همه</th><td data-k="سفارش"><span><span class="num">24</span> · <span class="num">25</span> بسته</span></td><td data-k="مشتری داد"><span class="num">3,552,072</span></td><td data-k="پست گرفت"><span class="num">3,874,688</span></td><td data-k="حاشیه"><span><b class="num">−322,616</b> <span class="ad-pct num">−9.1٪</span></span></td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="jy-card" aria-labelledby="t-mp">
+          <h2 id="t-mp" class="jy-card__title">به تفکیک چاپخانه</h2>
+          <table class="ad-table ad-table--margin">
+            <thead><tr><th scope="col"><span class="sr-only">چاپخانه</span></th><th scope="col">سفارش</th><th scope="col">مشتری داد</th><th scope="col">پست گرفت</th><th scope="col">حاشیه</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">چاپخانهٔ جزوه‌یار · تهران</th><td data-k="سفارش"><span><span class="num">20</span> · <span class="num">21</span> بسته</span></td><td data-k="مشتری داد"><span class="num">2,952,948</span></td><td data-k="پست گرفت"><span class="num">3,300,306</span></td><td data-k="حاشیه"><span><span class="num">−347,358</span> <span class="ad-pct num">−11.8٪</span></span></td></tr>
+              <tr><th scope="row">چاپ نور · مشهد</th><td data-k="سفارش"><span><span class="num">4</span> · <span class="num">4</span> بسته</span></td><td data-k="مشتری داد"><span class="num">599,124</span></td><td data-k="پست گرفت"><span class="num">574,383</span></td><td data-k="حاشیه"><span><span class="num">+24,741</span> <span class="ad-pct num">+4.1٪</span></span></td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="jy-card" aria-labelledby="t-mw">
+          <h2 id="t-mw" class="jy-card__title">وزن واقعی در برابر برآورد</h2>
+          <table class="ad-table ad-table--margin">
+            <thead><tr><th scope="col">بازهٔ برآورد</th><th scope="col">سفارش</th><th scope="col">برآورد، میانگین</th><th scope="col">واقعی، میانگین</th><th scope="col">واقعی ÷ برآورد</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">زیر <span class="num">1</span> کیلو</th><td data-k="سفارش"><span class="num">11</span></td><td data-k="برآورد"><span><span class="num">690</span> گرم</span></td><td data-k="واقعی"><span><span class="num">765</span> گرم</span></td><td data-k="واقعی ÷ برآورد"><span class="num">1.11</span></td></tr>
+              <tr><th scope="row"><span class="num">1</span> تا <span class="num">3</span> کیلو</th><td data-k="سفارش"><span class="num">12</span></td><td data-k="برآورد"><span><span class="num">1,402</span> گرم</span></td><td data-k="واقعی"><span><span class="num">1,486</span> گرم</span></td><td data-k="واقعی ÷ برآورد"><span class="num">1.06</span></td></tr>
+              <tr><th scope="row">بالای <span class="num">3</span> کیلو</th><td data-k="سفارش"><span class="num">1</span></td><td data-k="برآورد"><span><span class="num">3,150</span> گرم</span></td><td data-k="واقعی"><span><span class="num">3,300</span> گرم</span></td><td data-k="واقعی ÷ برآورد"><span class="num">1.05</span></td></tr>
+            </tbody>
+          </table>
+          <p class="ad-hint ad-gap">وزن واقعی جمع بسته‌های هر سفارش است؛ برای تنظیم وزن بسته‌بندی و بازه‌های وزن تعرفه.</p>
+        </section>
+      </div>
+      <p class="ad-hint ad-gap">فقط خواندن: قیمت و کرایهٔ سفارش‌ها منجمد است و این گزارش چیزی را عوض نمی‌کند.</p>
     </div>
 
     <!-- ===================== برش ۵: چاپخانه‌ها (فقط مالک) ===================== -->
@@ -1701,7 +2465,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
                   <input id="s-keep" type="number" value="30" aria-describedby="s-keep-hint">
                   <button type="button" aria-label="بیشتر"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span></button>
                 </div>
-                <p id="s-keep-hint" class="jy-hint">PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند.</p>
+                <p id="s-keep-hint" class="jy-hint">PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند. فایل پست خام و سطرهایی که سفارش ما نشدند هم همین‌قدر پس از ورودشان.</p>
               </div>
             </div>
             <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
@@ -1862,6 +2626,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
         <a class="ad-chip is-current" href="#" aria-current="page">همه</a>
         <a class="ad-chip" href="#">ورود</a>
         <a class="ad-chip" href="#">سفارش</a>
+        <a class="ad-chip" href="#">ارسال</a>
         <a class="ad-chip" href="#">تعرفه</a>
         <a class="ad-chip" href="#">تنظیمات و کلیدها</a>
         <a class="ad-chip" href="#">چاپخانه‌ها</a>
@@ -1872,6 +2637,8 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
         <ol class="ad-log">
           <li><span class="ad-log__when"><span class="num">11:19</span> · علی</span><span>سفارش <span class="num">10041</span> از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه چاپ نور تا فردا خراب است</span></li>
           <li><span class="ad-log__when"><span class="num">11:18</span> · سارا</span><span>کلید «کد پذیرندهٔ زیبال» عوض شد</span></li>
+          <li><span class="ad-log__when"><span class="num">11:07</span> · سارا</span><span>فایل پست <bdi>FileName-1981.xls</bdi> ثبت شد: <span class="num">9</span> کد رهگیری، <span class="num">4</span> سطر در صف تأیید، <span class="num">1</span> پیدا نشد، <span class="num">1</span> تکراری</span></li>
+          <li><span class="ad-log__when"><span class="num">11:05</span> · سارا</span><span>فایل پست <bdi>FileName-1981.xls</bdi> بارگذاری شد، <span class="num">15</span> سطر</span></li>
           <li><span class="ad-log__when"><span class="num">10:44</span> · سارا</span><span>پیوند ثبت برای حسن (چاپخانه، چاپ نور) ساخته شد</span></li>
           <li><span class="ad-log__when"><span class="num">10:40</span> · سارا</span><span>چاپخانهٔ «چاپ نور» در مشهد افزوده شد</span></li>
           <li><span class="ad-log__when"><span class="num">11:02</span> · سارا</span><span>نسخهٔ <span class="num">2</span> تعرفه فعال شد</span></li>
@@ -1894,6 +2661,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
       <span class="site-logo"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></span>
     </header>
     <main class="site-grow">
+      <div class="st st-cust">
       <div class="site-wrap ck">
         <div class="ck-main">
           <div class="st st-c-print">
@@ -1922,6 +2690,25 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               </ol>
             </section>
           </div>
+          <!-- برش ۶ (ADR-047): کد رهگیری فقط برای صاحب سفارش، با پیوند سایت پست در زبانهٔ تازه -->
+          <div class="st st-c-shipped">
+            <section class="jy-card" aria-labelledby="t-c4">
+              <span class="jy-icon jy-icon-truck ck-done__icon" aria-hidden="true"></span>
+              <h1 id="t-c4" class="ck-done__title">جزوه‌ات به پست رسید</h1>
+              <p class="ck-sub">سفارش <span class="num">10027</span> دوشنبه <span class="num">13</span> مهر تحویل پست شد. مسیر بسته را با کد رهگیری در سایت پست ببین.</p>
+              <ol class="ck-steps">
+                <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>پرداخت</b><span class="ck-steps__t">کد پیگیری بانک <span class="num">803114</span></span></li>
+                <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>چاپ و صحافی</b><span class="ck-steps__t">چاپ و صحافی شد.</span></li>
+                <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>تحویل به پست</b><span class="ck-steps__t">دوشنبه <span class="num">13</span> مهر، در مهلت.</span></li>
+                <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>کد رهگیری پست</b><span class="ck-steps__t">به <span class="num">0915 234 5678</span> هم پیامک شد.</span>
+                  <div class="ck-track">
+                    <span class="jy-barcode jy-barcode--lg"><span>1188</span><span>0000</span><span>0000</span><span>0000</span><span>0000</span><span>0101</span></span>
+                    <a class="jy-btn jy-btn--secondary" href="#" target="_blank" rel="noopener noreferrer">رهگیری در سایت پست<span class="sr-only"> (زبانهٔ تازه)</span></a>
+                  </div>
+                </li>
+              </ol>
+            </section>
+          </div>
           <div class="st st-c-cancelled">
             <section class="jy-card" aria-labelledby="t-c3">
               <span class="jy-icon jy-icon-error ck-done__icon ck-done__icon--error" aria-hidden="true"></span>
@@ -1939,9 +2726,24 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <div><dt>طلق و سیم · <span class="num">1</span> نسخه</dt><dd></dd></div>
               <div><dt>پست پیشتاز به مشهد</dt><dd></dd></div>
             </dl>
-            <div class="home-sum__total"><span class="home-sum__label"><span class="st st-c-print st-c-handed">پرداخت شد</span><span class="st st-c-cancelled">برمی‌گردد</span></span><span class="home-sum__value"><span class="num">374,750</span><small>تومان</small></span></div>
+            <div class="home-sum__total"><span class="home-sum__label"><span class="st st-c-print st-c-handed st-c-shipped">پرداخت شد</span><span class="st st-c-cancelled">برمی‌گردد</span></span><span class="home-sum__value"><span class="num">374,750</span><small>تومان</small></span></div>
           </div>
         </aside>
+      </div>
+      </div>
+      <!-- غریبه (ADR-033): شماره، وضعیت و روز تحویل؛ کد رهگیری نه -->
+      <div class="st st-c-guest">
+        <div class="site-wrap ck-solo">
+          <section class="jy-card" aria-labelledby="t-c5">
+            <div class="jy-card__head">
+              <h1 id="t-c5" class="jy-card__title">سفارش <span class="num">10027</span></h1>
+              <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span>تحویل پست شد</span>
+            </div>
+            <p class="ck-sub">دوشنبه <span class="num">13</span> مهر تحویل پست شد.</p>
+            <p class="ck-sub">کد رهگیری به موبایل گیرنده پیامک شد.</p>
+            <p class="ck-sub">جزئیات این سفارش فقط با همان گوشی و مرورگری دیده می‌شود که با آن سفارش داده شد.</p>
+          </section>
+        </div>
       </div>
     </main>
     <footer class="site-foot">
