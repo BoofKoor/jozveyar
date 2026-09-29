@@ -74,7 +74,7 @@ const END_NEXT_SATURDAY = tehran('2026-10-11 00:00');
 const MINUTE = 60_000;
 
 /** تکه‌ها به متن، برای سنجیدن؛ و جای عددها. */
-const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : s.ltr)).join('');
+const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
 const nums = (segs: readonly Seg[]) => segs.filter((s): s is { num: string } => typeof s === 'object' && 'num' in s).map((s) => s.num);
 
 describe('فهرست: پارامترهای نشانی و جست‌وجو', () => {
@@ -92,6 +92,11 @@ describe('فهرست: پارامترهای نشانی و جست‌وجو', () =>
     }
     // بیش از ۹ رقم شمارهٔ سفارش نیست، و بیش از ۱۱ ته موبایل هم نه.
     expect(parseSearch('123456789012')).toEqual({ kind: 'digits', orderNumber: null, phoneSuffix: null });
+    // ۲۴ رقم کد رهگیری پست است (۶٫۱)، با فاصلهٔ گروه‌های چهارتایی یا ارقام فارسی هم؛ ۲۳ رقم نه.
+    for (const code of ['118800000000000000000101', '1188 0000 0000 0000 0000 0101', '۱۱۸۸۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۱۰۱']) {
+      expect(parseSearch(code), code).toEqual({ kind: 'barcode', barcode: '118800000000000000000101' });
+    }
+    expect(parseSearch('11880000000000000000010')).toEqual({ kind: 'digits', orderNumber: null, phoneSuffix: null });
     expect(parseSearch('زهرا محمدي')).toEqual({ kind: 'name', text: 'زهرا محمدی' });
     expect(parseSearch('  مریم   کاظمی ')).toEqual({ kind: 'name', text: 'مریم کاظمی' });
     expect(parseSearch('x'.repeat(300))).toEqual({ kind: 'name', text: 'x'.repeat(100) });
@@ -250,6 +255,7 @@ function line(over: Partial<PanelOrderLine> = {}): PanelOrderLine {
     paidAt: NOW,
     postHandoffDueAt: END_MONDAY,
     handedToPostAt: null,
+    handedByFile: false,
     cancelledAt: null,
     pageCount: 120,
     itemCount: 1,
@@ -416,6 +422,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
         reason: null,
       },
     ],
+    shipments: [],
     ...over.rest,
   };
 }

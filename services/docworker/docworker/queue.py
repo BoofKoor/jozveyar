@@ -27,6 +27,8 @@ class Job:
     max_attempts: int
     # کار سفارش (`prepare_order`، برش ۳ب): هر کار یا مال یک سند است یا یک سفارش (`jobs_one_target`).
     order_id: str | None = None
+    # ورود فایل پست (`read_post_file`، برش ۶٫۱)؛ هدف سوم همان محدودیت.
+    shipment_import_id: str | None = None
 
 
 CLAIM_SQL = """
@@ -44,7 +46,7 @@ UPDATE jobs
          ORDER BY run_after, id
          LIMIT 1
          FOR UPDATE SKIP LOCKED)
-RETURNING id, kind, document_id::text, payload, attempts, max_attempts, order_id::text
+RETURNING id, kind, document_id::text, payload, attempts, max_attempts, order_id::text, shipment_import_id::text
 """
 
 

@@ -74,6 +74,15 @@ export type AdminErrorCode =
   | 'key_not_found'
   | 'invalid_key_value'
   | 'key_changed'
+  /** ارسال: ورود فایل پست (۶٫۱). */
+  | 'post_file_required'
+  | 'post_file_too_large'
+  | 'post_file_same'
+  | 'import_not_found'
+  | 'import_changed'
+  | 'import_closed'
+  | 'import_not_committed'
+  | 'order_has_shipment'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

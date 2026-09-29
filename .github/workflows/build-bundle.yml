@@ -206,7 +206,7 @@ jobs:
         run: |
           set -eux
           docker build --build-arg "BASE_IMAGE=${{ steps.base.outputs.image }}" -t docworker-smoke dw
-          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert, docworker.orders, docworker.printfile, docworker.ticket, docworker.retention, docworker.jalali; print(fitz.VersionBind, docworker.ticket.font_dir())"
+          docker run --rm docworker-smoke python -c "import fitz, numpy, psycopg, PIL, pillow_heif, docworker.jobs, docworker.fonts, docworker.convert, docworker.orders, docworker.printfile, docworker.ticket, docworker.retention, docworker.jalali, docworker.postfile, docworker.shipments; print(fitz.VersionBind, docworker.ticket.font_dir())"
           docker run --rm docworker-smoke soffice --version
           # تبدیل واقعی همان‌طور که روی سرور اجرا می‌شود (ADR-028): کاربر بی‌امتیاز
           # docworker، پایتون PID 1 بی init، پروفایل مهارشده، بی‌شبکه.
@@ -307,6 +307,8 @@ jobs:
       # که همان کارگر با چاپخانهٔ تازه دوباره می‌سازد؛ در پایان «چاپخانهٔ جزوه‌یار» پیش‌فرض است و چاپخانه‌های همان اجرا غیرفعال.
       # نقش چاپخانه و محدوده (برش ۵٫۳، ADR-042، `scope.spec.ts`): دو چاپخانه و دو کاربر چاپخانه که مالک از «ادمین‌ها» می‌سازد؛ هر کدام
       # فقط سفارش‌های خودش، بی مبلغ و بی لغو، و سفارش دیگری در صفحه، دانلود و هر کار ۴۰۴؛ چاپخانه‌های همان اجرا در پایان غیرفعال.
+      # ارسال (برش ۶٫۱، ADR-045 و ADR-046، `shipments.spec.ts`): فایل پست ساختگی (جدول HTML با پسوند `.xls`) را همان کارگر با
+      # `read_post_file` می‌خواند، بی استوریج؛ پیش‌نمایش با حکم هر سطر، «ثبت» با «تحویل پست شد»، «دور بینداز» و برگرداندن فقط با مالک.
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin

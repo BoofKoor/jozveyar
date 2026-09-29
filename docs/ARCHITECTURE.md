@@ -262,33 +262,41 @@ CREATE TABLE order_tickets (
   built_at    timestamptz NOT NULL DEFAULT now()
 );
 
--- برنامهٔ ۶٫۱ (ADR-045): هر فایل پستی که به پنل داده شد، با بایت‌های خامش (سقف ۲ مگابایت). کارگر جدول‌هایش را می‌خواند
--- (`read_post_file`) و پنل تفسیر و پیش‌نمایش می‌کند. همان فایل یک بار: یکتایی sha256، جز ورود برگشته یا دورانداخته.
+-- ✅ ۶٫۱ (ADR-045، `0021_shipments.sql` و `0022_shipments_guards.sql`): هر فایل پستی که به پنل داده شد، با بایت‌های خامش (سقف
+-- ۲ مگابایت). کارگر جدول‌هایش را می‌خواند (`read_post_file`) و پنل تفسیر و پیش‌نمایش می‌کند. همان فایل یک بار: ایندکس یکتای
+-- جزئی `shipment_imports_one_file` روی sha256 برای «در حال خواندن»، «خوانده شد» و «ثبت شد». گذار وضعیت، ستون‌های منجمد و
+-- پاک‌نشدنی با تریگر `shipment_imports_guard`.
 CREATE TABLE shipment_imports (
   id               uuid PRIMARY KEY,
   carrier          text NOT NULL,           -- 'iran_post' (ShippingCarrier، ADR-008)
   filename         text NOT NULL,
-  size_bytes       integer NOT NULL,
+  size_bytes       integer NOT NULL,        -- ۱ بایت تا ۲ مگابایت
   sha256           text NOT NULL,
-  raw              bytea,                   -- فایل خام؛ N روز پس از ورود پاک می‌شود (ADR-044)
-  status           text NOT NULL,           -- reading | read | unreadable | committed | discarded | reverted
+  raw              bytea,                   -- فایل خام؛ N روز پس از ورود پاک (ADR-044)، دورانداخته همان لحظه
+  status           text NOT NULL,           -- reading ← read | unreadable | discarded؛ read ← committed | discarded؛ committed ← reverted
   format           text,                    -- html | csv | xlsx، از محتوا
   tables           jsonb,                   -- جدول‌های خوانده‌شده، فقط رشته
-  error_code       text,                    -- unreadable: xls_binary، no_table، missing_column…
-  print_partner_id uuid REFERENCES print_partners(id),  -- واردکنندهٔ چاپخانه: فقط سفارش‌های همین (ADR-046)
+  error_code       text,                    -- unreadable: xls_binary، no_table، too_large، bad_xlsx، too_many_rows، read_failed
+  print_partner_id uuid REFERENCES print_partners(id),  -- واردکنندهٔ چاپخانه (۶٫۲): فقط سفارش‌های همین (ADR-046)
   created_by       uuid NOT NULL REFERENCES admin_users(id),
   created_at       timestamptz NOT NULL DEFAULT now(),
+  read_at          timestamptz,
   committed_by     uuid REFERENCES admin_users(id),
   committed_at     timestamptz,
+  discarded_by     uuid REFERENCES admin_users(id),     -- null با discarded_at: کارگر، پیش‌نویسی که N روز ثبت نشد
+  discarded_at     timestamptz,
   reverted_by      uuid REFERENCES admin_users(id),     -- برگرداندن: یک بار، مالک، با دلیل
   reverted_at      timestamptz,
-  revert_reason    text
+  revert_reason    text,
+  purged_at        timestamptz              -- raw و tables پاک شدند
 );
 
--- برنامهٔ ۶٫۱ (ADR-046): همهٔ سطرهای ورود ثبت‌شده، با حکم. فقط افزودنی؛ حکم صف یک بار.
+-- ✅ ۶٫۱ (ADR-046): همهٔ سطرهای ورود ثبت‌شده، با حکم؛ فقط در «ثبت» نوشته می‌شوند (پیش‌نمایش از `tables` ساخته می‌شود).
+-- عوض و پاک نمی‌شوند (`shipment_import_rows_frozen`)، جز متن سطری که مرسولهٔ ما نشد، N روز بعد. ستون‌های حکم صف (نامزدها، تصمیم
+-- و تصمیم‌گیرنده) با ۶٫۲ می‌آیند.
 CREATE TABLE shipment_import_rows (
   import_id    uuid NOT NULL REFERENCES shipment_imports(id),
-  row_no       integer NOT NULL,            -- شمارهٔ سطر در جدول فایل
+  row_no       integer NOT NULL,            -- شمارهٔ سطر پس از سرستون؛ اولی 1، مثل ستون «ردیف» فایل پست
   cells        jsonb,                       -- رشته‌های خام؛ سطری که مرسولهٔ ما نشد، N روز بعد پاک
   barcode      text,                        -- ۲۴ رقم، یا null: «خوانده نشد»
   order_number integer,                     -- فقط از «نام گ»، عدد انتهای رشته (ADR-010)
@@ -297,32 +305,33 @@ CREATE TABLE shipment_import_rows (
   weight_grams integer,
   fare_rials   bigint,
   tax_rials    bigint,
-  post_date    date,                        -- اگر فایل تاریخ دارد (نمونهٔ فایل، سؤال ۵۹)
-  verdict      text NOT NULL,               -- matched | review | unmatched | duplicate | invalid | total
-  reason       text,                        -- name_mismatch، cancelled، queued، out_of_scope…
-  candidates   jsonb,                       -- صف تأیید: تا سه سفارش با نمره و دلیل
-  decision     text,                        -- confirmed | rejected | manual
-  decided_by   uuid REFERENCES admin_users(id),
-  decided_at   timestamptz,
+  post_day     timestamptz,                 -- آغاز روز «تاریخ ثبت» به وقت تهران: روزی که پست بسته را گرفت (سؤال ۷۰)
+  post_status  text,                        -- ستون «وضعیت»؛ فقط «فعال» ثبت‌شدنی (سؤال ۷۱)
+  verdict      text NOT NULL,               -- matched | review | unmatched | duplicate | invalid | inactive | total
+  reason       text,                        -- name_mismatch، cancelled، queued، manual_code، same_file، already…
+  order_id     uuid REFERENCES orders(id) ON DELETE CASCADE,  -- سفارشی که سطر به آن نشست یا اشاره کرد
   PRIMARY KEY (import_id, row_no)
 );
 
--- برنامهٔ ۶٫۱ (ADR-045، ADR-046): مرسوله، یک بسته که به پست رسید. زنده فقط برای سفارش «تحویل پست شد» (در COMMIT)، و سفارشی که
--- مرسولهٔ زنده دارد از «تحویل پست شد» بیرون نمی‌رود. بارکد یکتا میان زنده‌ها. فقط افزودنی؛ «کنار گذاشتن» یک بار.
+-- ✅ ۶٫۱ (ADR-045، ADR-046): مرسوله، یک بسته که به پست رسید. زنده فقط برای سفارش «تحویل پست شد» (تریگر معوق
+-- `shipments_order_handed`، از هر دو سو)، و سفارشی که مرسولهٔ زنده دارد از «تحویل پست شد» بیرون نمی‌رود. بارکد یکتا میان زنده‌ها
+-- (`shipments_live_barcode`)، و هر سطر حداکثر یک مرسولهٔ زنده. با سطرش می‌خواند (`shipments_row`)؛ فقط افزودنی؛ «کنار گذاشتن» یک
+-- بار. `sms_message_id` با ۶٫۳ (ADR-047).
 CREATE TABLE shipments (
   id             uuid PRIMARY KEY,
-  order_id       uuid NOT NULL REFERENCES orders(id),
+  order_id       uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   barcode        text NOT NULL,             -- CHECK: دقیقاً ۲۴ رقم
   import_id      uuid NOT NULL,             -- (import_id, row_no) ← shipment_import_rows
   row_no         integer NOT NULL,
   weight_grams   integer NOT NULL,
   fare_rials     bigint NOT NULL,           -- کرایه و مالیاتی که پست گرفت؛ گزارش حاشیه (ADR-048)
   tax_rials      bigint NOT NULL,
-  matched_by     text NOT NULL,             -- rule (قطعی) | review (تأیید) | manual (دادن دستی)
+  post_day       timestamptz NOT NULL,      -- روز پست همان سطر
+  matched_by     text NOT NULL,             -- rule (قطعی) | review (تأیید، ۶٫۲) | manual (دادن دستی، ۶٫۲)
+  handed_order   boolean NOT NULL,          -- همین ثبت سفارش را «تحویل پست شد» کرد؛ برگرداندن فقط همین‌ها را برمی‌گرداند
   admin_user_id  uuid NOT NULL REFERENCES admin_users(id),   -- کسی که ثبت یا تأیید کرد
   created_at     timestamptz NOT NULL DEFAULT now(),
-  sms_message_id bigint REFERENCES sms_messages(id),         -- ۶٫۳ (ADR-047)
-  voided_at      timestamptz,               -- کنار گذاشته: برگرداندن ورود، یا تأیید اشتباه
+  voided_at      timestamptz,               -- کنار گذاشته: برگرداندن ورود، یا تأیید اشتباه (۶٫۲)
   voided_by      uuid REFERENCES admin_users(id),
   void_reason    text
 );
@@ -335,11 +344,11 @@ CREATE TABLE shipments (
 | تعرفه | `price_lists` `paper_types` `binding_types` `binding_rate_bands` `shipping_methods` `shipping_rates` | ✅ ساخته شد. نسخه‌دار با `version` و دقیقاً یکی فعال. بازه‌های صحافی و وزن با `EXCLUDE` — دیتابیس اجازهٔ همپوشانی نمی‌دهد. `print_rates` و `pricing_settings` جدول جدا نشدند؛ دلیل در ADR-021. `discount_tiers` هنوز ساخته نشده. ✅ ۴٫۵ (ADR-040): `activated_at`، `created_by` و `based_on`؛ نسخه‌ای که یک بار فعال شد با تریگرهای `price_lists_frozen` و `price_list_rows_frozen` عوض و پاک نمی‌شود، جز `is_active` (`0013_price_list_guards.sql`)، و CHECK `price_lists_active_activated`: نسخهٔ فعال زمان فعال شدن دارد |
 | سند | `documents` `document_analyses` `document_pages` | ✅ ساخته شد. سند = فایل آپلودشده، قبل از اینکه سفارشی باشد. مالکش هش کوکی نشست ناشناس است (`session_hash`) و شناسهٔ آپلود چندتکه کنارش می‌ماند. تحلیل مرورگر و سرور **هر دو** ذخیره می‌شوند تا واگرایی قابل اندازه‌گیری باشد. `document_pages` اعداد خام رنگ را نگه می‌دارد، نه فقط بولین |
 | سفارش | `order_items` `order_item_sections` `order_status_events` `payments` | ✅ جدول‌ها و محافظ‌ها در ۳الف (ADR-034). `order_items` یک ردیف به‌ازای هر **جزوه**، نه هر سند؛ `order_item_sections` سندها را به ترتیب صحافی نگه می‌دارد و PDF ادغام‌شده از همان ساخته می‌شود (ADR-030)، با کار `prepare_order` (`jobs.order_id`). `payments` هر تلاش پرداخت، و حداکثر یک پرداخت موفق برای هر سفارش. ✅ سرور در ۳ب: ساختن در یک تراکنش، برگشت از درگاه زیر قفل پرداخت و سفارش، و `prepare_order` کارگر (پایین، «۳ب»). ✅ ۴٫۳: `order_status_events.admin_user_id` برای گذار ادمین (CHECK `order_status_events_admin`: actor ادمین یعنی شناسهٔ ادمین)، و دلیل لغو و برگرداندن در `note`. ✅ ۵٫۱ (ADR-043): `order_print_files`، فایل چاپ هر جلد، و `order_tickets`، برگهٔ سفارش با کار جدای `prepare_ticket`؛ ADR-044: فایل‌های سفارش N روز پس از پست یا لغو پاک می‌شوند و `orders.files_deleted_at` ردش را نگه می‌دارد |
-| ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن). ✅ منطقه‌ها، استان‌ها و شهرها در ۳الف، از `@jozveyar/geo` (۳۱ استان، ۱۳۲۳ شهر)؛ منطقه مال استان است: استان تهران `tehran`، بقیه `other`. `shipments`: برنامهٔ ۶٫۱ (بالا، ADR-045)، هر بسته با بارکد، وزن، کرایه و مالیات واقعی |
-| رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود. برنامهٔ برش ۶ (بالا؛ ADR-045، ADR-046): پیش‌نمایش پیش از «ثبت»، «قطعی» با شماره، نام، مقصد، وضعیت و تاریخ، صف تأیید با مالک و متصدی، برگرداندن کل ورود با یک کلیک (مالک)، و ورود چاپخانه فقط برای سفارش‌های خودش |
-| دسترسی | `admin_users` `admin_invites` `admin_sessions` `admin_login_attempts` `roles` `permissions` `role_permissions` `admin_user_roles` `admin_events` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` (ADR-007). ✅ در ۴٫۱ (ADR-037، ADR-038): ادمین با رمز argon2id و رمز برنامهٔ تأیید مهروموم‌شده، پیوند ثبت یک‌باره، نشست و تلاش ورود فقط با هش؛ نقش‌ها از کد؛ رویداد فقط افزودنی، ادمین پاک‌نشدنی و پیوند مصرف‌شده دست‌نخوردنی با تریگر (`0008_admin_guards.sql`)؛ در ۴٫۲ نمایهٔ رویدادهای یک هدف، برای رویدادهای هر سفارش (`0009_admin_events_target.sql`). `scope` تا برش ۵ فقط `NULL`. ✅ در ۵٫۲ (ADR-042): `print_partners`، `order_assignments` و `orders.print_partner_id` با محافظ‌هایشان (`0017`، `0018`)، و مجوزهای `orders.assign` و `partners.manage`. ✅ در ۵٫۳ (ADR-042): `scope` jsonb جایش را به ستون نوع‌دار `admin_user_roles.print_partner_id` با کلید خارجی داد (CHECK `admin_user_roles_partner`: نقش چاپخانه یعنی دقیقاً یک چاپخانه؛ EXCLUDE `admin_user_roles_partner_alone`: کاربر چاپخانه فقط همین نقش)، نقش سوم `print_partner` و مجوزهای `orders.cancel` و `orders.money` (`0019`، `0020`). برنامهٔ برش ۶ (ADR-046، ADR-048): مجوزهای `shipments.import` (هر سه نقش، چاپخانه در محدودهٔ خودش)، `shipments.review` (مالک و متصدی)، و `shipments.revert` و `reports.read` (مالک) |
+| ارسال | `shipping_methods` `shipping_zones` `provinces` `cities` `shipping_rates` `shipments` | روش‌ها فلگ فعال/غیرفعال دارند. نرخ = (روش × منطقه × بازهٔ وزن). ✅ منطقه‌ها، استان‌ها و شهرها در ۳الف، از `@jozveyar/geo` (۳۱ استان، ۱۳۲۳ شهر)؛ منطقه مال استان است: استان تهران `tehran`، بقیه `other`. `shipments`: ✅ ۶٫۱ (بالا، ADR-045)، هر بسته با بارکد، وزن، کرایه و مالیات واقعی |
+| رهگیری | `shipment_imports` `shipment_import_rows` | هر آپلود یک تراکنش قابل بازگشت. سطر کم‌اطمینان بدون تأیید ادمین پیامک نمی‌شود. ✅ ۶٫۱ (بالا؛ ADR-045، ADR-046): پیش‌نمایش پیش از «ثبت»، «قطعی» با شماره، نام، مقصد، وضعیت و روز، «ثبت» زیر قفل با همان حکم‌ها، و برگرداندن کل ورود با یک کلیک (مالک). صف تأیید با مالک و متصدی و ورود چاپخانه فقط برای سفارش‌های خودش در ۶٫۲ |
+| دسترسی | `admin_users` `admin_invites` `admin_sessions` `admin_login_attempts` `roles` `permissions` `role_permissions` `admin_user_roles` `admin_events` `print_partners` `order_assignments` | نقش‌محور + محدودسازی سطر با `scope` (ADR-007). ✅ در ۴٫۱ (ADR-037، ADR-038): ادمین با رمز argon2id و رمز برنامهٔ تأیید مهروموم‌شده، پیوند ثبت یک‌باره، نشست و تلاش ورود فقط با هش؛ نقش‌ها از کد؛ رویداد فقط افزودنی، ادمین پاک‌نشدنی و پیوند مصرف‌شده دست‌نخوردنی با تریگر (`0008_admin_guards.sql`)؛ در ۴٫۲ نمایهٔ رویدادهای یک هدف، برای رویدادهای هر سفارش (`0009_admin_events_target.sql`). `scope` تا برش ۵ فقط `NULL`. ✅ در ۵٫۲ (ADR-042): `print_partners`، `order_assignments` و `orders.print_partner_id` با محافظ‌هایشان (`0017`، `0018`)، و مجوزهای `orders.assign` و `partners.manage`. ✅ در ۵٫۳ (ADR-042): `scope` jsonb جایش را به ستون نوع‌دار `admin_user_roles.print_partner_id` با کلید خارجی داد (CHECK `admin_user_roles_partner`: نقش چاپخانه یعنی دقیقاً یک چاپخانه؛ EXCLUDE `admin_user_roles_partner_alone`: کاربر چاپخانه فقط همین نقش)، نقش سوم `print_partner` و مجوزهای `orders.cancel` و `orders.money` (`0019`، `0020`). برش ۶ (ADR-046، ADR-048): ✅ ۶٫۱ مجوزهای `shipments.import` (مالک و متصدی؛ چاپخانه در محدودهٔ خودش با ۶٫۲) و `shipments.revert` (مالک)؛ `shipments.review` (مالک و متصدی، ۶٫۲) و `reports.read` (مالک، ۶٫۴) مانده |
 | هویت | `users` `otp_requests` `sessions` | ✅ جدول‌ها در ۳الف، سرویس کد و نشست در ۳ب (ADR-033). موبایل نرمال‌شده. محدودیت نرخ روی شماره، IP و کل سایت، از شمردن `otp_requests` زیر یک قفل مشورتی. کد و IP فقط HMAC |
-| عملیات | `jobs` `sms_messages` `settings` `service_secrets` | پیامک توسعه در دیتابیس می‌نشیند (✅ `sms_messages` در ۳الف، پیامک کنسولی در ۳ب). `settings` کلید/مقدار تایپ‌شده با zod (✅ `SETTING_SCHEMAS` در قرارداد، ۳ب؛ مقدار خراب به پیش‌فرض برمی‌گردد و لاگ می‌شود؛ ✅ از ۴٫۶ از پنل، زیر قفل و با رویداد). ✅ ۴٫۶ (ADR-041): `service_secrets` کلیدهای سرویس‌ها که مالک از پنل گذاشته، مهروموم با `SECRETS_KEY` و جای ردیف؛ CHECK نام (فقط سه کلید) و شکل مهروموم (`0014_service_secrets.sql`)؛ مقدار پنل بر `.env` مقدم. برنامهٔ برش ۶: کار `read_post_file` کارگر (۶٫۱، ADR-045)، و پیامک رهگیری از پنل با `purpose` تازهٔ `tracking` (۶٫۳، ADR-047) |
+| عملیات | `jobs` `sms_messages` `settings` `service_secrets` | پیامک توسعه در دیتابیس می‌نشیند (✅ `sms_messages` در ۳الف، پیامک کنسولی در ۳ب). `settings` کلید/مقدار تایپ‌شده با zod (✅ `SETTING_SCHEMAS` در قرارداد، ۳ب؛ مقدار خراب به پیش‌فرض برمی‌گردد و لاگ می‌شود؛ ✅ از ۴٫۶ از پنل، زیر قفل و با رویداد). ✅ ۴٫۶ (ADR-041): `service_secrets` کلیدهای سرویس‌ها که مالک از پنل گذاشته، مهروموم با `SECRETS_KEY` و جای ردیف؛ CHECK نام (فقط سه کلید) و شکل مهروموم (`0014_service_secrets.sql`)؛ مقدار پنل بر `.env` مقدم. برش ۶: ✅ کار `read_post_file` کارگر (۶٫۱، ADR-045، `jobs.shipment_import_id`)؛ پیامک رهگیری از پنل با `purpose` تازهٔ `tracking` در ۶٫۳ (ADR-047) |
 | سئو و آمار | `landing_pages` `landing_templates` `flow_events` | `flow_events` قیف و نرخ رها کردن سبد را می‌سازد |
 
 ### تنظیمات کلیدی در `settings`
@@ -810,16 +819,16 @@ windows-1256)، `.csv` و `.xlsx`. `.xls` واقعی (BIFF) پیام روشن م
 
 ### برش ۶: برنامه و وضعیت
 
-برنامه تأیید شد (۱۴۰۵/۰۷/۰۶، سؤال‌های ۴۷ تا ۶۰، همه طبق پیشنهاد). رابطش طرح نمونه‌ای است که پیش از ۶٫۱ ساخته و تأیید می‌شود:
-حالت‌های تازهٔ `docs/ui/mockups/admin.html` (`docs/UI.md`، بخش ۹؛ سؤال‌های طرح از ۶۱). تصمیم‌ها: ADR-045 (ورود فایل پست: پیش‌نمایش و
-«ثبت»، خواندن در کارگر، و برگرداندن)، ADR-046 (تطبیق، صف تأیید، «کد رهگیری یعنی تحویل پست شد» و فایل چاپخانه)، ADR-047 (رهگیری
-برای مشتری: پیامک و صفحهٔ سفارش) و ADR-048 (گزارش حاشیهٔ ارسال). نام‌ها ۶٫۱ تا ۶٫۴، مثل برش ۵.
+برنامه تأیید شد (۱۴۰۵/۰۷/۰۶، سؤال‌های ۴۷ تا ۶۰، همه طبق پیشنهاد). رابطش طرح نمونه‌ای است که پیش از ۶٫۱ ساخته و تأیید شد
+(۱۴۰۵/۰۷/۰۶، سؤال‌های ۶۱ تا ۶۹): حالت‌های تازهٔ `docs/ui/mockups/admin.html` (`docs/UI.md`، بخش ۹). تصمیم‌ها: ADR-045 (ورود فایل پست:
+پیش‌نمایش و «ثبت»، خواندن در کارگر، و برگرداندن)، ADR-046 (تطبیق، صف تأیید، «کد رهگیری یعنی تحویل پست شد» و فایل چاپخانه)، ADR-047
+(رهگیری برای مشتری: پیامک و صفحهٔ سفارش) و ADR-048 (گزارش حاشیهٔ ارسال). نام‌ها ۶٫۱ تا ۶٫۴، مثل برش ۵.
 
 | PR | دامنه | وضعیت |
 |---|---|---|
-| سند | همین برنامه: ADR-045 تا ۰۴۸، سؤال‌های ۴۷ تا ۶۰، و «ادغام و مستقر شد» #50 | باز |
-| ۶٫۱ | ورود فایل پست: `shipment_imports`، `shipment_import_rows` و `shipments` با محافظ‌ها؛ کار `read_post_file` کارگر (HTML، CSV، XLSX)؛ آداپتور «پست ایران» و تفسیر جدول؛ زبانهٔ «ارسال» (بارگذاری، پیش‌نمایش، «ثبت»، ورودها، برگرداندن)؛ «قطعی» و «تحویل پست شد»؛ کارت «ارسال» سفارش و جست‌وجو با بارکد | مانده (پس از طرح نمونه و نمونهٔ فایل) |
-| ۶٫۲ | صف تأیید و فایل چاپخانه: نمره و نامزدها، «همین است»، «هیچ‌کدام» و دادن دستی (مالک و متصدی)، کنار گذاشتن یک مرسوله، بارگذاری با کاربر چاپخانه در محدودهٔ خودش، هشدار پیشخوان «کد رهگیری ندارد»؛ و اگر فایل پست دوره‌ای است، ورود دستی بارکد (سؤال ۶۰) | مانده |
+| سند | همین برنامه: ADR-045 تا ۰۴۸، سؤال‌های ۴۷ تا ۶۰، و «ادغام و مستقر شد» #50 | #51، ادغام و مستقر شد |
+| ۶٫۱ | ورود فایل پست: `shipment_imports`، `shipment_import_rows` و `shipments` با محافظ‌ها؛ کار `read_post_file` کارگر (HTML، CSV، XLSX)؛ آداپتور «پست ایران» و تفسیر جدول؛ زبانهٔ «ارسال» (بارگذاری، پیش‌نمایش، «ثبت»، ورودها، برگرداندن)؛ «قطعی» و «تحویل پست شد»؛ کارت «بستهٔ پستی» سفارش و جست‌وجو با بارکد | این PR (پایین) |
+| ۶٫۲ | صف تأیید و فایل چاپخانه: نمره و نامزدها، «همین است»، «هیچ‌کدام» و دادن دستی (مالک و متصدی)، کنار گذاشتن یک مرسوله، بارگذاری با کاربر چاپخانه در محدودهٔ خودش، هشدار پیشخوان «کد رهگیری ندارد» پس از دو روز کاری (سؤال ۶۰: بی ورود دستی بارکد) | مانده |
 | ۶٫۳ | رهگیری برای مشتری: پیامک رهگیری (کنسولی تا برش ۷؛ آداپتور پیامک مشترک وب و پنل)، و کد رهگیری با پیوند پست در صفحهٔ سفارش | مانده |
 | ۶٫۴ | گزارش حاشیهٔ ارسال (مالک): ماه، منطقه و چاپخانه؛ کرایهٔ منجمد در برابر کرایه و مالیات واقعی؛ وزن واقعی در برابر برآورد | مانده |
 
@@ -846,6 +855,21 @@ windows-1256)، `.csv` و `.xlsx`. `.xls` واقعی (BIFF) پیام روشن م
 - سؤال ۵۹: نمونهٔ واقعی فایل پست پیش از ۶٫۱، بیرون از مخزن و فقط برای ساختار؛ fixtureها ساختگی با همان ساختار.
 - سؤال ۶۰ (شرطی): فایل همان روز یا فردای تحویل ← بی ورود دستی، و هشدار «کد رهگیری ندارد» پس از دو روز کاری؛ دوره‌ای ← ورود دستی
   بارکد در ۶٫۲. پاسخ با نمونهٔ فایل.
+
+پاسخ‌ها و تصمیم‌های پس از برنامه (۱۴۰۵/۰۷/۰۶):
+- سؤال ۵۹: نمونهٔ واقعی رسید (`FileName-1954.xls`)، بیرون از مخزن ماند و فقط ساختارش خوانده شد (ADR-045، «اجرا در ۶٫۱»).
+- سؤال ۶۰: فایل پست حداکثر تا همان دو روز کاری تحویل به پست می‌رسد. پس ورود دستی بارکد نیست، و هشدار «کد رهگیری ندارد» پس از
+  دو روز کاری (۶٫۲).
+- سؤال‌های ۶۱ تا ۶۹ (طرح نمونهٔ قدم ۹): طبق پیشنهادها، جز ۶۵: «ثبت» و «دور بینداز» ثابت زیر شمارها، نه نوار چسبان (`docs/UI.md`،
+  بخش ۹).
+- سؤال ۷۰: «تاریخ ثبت» هر سطر روزی است که پست بسته را گرفت؛ وظیفهٔ ما تحویل به پست و فرستادن کد رهگیری است. پس «تحویل پست شد» با
+  همان روز.
+- سؤال ۷۱: فقط سطر «فعال» ثبت می‌شود؛ بقیه «غیرفعال در پست».
+- سؤال ۷۲: کرایه + مالیات که با «هزینه کل» نخواند فقط هشدار است؛ «بیمه» خوانده نمی‌شود.
+- سؤال ۷۳: پیامک رهگیری ما در هر حال می‌رود، حتی اگر پست خودش پیامک بدهد (۶٫۳).
+- سؤال ۷۴ (باز، پیشنهاد): وضعیت بسته درون پنل و صفحهٔ سفارش فقط با خواندن غیررسمی سایت پست ممکن است (شکننده، با خطر کپچا)؛ پس فعلاً
+  فقط پیوند «رهگیری در سایت پست» (۶٫۱ در پنل، ۶٫۳ برای مشتری)، و پس از برش ۷ یک بار آزمایش از سرور ایران، کار کوچک جدا پشت آداپتور
+  حامل و با برگشت به پیوند.
 
 **جریان کار:** «تحویل پست شد» ← متصدی یا چاپخانه فایل پست را می‌گیرد ← بارگذاری در «ارسال» ← کارگر می‌خواند ← پیش‌نمایش با حکم هر
 سطر ← «ثبت» ← قطعی‌ها: مرسوله، «تحویل پست شد» اگر نخورده، پیامک رهگیری، و کد در صفحهٔ سفارش ← بقیه: صف تأیید (مالک و متصدی) یا
@@ -878,10 +902,32 @@ UTF-8 و هم windows-1256؛ سرستون‌های «باركد» و «كراي�
 صفحهٔ سفارش (کامپوننت سرور) و جای آداپتور پیامک عوض می‌شود؛ و ایمیج پایهٔ کارگر (فقط کتابخانهٔ استاندارد پایتون).
 
 **کار دستی صاحب پروژه:**
-- پیش از ۶٫۱: یک فایل پست واقعی (مثل `FileName-1954.xls`)، از راهی که خودت امن می‌دانی، فقط برای ساختار (سؤال ۵۹)؛ و اینکه فایل پست
-  را کی می‌گیری (سؤال ۶۰).
-- پیوند رهگیری با یک بارکد واقعی، روی گوشی خودت: از این محیط tracking.post.ir باز نشد.
+- ~~پیش از ۶٫۱: یک فایل پست واقعی و اینکه فایل پست را کی می‌گیری (سؤال‌های ۵۹ و ۶۰)~~: رسید (۱۴۰۵/۰۷/۰۶).
+- پیوند رهگیری با یک بارکد واقعی، روی گوشی خودت: از این محیط tracking.post.ir باز نشد. از ۶٫۱ دکمهٔ «رهگیری در سایت پست» کارت
+  «بستهٔ پستی» پنل همان پیوند است.
 - از همین حالا، برای برش ۷ (سؤال ۵۵): سه قالب کاوه‌نگار (کد تأیید، پرداخت، رهگیری؛ ADR-047)، و اطلاعات تماس قدم ۵.
+
+#### ۶٫۱: ورود فایل پست (این PR)
+
+| جا | کار |
+|---|---|
+| `packages/db`: `schema.ts`، `0021_shipments.sql` (تولیدی)، `0022_shipments_guards.sql` (دست‌نویس) | `shipment_imports`، `shipment_import_rows`، `shipments` و `jobs.shipment_import_id`؛ ایندکس‌های یکتای جزئی `shipment_imports_one_file`، `shipments_live_barcode` و `shipments_live_row`، و CHECKهای شکل؛ تریگرهای `shipment_imports_guard` (گذار وضعیت، ستون‌های منجمد، پاک‌نشدنی)، معوق `shipment_imports_revert_voids`، `shipment_import_rows_committed` و `_frozen`، `shipments_insert` (فقط از ورود ثبت‌شده، با سطرش، و ورود چاپخانه فقط سفارش همان چاپخانه)، `shipments_frozen`، و معوق `shipments_order_handed` از هر دو سو |
+| `packages/db/src/postfile.ts` | آداپتور «پست ایران» (`ShippingCarrier`: سرستون‌ها، ستون‌های لازم، «فعال»، پیوند رهگیری) و تفسیر خالص جدول: `readPostSheet`، `totalsAgree`، `judgeRows` (حکم و دلیل هر سطر)، `judgedFingerprint` و `handedAtOf`؛ fixtureهای ساختگی به شکل فایل واقعی (`postfile.fixtures.ts`) |
+| `packages/db/src/shipments.ts`، `admin.ts`، `panel.ts` | ذخیره‌گاه «ارسال»: بارگذاری با کار خواندن و رویداد در یک تراکنش، فهرست، صفحهٔ ورود (پیش‌نمایش یا ثبت‌شده)، «ثبت» زیر قفل با همان حکم‌ها، «دور بینداز» و برگرداندن؛ مجوزهای `shipments.import` (مالک و متصدی) و `shipments.revert` (مالک)؛ مرسوله‌ها در جزئیات سفارش، جست‌وجو با بارکد، و `handedByFile` در خط فهرست سفارش‌ها |
+| `packages/text` | `parseJalaliNumeric` («1405/07/12» ← روز تهران) |
+| `services/docworker`: `postfile.py`، `shipments.py`، `queue.py`، `retention.py`، `__main__.py` | کار `read_post_file`: فرمت از محتوا (HTML با BOM، `charset`، UTF-8 یا windows-1256؛ CSV با سه جداکننده؛ XLSX با سقف بازشده)، `.xls` واقعی و فایل خراب «خوانده نشد» با کد، نه کار شکست‌خورده؛ پاک کردن فایل پست N روز پس از ورود (پیش‌نویس کهنه، بایت خام و جدول‌ها، متن سطرهای دیگران) در همان دور نگهداری |
+| `apps/admin/lib/shipments.ts`، `lib/server/shipments.ts`، `lib/orders.ts`، `lib/events.ts`، `lib/format.ts` | نمای ورودها، کاشی‌ها، گروه‌های سطر و دلیل هر حکم؛ سرویس با `Result`؛ «بستهٔ پستی» و رویدادهای سفارش؛ جست‌وجوی بارکد؛ روز پست بی ساعت (`dayText`)؛ رویدادهای `shipments.*` و چیپ «ارسال» |
+| `apps/admin/app/[gate]/(panel)/shipments/…`، `orders/[number]`، `components/…` | زبانهٔ «ارسال» پس از «سفارش‌ها»، صفحهٔ ورود (در حال خواندن، خوانده نشد، پیش‌نمایش، ثبت شد، دور انداخته، برگشت)، صفحهٔ برگرداندن، کارت «بستهٔ پستی»؛ کیت تازهٔ `jy-barcode` (`packages/ui`) |
+| `infra/nginx`، `apps/admin/next.config.ts` | سقف بدنهٔ پنل ۳ مگابایت، برای فایل پست تا ۲ مگابایت |
+| CI | ایمیج کارگر `docworker.postfile` و `docworker.shipments` را بار می‌کند؛ «پنل، سرتاسری» با `shipments.spec.ts` |
+
+- باندل اولیهٔ سایت همان ۱۰۷٬۶۳۳ بایت؛ ایمیج پایهٔ کارگر عوض نشد (فقط کتابخانهٔ استاندارد پایتون).
+- **پس از استقرار، خودکار:** مهاجرت‌های `0021` و `0022` جدول‌ها را می‌سازند، و دادهٔ پایهٔ وب مجوزهای `shipments.import` و
+  `shipments.revert` را می‌نشاند. سفارش‌های موجود دست نمی‌خورند؛ پیکربندی تازهٔ Nginx را `deploy-bundle.sh` خودش به کار می‌اندازد
+  (`nginx-apply.sh`).
+- **کار دستی صاحب پروژه:** با اولین فایل پست واقعی، پیش‌نمایش را پیش از «ثبت» بسنج، و دکمهٔ «رهگیری در سایت پست» را روی گوشی.
+- تصمیم‌های اجرا و سنجش‌ها در ADR-045 و ADR-046، «اجرا در ۶٫۱»، و ADR-047 برای کارت و جست‌وجو؛ رابط و فرق‌ها با طرح در `docs/UI.md`،
+  «۶٫۱».
 
 ---
 

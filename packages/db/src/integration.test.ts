@@ -88,6 +88,11 @@ import { FILES_RETENTION_SETTING, OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTI
 import { orderAssignments, orderPrintFiles, printPartners } from './schema.js';
 import { createPartnerStore } from './partners.js';
 import { sql } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import { READ_POST_FILE_JOB, createShipmentStore } from './shipments.js';
+import { shipmentImportRows, shipmentImports, shipments } from './schema.js';
+import { barcodeOf, parcel, postTable } from './postfile.fixtures.js';
+import type { PanelScope } from './panel.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -1051,7 +1056,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -1105,7 +1110,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const read = async (role: string) =>
         (await conn.db.select().from(rolePermissions).where(eq(rolePermissions.roleId, role))).map((r) => r.permissionId).sort();
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
-      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد؛ چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042). صریح، نه از کد.
+      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، و از ۶٫۱ ورود فایل پست (نه برگرداندنش)؛ چاپخانه فقط دیدن، وضعیت و دانلود
+      // (ADR-042). صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'files.download',
         'orders.address',
@@ -1114,6 +1120,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.money',
         'orders.read',
         'orders.status',
+        'shipments.import',
         'tariff.read',
       ]);
       expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
@@ -1196,6 +1203,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.money',
         'orders.read',
         'orders.status',
+        'shipments.import',
         'tariff.read',
       ]);
       expect(session!.partner).toBeNull();
@@ -1444,7 +1452,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -1848,7 +1856,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -2277,7 +2285,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -2672,7 +2680,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -3566,7 +3574,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -3913,7 +3921,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments`,
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -4102,6 +4110,664 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(resolveServiceKey('PAYMENT_MERCHANT_ID', await store.read('PAYMENT_MERCHANT_ID'), {}, KEY, () => undefined)).toMatchObject({
         source: 'unreadable',
       });
+    });
+  });
+
+  describe('ارسال: ورود فایل پست روی پستگرس (برش ۶٫۱)', () => {
+    /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
+    const NOW = new Date('2026-10-05T07:50:00Z');
+    const MINUTE = 60_000;
+    const DAY = 86_400_000;
+    const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
+    const END_MONDAY = tehran('2026-10-06 00:00');
+    /** پایان یکشنبه 12 مهر به وقت تهران، یک ثانیه پیش از نیمه‌شب: زمان «تحویل پست شد» بسته‌ای که پست یکشنبه گرفت. */
+    const END_SUNDAY = new Date('2026-10-04T20:29:59Z');
+    const TEHRAN = { provinceId: 8, cityId: 394 };
+    const MASHHAD = { provinceId: 11, cityId: 1326 };
+    let owner = '';
+    let operator = '';
+    let docId = '';
+    let first = '';
+    let files = 0;
+
+    const store = () => createShipmentStore(conn);
+    const panelStore = () => createPanelOrderStore(conn);
+    const orderOf = async (id: string) => (await conn.db.select().from(orders).where(eq(orders.id, id)))[0]!;
+    const importOf = async (id: string) => (await conn.db.select().from(shipmentImports).where(eq(shipmentImports.id, id)))[0]!;
+    const statusRows = (id: string) =>
+      conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, id)).orderBy(orderStatusEvents.id);
+    const shipmentsOf = (orderId: string) =>
+      conn.db.select().from(shipments).where(eq(shipments.orderId, orderId)).orderBy(shipments.createdAt, shipments.rowNo);
+
+    /** سفارش پرداخت‌شده (شنبه 11 مهر) همان‌طور که سرور می‌سازد؛ چاپخانه با تخصیص پرداخت. */
+    async function paidOrder(place: { provinceId: number; cityId: number }, name: string) {
+      const zoneId = place.provinceId === 8 ? 'tehran' : 'other';
+      const sections = [{ documentId: docId, pageCount: 20 }];
+      const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
+      const breakdown = quote(
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
+        SEED_PRICE_LIST,
+      );
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: '09152345678' })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+        .returning();
+      const orderStore = createOrderStore(conn);
+      const { order } = await orderStore.createOrder({
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        breakdown,
+        quoteSnapshot: null,
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: zoneId,
+        provinceId: place.provinceId,
+        cityId: place.cityId,
+        recipientName: name,
+        recipientPhone: '09152345678',
+        addressText: 'بلوار سجاد، سجاد 18، پلاک 42',
+        postalCode: null,
+        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+      });
+      const payment = await orderStore.insertPayment({
+        orderId: order.id,
+        provider: 'mock',
+        amountRials: order.totalRials,
+        authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
+        raw: null,
+      });
+      const settled = await orderStore.settlePayment('mock', payment.authority, async () => ({
+        kind: 'succeeded',
+        refId: '803114',
+        cardMask: null,
+        raw: null,
+        paidAt: tehran('2026-10-03 10:00'),
+        postHandoffDueAt: END_MONDAY,
+      }));
+      return settled!.order;
+    }
+
+    /** تغییر وضعیت ادمین از پنل، با رویدادش. */
+    const change = (order: { id: string }, from: OrderStatus, to: OrderStatus, reason: string | null = null) =>
+      panelStore().changeStatus(ALL_ORDERS, {
+        orderId: order.id,
+        from,
+        to,
+        at: NOW,
+        adminUserId: owner,
+        note: reason ? { reason } : null,
+        event: { adminUserId: owner, action: 'orders.status', targetType: 'order', targetId: order.id, at: NOW },
+      });
+
+    async function printingOrder(place: { provinceId: number; cityId: number }, name: string) {
+      const order = await paidOrder(place, name);
+      expect((await change(order, 'paid', 'printing')).ok).toBe(true);
+      return order;
+    }
+
+    async function handedOrder(place: { provinceId: number; cityId: number }, name: string) {
+      const order = await printingOrder(place, name);
+      expect((await change(order, 'printing', 'handed_to_post')).ok).toBe(true);
+      return orderOf(order.id);
+    }
+
+    /** بارگذاری، و «خوانده شد» مثل کارگر: بایت خام یکتا (یا همان که داده شد)، و جدول‌ها. */
+    async function readImport(rows: string[][], { scope = ALL_ORDERS as PanelScope, raw }: { scope?: PanelScope; raw?: Buffer } = {}) {
+      files += 1;
+      const created = await store().createImport(scope, {
+        filename: `FileName-${1950 + files}.xls`,
+        raw: raw ?? Buffer.from(`<table><tr><td>${files}</td></tr></table>`),
+        createdBy: operator,
+        at: NOW,
+        event: { adminUserId: operator, action: 'shipments.upload', at: NOW },
+      });
+      if (!created.ok) throw new Error('same_file');
+      await conn.db
+        .update(shipmentImports)
+        .set({ status: 'read', format: 'html', tables: [postTable(rows)], readAt: NOW })
+        .where(eq(shipmentImports.id, created.id));
+      return created.id;
+    }
+
+    async function previewOf(id: string, scope: PanelScope = ALL_ORDERS, at = NOW) {
+      const page = await store().importPage(scope, id, at);
+      if (page?.kind !== 'preview') throw new Error(`پیش‌نمایش نیست: ${page?.kind}`);
+      return page.preview;
+    }
+
+    async function commit(id: string, { scope = ALL_ORDERS as PanelScope, fingerprint }: { scope?: PanelScope; fingerprint?: string } = {}) {
+      const seen = fingerprint ?? (await previewOf(id, scope)).fingerprint;
+      return store().commit(scope, {
+        id,
+        fingerprint: seen,
+        at: NOW,
+        adminUserId: operator,
+        event: { adminUserId: operator, action: 'shipments.commit', at: NOW },
+      });
+    }
+
+    const revert = (id: string, reason = 'فایل روز اشتباه بود؛ فایل یکشنبه را جایش می‌آورم.') =>
+      store().revert(ALL_ORDERS, { id, reason, at: NOW, adminUserId: owner, event: { adminUserId: owner, action: 'shipments.revert', at: NOW } });
+
+    /** یک بسته برای سفارش، با نام خانوادگی و شمارهٔ برچسب برگه. */
+    const row = (n: number, barcode: string, nameG: string, destination = 'تهران', over: Parameters<typeof parcel>[6] = {}) =>
+      parcel(n, barcode, nameG, destination, 820 + n, 1_295_000, over);
+
+    async function reset() {
+      await clearOrders(conn);
+      await conn.db.execute(sql`TRUNCATE shipments, shipment_import_rows, shipment_imports, admin_events, jobs`);
+      await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      first = (await conn.db.select({ id: printPartners.id }).from(printPartners))[0]!.id;
+    }
+
+    beforeAll(async () => {
+      await clearOrders(conn);
+      await conn.db.execute(
+        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+      );
+      await reset();
+      const admins = createAdminStore(conn);
+      const make = async (username: string, displayName: string, role: 'owner' | 'operator') => {
+        const created = await admins.createInvite({
+          inviteId: randomUUID(),
+          newUserId: randomUUID(),
+          username,
+          displayName,
+          role,
+          tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+          totpSealed: 'v1.sealed',
+          at: NOW,
+          expiresAt: new Date(NOW.getTime() + 15 * MINUTE),
+          createdBy: null,
+          allowExisting: false,
+          event: { adminUserId: null, action: 'admins.invite', targetType: 'admin' },
+        });
+        if (!created.ok) throw new Error(created.reason);
+        return created.userId;
+      };
+      owner = await make('sara', 'سارا رضایی', 'owner');
+      operator = await make('ali', 'علی محمدی', 'operator');
+      const documentStore = createDocumentStore(conn);
+      docId = randomUUID();
+      await documentStore.insertUpload({
+        id: docId,
+        sessionHash: 'e'.repeat(64),
+        originalName: 'ریاضی ۲.pdf',
+        sourceKind: 'pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 1_000,
+        storageKey: `uploads/${docId}.pdf`,
+        uploadId: 'u',
+        partSizeBytes: 8 * 1024 * 1024,
+      });
+      await documentStore.markUploaded(docId, NOW, new Date(NOW.getTime() + 2 * DAY), null);
+      await conn.db.update(documents).set({ status: 'ready', pageCount: 20 }).where(eq(documents.id, docId));
+    });
+
+    beforeEach(async () => {
+      await reset();
+    });
+
+    afterAll(async () => {
+      await reset();
+    });
+
+    it('بارگذاری: بایت خام و sha256، کار خواندن و رویداد در یک تراکنش؛ همان فایل تا زنده است یک بار، هم‌زمان هم', async () => {
+      const raw = Buffer.from('<table><tr><td>بارکد</td></tr></table>');
+      const created = await store().createImport(ALL_ORDERS, {
+        filename: 'FileName-1954.xls',
+        raw,
+        createdBy: operator,
+        at: NOW,
+        event: { adminUserId: operator, action: 'shipments.upload', ipHash: 'ip', at: NOW },
+      });
+      expect(created.ok).toBe(true);
+      const id = created.ok ? created.id : '';
+      const imported = await importOf(id);
+      expect(imported).toMatchObject({ status: 'reading', carrier: 'iran_post', sizeBytes: raw.length, printPartnerId: null, createdBy: operator });
+      expect(Buffer.compare(imported.raw!, raw)).toBe(0);
+      expect(imported.sha256).toBe(createHash('sha256').update(raw).digest('hex'));
+      const [job] = await conn.db.select().from(jobs).where(eq(jobs.shipmentImportId, id));
+      expect(job).toMatchObject({ kind: READ_POST_FILE_JOB, status: 'queued', documentId: null, orderId: null });
+      const [event] = await conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, id));
+      expect(event).toMatchObject({ action: 'shipments.upload', targetType: 'shipment_import', adminUserId: operator, ipHash: 'ip' });
+      expect(event!.detail).toMatchObject({ filename: 'FileName-1954.xls', sizeBytes: raw.length });
+
+      // همان بایت‌ها، با هر نامی: همان ورود.
+      const again = await store().createImport(ALL_ORDERS, { filename: 'copy.xls', raw, createdBy: owner, at: NOW, event: { adminUserId: owner, action: 'shipments.upload', at: NOW } });
+      expect(again).toMatchObject({ ok: false, reason: 'same_file', existing: { id, filename: 'FileName-1954.xls', createdByName: 'علی محمدی' } });
+      // هم‌زمان: یکی ساخته می‌شود و بقیه همان را می‌بینند.
+      const other = Buffer.from('<table><tr><td>دیگر</td></tr></table>');
+      const results = await Promise.all(
+        [1, 2, 3, 4].map(() =>
+          store().createImport(ALL_ORDERS, { filename: 'b.xls', raw: other, createdBy: operator, at: NOW, event: { adminUserId: operator, action: 'shipments.upload', at: NOW } }),
+        ),
+      );
+      const made = results.filter((r) => r.ok);
+      expect(made).toHaveLength(1);
+      const madeId = made[0]!.ok ? made[0]!.id : '';
+      expect(results.filter((r) => !r.ok && r.existing?.id === madeId)).toHaveLength(3);
+      expect(await conn.db.select().from(jobs).where(eq(jobs.shipmentImportId, madeId))).toHaveLength(1);
+      // پایگاه داده هم، بی ذخیره‌گاه؛ و کار دوم برای همان ورود نه.
+      expect(
+        await rejectedConstraint(
+          conn.db.insert(shipmentImports).values({ carrier: 'iran_post', filename: 'x.xls', sizeBytes: raw.length, sha256: imported.sha256, createdBy: operator }),
+        ),
+      ).toBe('shipment_imports_one_file');
+      expect(await rejectedConstraint(conn.db.insert(jobs).values({ kind: READ_POST_FILE_JOB, shipmentImportId: id }))).toBe('jobs_shipment_import_kind');
+      expect(await rejectedConstraint(conn.db.insert(jobs).values({ kind: READ_POST_FILE_JOB, shipmentImportId: id, orderId: randomUUID() }))).toBe(
+        'jobs_one_target',
+      );
+    });
+
+    it('پیش‌نمایش و «ثبت»: قطعی مرسوله می‌شود و «در حال چاپ» تا پایان روز پست «تحویل پست شد»؛ بقیه فقط سطر با حکمش', async () => {
+      const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+      const rahmani = await handedOrder(TEHRAN, 'نگار رحمانی');
+      const queued = await paidOrder(TEHRAN, 'زهرا محمدی');
+      const cancelled = await printingOrder(TEHRAN, 'امین قاسمی');
+      expect((await change(cancelled, 'printing', 'cancelled', 'مشتری نخواست')).ok).toBe(true);
+      const id = await readImport([
+        row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`),
+        row(2, barcodeOf(2), `رحمانی ${rahmani.orderNumber}`),
+        row(3, barcodeOf(3), `محمدی ${queued.orderNumber}`),
+        row(4, barcodeOf(4), `قاسمی ${cancelled.orderNumber}`),
+        row(5, barcodeOf(5), 'کریمی 10099'),
+        row(6, barcodeOf(6), 'احمدی'),
+        row(7, barcodeOf(7), 'طهماسبی 6103', 'مشهد'),
+        row(8, '1.18832198006261E+23', `طاهری ${taheri.orderNumber}`),
+        row(9, barcodeOf(9), `طاهری ${taheri.orderNumber}`, 'تهران', { status: 'باطل' }),
+      ]);
+      const preview = await previewOf(id);
+      expect(preview.judged.map((j) => [j.rowNo, j.verdict, j.reason])).toEqual([
+        [1, 'matched', null],
+        [2, 'matched', null],
+        [3, 'review', 'queued'],
+        [4, 'review', 'cancelled'],
+        [5, 'unmatched', 'not_found'],
+        [6, 'unmatched', 'no_number'],
+        [7, 'unmatched', 'manual_code'],
+        [8, 'invalid', 'barcode'],
+        [9, 'inactive', 'inactive'],
+      ]);
+      expect(preview.judged.filter((j) => j.handOver).map((j) => j.orderId)).toEqual([taheri.id]);
+      // پیش‌نمایش چیزی نمی‌نویسد.
+      expect(await conn.db.select().from(shipmentImportRows)).toHaveLength(0);
+      expect((await orderOf(taheri.id)).status).toBe('printing');
+
+      const written = await commit(id, { fingerprint: preview.fingerprint });
+      expect(written).toEqual({
+        ok: true,
+        counts: { matched: 2, review: 2, unmatched: 3, invalid: 1, inactive: 1 },
+        shipments: 2,
+        handed: [taheri.orderNumber],
+      });
+      expect(await importOf(id)).toMatchObject({ status: 'committed', committedBy: operator, committedAt: NOW });
+      const stored = await conn.db.select().from(shipmentImportRows).where(eq(shipmentImportRows.importId, id)).orderBy(shipmentImportRows.rowNo);
+      expect(stored.map((r) => [r.rowNo, r.verdict, r.orderId])).toEqual([
+        [1, 'matched', taheri.id],
+        [2, 'matched', rahmani.id],
+        [3, 'review', queued.id],
+        [4, 'review', cancelled.id],
+        [5, 'unmatched', null],
+        [6, 'unmatched', null],
+        [7, 'unmatched', null],
+        [8, 'invalid', null],
+        [9, 'inactive', null],
+        [10, 'total', null],
+      ]);
+      expect(stored[7]).toMatchObject({ barcode: null, cells: expect.arrayContaining(['1.18832198006261E+23 ']) });
+      // «جمع کل» با جمع‌های خودش: وزن‌ها 821 تا 829 گرم.
+      expect(stored[9]).toMatchObject({ weightGrams: 7425, fareRials: 9 * 1_295_000, taxRials: 9 * 129_500 });
+
+      // «در حال چاپ» ← «تحویل پست شد» با روز فایل (یکشنبه)، نه لحظهٔ ثبت؛ رویداد وضعیت با ثبت‌کننده و یادداشت «فایل پست».
+      expect(await orderOf(taheri.id)).toMatchObject({ status: 'handed_to_post', handedToPostAt: END_SUNDAY });
+      const moved = (await statusRows(taheri.id)).at(-1)!;
+      expect(moved).toMatchObject({ fromStatus: 'printing', toStatus: 'handed_to_post', actor: 'admin', adminUserId: operator, at: NOW });
+      expect(moved.note).toMatchObject({ source: 'post_file', importId: id, filename: expect.stringMatching(/^FileName-/) });
+      // «تحویل پست شد»ی که پیش‌تر خورده بود دست نمی‌خورد، زمانش هم.
+      expect(await orderOf(rahmani.id)).toMatchObject({ status: 'handed_to_post', handedToPostAt: rahmani.handedToPostAt });
+      expect(await orderOf(queued.id)).toMatchObject({ status: 'paid' });
+      expect((await shipmentsOf(taheri.id)).map((s) => [s.barcode, s.handedOrder, s.matchedBy, s.weightGrams, s.fareRials, s.taxRials])).toEqual([
+        [barcodeOf(1), true, 'rule', 821, 1_295_000, 129_500],
+      ]);
+      expect((await shipmentsOf(rahmani.id)).map((s) => [s.barcode, s.handedOrder])).toEqual([[barcodeOf(2), false]]);
+      const [event] = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.targetId, id), eq(adminEvents.action, 'shipments.commit')));
+      expect(event!.detail).toMatchObject({ shipments: 2, handed: [taheri.orderNumber], counts: { matched: 2, review: 2 } });
+
+      // صفحهٔ ورود ثبت‌شده، فهرست ورودها، جزئیات سفارش و جست‌وجو با کد رهگیری.
+      const page = await store().importPage(ALL_ORDERS, id, NOW);
+      expect(page?.kind).toBe('committed');
+      if (page?.kind === 'committed') {
+        expect(page.committed.rows).toHaveLength(10);
+        expect(page.committed.shipments.map((s) => [s.rowNo, s.handedOrder, s.voidedAt])).toEqual([
+          [1, true, null],
+          [2, false, null],
+        ]);
+        expect(page.committed.orders.map((o) => o.orderNumber).sort()).toEqual(
+          [taheri.orderNumber, rahmani.orderNumber, queued.orderNumber, cancelled.orderNumber].sort(),
+        );
+      }
+      const [line] = await store().listImports(ALL_ORDERS, { limit: 10, offset: 0 });
+      expect(line).toMatchObject({
+        id,
+        status: 'committed',
+        committedByName: 'علی محمدی',
+        counts: { matched: 2, review: 2, unmatched: 3, invalid: 1, inactive: 1, total: 1 },
+        liveShipments: 2,
+        voidedShipments: 0,
+        handedOrders: 1,
+        firstPostDay: tehran('2026-10-04 00:00'),
+        lastPostDay: tehran('2026-10-04 00:00'),
+      });
+      const details = await panelStore().details(ALL_ORDERS, taheri.orderNumber);
+      expect(details!.shipments).toMatchObject([{ barcode: barcodeOf(1), handedOrder: true, adminName: 'علی محمدی', rowNo: 1, voidedAt: null }]);
+      const search: PanelSearch = { kind: 'barcode', barcode: barcodeOf(1) };
+      const clock: PanelClock = { at: NOW, staleBefore: NOW, unreturnedBefore: NOW };
+      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search, clock, limit: 10, offset: 0 })).map((o) => [o.id, o.handedByFile])).toEqual([
+        [taheri.id, true],
+      ]);
+      // «تحویل پست شد»ی که پیش از فایل دستی خورده بود کار فایل نیست: ساعتش واقعی است و نشان داده می‌شود.
+      const manual: PanelSearch = { kind: 'barcode', barcode: barcodeOf(2) };
+      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search: manual, clock, limit: 10, offset: 0 })).map((o) => [o.id, o.handedByFile])).toEqual([
+        [rahmani.id, false],
+      ]);
+    });
+
+    it('فایل هم‌پوشان: همان کد برای همان سفارش «تکراری» و مرسولهٔ دوم نمی‌سازد؛ همان کد برای سفارش دیگر صف تأیید؛ چند بسته برای یک سفارش', async () => {
+      const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+      const sharifi = await printingOrder(TEHRAN, 'امید شریفی');
+      expect((await commit(await readImport([row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`)]))).ok).toBe(true);
+      const second = await readImport([
+        row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`),
+        row(2, barcodeOf(1), `شریفی ${sharifi.orderNumber}`),
+        row(3, barcodeOf(3), `طاهری ${taheri.orderNumber}`),
+        row(4, barcodeOf(3), `طاهری ${taheri.orderNumber}`),
+      ]);
+      const preview = await previewOf(second);
+      expect(preview.judged.map((j) => [j.verdict, j.reason, j.orderId, j.handOver])).toEqual([
+        ['duplicate', 'already', taheri.id, false],
+        ['duplicate', 'same_file', null, false],
+        ['matched', null, taheri.id, false],
+        ['duplicate', 'same_file', null, false],
+      ]);
+      expect(preview.live).toMatchObject([{ barcode: barcodeOf(1), orderId: taheri.id, orderNumber: taheri.orderNumber }]);
+      // همان کد با سفارش دیگر در فایل دیگر: صف تأیید، نه مرسولهٔ دوم.
+      const third = await readImport([row(1, barcodeOf(1), `شریفی ${sharifi.orderNumber}`)]);
+      expect((await previewOf(third)).judged.map((j) => [j.verdict, j.reason, j.orderId])).toEqual([['review', 'barcode_elsewhere', sharifi.id]]);
+      expect((await commit(second)).ok).toBe(true);
+      expect((await commit(third)).ok).toBe(true);
+      // دو بسته برای طاهری (جلدها در دو پاکت)، هیچ برای شریفی؛ «تحویل پست شد» فقط با اولی.
+      expect((await shipmentsOf(taheri.id)).map((s) => [s.barcode, s.handedOrder])).toEqual([
+        [barcodeOf(1), true],
+        [barcodeOf(3), false],
+      ]);
+      expect(await shipmentsOf(sharifi.id)).toHaveLength(0);
+      expect((await orderOf(sharifi.id)).status).toBe('printing');
+      const page = await store().importPage(ALL_ORDERS, second, NOW);
+      expect(page?.kind === 'committed' && page.committed.elsewhere.map((s) => [s.barcode, s.orderNumber])).toEqual([[barcodeOf(1), taheri.orderNumber]]);
+    });
+
+    it('«ثبت» همان که دیده شد: اثر انگشت کهنه «changed»؛ دو «ثبت» هم‌زمان یک بار؛ دو فایل هم‌پوشان هم‌زمان یکی', async () => {
+      const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+      const first = await readImport([row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`)]);
+      const seen = (await previewOf(first)).fingerprint;
+      // سفارش همین حالا با دکمه «تحویل پست شد» شد: حکم همان «قطعی» است، ولی دیگر «تحویل پست شد» نمی‌کند.
+      expect((await change(taheri, 'printing', 'handed_to_post')).ok).toBe(true);
+      expect(await commit(first, { fingerprint: seen })).toEqual({ ok: false, reason: 'changed' });
+      expect((await importOf(first)).status).toBe('read');
+      expect(await conn.db.select().from(shipmentImportRows)).toHaveLength(0);
+      // پیش‌نمایش تازه، دو «ثبت» هم‌زمان: یکی.
+      const fresh = (await previewOf(first)).fingerprint;
+      const both = await Promise.all([commit(first, { fingerprint: fresh }), commit(first, { fingerprint: fresh })]);
+      expect(both.filter((r) => r.ok)).toHaveLength(1);
+      expect(both.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'status', status: 'committed' }]);
+      expect(await shipmentsOf(taheri.id)).toHaveLength(1);
+
+      // دو فایل هم‌پوشان، هر کدام پیش‌نمایشش «قطعی»: اولی می‌نشیند، دومی پیش‌نمایش تازه می‌خواهد و بعد «تکراری» است.
+      const sharifi = await printingOrder(TEHRAN, 'امید شریفی');
+      const a = await readImport([row(1, barcodeOf(2), `شریفی ${sharifi.orderNumber}`)]);
+      const b = await readImport([row(1, barcodeOf(2), `شریفی ${sharifi.orderNumber}`), row(2, barcodeOf(4), 'کریمی 10099')]);
+      const [seenA, seenB] = [(await previewOf(a)).fingerprint, (await previewOf(b)).fingerprint];
+      const race = await Promise.all([commit(a, { fingerprint: seenA }), commit(b, { fingerprint: seenB })]);
+      expect(race.filter((r) => r.ok)).toHaveLength(1);
+      expect(race.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'changed' }]);
+      expect(await shipmentsOf(sharifi.id)).toHaveLength(1);
+      const loser = race[0]!.ok ? b : a;
+      expect((await previewOf(loser)).judged[0]).toMatchObject({ verdict: 'duplicate', reason: 'already' });
+
+      // همان کد برای دو سفارش در دو فایل، هم‌زمان: قفل سفارش مشترکی نیست، ایندکس یکتای کدهای زنده یکی را نگه می‌دارد.
+      const kazemi = await printingOrder(TEHRAN, 'آرش کاظمی');
+      const farhadi = await printingOrder(TEHRAN, 'یاسمن فرهادی');
+      const c = await readImport([row(1, barcodeOf(5), `کاظمی ${kazemi.orderNumber}`)]);
+      const d = await readImport([row(1, barcodeOf(5), `فرهادی ${farhadi.orderNumber}`)]);
+      const [seenC, seenD] = [(await previewOf(c)).fingerprint, (await previewOf(d)).fingerprint];
+      const clash = await Promise.all([commit(c, { fingerprint: seenC }), commit(d, { fingerprint: seenD })]);
+      expect(clash.filter((r) => r.ok)).toHaveLength(1);
+      expect(clash.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'changed' }]);
+      expect([...(await shipmentsOf(kazemi.id)), ...(await shipmentsOf(farhadi.id))]).toHaveLength(1);
+    });
+
+    it('«ثبت» هم‌زمان با «تحویل پست شد» دستی: فقط یکی، و سفارش یک بار «تحویل پست شد»', async () => {
+      for (let round = 0; round < 3; round += 1) {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const id = await readImport([row(1, barcodeOf(10 + round), `طاهری ${taheri.orderNumber}`)]);
+        const seen = (await previewOf(id)).fingerprint;
+        const [written, button] = await Promise.all([commit(id, { fingerprint: seen }), change(taheri, 'printing', 'handed_to_post')]);
+        expect([written.ok, button.ok].filter(Boolean)).toHaveLength(1);
+        const moves = (await statusRows(taheri.id)).filter((e) => e.toStatus === 'handed_to_post');
+        expect(moves).toHaveLength(1);
+        expect((await orderOf(taheri.id)).status).toBe('handed_to_post');
+        if (!written.ok) {
+          expect(written).toEqual({ ok: false, reason: 'changed' });
+          // پیش‌نمایش تازه: همان کد، بی «تحویل پست شد».
+          expect((await previewOf(id)).judged[0]).toMatchObject({ verdict: 'matched', handOver: false });
+        }
+      }
+    });
+
+    it('برگرداندن: کدها کنار می‌روند؛ سفارشی که همین ورود تحویل پست کرد به «در حال چاپ» برمی‌گردد، مگر کد زندهٔ دیگری دارد؛ یک بار؛ همان فایل دوباره', async () => {
+      const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+      const rahmani = await handedOrder(TEHRAN, 'نگار رحمانی');
+      const sharifi = await printingOrder(TEHRAN, 'امید شریفی');
+      const raw = Buffer.from('<table><tr><td>FileName-1981</td></tr></table>');
+      const id = await readImport(
+        [row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`), row(2, barcodeOf(2), `رحمانی ${rahmani.orderNumber}`), row(3, barcodeOf(3), `شریفی ${sharifi.orderNumber}`)],
+        { raw },
+      );
+      expect(await commit(id)).toMatchObject({ ok: true, handed: [taheri.orderNumber, sharifi.orderNumber].sort((x, y) => x - y) });
+      // شریفی بستهٔ دومی هم در فایل دیگری دارد: با برگرداندن اولی «تحویل پست شد» می‌ماند.
+      const other = await readImport([row(1, barcodeOf(4), `شریفی ${sharifi.orderNumber}`)]);
+      expect(await commit(other)).toMatchObject({ ok: true, shipments: 1, handed: [] });
+
+      const reverted = await revert(id);
+      expect(reverted).toEqual({ ok: true, voided: 3, reopened: [taheri.orderNumber], kept: [sharifi.orderNumber] });
+      expect(await importOf(id)).toMatchObject({ status: 'reverted', revertedBy: owner, revertedAt: NOW });
+      expect(await orderOf(taheri.id)).toMatchObject({ status: 'printing', handedToPostAt: null });
+      const back = (await statusRows(taheri.id)).at(-1)!;
+      expect(back).toMatchObject({ fromStatus: 'handed_to_post', toStatus: 'printing', adminUserId: owner });
+      expect(back.note).toMatchObject({ reason: 'فایل روز اشتباه بود؛ فایل یکشنبه را جایش می‌آورم.', source: 'post_file_revert', importId: id });
+      // «تحویل پست شد»ی که پیش از ورود بود و «تحویل پست شد»ی که کد دیگری دارد، همان‌اند.
+      expect((await orderOf(rahmani.id)).status).toBe('handed_to_post');
+      expect((await orderOf(sharifi.id)).status).toBe('handed_to_post');
+      expect((await shipmentsOf(taheri.id)).map((s) => [s.voidedBy, s.voidReason])).toEqual([[owner, 'فایل روز اشتباه بود؛ فایل یکشنبه را جایش می‌آورم.']]);
+      expect((await shipmentsOf(sharifi.id)).map((s) => [s.barcode, s.voidedAt === null]).sort()).toEqual([
+        [barcodeOf(3), false],
+        [barcodeOf(4), true],
+      ]);
+      const [event] = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.targetId, id), eq(adminEvents.action, 'shipments.revert')));
+      expect(event!.detail).toMatchObject({ voided: 3, reopened: [taheri.orderNumber], kept: [sharifi.orderNumber] });
+      // سطرها و فایل خام برای سابقه می‌مانند؛ یک بار؛ و همان فایل دوباره واردشدنی است.
+      expect(await conn.db.select().from(shipmentImportRows).where(eq(shipmentImportRows.importId, id))).toHaveLength(4); // سه بسته و «جمع کل»
+      expect((await importOf(id)).raw).not.toBeNull();
+      expect(await revert(id)).toEqual({ ok: false, reason: 'status', status: 'reverted' });
+      const again = await store().createImport(ALL_ORDERS, { filename: 'FileName-1981.xls', raw, createdBy: operator, at: NOW, event: { adminUserId: operator, action: 'shipments.upload', at: NOW } });
+      expect(again.ok).toBe(true);
+      // برگرداندن وضعیت سفارشی که کد زنده دارد: پایگاه داده نمی‌گذارد.
+      expect(await change(sharifi, 'handed_to_post', 'printing', 'اشتباه')).toEqual({ ok: false, current: 'handed_to_post', hasShipment: true });
+      expect((await orderOf(sharifi.id)).status).toBe('handed_to_post');
+      // شاهد: سفارشی که کد زنده ندارد برمی‌گردد.
+      expect((await shipmentsOf(rahmani.id)).every((s) => s.voidedAt !== null)).toBe(true);
+      expect((await change(rahmani, 'handed_to_post', 'printing', 'اشتباه')).ok).toBe(true);
+      expect((await orderOf(rahmani.id)).status).toBe('printing');
+      // «تحویل پست شد» دستی پس از برگرداندن کار فایل نیست، هرچند کد کنارگذاشته‌اش `handed_order` دارد: ساعتش واقعی است.
+      expect((await change(taheri, 'printing', 'handed_to_post')).ok).toBe(true);
+      const clock: PanelClock = { at: NOW, staleBefore: NOW, unreturnedBefore: NOW };
+      const search: PanelSearch = { kind: 'barcode', barcode: barcodeOf(1) };
+      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search, clock, limit: 10, offset: 0 })).map((o) => [o.id, o.handedByFile])).toEqual([
+        [taheri.id, false],
+      ]);
+    });
+
+    it('دور بینداز: فقط پیش از «ثبت»؛ بایت خام و جدول‌ها پاک؛ همان فایل دوباره واردشدنی', async () => {
+      const raw = Buffer.from('<table><tr><td>discard</td></tr></table>');
+      const id = await readImport([row(1, barcodeOf(1), 'کریمی 10099')], { raw });
+      const discard = (target: string) =>
+        store().discard(ALL_ORDERS, { id: target, at: NOW, adminUserId: operator, event: { adminUserId: operator, action: 'shipments.discard', at: NOW } });
+      expect(await discard(id)).toEqual({ ok: true });
+      expect(await importOf(id)).toMatchObject({ status: 'discarded', raw: null, tables: null, purgedAt: NOW, discardedBy: operator });
+      expect(await discard(id)).toEqual({ ok: false, reason: 'status', status: 'discarded' });
+      expect(await commit(id, { fingerprint: 'x' })).toEqual({ ok: false, reason: 'status', status: 'discarded' });
+      expect(await store().importPage(ALL_ORDERS, id, NOW)).toMatchObject({ kind: 'plain', import: { status: 'discarded', discardedByName: 'علی محمدی' } });
+      const again = await readImport([row(1, barcodeOf(1), 'کریمی 10099')], { raw });
+      expect(await commit(again)).toMatchObject({ ok: true, shipments: 0 });
+      expect(await discard(again)).toEqual({ ok: false, reason: 'status', status: 'committed' });
+      expect(await discard(randomUUID())).toEqual({ ok: false, reason: 'not_found' });
+    });
+
+    it('محافظ‌ها: گذار وضعیت ورود، ستون‌های منجمد، سطر و کد فقط افزودنی، و کد زنده فقط در «تحویل پست شد» از هر دو سو', async () => {
+      const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+      const id = await readImport([row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`), row(2, barcodeOf(2), 'کریمی 10099')]);
+      const setImport = (values: Partial<typeof shipmentImports.$inferInsert>, target = id) =>
+        rejectedConstraint(conn.db.update(shipmentImports).set(values).where(eq(shipmentImports.id, target)));
+      // سطر فقط برای ورود ثبت‌شده، و مرسوله هم.
+      expect(
+        await rejectedConstraint(conn.db.insert(shipmentImportRows).values({ importId: id, rowNo: 1, verdict: 'unmatched' })),
+      ).toBe('shipment_import_rows_committed');
+      expect(await setImport({ status: 'reverted', revertedAt: NOW, revertedBy: owner, revertReason: 'x' })).toBe('shipment_imports_flow');
+      expect(await setImport({ filename: 'دیگر.xls' })).toBe('shipment_imports_frozen');
+      expect(await setImport({ raw: Buffer.from('<table><tr><td>2</td></tr></table>') })).toBe('shipment_imports_frozen');
+      expect(await setImport({ tables: [[['x']]] })).toBe('shipment_imports_frozen');
+      expect(await rejectedConstraint(conn.db.delete(shipmentImports).where(eq(shipmentImports.id, id)))).toBe('shipment_imports_no_delete');
+      expect((await commit(id)).ok).toBe(true);
+
+      const setRow = (values: Partial<typeof shipmentImportRows.$inferInsert>, rowNo: number) =>
+        rejectedConstraint(
+          conn.db.update(shipmentImportRows).set(values).where(and(eq(shipmentImportRows.importId, id), eq(shipmentImportRows.rowNo, rowNo))),
+        );
+      expect(await setRow({ verdict: 'review' }, 1)).toBe('shipment_import_rows_frozen');
+      expect(await setRow({ nameG: null }, 1)).toBe('shipment_import_rows_frozen');
+      // شاهد: متن سطری که مرسولهٔ ما نشد پاک می‌شود (نگهداری، کارگر)، فقط پاک.
+      expect(await setRow({ nameG: null, cells: null, destination: null }, 2)).toBeUndefined();
+      expect(await setRow({ nameG: 'دیگر' }, 2)).toBe('shipment_import_rows_frozen');
+      expect(
+        await rejectedConstraint(conn.db.delete(shipmentImportRows).where(eq(shipmentImportRows.importId, id))),
+      ).toBe('shipment_import_rows_frozen');
+
+      const [made] = await shipmentsOf(taheri.id);
+      const setShipment = (values: Partial<typeof shipments.$inferInsert>) =>
+        rejectedConstraint(conn.db.update(shipments).set(values).where(eq(shipments.id, made!.id)));
+      expect(await setShipment({ barcode: barcodeOf(9) })).toBe('shipments_frozen');
+      expect(await setShipment({ weightGrams: 900 })).toBe('shipments_frozen');
+      expect(await rejectedConstraint(conn.db.delete(shipments).where(eq(shipments.id, made!.id)))).toBe('shipments_frozen');
+      // مرسوله از سطر همان ورود، با همان اعداد؛ قطعی فقط برای سفارش حکم.
+      const insertShipment = (values: Partial<typeof shipments.$inferInsert>) =>
+        rejectedConstraint(
+          conn.db.insert(shipments).values({
+            orderId: taheri.id,
+            barcode: barcodeOf(2),
+            importId: id,
+            rowNo: 2,
+            weightGrams: 822,
+            fareRials: 1_295_000,
+            taxRials: 129_500,
+            postDay: tehran('2026-10-04 00:00'),
+            matchedBy: 'manual',
+            adminUserId: owner,
+            ...values,
+          }),
+        );
+      expect(await insertShipment({ weightGrams: 900 })).toBe('shipments_row');
+      expect(await insertShipment({ matchedBy: 'rule' })).toBe('shipments_row');
+      expect(await insertShipment({ barcode: barcodeOf(7) })).toBe('shipments_row');
+      // کد بدشکل را تریگر پیش از CHECK می‌گیرد (سطری با آن نیست)؛ CHECK خود سطر ۲۴ رقم می‌خواهد.
+      expect(await insertShipment({ barcode: '1188' })).toBe('shipments_row');
+      expect(
+        await rejectedConstraint(conn.db.insert(shipmentImportRows).values({ importId: id, rowNo: 99, verdict: 'unmatched', barcode: '1188' })),
+      ).toBe('shipment_import_rows_barcode');
+      // کد زنده یکتاست: همان کد برای سفارش دیگر نه؛ کنارگذاشته‌اش مانع نیست.
+      expect(await insertShipment({ barcode: barcodeOf(1), rowNo: 1, weightGrams: 821 })).toBe('shipments_live_barcode');
+
+      // از هر دو سو: سفارشی که کد زنده دارد از «تحویل پست شد» بیرون نمی‌رود، و کد زنده برای سفارشی که «تحویل پست شد» نیست نه.
+      expect(await rejectedConstraint(conn.db.update(orders).set({ status: 'printing', handedToPostAt: null }).where(eq(orders.id, taheri.id)))).toBe(
+        'shipments_order_handed',
+      );
+      const printing = await printingOrder(TEHRAN, 'امید شریفی');
+      expect(await insertShipment({ orderId: printing.id })).toBe('shipments_order_handed');
+      // شاهد: همان کد برای سفارش «تحویل پست شد» (دادن دستی، ۶٫۲) می‌نشیند.
+      expect((await change(printing, 'printing', 'handed_to_post')).ok).toBe(true);
+      expect(await insertShipment({ orderId: printing.id })).toBeUndefined();
+
+      // ورودی که برگشت کد زنده ندارد (معوق)، و پس از برگشت عوض نمی‌شود.
+      expect(await setImport({ status: 'reverted', revertedAt: NOW, revertedBy: owner, revertReason: 'دستی' })).toBe('shipment_imports_revert_voids');
+      expect((await revert(id)).ok).toBe(true);
+      expect(await setImport({ revertReason: 'دیگر' })).toBe('shipment_imports_frozen');
+      expect(await setImport({ status: 'committed' })).toBe('shipment_imports_flow');
+      // کنار گذاشتن یک بار.
+      expect(await setShipment({ voidedAt: NOW, voidedBy: owner, voidReason: 'دوباره' })).toBe('shipments_frozen');
+    });
+
+    it('ورود چاپخانه: حکم‌ها فقط سفارش‌های همان چاپخانه، ورودش فقط در محدودهٔ خودش، و پایگاه داده کد سفارش دیگری را از آن نمی‌پذیرد', async () => {
+      const [noor] = await conn.db.insert(printPartners).values({ name: 'چاپ نور', ...MASHHAD }).returning();
+      const partner: PanelScope = { kind: 'partner', partnerId: noor!.id };
+      const own = await printingOrder(MASHHAD, 'فرزانه کاظمی');
+      const others = await printingOrder(TEHRAN, 'مهسا طاهری');
+      expect((await orderOf(own.id)).printPartnerId).toBe(noor!.id);
+      expect((await orderOf(others.id)).printPartnerId).toBe(first);
+      const id = await readImport(
+        [row(1, barcodeOf(1), `کاظمی ${own.orderNumber}`, 'مشهد'), row(2, barcodeOf(2), `طاهری ${others.orderNumber}`)],
+        { scope: partner },
+      );
+      expect((await importOf(id)).printPartnerId).toBe(noor!.id);
+      // سفارش چاپخانهٔ دیگر برای او «پیدا نشد» است، مثل شماره‌ای که نیست؛ و مالک همان حکم‌ها را می‌بیند.
+      const seen = await previewOf(id, partner);
+      expect(seen.judged.map((j) => [j.verdict, j.reason])).toEqual([
+        ['matched', null],
+        ['unmatched', 'not_found'],
+      ]);
+      expect(seen.orders.map((o) => o.id)).toEqual([own.id]);
+      expect((await previewOf(id, ALL_ORDERS)).fingerprint).toBe(seen.fingerprint);
+      const firstScope: PanelScope = { kind: 'partner', partnerId: first };
+      expect(await store().importPage(firstScope, id, NOW)).toBeNull();
+      expect(await store().listImports(firstScope, { limit: 10, offset: 0 })).toEqual([]);
+      expect((await store().listImports(ALL_ORDERS, { limit: 10, offset: 0 })).map((i) => [i.id, i.partner?.name])).toEqual([[id, 'چاپ نور']]);
+      expect(await commit(id, { scope: firstScope, fingerprint: seen.fingerprint })).toEqual({ ok: false, reason: 'not_found' });
+      expect(await commit(id, { scope: partner, fingerprint: seen.fingerprint })).toMatchObject({ ok: true, shipments: 1, handed: [own.orderNumber] });
+      expect((await orderOf(others.id)).status).toBe('printing');
+      // پایگاه داده هم: از ورود چاپخانه، کد سفارش چاپخانهٔ دیگر نه (سطرش با همان اعداد، دادن دستی).
+      expect((await change(others, 'printing', 'handed_to_post')).ok).toBe(true);
+      expect(
+        await rejectedConstraint(
+          conn.db.insert(shipments).values({
+            orderId: others.id,
+            barcode: barcodeOf(2),
+            importId: id,
+            rowNo: 2,
+            weightGrams: 822,
+            fareRials: 1_295_000,
+            taxRials: 129_500,
+            postDay: tehran('2026-10-04 00:00'),
+            matchedBy: 'manual',
+            adminUserId: owner,
+          }),
+        ),
+      ).toBe('shipments_partner_scope');
+      // همان فایل از چاپخانهٔ دیگر: «همان فایل»، بی نشانی ورود او.
+      const raw = (await importOf(id)).raw!;
+      expect(
+        await store().createImport(firstScope, { filename: 'x.xls', raw, createdBy: operator, at: NOW, event: { adminUserId: operator, action: 'shipments.upload', at: NOW } }),
+      ).toEqual({ ok: false, reason: 'same_file', existing: null });
     });
   });
 });

@@ -157,6 +157,7 @@ function failedDetails(
     events: [],
     partner: null,
     assignments: [],
+    shipments: [],
   } as unknown as PanelOrderDetails;
 }
 
@@ -413,6 +414,7 @@ function orderDetails(
       ? { id: partner, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', provinceName: 'تهران', active: true, isDefault: true, ...named }
       : null,
     assignments: [],
+    shipments: [],
     events: [],
     payments: [],
     order: {

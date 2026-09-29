@@ -190,14 +190,14 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await operatorPage.goto(at('/partners'));
     await expect(operatorPage.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
-      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها و رویدادها با مالک پنل است.',
+      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها و برگرداندن ورود فایل پست با مالک پنل است.',
     );
     await operatorPage.goto(at('/partners/new'));
     await expect(operatorPage.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
 
     await ownerPage.goto(at());
     const nav = ownerPage.getByRole('navigation', { name: 'بخش‌های پنل' });
-    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تعرفه', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await nav.locator('.ad-nav__wide', { hasText: 'چاپخانه‌ها' }).click();
     await expect(ownerPage.getByRole('heading', { name: 'چاپخانه‌ها', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'چاپخانه‌ها' })).toHaveAttribute('aria-current', 'page');

@@ -291,6 +291,33 @@
   }
 
   /*
+   * ===== کد رهگیری پست (برش ۶): ۲۴ رقم در شش گروه چهارتایی برای خواندن =====
+   * فاصله در ::after است، نه در متن، پس کپی همان ۲۴ رقم پشت‌سرهم است و یک کلیک همه را انتخاب می‌کند. در جای تنگ فقط میان
+   * گروه‌ها می‌شکند، و فاصلهٔ ته خط می‌افتد.
+   */
+  .jy-barcode {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-variant-numeric: tabular-nums;
+    user-select: all;
+  }
+  .jy-barcode > span:not(:last-child)::after {
+    content: ' ';
+    word-spacing: 0.15em;
+  }
+  .jy-barcode--lg {
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  /* گوشی: هر ۲۴ رقم در یک سطر؛ درشتش در ۳۹۰ پیکسل گروه آخر را به سطر بعد می‌برد. */
+  @media (width <= 480px) {
+    .jy-barcode--lg {
+      font-size: 1rem;
+    }
+  }
+
+  /*
    * ===== نوار پیشرفت: هم <progress>، هم ظرف با .jy-progress__bar برای پهنای متحرک =====
    * سبزآبی، نه سبز کیت (تصمیم ۱۴۰۵/۰۷/۰۳، نقش progress در theme.css): تنها جای tetrad در رابط.
    */

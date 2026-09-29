@@ -34,7 +34,7 @@ const IDLE = HOUR;
 const INVITE = 15 * MINUTE;
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 200;
-// لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را. چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042).
+// لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را، و از ۶٫۱ ورود فایل پست. چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042).
 const OPERATOR_PERMISSIONS = [
   'files.download',
   'orders.address',
@@ -43,6 +43,7 @@ const OPERATOR_PERMISSIONS = [
   'orders.money',
   'orders.read',
   'orders.status',
+  'shipments.import',
   'tariff.read',
 ];
 const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status'];

@@ -110,8 +110,16 @@ export async function layoutProblems(page: Page): Promise<{ overflow: number; sm
     [...document.querySelectorAll('main a, main button, main input:not([type=hidden]), nav a, nav summary, header button')]
       .map((el) => ({ el, box: el.getBoundingClientRect() }))
       .filter(({ el, box }) => box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden')
-      // پیوند درون جمله (`.jy-link`، مثل شمارهٔ سفارش در هشدار) از سقف معاف است، مثل WCAG 2.5.8.
-      .filter(({ el, box }) => box.height < 44 && !el.closest('.jy-tile') && el.getAttribute('type') !== 'radio' && !el.classList.contains('jy-link'))
+      // پیوند درون جمله (`.jy-link`، مثل شمارهٔ سفارش در هشدار) از سقف معاف است، مثل WCAG 2.5.8؛ و ورودی پنهانی که برچسب بزرگش
+      // هدف است (`sr-only`، مثل ورودی فایل درون کارت بارگذاری، ۶٫۱).
+      .filter(
+        ({ el, box }) =>
+          box.height < 44 &&
+          !el.closest('.jy-tile') &&
+          el.getAttribute('type') !== 'radio' &&
+          !el.classList.contains('jy-link') &&
+          !el.classList.contains('sr-only'),
+      )
       .map(({ el, box }) => `${el.tagName} «${(el.textContent ?? '').trim().slice(0, 20)}» ${Math.round(box.height)}`),
   );
   const blank = await page.evaluate(() =>

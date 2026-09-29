@@ -148,6 +148,20 @@
       "when": 1790603524230,
       "tag": "0020_admin_role_partner_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790636318334,
+      "tag": "0021_shipments",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790636329682,
+      "tag": "0022_shipments_guards",
+      "breakpoints": true
     }
   ]
 }

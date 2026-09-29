@@ -97,6 +97,28 @@ function orderRef(detail: Detail): Segment[] {
   return [{ ltr: number }, ...item];
 }
 
+/** «10013 و 10017»، «10013، 10017 و 10021»: هر شماره جدا از جملهٔ فارسی. */
+function numbersOf(value: unknown): Segment[] {
+  const numbers = Array.isArray(value) ? value.filter((n): n is number => typeof n === 'number') : [];
+  return numbers.flatMap((n, i): Segment[] => [...(i === 0 ? [] : [i === numbers.length - 1 ? ' و ' : '، ']), { ltr: String(n) }]);
+}
+
+/** شمار حکم‌های «ثبت» فایل پست، به ترتیب طرح: «9 کد رهگیری، 4 سطر در صف تأیید، 1 پیدا نشد، 1 تکراری». */
+function commitCounts(detail: Detail): Segment[] {
+  const counts = (detail.counts ?? {}) as Record<string, unknown>;
+  const parts: [unknown, string][] = [
+    [detail.shipments, ' کد رهگیری'],
+    [counts.review, ' سطر در صف تأیید'],
+    [counts.unmatched, ' پیدا نشد'],
+    [counts.duplicate, ' تکراری'],
+    [counts.invalid, ' خوانده نشد'],
+    [counts.inactive, ' غیرفعال در پست'],
+  ];
+  return parts
+    .filter(([n], i) => i === 0 || (typeof n === 'number' && n > 0))
+    .flatMap(([n, label], i): Segment[] => [...(i === 0 ? [] : ['، ']), { ltr: String(typeof n === 'number' ? n : 0) }, label]);
+}
+
 function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
   const detail = (event.detail ?? {}) as Detail;
   const name = str(detail.username);
@@ -208,6 +230,38 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» غیرفعال شد`] };
     case 'partners.activate':
       return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» دوباره فعال شد`] };
+    case 'shipments.upload':
+      return { badge: null, text: ['فایل پست ', { ltr: str(detail.filename) }, ' بارگذاری شد'] };
+    case 'shipments.commit': {
+      const handed = numbersOf(detail.handed);
+      return {
+        badge: null,
+        text: [
+          'فایل پست ',
+          { ltr: str(detail.filename) },
+          ' ثبت شد: ',
+          ...commitCounts(detail),
+          ...(handed.length > 0 ? ['؛ سفارش ', ...handed, ' تحویل پست شد'] : []),
+        ],
+      };
+    }
+    case 'shipments.discard':
+      return { badge: null, text: ['فایل پست ', { ltr: str(detail.filename) }, ' دور انداخته شد'] };
+    case 'shipments.revert': {
+      const reopened = numbersOf(detail.reopened);
+      return {
+        badge: null,
+        text: [
+          'ورود ',
+          { ltr: str(detail.filename) },
+          ' برگشت: ',
+          { ltr: String(typeof detail.voided === 'number' ? detail.voided : 0) },
+          ' کد رهگیری کنار رفت',
+          ...(reopened.length > 0 ? ['؛ سفارش ', ...reopened, ' به «در حال چاپ» برگشت'] : []),
+          ...(str(detail.reason) ? [`؛ ${str(detail.reason)}`] : []),
+        ],
+      };
+    }
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -256,13 +310,14 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
 }
 
 /**
- * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲)،
- * به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش».
+ * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲،
+ * ارسال ۶٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش».
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
   { kind: 'auth', label: 'ورود' },
   { kind: 'orders', label: 'سفارش' },
+  { kind: 'shipments', label: 'ارسال' },
   { kind: 'tariff', label: 'تعرفه' },
   { kind: 'settings', label: 'تنظیمات و کلیدها' },
   { kind: 'partners', label: 'چاپخانه‌ها' },

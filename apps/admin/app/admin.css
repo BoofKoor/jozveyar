@@ -3,7 +3,8 @@
  * سربرگ سفید با ناوبری زبانه‌ای، صفحه green-50 با کارت‌های سفید (تصمیم ۲۴). چیدمان پنل است، نه جزء کیت؛
  * پس پیشوندش `ad-` است، نه `jy-`. رنگ فقط توکن، فقط logical properties. هر قدم بخش صفحه‌های خودش را
  * می‌آورد؛ ۴٫۱: پوسته، ورود و ثبت، ادمین‌ها و رویدادها؛ ۴٫۲: پیشخوان، سفارش‌ها و جزئیات سفارش؛ ۴٫۳: کار بعدی سفارش،
- * لغو و برگرداندن در ستون کنار؛ ۴٫۵: تعرفه، پیش‌نویس و فعال کردن؛ ۴٫۶: تنظیمات، تعطیلی‌ها و کلیدها.
+ * لغو و برگرداندن در ستون کنار؛ ۴٫۵: تعرفه، پیش‌نویس و فعال کردن؛ ۴٫۶: تنظیمات، تعطیلی‌ها و کلیدها؛ ۶٫۱: ارسال (بارگذاری فایل
+ * پست، ورودها، سطرهای فایل با حکم) و بستهٔ پستی سفارش.
  */
 @layer components {
   body {
@@ -1275,5 +1276,220 @@
       justify-content: flex-start;
       margin-inline-start: -12px;
     }
+  }
+
+  /* ===== ارسال: بارگذاری فایل پست، ورودها، سطرهای فایل با حکم، و بستهٔ پستی سفارش (۶٫۱، طرح برش ۶) ===== */
+  .ad-upload-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ad-upload .jy-drop {
+    padding-block: 28px 24px;
+  }
+  .ad-upstate {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ad-upstate > .jy-note {
+    margin-block-start: 0;
+  }
+  .ad-fileline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+  .ad-fileline > .jy-icon {
+    color: var(--color-green-600);
+  }
+  .ad-fileline__name,
+  .ad-fname,
+  .ad-imp__name {
+    direction: ltr;
+    unicode-bidi: isolate;
+    overflow-wrap: anywhere;
+  }
+  .ad-fileline__name {
+    font-weight: 600;
+  }
+  /* تکهٔ کوتاه زیر عنوان ورود («7 بسته») که نباید بشکند. */
+  .ad-nowrap {
+    white-space: nowrap;
+  }
+  .ad-need {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .ad-need li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ad-need .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .ad-need .jy-icon-success {
+    color: var(--color-success-text);
+  }
+  .ad-need .jy-icon-error {
+    color: var(--color-error-text);
+  }
+  .ad-imp {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 24px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .ad-imp:hover {
+    background: var(--color-green-50);
+  }
+  .ad-imp__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+  .ad-imp__name {
+    font-weight: 600;
+  }
+  .ad-imp__meta {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-imp__counts {
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  /* چهار کاشی همیشه، و «خوانده نشد» و «غیرفعال در پست» فقط اگر هست: هر چند تا، در یک ردیف تا جا هست. */
+  .ad-counts {
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    margin-block-start: 0;
+  }
+  /* «ثبت» و «دور بینداز» ثابت زیر شمارها، نه نوار چسبان (تصمیم طرح ۱۴۰۵/۰۷/۰۶). */
+  .ad-commit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .ad-commit__note {
+    flex: 1;
+    min-width: 12rem;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-list__sub {
+    padding: 0 24px 8px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .ad-list > .ad-list__sub:last-child {
+    padding-block-end: 20px;
+  }
+  /* سطر فایل پست: شماره، «نام گ» و مقصد با بارکد زیرش، سفارشی که نشست یا دلیل، و وزن با کرایه */
+  .ad-prow {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1.3fr) 200px;
+    grid-template-areas:
+      'n file match w'
+      'n bc match fare';
+    column-gap: 16px;
+    align-items: start;
+    padding: 12px 24px;
+  }
+  .ad-prow__n {
+    grid-area: n;
+    color: var(--color-muted);
+  }
+  .ad-prow__file {
+    grid-area: file;
+    min-width: 0;
+  }
+  .ad-prow__bc {
+    grid-area: bc;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .ad-prow__match {
+    grid-area: match;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .ad-prow__w {
+    grid-area: w;
+    text-align: end;
+  }
+  .ad-prow__fare {
+    grid-area: fare;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+    text-align: end;
+  }
+  .ad-prow__to {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .ad-prow__to .jy-icon {
+    width: 16px;
+    height: 16px;
+    margin-block-start: 5px;
+    color: var(--color-green-700);
+  }
+  .ad-prow__why {
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  @media (width <= 860px) {
+    .ad-prow {
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      grid-template-areas:
+        'n file w'
+        '. bc bc'
+        '. match match'
+        '. fare fare';
+      column-gap: 10px;
+      padding-inline: 16px;
+    }
+    .ad-prow__match {
+      margin-block-start: 4px;
+    }
+    .ad-prow__fare {
+      text-align: start;
+    }
+    .ad-list__sub {
+      padding-inline: 16px;
+    }
+    .ad-imp {
+      padding-inline: 16px;
+    }
+  }
+  /* بستهٔ پستی در جزئیات سفارش */
+  .ad-parcel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-block: 12px 4px;
+    padding: 12px 16px;
+    background: var(--color-green-50);
+    border-radius: var(--radius-md);
   }
 }

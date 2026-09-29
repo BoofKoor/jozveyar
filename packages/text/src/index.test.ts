@@ -14,6 +14,7 @@ import {
   isWorkingDay,
   jalaliYear,
   normalizeFa,
+  parseJalaliNumeric,
   postHandoffDue,
   recipientSurname,
   rialsToTomans,
@@ -289,6 +290,32 @@ describe('تاریخ شمسی', () => {
     // نیمه‌شب نوروز ۱۴۰۵ در تهران ساعت ۲۰:۳۰ UTC روز ۲۰ مارس است.
     expect(jalaliYear(new Date('2026-03-20T20:00:00Z'))).toBe(1404);
     expect(jalaliYear(new Date('2026-03-20T20:40:00Z'))).toBe(1405);
+  });
+
+  it('«تاریخ ثبت» فایل پست به آغاز همان روز تهران (برش ۶)', () => {
+    // ۱۴۰۵/۰۶/۲۲ برابر ۱۳ سپتامبر ۲۰۲۶؛ آغازش نیمه‌شب تهران، ۲۰:۳۰ UTC روز پیش.
+    expect(parseJalaliNumeric('1405/06/22')?.toISOString()).toBe('2026-09-12T20:30:00.000Z');
+    expect(parseJalaliNumeric('1405/01/01')?.toISOString()).toBe('2026-03-20T20:30:00.000Z');
+    // ارقام فارسی، یک‌رقمی و فاصلهٔ دو سر هم.
+    expect(parseJalaliNumeric(' ۱۴۰۵/۶/۲۲ ')).toEqual(parseJalaliNumeric('1405/06/22'));
+  });
+
+  it('هر روز چهار سال، رفت‌وبرگشت با formatJalaliNumeric', () => {
+    const start = parseJalaliNumeric('1403/01/01')!;
+    for (let i = 0; i < 4 * 366; i += 1) {
+      const instant = new Date(start.getTime() + i * 86_400_000 + 12 * 3_600_000);
+      const text = formatJalaliNumeric(instant);
+      expect(parseJalaliNumeric(text), text).toEqual(tehranDayStart(instant));
+    }
+  });
+
+  it('روزی که نیست و شکل دیگر: null', () => {
+    for (const text of ['1405/07/31', '1405/13/01', '1405/00/10', '1405/06/00', '1405/06/32', '1405-06-22', '1405/06/22 10:00', '05/06/22', '', 'جمع کل']) {
+      expect(parseJalaliNumeric(text), text).toBeNull();
+    }
+    // ۳۰ اسفند فقط در سال کبیسه: ۱۴۰۳ کبیسه بود و ۱۴۰۴ نه.
+    expect(formatJalaliNumeric(parseJalaliNumeric('1403/12/30')!)).toBe('1403/12/30');
+    expect(parseJalaliNumeric('1404/12/30')).toBeNull();
   });
 });
 

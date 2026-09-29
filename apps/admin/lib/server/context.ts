@@ -13,6 +13,7 @@ import {
   createPartnerStore,
   createSecretStore,
   createSettingsStore,
+  createShipmentStore,
   createTariffStore,
   getDb,
 } from '@jozveyar/db';
@@ -26,6 +27,7 @@ import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
 import { createPanelSettings, type PanelSettings } from './settings';
+import { createPanelShipments, type PanelShipments } from './shipments';
 import { createPanelTariff, type PanelTariff } from './tariff';
 
 interface Panel {
@@ -35,6 +37,7 @@ interface Panel {
   tariff: PanelTariff;
   settings: PanelSettings;
   partners: PanelPartners;
+  shipments: PanelShipments;
 }
 
 let cached: Panel | null | undefined;
@@ -68,6 +71,8 @@ function build(config: AdminConfig): Panel {
     }),
     // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
     partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),
+    // ارسال (۶٫۱): ورود فایل پست؛ خواندن فایل با کارگر است، پس پنل بایت‌ها را فقط در پایگاه داده می‌گذارد (ADR-045).
+    shipments: createPanelShipments({ store: createShipmentStore(getDb()), secret: config.secret }),
   };
 }
 

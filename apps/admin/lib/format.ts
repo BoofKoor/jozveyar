@@ -29,3 +29,14 @@ export function whenText(at: Date, now: Date): string {
   if (day === tehranDay(new Date(now.getTime() - DAY_MS))) return `دیروز ${time}`;
   return `${jalaliYear(at) === jalaliYear(now) ? formatJalaliWeekday(at) : formatJalali(at)} ${time}`;
 }
+
+/**
+ * همان `whenText` بی ساعت، برای لحظه‌ای که فقط روزش معلوم است (روز پست در فایل پست، برش ۶٫۱): «امروز»، «دیروز»، «شنبه 11 مهر»،
+ * و از سال دیگر «25 اسفند 1404».
+ */
+export function dayText(at: Date, now: Date): string {
+  const day = tehranDay(at);
+  if (day === tehranDay(now)) return 'امروز';
+  if (day === tehranDay(new Date(now.getTime() - DAY_MS))) return 'دیروز';
+  return jalaliYear(at) === jalaliYear(now) ? formatJalaliWeekday(at) : formatJalali(at);
+}

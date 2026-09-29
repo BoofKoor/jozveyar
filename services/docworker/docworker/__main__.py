@@ -10,11 +10,11 @@
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
 S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
 مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، از برش ۳ب
-ساختن PDF جزوهٔ سفارش پرداخت‌شده و از ۵٫۱ فایل چاپ و برگهٔ سفارش)، DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛
+ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، و از ۶٫۱ خواندن فایل پست)، DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛
 پیش‌فرض ۳۰۰)، DOCWORKER_RETENTION_SECONDS (اختیاری؛ فاصلهٔ دورهای پاک کردن فایل‌های سفارش بسته، پیش‌فرض ۶۰۰).
 
 نودی که کار سفارش (`prepare_order`) برمی‌دارد، بین کارها فایل‌های سفارش‌های بسته را هم پس از روزهای نگهداری پاک می‌کند
-(ADR-044)؛ نود فقط‌تحلیل نه.
+(ADR-044)، و از ۶٫۱ فایل پست خام و متن سطرهایی که سفارش ما نشدند (ADR-045)؛ نود فقط‌تحلیل نه.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from .jobs import (
 )
 from .orders import PREPARE_ORDER, prepare_order
 from .retention import sweep
+from .shipments import READ_POST_FILE, mark_import_failed, read_post_file
 from .storage import S3Storage
 from .ticket import PREPARE_TICKET, prepare_ticket
 
@@ -47,7 +48,7 @@ log = logging.getLogger("docworker")
 # سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
 
-KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET)
+KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET, READ_POST_FILE)
 # شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
 EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
 
@@ -116,7 +117,11 @@ class Worker:
         job = queue.claim(conn, self.id, self.kinds, LEASE_SECONDS)
         if job is None:
             return False
-        target = f"سفارش {job.order_id}" if job.order_id else f"سند {job.document_id}"
+        target = (
+            f"سفارش {job.order_id}" if job.order_id
+            else f"ورود فایل پست {job.shipment_import_id}" if job.shipment_import_id
+            else f"سند {job.document_id}"
+        )
         log.info("کار %s (%s) %s — تلاش %s", job.id, job.kind, target, job.attempts)
         try:
             if job.kind == CONVERT_DOCUMENT:
@@ -125,6 +130,8 @@ class Worker:
                 result = prepare_order(conn, self.storage, job.order_id)
             elif job.kind == PREPARE_TICKET:
                 result = prepare_ticket(conn, self.storage, job.order_id)
+            elif job.kind == READ_POST_FILE:
+                result = read_post_file(conn, job.shipment_import_id)
             else:
                 result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)
@@ -137,6 +144,8 @@ class Worker:
             # با `last_error` نشان می‌دهد.
             if job.document_id:
                 mark_document_failed(conn, job.document_id, failure.code)
+            if job.shipment_import_id:
+                mark_import_failed(conn, job.shipment_import_id)
             conn.commit()
             log.warning("✗ کار %s شکست قطعی: %s", job.id, failure.code)
         except Exception as error:  # noqa: BLE001 — هر خطای دیگری گذرا فرض می‌شود
@@ -144,6 +153,9 @@ class Worker:
             final = queue.fail(conn, job, repr(error), permanent=False)
             if final and job.document_id:
                 mark_document_failed(conn, job.document_id, EXHAUSTED.get(job.kind, "analysis_failed"))
+            # ورودی که پس از آخرین تلاش هم خوانده نشد، «خوانده نشد» است، نه تا ابد «در حال خواندن».
+            if final and job.shipment_import_id:
+                mark_import_failed(conn, job.shipment_import_id)
             conn.commit()
             log.exception("✗ کار %s شکست%s", job.id, " — تلاش‌ها تمام شد" if final else "، دوباره تلاش می‌شود")
         return True
