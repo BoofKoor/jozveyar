@@ -172,7 +172,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
     if (toMidnight < 5 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
-    // پایگاه دادهٔ دورریختنی، مثل `scope.spec.ts`: نامزدها، صف و هشدارهای پیشخوان فقط سفارش‌های همین اجرا.
+    // پایگاه دادهٔ دورریختنی، مثل `orders.spec.ts` و `partners.spec.ts`: نامزدها، صف و هشدارهای پیشخوان فقط سفارش‌های همین اجرا.
     await sql`DELETE FROM payments`;
     await sql`DELETE FROM orders`;
     const yesterday = new Date(Date.now() - DAY);
