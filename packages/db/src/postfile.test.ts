@@ -116,11 +116,12 @@ describe('حکم هر سطر (ADR-046)', () => {
     paidAt: paid,
     ...over,
   });
-  const judge = (rows: string[][], orders: OrderFacts[], live: [string, string | null][] = []) =>
+  const judge = (rows: string[][], orders: OrderFacts[], live: [string, string | null][] = [], candidateRows: number[] = []) =>
     judgeRows(sheetRows(rows), {
       orders: new Map(orders.map((o) => [o.orderNumber, o])),
       live: new Map(live.map(([barcode, orderId]) => [barcode, { barcode, orderId }])),
       now,
+      candidateRows: new Set(candidateRows),
     }).map((j) => [j.verdict, j.reason, j.orderId, j.handOver]);
   const row = (name: string, over: Parameters<typeof parcel>[6] = {}, destination = 'تهران', barcode = BC(1)) =>
     parcel(1, barcode, name, destination, 1560, 1_336_660, over);
@@ -174,6 +175,16 @@ describe('حکم هر سطر (ADR-046)', () => {
     ]);
   });
 
+  it('بی شماره با نامزد صف تأیید است (۶٫۲)؛ بی نامزد همان «پیدا نشد»؛ نامزد سطر دیگر اثری ندارد', () => {
+    const rows = [parcel(1, BC(1), 'احمدی', 'تهران', 1850, 1_336_660), parcel(2, BC(2), 'رحمانی', 'تهران', 820, 1_295_000)];
+    expect(judge(rows, [], [], [1]).map((j) => j.slice(0, 3))).toEqual([
+      ['review', 'no_number', null],
+      ['unmatched', 'no_number', null],
+    ]);
+    // شاهد: نامزد فقط برای سطر بی شماره است؛ سطر شماره‌دار حکم خودش را دارد.
+    expect(judge([parcel(1, BC(1), 'طاهری 10099', 'تهران', 1050, 1_618_120)], [], [], [1])[0]!.slice(0, 2)).toEqual(['unmatched', 'not_found']);
+  });
+
   it('تکراری: همین بارکد بالاتر در همین فایل، یا زنده برای همین سفارش؛ زنده برای سفارش دیگر صف تأیید', () => {
     const rows = [parcel(1, BC(1), 'طاهری 10013', 'تهران', 1560, 1_336_660), parcel(2, BC(1), 'طاهری 10013', 'تهران', 1560, 1_336_660)];
     expect(judge(rows, [order(10013)]).map((j) => j.slice(0, 2))).toEqual([['matched', null], ['duplicate', 'same_file']]);
@@ -194,7 +205,12 @@ describe('حکم هر سطر (ADR-046)', () => {
 
   it('اثر انگشت همان حکم‌ها را می‌گیرد: حکم دیگر، اثر دیگر', () => {
     const rows = sheetRows([row('طاهری 10013')]);
-    const context = (status: OrderFacts['status']) => ({ orders: new Map([[10013, order(10013, { status })]]), live: new Map(), now });
+    const context = (status: OrderFacts['status']) => ({
+      orders: new Map([[10013, order(10013, { status })]]),
+      live: new Map(),
+      now,
+      candidateRows: new Set<number>(),
+    });
     const printing = judgedFingerprint(judgeRows(rows, context('printing')));
     expect(judgedFingerprint(judgeRows(rows, context('printing')))).toBe(printing);
     expect(judgedFingerprint(judgeRows(rows, context('handed_to_post')))).not.toBe(printing);

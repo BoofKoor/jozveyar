@@ -162,6 +162,20 @@
       "when": 1790636329682,
       "tag": "0022_shipments_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790684802751,
+      "tag": "0023_review_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790684810486,
+      "tag": "0024_review_queue_guards",
+      "breakpoints": true
     }
   ]
 }

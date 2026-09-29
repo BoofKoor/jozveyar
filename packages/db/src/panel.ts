@@ -66,6 +66,7 @@ import {
   printRules,
   provinces,
   settings,
+  shipmentImportRows,
   shipmentImports,
   shipments,
   shippingMethods,
@@ -123,13 +124,34 @@ export type PanelSearch =
   /** کد رهگیری ۲۴ رقمی (برش ۶٫۱): سفارشی که مرسوله‌ای با همین بارکد دارد، زنده یا کنارگذاشته. */
   | { kind: 'barcode'; barcode: string };
 
-/** «حالا» و دو مرزی که با آن ساخته می‌شوند. */
+/** «حالا» و مرزهایی که با آن ساخته می‌شوند. */
 export interface PanelClock {
   at: Date;
   /** فایلی که پیش از این لحظه پاک می‌شود، سفارش در انتظار را «رهاشده» می‌کند: `at` + حاشیهٔ پرداخت. */
   staleBefore: Date;
   /** تلاشی که پیش از این ساخته شده و هنوز در انتظار است «بی برگشت» است: `at` − مهلت هر تلاش پرداخت. */
   unreturnedBefore: Date;
+  /** «کد رهگیری ندارد» فقط برای تحویل‌های پس از این لحظه (برش ۶٫۲): `at` − `TRACKING_ALERT_DAYS` روز. */
+  untrackedSince: Date;
+}
+
+/**
+ * هشدار «کد رهگیری ندارد» (برش ۶٫۲، ADR-047، تصمیم ۸۲): سفارش «تحویل پست شد» بی کد زنده، وقتی این چند روز کاری از روز تحویل
+ * گذشته؛ فایل پست تا همین دو روز کاری می‌رسد (سؤال ۶۰). عدد در کد، نه تنظیم.
+ */
+export const TRACKING_GRACE_WORKDAYS = 2;
+/** و فقط تحویل‌های این چند روز اخیر، همان پنجرهٔ نامزدهای صف (۴۵ روز)، تا هشدار همیشگی نشود. */
+export const TRACKING_ALERT_DAYS = 45;
+
+/**
+ * سطر فایل پست در صف تأیید (برش ۶٫۲، ADR-046): ورودش «ثبت شد»، «هیچ‌کدام» نخورده، مرسولهٔ زنده ندارد، و حکمش صف تأیید است یا
+ * کدی گرفته که کنار رفت. همان قاعدهٔ `queuedRow` در `shipments.ts`، به زبان پستگرس؛ و همان که تریگر «هیچ‌کدام» (0024) می‌سنجد.
+ */
+export function inReviewQueue(): SQL {
+  const row = sql`s.import_id = ${shipmentImportRows.importId} AND s.row_no = ${shipmentImportRows.rowNo}`;
+  return sql`(${shipmentImports.status} = 'committed' AND ${shipmentImportRows.dismissedAt} IS NULL
+    AND NOT EXISTS (SELECT 1 FROM shipments s WHERE ${row} AND s.voided_at IS NULL)
+    AND (${shipmentImportRows.verdict} = 'review' OR EXISTS (SELECT 1 FROM shipments s WHERE ${row})))`;
 }
 
 /** یک ردیف فهرست سفارش‌ها و صف تحویل. */
@@ -202,6 +224,15 @@ export interface PanelAlerts {
    * مهلت. «در حال چاپ» بی چاپخانه (پیش از ۵٫۲) نه: چاپخانه‌اش دیگر عوض نمی‌شود.
    */
   unassigned: number[];
+  /**
+   * سطرهای فایل پست که در صف تأییدند (برش ۶٫۲)، از ورودهای محدوده؛ پیشخوان فقط با `shipments.review` نشانش می‌دهد.
+   */
+  reviewRows: number;
+  /**
+   * سفارش‌های «تحویل پست شد» بی کد رهگیری زنده که پس از `untrackedSince` تحویل پست شدند، به ترتیب روز تحویل (برش ۶٫۲). اینکه دو
+   * روز کاری از تحویل گذشته یا نه را سرویس با تعطیلی‌ها می‌سنجد (`TRACKING_GRACE_WORKDAYS`).
+   */
+  untracked: { orderNumber: number; handedToPostAt: Date }[];
 }
 
 export interface PanelSection {
@@ -319,6 +350,8 @@ export interface PanelShipment {
   postDay: Date;
   /** همین مرسوله سفارش را «تحویل پست شد» کرد. */
   handedOrder: boolean;
+  /** `rule` (قطعی در «ثبت»)، `review` (تأیید صف) یا `manual` (دادن دستی)؛ برش ۶٫۲. */
+  matchedBy: 'rule' | 'review' | 'manual';
   createdAt: Date;
   adminName: string | null;
   importId: string;
@@ -673,7 +706,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     },
 
     async alerts(scope, clock) {
-      const [failed, unreturned, unassigned] = await Promise.all([
+      const [failed, unreturned, unassigned, review, untracked] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -701,8 +734,33 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .from(orders)
           .where(and(eq(orders.status, 'paid'), isNull(orders.printPartnerId), inScope(scope)))
           .orderBy(asc(orders.postHandoffDueAt), asc(orders.orderNumber)),
+        // صف تأیید (۶٫۲): سطرهای ورودهای محدوده؛ ورود چاپخانه فقط در محدودهٔ همان چاپخانه.
+        db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(shipmentImportRows)
+          .innerJoin(shipmentImports, eq(shipmentImports.id, shipmentImportRows.importId))
+          .where(and(inReviewQueue(), scope.kind === 'partner' ? eq(shipmentImports.printPartnerId, scope.partnerId) : undefined)),
+        // «کد رهگیری ندارد» (۶٫۲): تحویل پست شده، بی کد زنده، در پنجرهٔ اخیر؛ دو روز کاری را سرویس با تعطیلی‌ها می‌سنجد. زمان
+        // تحویل پست فقط در «تحویل پست شد» پر است (`orders_handed_at`)، پس همین شرط وضعیت هم هست.
+        db
+          .select({ orderNumber: orders.orderNumber, handedToPostAt: orders.handedToPostAt })
+          .from(orders)
+          .where(
+            and(
+              sql`${orders.handedToPostAt} > ${ts(clock.untrackedSince)}`,
+              sql`NOT EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = ${orders.id} AND s.voided_at IS NULL)`,
+              inScope(scope),
+            ),
+          )
+          .orderBy(asc(orders.handedToPostAt), asc(orders.orderNumber)),
       ]);
-      return { failedPdf: failed.map((row) => row.orderNumber), unreturned, unassigned: unassigned.map((row) => row.orderNumber) };
+      return {
+        failedPdf: failed.map((row) => row.orderNumber),
+        unreturned,
+        unassigned: unassigned.map((row) => row.orderNumber),
+        reviewRows: review[0]?.n ?? 0,
+        untracked: untracked.flatMap((row) => (row.handedToPostAt ? [{ orderNumber: row.orderNumber, handedToPostAt: row.handedToPostAt }] : [])),
+      };
     },
 
     async list(scope, { bucket, search, clock, limit, offset }) {
@@ -907,6 +965,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             taxRials: shipments.taxRials,
             postDay: shipments.postDay,
             handedOrder: shipments.handedOrder,
+            matchedBy: sql<PanelShipment['matchedBy']>`${shipments.matchedBy}`,
             createdAt: shipments.createdAt,
             adminName: adminUsers.displayName,
             importId: shipments.importId,

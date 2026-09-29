@@ -1,28 +1,49 @@
 /**
- * ارسال در پنل (برش ۶٫۱، ADR-045، ADR-046): ذخیره‌گاه زبانهٔ «ارسال» — بارگذاری فایل پست، پیش‌نمایش، «ثبت»، «دور بینداز» و
- * برگرداندن. تفسیر جدول و حکم هر سطر خالص است و در `postfile.ts`؛ اینجا همان است که درستی‌اش فقط با پستگرس معلوم می‌شود:
+ * ارسال در پنل (برش ۶٫۱ و ۶٫۲، ADR-045، ADR-046): ذخیره‌گاه زبانهٔ «ارسال» — بارگذاری فایل پست، پیش‌نمایش، «ثبت»، «دور
+ * بینداز» و برگرداندن؛ و از ۶٫۲ صف تأیید: «همین است»، «هیچ‌کدام»، دادن دستی، و کنار گذاشتن یک کد. تفسیر جدول، حکم هر سطر و
+ * نامزدها خالص‌اند و در `postfile.ts` و `candidates.ts`؛ اینجا همان است که درستی‌اش فقط با پستگرس معلوم می‌شود:
  *
  *  - **همان فایل یک بار** (`shipment_imports_one_file`): فایلی که هنوز «در حال خواندن»، «خوانده شد» یا «ثبت شد» است ورود دوم
  *    نمی‌سازد؛ دو بارگذاری هم‌زمان یکی می‌شوند و دومی همان ورود اول را می‌بیند.
  *  - **«ثبت» همان که دیده شد** (مثل ۴٫۵ و ۴٫۶): ورود زیر قفل ردیف؛ سفارش‌های شماره‌های فایل زیر قفل، به ترتیب شناسه (دو «ثبت»
  *    هم‌زمان بن‌بست نمی‌سازند)؛ حکم‌ها دوباره با همان تابع؛ و فقط اگر اثر انگشتشان همان پیش‌نمایش است. فایل هم‌پوشانی که همین
  *    حالا ثبت شد، یا تغییر وضعیت هم‌زمان، حکم‌ها را عوض کرده و پیش‌نمایش تازه می‌خواهد (`changed`)؛ بارکدی که همین حالا برای
- *    سفارش دیگری نشست به ایندکس یکتای `shipments_live_barcode` می‌خورد، و همان `changed` است.
+ *    سفارش دیگری نشست به ایندکس یکتای `shipments_live_barcode` می‌خورد، و همان `changed` است. از ۶٫۲ سطر بی شماره‌ای که همان لحظه
+ *    نامزد دارد به صف تأیید می‌رود؛ نامزدها (پنجرهٔ ۴۵ روزه) قفل نمی‌شوند: صف یا «پیدا نشد»، هیچ‌کدام کدی نمی‌سازد.
  *  - **یک تراکنش:** سطرها، مرسوله‌ها، «تحویل پست شد» سفارش‌های «در حال چاپ» با ردیف `order_status_events`، و رویداد ادمین.
- *  - **برگرداندن** (فقط `committed`، یک بار): مرسوله‌های ورود کنار می‌روند، نه پاک؛ و سفارش‌هایی که همین ورود «تحویل پست شد»
- *    کرده بود، اگر مرسولهٔ زندهٔ دیگری ندارند، به «در حال چاپ» برمی‌گردند. سفارشی که فایل‌هایش پاک شده (ADR-044) همان می‌ماند.
+ *  - **برگرداندن** (فقط `committed`، یک بار): مرسوله‌های ورود کنار می‌روند، نه پاک، از تأیید و دستی هم؛ و سفارش‌هایی که همین ورود
+ *    «تحویل پست شد» کرده بود، اگر مرسولهٔ زندهٔ دیگری ندارند، به «در حال چاپ» برمی‌گردند. سفارشی که فایل‌هایش پاک شده (ADR-044)
+ *    همان می‌ماند. سطرهایش از صف بیرون می‌روند.
+ *  - **صف تأیید** (۶٫۲): نامزدها هر بار از نو، در محدودهٔ واردکننده. «همین است» و دادن دستی ورود را قفل اشتراکی می‌کنند (برگرداندن
+ *    هم‌زمان پیش یا پس از آن است)، سطر و سفارش را قفل کامل، و از همان که ادمین دید (وضعیت سفارش و شمار کد زنده‌اش): اگر همین حالا
+ *    عوض شد، هیچ (`changed`). «در صف چاپ» فقط با دروازه‌های «شروع چاپ»، و در همان تراکنش «در حال چاپ» و «تحویل پست شد»؛ لغوشده و
+ *    پرداخت‌نشده هرگز. «هیچ‌کدام» یک بار. کنار گذاشتن یک کد سفارشی را که همان کد «تحویل پست شد» کرده بود به «در حال چاپ» برمی‌گرداند
+ *    (اگر کد زندهٔ دیگری ندارد و فایل‌هایش پاک نشده)، و سطرش را به صف.
  *  - **محدوده** (ADR-042): هر تابع محدودهٔ نشست را آرگومان اول می‌گیرد، و ورود چاپخانه فقط در محدودهٔ همان چاپخانه دیده می‌شود.
- *    حکم‌ها، هر که ببیند، فقط سفارش‌های محدودهٔ واردکننده را می‌شناسند (`importScope`)، پس حکم به بیننده بسته نیست.
+ *    حکم‌ها و نامزدها، هر که ببیند، فقط سفارش‌های محدودهٔ واردکننده را می‌شناسند (`importScope`)، پس به بیننده بسته نیستند.
  */
 
 import { createHash } from 'node:crypto';
 
-import { and, asc, desc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import { recipientSurname, tehranDayStart } from '@jozveyar/text';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn, SelectedFields } from 'drizzle-orm/pg-core';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
+import {
+  CANDIDATE_WINDOW_DAYS,
+  blockOf,
+  candidatesFor,
+  criteriaOf,
+  isNumberedCandidate,
+  isPoolCandidate,
+  scoreOf,
+  type CandidateBlock,
+  type CandidateList,
+  type CandidateRow,
+} from './candidates.js';
 import type { Database } from './index.js';
-import { ALL_ORDERS, ordersInScope, type PanelScope } from './panel.js';
+import { ALL_ORDERS, inReviewQueue, ordersInScope, type PanelScope } from './panel.js';
 import {
   FIRST_ORDER_NUMBER,
   IRAN_POST,
@@ -98,15 +119,35 @@ export interface ShipmentImportLine extends ShipmentImportView {
   /** روز «تاریخ ثبت» اولین و آخرین سطر ثبت‌شده. */
   firstPostDay: Date | null;
   lastPostDay: Date | null;
+  /** سطرهای همین ورود که همین حالا در صف تأییدند (۶٫۲). */
+  queuedRows: number;
+  /** «هیچ‌کدام» خورده و بی کد زنده (۶٫۲). */
+  dismissedRows: number;
+  /** «پیدا نشد»ی که هرگز کدی نگرفت (دادن دستی نخورده، ۶٫۲). */
+  unmatchedRows: number;
 }
 
-/** سفارشی که سطری به آن اشاره می‌کند، با آنچه حکم و پیام‌های پنل لازم دارند. */
+/**
+ * سفارشی که سطری به آن اشاره می‌کند، یا نامزد صف است، با آنچه حکم، نامزدها، پیام‌های پنل و دروازه‌های «همین است» لازم دارند؛
+ * همان شکل `CandidateOrder` (۶٫۲).
+ */
 export interface ShipmentOrderFacts extends OrderFacts {
   provinceName: string;
   cityName: string | null;
   handedToPostAt: Date | null;
+  /** مهلت تحویل به پست، برای «در مهلت» کنار «همین است» سفارش «در صف چاپ». */
+  postHandoffDueAt: Date | null;
   estWeightGrams: number;
+  /** مرسوله‌های زندهٔ همین حالا. */
+  liveShipments: number;
+  /** فایل چاپ همهٔ جزوه‌ها ساخته شده و فایل‌ها پاک نشده (دروازهٔ «شروع چاپ»، ADR-043). */
+  printReady: boolean;
+  /** چاپخانه دارد (دروازهٔ «شروع چاپ»، ADR-042). */
+  hasPartner: boolean;
 }
+
+/** نامزدهای یک سطر صف تأیید، با سفارش‌هایشان. */
+export type ReviewCandidates = CandidateList<ShipmentOrderFacts>;
 
 /** مرسولهٔ دیگری با همین بارکد؛ جز بارکد، همه null اگر سفارشش بیرون از محدودهٔ واردکننده است. */
 export interface ShipmentElsewhere {
@@ -128,28 +169,44 @@ export interface ShipmentPreview {
   /** مرسوله‌های زندهٔ بارکدهای همین فایل. */
   live: ShipmentElsewhere[];
   fingerprint: string;
+  /** نامزدهای هر سطر صف تأیید (شمارهٔ سطر ← فهرست)؛ خالی اگر خواسته نشد (چاپخانه نامزدها را نمی‌بیند). */
+  candidates: Record<number, ReviewCandidates>;
 }
 
 export type StoredImportRow = typeof shipmentImportRows.$inferSelect;
 
-/** مرسوله‌ای که از همین ورود ساخته شد. */
+/** سطر ورود ثبت‌شده، با نام کسی که «هیچ‌کدام» زد، و اینکه همین حالا در صف تأیید است (۶٫۲). */
+export interface CommittedImportRow extends StoredImportRow {
+  dismissedByName: string | null;
+  queued: boolean;
+}
+
+/** مرسوله‌ای که از همین ورود ساخته شد: قطعی، تأیید یا دستی؛ زنده یا کنارگذاشته. */
 export interface ImportShipment {
   id: string;
   rowNo: number;
   orderId: string;
+  orderNumber: number;
   barcode: string;
   handedOrder: boolean;
+  matchedBy: 'rule' | 'review' | 'manual';
+  adminName: string | null;
+  createdAt: Date;
   voidedAt: Date | null;
+  voidedByName: string | null;
   voidReason: string | null;
 }
 
 /** ورود ثبت‌شده یا برگشته: سطرها با حکم‌هایشان، سفارش‌ها و مرسوله‌ها. */
 export interface CommittedImport {
-  rows: StoredImportRow[];
+  rows: CommittedImportRow[];
   orders: ShipmentOrderFacts[];
+  /** همهٔ مرسوله‌های همین ورود، به ترتیب سطر و ساختن. */
   shipments: ImportShipment[];
   /** «تکراری»: مرسوله‌های همان بارکدها از ورودهای دیگر، قدیمی‌ترین اول. */
   elsewhere: ShipmentElsewhere[];
+  /** نامزدهای سطرهایی که در صف‌اند؛ خالی اگر خواسته نشد. */
+  candidates: Record<number, ReviewCandidates>;
 }
 
 export type ShipmentImportPage =
@@ -203,6 +260,8 @@ export type ShipmentRevertWrite =
       reopened: number[];
       /** همین ورود «تحویل پست شد» کرده بود و همان ماند: مرسولهٔ زندهٔ دیگری دارد، یا فایل‌هایش پاک شده. */
       kept: number[];
+      /** سطرهایی که در صف تأیید بودند و بیرون رفتند (۶٫۲). */
+      unqueued: number;
     }
   | { ok: false; reason: 'not_found' }
   | { ok: false; reason: 'status'; status: ShipmentImportStatus };
@@ -211,6 +270,93 @@ export type ShipmentDiscardWrite =
   | { ok: true }
   | { ok: false; reason: 'not_found' }
   | { ok: false; reason: 'status'; status: ShipmentImportStatus };
+
+/** ورودی که سطری از آن در صف است. */
+export interface ReviewImportRef {
+  id: string;
+  filename: string;
+  status: ShipmentImportStatus;
+  createdAt: Date;
+  createdByName: string;
+  committedAt: Date | null;
+  partner: { id: string; name: string } | null;
+}
+
+/**
+ * یک سطر صف تأیید (یا سطری که دستی به سفارشی داده می‌شود)، با آنچه کارتش لازم دارد: چرا اینجاست، کدهای کنارگذاشته‌اش، کدی که
+ * همین حالا با همین بارکد مال سفارش دیگری است، سفارش همان شمارهٔ «نام گ» (حتی اگر نامزد نیست)، و نامزدها.
+ */
+export interface ReviewRow {
+  import: ReviewImportRef;
+  row: StoredImportRow & { dismissedByName: string | null };
+  /** همهٔ مرسوله‌های همین سطر (کنارگذاشته، و اگر هست زنده)، به ترتیب ساختن. */
+  shipments: ImportShipment[];
+  /** همین حالا در صف تأیید است. */
+  queued: boolean;
+  /** دادن دستی باز است: ورود «ثبت شد»، قطعی، صف تأیید یا پیدا نشد، بی کد زنده (ردشده هم). */
+  assignable: boolean;
+  /** همین بارکد، زنده، برای سفارش دیگری. */
+  elsewhere: ShipmentElsewhere | null;
+  numbered: ShipmentOrderFacts | null;
+  candidates: ReviewCandidates;
+}
+
+/** «همین است» (`review`، نامزد) یا دادن دستی (`manual`، شمارهٔ سفارش)، از همان که ادمین از سفارش دید. */
+export interface ReviewDecision {
+  importId: string;
+  rowNo: number;
+  orderId: string;
+  via: 'review' | 'manual';
+  seen: { status: OrderFacts['status']; liveShipments: number };
+  at: Date;
+  adminUserId: string;
+  /** `shipments.approve` یا `shipments.assign`؛ هدف و جزئیات را ذخیره‌گاه می‌گذارد. */
+  event: AdminEventInput;
+}
+
+/** چرا «همین است» یا دادن دستی بسته است: دروازه‌های نامزد، و همین بارکد زنده برای سفارش دیگر. */
+export type ReviewBlock = CandidateBlock | 'barcode_elsewhere';
+
+export type ReviewWrite =
+  | { ok: true; orderNumber: number; from: OrderFacts['status']; handed: boolean }
+  /** ورود یا سطر (در محدوده) نیست. */
+  | { ok: false; reason: 'not_found' }
+  /** سطر دیگر در صف نیست (یا برای دادن دستی باز نیست): «هیچ‌کدام» خورد، کد گرفت، یا ورود برگشت. */
+  | { ok: false; reason: 'row_closed' }
+  /** سفارش در محدودهٔ واردکننده نیست، یا پرداخت نشده. */
+  | { ok: false; reason: 'order_not_found' }
+  /** سفارش همین حالا عوض شد (وضعیت یا کد زنده)، یا دیگر نامزد این سطر نیست. */
+  | { ok: false; reason: 'changed' }
+  | { ok: false; reason: 'blocked'; block: ReviewBlock };
+
+export type DismissWrite = { ok: true } | { ok: false; reason: 'not_found' | 'row_closed' };
+
+export interface ShipmentVoid {
+  shipmentId: string;
+  reason: string;
+  at: Date;
+  adminUserId: string;
+  /** `shipments.void`؛ هدف و جزئیات را ذخیره‌گاه می‌گذارد. */
+  event: AdminEventInput;
+}
+
+/** چرا سفارش پس از کنار رفتن کدش «تحویل پست شد» ماند. */
+export type VoidKept = 'other_code' | 'files_deleted' | 'handed_before';
+
+/**
+ * پس از کنار رفتن یک کد، سفارش «تحویل پست شد» می‌ماند یا نه (تصمیم ۸۰): فقط سفارشی که همین کد «تحویل پست شد» کرده بود، کد زندهٔ
+ * دیگری ندارد و فایل‌هایش پاک نشده (ADR-044) یک قدم به «در حال چاپ» برمی‌گردد. همان که ذخیره‌گاه زیر قفل می‌کند و صفحهٔ سفارش پیش
+ * از کار می‌گوید.
+ */
+export function voidKept(shipment: { handedOrder: boolean }, otherLive: boolean, filesDeleted: boolean): VoidKept | null {
+  if (!shipment.handedOrder) return 'handed_before';
+  if (otherLive) return 'other_code';
+  return filesDeleted ? 'files_deleted' : null;
+}
+
+export type VoidWrite =
+  | { ok: true; orderNumber: number; reopened: boolean; kept: VoidKept | null }
+  | { ok: false; reason: 'not_found' | 'already_voided' };
 
 /**
  * ذخیره‌گاه زبانهٔ «ارسال». هر تابع محدودهٔ نشست (`PanelScope`) را آرگومان اول می‌گیرد؛ ورود بیرون از محدوده همان «نیست» است.
@@ -223,14 +369,29 @@ export interface ShipmentStore {
   createImport(scope: PanelScope, input: NewShipmentImport): Promise<ShipmentImportCreate>;
   /** ورودهای محدوده، تازه‌ترین اول. */
   listImports(scope: PanelScope, page: { limit: number; offset: number }): Promise<ShipmentImportLine[]>;
-  /** یک ورود با آنچه صفحه‌اش لازم دارد: پیش‌نمایش برای «خوانده شد»، سطرها و مرسوله‌ها برای ثبت‌شده و برگشته. */
-  importPage(scope: PanelScope, id: string, now: Date): Promise<ShipmentImportPage | null>;
+  /**
+   * یک ورود با آنچه صفحه‌اش لازم دارد: پیش‌نمایش برای «خوانده شد»، سطرها و مرسوله‌ها برای ثبت‌شده و برگشته. `candidates`: نامزدهای
+   * سطرهای صف هم (مالک و متصدی؛ چاپخانه نه).
+   */
+  importPage(scope: PanelScope, id: string, now: Date, options?: { candidates?: boolean }): Promise<ShipmentImportPage | null>;
   /** «ثبت»، فقط اگر حکم‌ها زیر قفل همان است که ادمین دید. */
   commit(scope: PanelScope, input: ShipmentCommit): Promise<ShipmentCommitWrite>;
   /** «دور بینداز»: ورودی که هنوز ثبت نشده، با پاک شدن بایت خام و جدول‌ها. */
   discard(scope: PanelScope, input: { id: string; at: Date; adminUserId: string; event: AdminEventInput }): Promise<ShipmentDiscardWrite>;
   /** برگرداندن کل یک ورود ثبت‌شده، یک بار، با دلیل. */
   revert(scope: PanelScope, input: ShipmentRevert): Promise<ShipmentRevertWrite>;
+  /** صف تأیید (۶٫۲): سطرهای ورودهای محدوده، قدیمی‌ترین «ثبت» اول و بعد شمارهٔ سطر، هر کدام با نامزدهایش؛ و شمار همه. */
+  reviewQueue(scope: PanelScope, page: { limit: number; offset: number }): Promise<{ rows: ReviewRow[]; total: number }>;
+  /** یک سطر صف یا دادن دستی، با نامزدهایش؛ null اگر ورود یا سطر در محدوده نیست. */
+  reviewRow(scope: PanelScope, importId: string, rowNo: number): Promise<ReviewRow | null>;
+  /** سفارشی با این شماره در محدودهٔ واردکنندهٔ همین ورود، برای کارت دادن دستی؛ null اگر نیست یا بیرون است. */
+  orderForRow(scope: PanelScope, importId: string, orderNumber: number): Promise<ShipmentOrderFacts | null>;
+  /** «همین است» یا دادن دستی، در یک تراکنش: مرسوله، «تحویل پست شد» اگر هنوز نخورده، و رویداد. */
+  decide(scope: PanelScope, input: ReviewDecision): Promise<ReviewWrite>;
+  /** «هیچ‌کدام»: سطر از صف بیرون می‌رود، یک بار، با رویداد. */
+  dismiss(scope: PanelScope, input: { importId: string; rowNo: number; at: Date; adminUserId: string; event: AdminEventInput }): Promise<DismissWrite>;
+  /** کنار گذاشتن یک کد رهگیری (مالک، با دلیل): سطرش به صف برمی‌گردد، و سفارشی که همین کد «تحویل پست شد» کرده بود به «در حال چاپ». */
+  voidShipment(scope: PanelScope, input: ShipmentVoid): Promise<VoidWrite>;
 }
 
 type PgError = { code?: string; constraint_name?: string; cause?: PgError };
@@ -242,7 +403,6 @@ function constraintOf(error: unknown): string | undefined {
 }
 
 type Db = Database['db'];
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'>;
 
 /** ورودهایی که نشست می‌بیند: همه، یا فقط ورودهای همان چاپخانه. */
@@ -260,6 +420,55 @@ const LIVE_FILE: ShipmentImportStatus[] = ['reading', 'read', 'committed'];
 
 /** دسته‌های درج: هر سطر فایل تا ۱۶ پارامتر؛ پستگرس بیش از ۶۵٬۵۳۵ پارامتر در یک دستور نمی‌گیرد. */
 const BATCH = 500;
+
+/** حکم‌هایی که کد سفارش ما می‌شوند (قطعی) یا می‌توانستند بشوند (صف تأیید، پیدا نشد). */
+const DECIDABLE: readonly string[] = ['matched', 'review', 'unmatched'];
+
+/**
+ * سطر در صف تأیید است (۶٫۲، ADR-046): ورود «ثبت شد»، «هیچ‌کدام» نخورده، مرسولهٔ زنده ندارد، و حکمش صف تأیید است یا کدی گرفته
+ * که کنار رفت. همان `inReviewQueue` پنل به زبان پستگرس، و همان که تریگر «هیچ‌کدام» (0024) می‌سنجد.
+ */
+export function queuedRow(
+  row: Pick<StoredImportRow, 'verdict' | 'dismissedAt'>,
+  importStatus: string,
+  rowShipments: readonly { voidedAt: Date | null }[],
+): boolean {
+  if (importStatus !== 'committed' || row.dismissedAt !== null) return false;
+  if (rowShipments.some((s) => s.voidedAt === null)) return false;
+  // مرسوله فقط از قطعی، صف تأیید یا پیدا نشد ساخته می‌شود (تریگر `shipments_insert`)، پس «کدی گرفته» یعنی یکی از این سه.
+  return row.verdict === 'review' || rowShipments.length > 0;
+}
+
+/**
+ * دادن دستی باز است: ورود «ثبت شد»، قطعی، صف تأیید یا پیدا نشد، بی کد زنده؛ «هیچ‌کدام» خورده هم (راه اشتباهش). این سه حکم همیشه
+ * بارکد درست دارند: بارکد خراب پیش از همه «خوانده نشد» است (`judgeRows`).
+ */
+export function assignableRow(
+  row: Pick<StoredImportRow, 'verdict'>,
+  importStatus: string,
+  rowShipments: readonly { voidedAt: Date | null }[],
+): boolean {
+  return importStatus === 'committed' && DECIDABLE.includes(row.verdict) && !rowShipments.some((s) => s.voidedAt === null);
+}
+
+/** سطر ثبت‌شده به شکلی که نامزدها لازم دارند. */
+export function storedCandidateRow(row: Pick<StoredImportRow, 'orderNumber' | 'nameG' | 'destination' | 'weightGrams' | 'postDay'>): CandidateRow {
+  return {
+    orderNumber: row.orderNumber,
+    surname: row.nameG ? recipientSurname(row.nameG) : '',
+    destination: row.destination ?? '',
+    weightGrams: row.weightGrams,
+    postDay: row.postDay,
+  };
+}
+
+const postCandidateRow = (row: PostRow): CandidateRow => ({
+  orderNumber: row.orderNumber,
+  surname: row.surname,
+  destination: row.destination,
+  weightGrams: row.weightGrams,
+  postDay: row.postDay,
+});
 
 const adminName = (column: AnyPgColumn) => sql<string | null>`(SELECT u.display_name FROM admin_users u WHERE u.id = ${column})`;
 
@@ -349,22 +558,32 @@ function toView(v: ViewRow): ShipmentImportView {
   };
 }
 
+/** آنچه از هر سفارش خوانده می‌شود: حکم، نامزدها، پیام‌ها و دروازه‌های «همین است». */
+const factsFields = {
+  id: orders.id,
+  orderNumber: orders.orderNumber,
+  status: orders.status,
+  recipientName: orders.recipientName,
+  provinceId: orders.provinceId,
+  cityId: orders.cityId,
+  paidAt: orders.paidAt,
+  provinceName: provinces.nameFa,
+  cityName: cities.nameFa,
+  handedToPostAt: orders.handedToPostAt,
+  postHandoffDueAt: orders.postHandoffDueAt,
+  estWeightGrams: orders.estWeightGrams,
+  liveShipments: sql<number>`(SELECT count(*)::int FROM shipments s WHERE s.order_id = ${orders.id} AND s.voided_at IS NULL)`,
+  // همان `printReady` صفحهٔ سفارش برای «در صف چاپ»: هر جزوه دست‌کم یک جلد فایل چاپ. سفارش بی جزوه نیست (مسیر خرید)، و فایل‌های
+  // سفارشِ هنوز باز پاک نمی‌شوند (`orders_files_deleted_closed`)، پس این دو شرط صفحهٔ سفارش اینجا چیزی نمی‌گیرند.
+  printReady: sql<boolean>`(NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = ${orders.id}
+                     AND NOT EXISTS (SELECT 1 FROM order_print_files f WHERE f.order_item_id = i.id)))`,
+  hasPartner: sql<boolean>`(${orders.printPartnerId} IS NOT NULL)`,
+};
+
 /** سفارش‌های محدوده، با آنچه حکم و پیام‌ها لازم دارند؛ با `lock`، زیر قفل ردیف و به ترتیب شناسه. */
 function factsQuery(q: Reader, scope: PanelScope, where: SQL, lock: boolean) {
   const query = q
-    .select({
-      id: orders.id,
-      orderNumber: orders.orderNumber,
-      status: orders.status,
-      recipientName: orders.recipientName,
-      provinceId: orders.provinceId,
-      cityId: orders.cityId,
-      paidAt: orders.paidAt,
-      provinceName: provinces.nameFa,
-      cityName: cities.nameFa,
-      handedToPostAt: orders.handedToPostAt,
-      estWeightGrams: orders.estWeightGrams,
-    })
+    .select(factsFields)
     .from(orders)
     .innerJoin(provinces, eq(provinces.id, orders.provinceId))
     .leftJoin(cities, eq(cities.id, orders.cityId))
@@ -372,6 +591,44 @@ function factsQuery(q: Reader, scope: PanelScope, where: SQL, lock: boolean) {
     .orderBy(asc(orders.id));
   // فقط ردیف سفارش؛ قفل استان و شهر درج هر سفارش تازه را پشت این نگه می‌داشت.
   return lock ? query.for('update', { of: orders }) : query;
+}
+
+/**
+ * پنجرهٔ نامزدها (۶٫۲): سفارش‌های «در حال چاپ» یا «تحویل پست شد» بی کد زنده در محدوده، که در ۴۵ روز پیش از اولین روز پست تا پایان
+ * آخرین روز پست این سطرها پرداخت شده‌اند. نام خانوادگی و مرز هر سطر را `candidatesFor` می‌سنجد؛ اینجا فقط بازهٔ همهٔ سطرها.
+ */
+function poolQuery(q: Reader, scope: PanelScope, postDays: readonly Date[]) {
+  const first = new Date(Math.min(...postDays.map((d) => d.getTime())));
+  const last = new Date(Math.max(...postDays.map((d) => d.getTime())));
+  return q
+    .select(factsFields)
+    .from(orders)
+    .innerJoin(provinces, eq(provinces.id, orders.provinceId))
+    .leftJoin(cities, eq(cities.id, orders.cityId))
+    .where(
+      and(
+        inArray(orders.status, ['printing', 'handed_to_post']),
+        gte(orders.paidAt, tehranDayStart(first, -CANDIDATE_WINDOW_DAYS)),
+        lt(orders.paidAt, tehranDayStart(last, 1)),
+        sql`NOT EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = ${orders.id} AND s.voided_at IS NULL)`,
+        ordersInScope(scope),
+      ),
+    )
+    .orderBy(asc(orders.id));
+}
+
+/**
+ * سفارش‌هایی که نامزد سطرهای یک ورود می‌توانند باشند، همه در محدودهٔ واردکننده: سفارش‌های شماره‌های «نام گ» (در هر وضعیتی؛
+ * `candidatesFor` می‌گوید کدام نامزد است) و پنجرهٔ روز پست.
+ */
+async function candidateOrders(q: Reader, scope: PanelScope, rows: readonly CandidateRow[]): Promise<ShipmentOrderFacts[]> {
+  const numbers = [...new Set(rows.flatMap((row) => (row.orderNumber !== null && row.orderNumber >= FIRST_ORDER_NUMBER ? [row.orderNumber] : [])))];
+  const days = rows.flatMap((row) => (row.postDay && row.surname ? [row.postDay] : []));
+  const [numbered, pool] = await Promise.all([
+    numbers.length === 0 ? Promise.resolve([]) : factsQuery(q, scope, inArray(orders.orderNumber, numbers), false),
+    days.length === 0 ? Promise.resolve([]) : poolQuery(q, scope, days),
+  ]);
+  return [...(numbered as ShipmentOrderFacts[]), ...(pool as ShipmentOrderFacts[])];
 }
 
 /**
@@ -398,6 +655,30 @@ function elsewhereQuery(q: Reader, scope: PanelScope, barcodes: string[], where?
     .orderBy(asc(shipments.createdAt), asc(shipments.id));
 }
 
+/** مرسوله‌های چند ورود (همه، کنارگذاشته هم)، با شمارهٔ سفارش و نام کسانی که ساختند یا کنار گذاشتند. */
+function importShipmentsQuery(q: Reader, importIds: string[]) {
+  return q
+    .select({
+      id: shipments.id,
+      importId: shipments.importId,
+      rowNo: shipments.rowNo,
+      orderId: shipments.orderId,
+      orderNumber: orders.orderNumber,
+      barcode: shipments.barcode,
+      handedOrder: shipments.handedOrder,
+      matchedBy: sql<ImportShipment['matchedBy']>`${shipments.matchedBy}`,
+      adminName: adminName(shipments.adminUserId),
+      createdAt: shipments.createdAt,
+      voidedAt: shipments.voidedAt,
+      voidedByName: adminName(shipments.voidedBy),
+      voidReason: shipments.voidReason,
+    })
+    .from(shipments)
+    .innerJoin(orders, eq(orders.id, shipments.orderId))
+    .where(inArray(shipments.importId, importIds))
+    .orderBy(asc(shipments.rowNo), asc(shipments.createdAt), asc(shipments.id));
+}
+
 /** شماره‌های سفارش‌های سایت و بارکدهای درست یک فایل. */
 function keysOf(rows: readonly PostRow[]) {
   const numbers = [...new Set(rows.flatMap((row) => (row.orderNumber !== null && row.orderNumber >= FIRST_ORDER_NUMBER ? [row.orderNumber] : [])))];
@@ -405,19 +686,33 @@ function keysOf(rows: readonly PostRow[]) {
   return { numbers, barcodes };
 }
 
-/** سفارش‌ها و مرسوله‌های زندهٔ یک فایل، و حکم‌هایش. */
+/**
+ * سفارش‌ها و مرسوله‌های زندهٔ یک فایل، و حکم‌هایش. سطر بی شماره‌ای که نامزد دارد به صف می‌رود (۶٫۲)، پس پنجرهٔ نامزدها هم
+ * خوانده می‌شود، بی قفل: صف یا «پیدا نشد»، هیچ‌کدام کد نمی‌سازد. `candidates`: نامزدهای سطرهای صف، برای پیش‌نمایش.
+ */
 async function judge(q: Reader, scope: PanelScope, rows: readonly PostRow[], now: Date, lock: boolean) {
   const { numbers, barcodes } = keysOf(rows);
-  const [facts, live] = await Promise.all([
+  const valid = rows.filter((row) => row.problem === null && row.postDay !== null && row.surname);
+  const [facts, live, pool] = await Promise.all([
     numbers.length === 0 ? Promise.resolve([]) : factsQuery(q, scope, inArray(orders.orderNumber, numbers), lock),
     barcodes.length === 0 ? Promise.resolve([]) : elsewhereQuery(q, scope, barcodes, isNull(shipments.voidedAt)),
+    valid.length === 0 ? Promise.resolve([]) : poolQuery(q, scope, valid.map((row) => row.postDay!)),
   ]);
+  const known = [...(facts as ShipmentOrderFacts[]), ...(pool as ShipmentOrderFacts[])];
+  const candidateRows = new Set(
+    valid.filter((row) => row.orderNumber === null && candidatesFor(postCandidateRow(row), known).candidates.length > 0).map((row) => row.rowNo),
+  );
   const judged = judgeRows(rows, {
     orders: new Map(facts.map((order) => [order.orderNumber, order])),
     live: new Map(live.map((s): [string, LiveShipment] => [s.barcode, { barcode: s.barcode, orderId: s.orderId }])),
     now,
+    candidateRows,
   });
-  return { facts: facts as ShipmentOrderFacts[], live: live as ShipmentElsewhere[], judged };
+  const candidates: Record<number, ReviewCandidates> = {};
+  rows.forEach((row, i) => {
+    if (judged[i]!.verdict === 'review') candidates[row.rowNo] = candidatesFor(postCandidateRow(row), known);
+  });
+  return { facts: facts as ShipmentOrderFacts[], live: live as ShipmentElsewhere[], judged, candidates };
 }
 
 function countOf(verdicts: readonly Verdict[]): Partial<Record<Verdict, number>> {
@@ -426,40 +721,128 @@ function countOf(verdicts: readonly Verdict[]): Partial<Record<Verdict, number>>
   return counts;
 }
 
+const rowFields = {
+  row: shipmentImportRows,
+  dismissedByName: adminName(shipmentImportRows.dismissedBy),
+};
+
+/** کارت‌های صف یا دادن دستی برای سطرهای یک یا چند ورود: مرسوله‌ها، بارکد زندهٔ جای دیگر، سفارش همان شماره، و نامزدها. */
+async function reviewRowsOf(
+  q: Reader,
+  found: { row: StoredImportRow; dismissedByName: string | null; import: ReviewImportRef }[],
+): Promise<ReviewRow[]> {
+  if (found.length === 0) return [];
+  const importIds = [...new Set(found.map((f) => f.import.id))];
+  const made = (await importShipmentsQuery(q, importIds)) as (ImportShipment & { importId: string })[];
+  const byScope = new Map<string, typeof found>();
+  for (const f of found) {
+    const key = f.import.partner?.id ?? '';
+    byScope.set(key, [...(byScope.get(key) ?? []), f]);
+  }
+  const out = new Map<string, ReviewRow>();
+  for (const [key, group] of byScope) {
+    const scope = importScope(key || null);
+    const candidateRows = group.map((f) => storedCandidateRow(f.row));
+    const barcodes = [...new Set(group.flatMap((f) => (f.row.barcode ? [f.row.barcode] : [])))];
+    const [known, live] = await Promise.all([
+      candidateOrders(q, scope, candidateRows),
+      barcodes.length === 0 ? Promise.resolve([]) : elsewhereQuery(q, scope, barcodes, isNull(shipments.voidedAt)),
+    ]);
+    const byNumber = new Map(known.map((order) => [order.orderNumber, order]));
+    for (const f of group) {
+      const rowShipments = made.filter((s) => s.importId === f.import.id && s.rowNo === f.row.rowNo);
+      const voided = new Set(rowShipments.filter((s) => s.voidedAt !== null).map((s) => s.orderId));
+      const liveHere = rowShipments.find((s) => s.voidedAt === null);
+      const elsewhere = (live as ShipmentElsewhere[]).find((s) => s.barcode === f.row.barcode && (!liveHere || s.orderId !== liveHere.orderId)) ?? null;
+      out.set(`${f.import.id}/${f.row.rowNo}`, {
+        import: f.import,
+        row: { ...f.row, dismissedByName: f.dismissedByName },
+        shipments: rowShipments.map(({ importId: _import, ...s }) => s),
+        queued: queuedRow(f.row, f.import.status, rowShipments),
+        assignable: assignableRow(f.row, f.import.status, rowShipments),
+        elsewhere: liveHere ? null : elsewhere,
+        numbered: f.row.orderNumber !== null ? (byNumber.get(f.row.orderNumber) ?? null) : null,
+        candidates: candidatesFor(storedCandidateRow(f.row), known, voided),
+      });
+    }
+  }
+  return found.map((f) => out.get(`${f.import.id}/${f.row.rowNo}`)!);
+}
+
+const importRefFields = {
+  id: shipmentImports.id,
+  filename: shipmentImports.filename,
+  status: shipmentImports.status,
+  createdAt: shipmentImports.createdAt,
+  createdByName: adminName(shipmentImports.createdBy),
+  committedAt: shipmentImports.committedAt,
+  partnerId: shipmentImports.printPartnerId,
+  partnerName: printPartners.name,
+};
+
+const importRefOf = (r: {
+  id: string;
+  filename: string;
+  status: string;
+  createdAt: Date;
+  createdByName: string | null;
+  committedAt: Date | null;
+  partnerId: string | null;
+  partnerName: string | null;
+}): ReviewImportRef => ({
+  id: r.id,
+  filename: r.filename,
+  status: r.status as ShipmentImportStatus,
+  createdAt: r.createdAt,
+  createdByName: r.createdByName ?? '',
+  committedAt: r.committedAt,
+  partner: r.partnerId ? { id: r.partnerId, name: r.partnerName ?? '' } : null,
+});
+
 export function createShipmentStore({ db }: Database): ShipmentStore {
-  async function preview(tables: string[][][], scope: PanelScope, now: Date): Promise<ShipmentPreview> {
+  async function preview(tables: string[][][], scope: PanelScope, now: Date, withCandidates: boolean): Promise<ShipmentPreview> {
     const sheet = readPostSheet(tables);
-    if (!sheet.ok) return { sheet, judged: [], orders: [], live: [], fingerprint: judgedFingerprint([]) };
-    const { facts, live, judged } = await judge(db, scope, sheet.rows, now, false);
-    return { sheet, judged, orders: facts, live, fingerprint: judgedFingerprint(judged) };
+    if (!sheet.ok) return { sheet, judged: [], orders: [], live: [], fingerprint: judgedFingerprint([]), candidates: {} };
+    const { facts, live, judged, candidates } = await judge(db, scope, sheet.rows, now, false);
+    return { sheet, judged, orders: facts, live, fingerprint: judgedFingerprint(judged), candidates: withCandidates ? candidates : {} };
   }
 
-  async function committed(importId: string, scope: PanelScope): Promise<CommittedImport> {
-    const rows = await db
-      .select()
+  async function committed(view: ShipmentImportView, scope: PanelScope, withCandidates: boolean): Promise<CommittedImport> {
+    const found = await db
+      .select(rowFields)
       .from(shipmentImportRows)
-      .where(eq(shipmentImportRows.importId, importId))
+      .where(eq(shipmentImportRows.importId, view.id))
       .orderBy(asc(shipmentImportRows.rowNo));
-    const orderIds = [...new Set(rows.flatMap((row) => (row.orderId ? [row.orderId] : [])))];
-    const duplicates = [...new Set(rows.flatMap((row) => (row.verdict === 'duplicate' && row.barcode ? [row.barcode] : [])))];
-    const [facts, made, elsewhere] = await Promise.all([
-      orderIds.length === 0 ? Promise.resolve([]) : factsQuery(db, scope, inArray(orders.id, orderIds), false),
-      db
-        .select({
-          id: shipments.id,
-          rowNo: shipments.rowNo,
-          orderId: shipments.orderId,
-          barcode: shipments.barcode,
-          handedOrder: shipments.handedOrder,
-          voidedAt: shipments.voidedAt,
-          voidReason: shipments.voidReason,
-        })
-        .from(shipments)
-        .where(eq(shipments.importId, importId))
-        .orderBy(asc(shipments.rowNo)),
-      duplicates.length === 0 ? Promise.resolve([]) : elsewhereQuery(db, scope, duplicates, ne(shipments.importId, importId)),
+    const duplicates = [...new Set(found.flatMap(({ row }) => (row.verdict === 'duplicate' && row.barcode ? [row.barcode] : [])))];
+    const [made, elsewhere] = await Promise.all([
+      importShipmentsQuery(db, [view.id]),
+      duplicates.length === 0 ? Promise.resolve([]) : elsewhereQuery(db, scope, duplicates, ne(shipments.importId, view.id)),
     ]);
-    return { rows, orders: facts as ShipmentOrderFacts[], shipments: made, elsewhere: elsewhere as ShipmentElsewhere[] };
+    // سفارش حکم هر سطر، و سفارش هر کد (کد «همین است» و دستی می‌تواند مال سفارش دیگری باشد، ۶٫۲).
+    const orderIds = [...new Set([...found.flatMap(({ row }) => (row.orderId ? [row.orderId] : [])), ...made.map((s) => s.orderId)])];
+    const facts = orderIds.length === 0 ? [] : await factsQuery(db, scope, inArray(orders.id, orderIds), false);
+    const shipmentsOf = (rowNo: number) => made.filter((s) => s.rowNo === rowNo);
+    const rows: CommittedImportRow[] = found.map(({ row, dismissedByName }) => ({
+      ...row,
+      dismissedByName,
+      queued: queuedRow(row, view.status, shipmentsOf(row.rowNo)),
+    }));
+    const candidates: Record<number, ReviewCandidates> = {};
+    const queued = rows.filter((row) => row.queued);
+    if (withCandidates && queued.length > 0) {
+      const known = await candidateOrders(db, scope, queued.map(storedCandidateRow));
+      for (const row of queued) {
+        const voided = new Set(shipmentsOf(row.rowNo).map((s) => s.orderId));
+        candidates[row.rowNo] = candidatesFor(storedCandidateRow(row), known, voided);
+      }
+    }
+    return {
+      rows,
+      orders: facts as ShipmentOrderFacts[],
+      shipments: made.map(({ importId: _import, ...s }) => s),
+      elsewhere: elsewhere as ShipmentElsewhere[],
+      candidates,
+    };
   }
 
   return {
@@ -516,6 +899,15 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
           WHERE r.import_id = ${shipmentImports.id} AND r.verdict <> 'total')`.mapWith(shipmentImports.createdAt),
         lastPostDay: sql<Date | null>`(SELECT max(r.post_day) FROM shipment_import_rows r
           WHERE r.import_id = ${shipmentImports.id} AND r.verdict <> 'total')`.mapWith(shipmentImports.createdAt),
+        // همان `inReviewQueue` صف، برای سطرهای همین ورود (زیرپرسش همبسته: `shipment_import_rows` جدول درونی است و ورود بیرونی).
+        queuedRows: sql<number>`(SELECT count(*)::int FROM shipment_import_rows
+          WHERE ${shipmentImportRows.importId} = ${shipmentImports.id} AND ${inReviewQueue()})`,
+        dismissedRows: sql<number>`(SELECT count(*)::int FROM shipment_import_rows r
+          WHERE r.import_id = ${shipmentImports.id} AND r.dismissed_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM shipments s WHERE s.import_id = r.import_id AND s.row_no = r.row_no AND s.voided_at IS NULL))`,
+        unmatchedRows: sql<number>`(SELECT count(*)::int FROM shipment_import_rows r
+          WHERE r.import_id = ${shipmentImports.id} AND r.verdict = 'unmatched'
+            AND NOT EXISTS (SELECT 1 FROM shipments s WHERE s.import_id = r.import_id AND s.row_no = r.row_no))`,
       })
         .where(importsInScope(scope))
         .orderBy(desc(shipmentImports.createdAt), desc(shipmentImports.id))
@@ -529,10 +921,14 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
         handedOrders: row.handedOrders,
         firstPostDay: row.firstPostDay,
         lastPostDay: row.lastPostDay,
+        queuedRows: row.queuedRows,
+        dismissedRows: row.dismissedRows,
+        unmatchedRows: row.unmatchedRows,
       }));
     },
 
-    async importPage(scope, id, now) {
+    async importPage(scope, id, now, options = {}) {
+      const withCandidates = options.candidates ?? true;
       const [row] = await viewQuery(db, { tables: shipmentImports.tables })
         .where(and(eq(shipmentImports.id, id), importsInScope(scope)))
         .limit(1);
@@ -540,10 +936,10 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
       const view = toView(row);
       const judgeScope = importScope(view.partner?.id ?? null);
       if (view.status === 'read' && row.tables) {
-        return { kind: 'preview', import: view, preview: await preview(row.tables, judgeScope, now) };
+        return { kind: 'preview', import: view, preview: await preview(row.tables, judgeScope, now, withCandidates) };
       }
       if (view.status === 'committed' || view.status === 'reverted') {
-        return { kind: 'committed', import: view, committed: await committed(view.id, judgeScope) };
+        return { kind: 'committed', import: view, committed: await committed(view, judgeScope, withCandidates) };
       }
       return { kind: 'plain', import: view };
     },
@@ -723,6 +1119,12 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
         if (!imp) return { ok: false, reason: 'not_found' };
         if (imp.status !== 'committed') return { ok: false, reason: 'status', status: imp.status as ShipmentImportStatus };
 
+        // سطرهایی که همین حالا در صف‌اند، پیش از کنار رفتن کدها (کد کنارگذاشته سطر را به صف می‌برد، ولی ورود برگشته صف ندارد).
+        const [queued] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(shipmentImportRows)
+          .innerJoin(shipmentImports, eq(shipmentImports.id, shipmentImportRows.importId))
+          .where(and(eq(shipmentImportRows.importId, imp.id), inReviewQueue()));
         const live = await tx
           .select({ orderId: shipments.orderId, handedOrder: shipments.handedOrder })
           .from(shipments)
@@ -782,6 +1184,7 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
           .where(eq(shipmentImports.id, imp.id));
         reopened.sort((a, b) => a - b);
         kept.sort((a, b) => a - b);
+        const unqueued = queued?.n ?? 0;
         await tx.insert(adminEvents).values(
           adminEventRow({
             ...input.event,
@@ -793,11 +1196,295 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
               voided: live.length,
               reopened,
               kept,
+              unqueued,
               reason: input.reason,
             },
           }),
         );
-        return { ok: true, voided: live.length, reopened, kept };
+        return { ok: true, voided: live.length, reopened, kept, unqueued };
+      });
+    },
+
+    async reviewQueue(scope, { limit, offset }) {
+      const where = and(inReviewQueue(), importsInScope(scope));
+      const [found, [total]] = await Promise.all([
+        db
+          .select({ ...rowFields, import: importRefFields })
+          .from(shipmentImportRows)
+          .innerJoin(shipmentImports, eq(shipmentImports.id, shipmentImportRows.importId))
+          .leftJoin(printPartners, eq(printPartners.id, shipmentImports.printPartnerId))
+          .where(where)
+          // «قدیمی‌ترین اول» (تصمیم ۷۸): زمان «ثبت» ورود، بعد شمارهٔ سطر؛ سطری که با کنار رفتن کدش برگشت جای خودش را دارد.
+          .orderBy(asc(shipmentImports.committedAt), asc(shipmentImports.id), asc(shipmentImportRows.rowNo))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(shipmentImportRows)
+          .innerJoin(shipmentImports, eq(shipmentImports.id, shipmentImportRows.importId))
+          .where(where),
+      ]);
+      const rows = await reviewRowsOf(
+        db,
+        found.map((f) => ({ row: f.row, dismissedByName: f.dismissedByName, import: importRefOf(f.import) })),
+      );
+      return { rows, total: total?.n ?? 0 };
+    },
+
+    async reviewRow(scope, importId, rowNo) {
+      const [found] = await db
+        .select({ ...rowFields, import: importRefFields })
+        .from(shipmentImportRows)
+        .innerJoin(shipmentImports, eq(shipmentImports.id, shipmentImportRows.importId))
+        .leftJoin(printPartners, eq(printPartners.id, shipmentImports.printPartnerId))
+        .where(and(eq(shipmentImportRows.importId, importId), eq(shipmentImportRows.rowNo, rowNo), importsInScope(scope)))
+        .limit(1);
+      if (!found) return null;
+      const [row] = await reviewRowsOf(db, [{ row: found.row, dismissedByName: found.dismissedByName, import: importRefOf(found.import) }]);
+      return row ?? null;
+    },
+
+    async orderForRow(scope, importId, orderNumber) {
+      const [imp] = await db
+        .select({ printPartnerId: shipmentImports.printPartnerId })
+        .from(shipmentImports)
+        .where(and(eq(shipmentImports.id, importId), importsInScope(scope)))
+        .limit(1);
+      if (!imp) return null;
+      const [order] = await factsQuery(db, importScope(imp.printPartnerId), eq(orders.orderNumber, orderNumber), false);
+      return (order as ShipmentOrderFacts | undefined) ?? null;
+    },
+
+    async decide(scope, input) {
+      try {
+        return await db.transaction(async (tx): Promise<ReviewWrite> => {
+          // ورود زیر قفل اشتراکی: برگرداندن هم‌زمانش (FOR UPDATE) پیش یا پس از این است، نه وسطش.
+          const [imp] = await tx
+            .select({ id: shipmentImports.id, status: shipmentImports.status, filename: shipmentImports.filename, printPartnerId: shipmentImports.printPartnerId })
+            .from(shipmentImports)
+            .where(and(eq(shipmentImports.id, input.importId), importsInScope(scope)))
+            .limit(1)
+            .for('share');
+          if (!imp) return { ok: false, reason: 'not_found' };
+          // دو تصمیم هم‌زمان روی یک سطر: دومی پشت این قفل می‌ماند و بعد کد زندهٔ اولی را می‌بیند.
+          const [row] = await tx
+            .select()
+            .from(shipmentImportRows)
+            .where(and(eq(shipmentImportRows.importId, imp.id), eq(shipmentImportRows.rowNo, input.rowNo)))
+            .limit(1)
+            .for('update');
+          if (!row) return { ok: false, reason: 'not_found' };
+          const rowShipments = await tx
+            .select({ voidedAt: shipments.voidedAt })
+            .from(shipments)
+            .where(and(eq(shipments.importId, imp.id), eq(shipments.rowNo, row.rowNo)));
+          const open = input.via === 'review' ? queuedRow(row, imp.status, rowShipments) : assignableRow(row, imp.status, rowShipments);
+          if (!open) return { ok: false, reason: 'row_closed' };
+
+          const judgeScope = importScope(imp.printPartnerId);
+          const [found] = await factsQuery(tx, judgeScope, eq(orders.id, input.orderId), true);
+          const order = found as ShipmentOrderFacts | undefined;
+          if (!order || order.status === 'awaiting_payment' || order.status === 'expired') return { ok: false, reason: 'order_not_found' };
+          if (order.status !== input.seen.status || order.liveShipments !== input.seen.liveShipments) return { ok: false, reason: 'changed' };
+          const candidateRow = storedCandidateRow(row);
+          if (input.via === 'review' && !isNumberedCandidate(candidateRow, order) && !isPoolCandidate(candidateRow, order)) {
+            return { ok: false, reason: 'changed' };
+          }
+          const block = blockOf(candidateRow, order);
+          if (block) return { ok: false, reason: 'blocked', block };
+          // همین بارکد زنده برای سفارش دیگر: درج مرسوله به `shipments_live_barcode` می‌خورد و همه برمی‌گردد (پایین).
+
+          // «در صف چاپ»: «شروع چاپ» و «تحویل پست شد» با هم؛ «در حال چاپ»: «تحویل پست شد»؛ «تحویل پست شد»: فقط کد (ADR-046).
+          const from = order.status;
+          const note = {
+            source: 'post_file',
+            via: input.via,
+            importId: imp.id,
+            filename: imp.filename,
+            rowNo: row.rowNo,
+            postDay: row.postDay!.toISOString(),
+          };
+          const step = async (fromStatus: 'paid' | 'printing', toStatus: 'printing' | 'handed_to_post') => {
+            const [moved] = await tx
+              .update(orders)
+              .set({ status: toStatus, handedToPostAt: toStatus === 'handed_to_post' ? handedAtOf(row.postDay!, input.at) : null })
+              .where(and(eq(orders.id, order.id), eq(orders.status, fromStatus), isNull(orders.filesDeletedAt)))
+              .returning({ id: orders.id });
+            // ردیف زیر قفل همین تراکنش است؛ شرط فقط دیوار دوم است.
+            if (!moved) throw new Error(`سفارش ${order.orderNumber} زیر قفل «${fromStatus}» نماند`);
+            await tx.insert(orderStatusEvents).values({
+              orderId: order.id,
+              fromStatus,
+              toStatus,
+              at: input.at,
+              actor: 'admin',
+              adminUserId: input.adminUserId,
+              note,
+            });
+          };
+          if (from === 'paid') await step('paid', 'printing');
+          if (from === 'paid' || from === 'printing') await step('printing', 'handed_to_post');
+          const handed = from !== 'handed_to_post';
+          await tx.insert(shipments).values({
+            orderId: order.id,
+            barcode: row.barcode!,
+            importId: imp.id,
+            rowNo: row.rowNo,
+            weightGrams: row.weightGrams!,
+            fareRials: row.fareRials!,
+            taxRials: row.taxRials!,
+            postDay: row.postDay!,
+            matchedBy: input.via,
+            handedOrder: handed,
+            adminUserId: input.adminUserId,
+            createdAt: input.at,
+          });
+          const criteria = criteriaOf(candidateRow, order);
+          await tx.insert(adminEvents).values(
+            adminEventRow({
+              ...input.event,
+              targetType: 'order',
+              targetId: order.id,
+              detail: {
+                ...(input.event.detail as Record<string, unknown> | undefined),
+                orderNumber: order.orderNumber,
+                importId: imp.id,
+                filename: imp.filename,
+                rowNo: row.rowNo,
+                barcode: row.barcode,
+                from,
+                handed,
+                // آنچه ادمین کنار سفارش دید، برای سابقه: کدام معیار خواند و نمره.
+                criteria,
+                score: scoreOf(criteria),
+              },
+            }),
+          );
+          return { ok: true, orderNumber: order.orderNumber, from, handed };
+        });
+      } catch (error) {
+        // همین بارکد همین حالا جای دیگری زنده شد (ورود دیگری ثبت شد).
+        if (constraintOf(error) === 'shipments_live_barcode') return { ok: false, reason: 'blocked', block: 'barcode_elsewhere' };
+        throw error;
+      }
+    },
+
+    async dismiss(scope, input) {
+      return db.transaction(async (tx): Promise<DismissWrite> => {
+        const [imp] = await tx
+          .select({ id: shipmentImports.id, status: shipmentImports.status, filename: shipmentImports.filename })
+          .from(shipmentImports)
+          .where(and(eq(shipmentImports.id, input.importId), importsInScope(scope)))
+          .limit(1)
+          .for('share');
+        if (!imp) return { ok: false, reason: 'not_found' };
+        const [row] = await tx
+          .select()
+          .from(shipmentImportRows)
+          .where(and(eq(shipmentImportRows.importId, imp.id), eq(shipmentImportRows.rowNo, input.rowNo)))
+          .limit(1)
+          .for('update');
+        if (!row) return { ok: false, reason: 'not_found' };
+        const rowShipments = await tx
+          .select({ voidedAt: shipments.voidedAt })
+          .from(shipments)
+          .where(and(eq(shipments.importId, imp.id), eq(shipments.rowNo, row.rowNo)));
+        if (!queuedRow(row, imp.status, rowShipments)) return { ok: false, reason: 'row_closed' };
+        await tx
+          .update(shipmentImportRows)
+          .set({ dismissedAt: input.at, dismissedBy: input.adminUserId })
+          .where(and(eq(shipmentImportRows.importId, imp.id), eq(shipmentImportRows.rowNo, row.rowNo)));
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...input.event,
+            targetType: 'shipment_import',
+            targetId: imp.id,
+            detail: {
+              ...(input.event.detail as Record<string, unknown> | undefined),
+              filename: imp.filename,
+              rowNo: row.rowNo,
+              barcode: row.barcode,
+              orderNumber: row.orderNumber,
+            },
+          }),
+        );
+        return { ok: true };
+      });
+    },
+
+    async voidShipment(scope, input) {
+      return db.transaction(async (tx): Promise<VoidWrite> => {
+        const [found] = await tx
+          .select({ id: shipments.id, importId: shipments.importId })
+          .from(shipments)
+          .innerJoin(orders, eq(orders.id, shipments.orderId))
+          .where(and(eq(shipments.id, input.shipmentId), ordersInScope(scope)))
+          .limit(1);
+        if (!found) return { ok: false, reason: 'not_found' };
+        // ترتیب قفل‌ها همان برگرداندن و «همین است»: ورود، بعد مرسوله، بعد سفارش.
+        const [imp] = await tx
+          .select({ id: shipmentImports.id, filename: shipmentImports.filename })
+          .from(shipmentImports)
+          .where(eq(shipmentImports.id, found.importId))
+          .limit(1)
+          .for('share');
+        const [shipment] = await tx.select().from(shipments).where(eq(shipments.id, found.id)).limit(1).for('update');
+        if (!shipment || !imp) return { ok: false, reason: 'not_found' };
+        if (shipment.voidedAt) return { ok: false, reason: 'already_voided' };
+        // محدوده بالا سنجیده شد و کد هنوز زنده است، پس سفارشش «تحویل پست شد» است و چاپخانه‌اش عوض نشده (فقط در «در صف چاپ»، ADR-042).
+        const [order] = await tx
+          .select({ id: orders.id, orderNumber: orders.orderNumber, status: orders.status, filesDeletedAt: orders.filesDeletedAt })
+          .from(orders)
+          .where(eq(orders.id, shipment.orderId))
+          .limit(1)
+          .for('update');
+        if (!order) return { ok: false, reason: 'not_found' };
+        await tx
+          .update(shipments)
+          .set({ voidedAt: input.at, voidedBy: input.adminUserId, voidReason: input.reason })
+          .where(and(eq(shipments.id, shipment.id), isNull(shipments.voidedAt)));
+        const [other] = await tx
+          .select({ id: shipments.id })
+          .from(shipments)
+          .where(and(eq(shipments.orderId, order.id), isNull(shipments.voidedAt)))
+          .limit(1);
+        // سفارشی که همین کد «تحویل پست شد» کرده بود، یک قدم به «در حال چاپ» (تصمیم ۸۰)، مثل برگرداندن ورود؛ کد دیگر، فایل‌های پاک‌شده
+        // (ADR-044) یا «تحویل پست شد»ی که پیش از این کد خورده بود، سفارش را همان می‌گذارد.
+        const kept = voidKept(shipment, Boolean(other), order.filesDeletedAt !== null);
+        const reopened = kept === null && order.status === 'handed_to_post';
+        if (reopened) {
+          await tx
+            .update(orders)
+            .set({ status: 'printing', handedToPostAt: null })
+            .where(and(eq(orders.id, order.id), eq(orders.status, 'handed_to_post')));
+          await tx.insert(orderStatusEvents).values({
+            orderId: order.id,
+            fromStatus: 'handed_to_post',
+            toStatus: 'printing',
+            at: input.at,
+            actor: 'admin',
+            adminUserId: input.adminUserId,
+            note: { reason: input.reason, source: 'shipment_void', importId: imp.id, filename: imp.filename, barcode: shipment.barcode },
+          });
+        }
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...input.event,
+            targetType: 'order',
+            targetId: order.id,
+            detail: {
+              ...(input.event.detail as Record<string, unknown> | undefined),
+              orderNumber: order.orderNumber,
+              barcode: shipment.barcode,
+              importId: imp.id,
+              filename: imp.filename,
+              rowNo: shipment.rowNo,
+              reason: input.reason,
+              reopened,
+            },
+          }),
+        );
+        return { ok: true, orderNumber: order.orderNumber, reopened, kept };
       });
     },
   };
