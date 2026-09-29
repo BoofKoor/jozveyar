@@ -32,7 +32,7 @@ import {
 } from './tariff';
 
 /** متن تکه‌ها، مثل آنچه صفحه نشان می‌دهد. */
-const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : s.ltr)).join('');
+const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
 
 const V1 = SEED_PRICE_LIST;
 const form = (over: Partial<DraftForm> = {}): DraftForm => ({ ...draftFormOf(V1), ...over });

@@ -495,3 +495,75 @@ export async function partnerStateAction(form: FormData): Promise<void> {
   const target = `p=${encodeURIComponent(id.slice(0, 64))}`;
   redirect(result.ok ? `${home}?done=${intent}&${target}&${doneMark()}` : `${home}?e=${result.error}&${target}&${doneMark()}`);
 }
+
+/* ───────────────────────── ارسال: ورود فایل پست (۶٫۱) ───────────────────────── */
+
+export interface UploadState {
+  error?: AdminErrorCode;
+  /** همان فایل پیش‌تر وارد شده: ورود قبلی، اگر در محدودهٔ همین نشست است. */
+  existing?: string | null;
+}
+
+/**
+ * بارگذاری فایل پست (طرح `m-ship`): موفق به صفحهٔ همان ورود، که تا کارگر بخواندش «در حال خواندن» است؛ فایل بزرگ یا خالی همین‌جا؛
+ * همان فایل که پیش‌تر وارد شده به صفحهٔ همان ورود (طرح `m-ship-dup`). کد تازه نمی‌خواهد: تا «ثبت» چیزی جز خود فایل نوشته نمی‌شود.
+ * بدنهٔ کار حداکثر ۳ مگابایت است (`next.config.ts` و Nginx)، کمی بیش از سقف فایل.
+ */
+export async function uploadPostFileAction(_state: UploadState, form: FormData): Promise<UploadState> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const file = form.get('file');
+  const picked = file instanceof File && file.size > 0 ? file : null;
+  const result = await shipments.upload(
+    session,
+    picked ? { name: picked.name, bytes: Buffer.from(await picked.arrayBuffer()) } : null,
+    await requestIp(),
+  );
+  if (result.ok) redirect(panelPath(gate, `/shipments/${result.value.id}`));
+  const existing = typeof result.existing === 'string' ? result.existing : null;
+  if (result.error === 'post_file_same' && existing) redirect(`${panelPath(gate, `/shipments/${existing}`)}?same=1`);
+  return { error: result.error, existing };
+}
+
+/**
+ * «ثبت» (طرح `m-ship-preview`): با اثر انگشت حکم‌هایی که صفحه نشان داد؛ برگشت به همان ورود، که حالا «ثبت شد» است، یا با پیامش
+ * اگر حکم‌ها همین حالا عوض شد (پیش‌نمایش تازه). کد تازه نمی‌خواهد (ADR-046).
+ */
+export async function commitImportAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const result = await shipments.commit(session, id, { fingerprint: field(form, 'fingerprint') }, await requestIp());
+  const back = panelPath(gate, `/shipments/${encodeURIComponent(id)}`);
+  redirect(result.ok ? back : `${back}?e=${result.error}&${doneMark()}`);
+}
+
+/** «دور بینداز»: پیش از «ثبت»؛ برگشت به فهرست ورودها با پیام. */
+export async function discardImportAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const result = await shipments.discard(session, id, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, '/shipments')}?done=discard&${doneMark()}`);
+  redirect(`${panelPath(gate, `/shipments/${encodeURIComponent(id)}`)}?e=${result.error}&${doneMark()}`);
+}
+
+/**
+ * برگرداندن کل یک ورود (مالک، طرح `m-ship-revert`): خطای دلیل همین‌جا با متن نوشته‌شده؛ بقیه به صفحهٔ همان ورود با پیامش یا با
+ * نتیجه. کد تازه نمی‌خواهد (ADR-046): برگشت‌پذیر است و پولی جابه‌جا نمی‌کند.
+ */
+export async function revertImportAction(_state: ReasonState, form: FormData): Promise<ReasonState> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const reason = field(form, 'reason');
+  const result = await shipments.revert(session, id, { reason }, await requestIp());
+  const back = panelPath(gate, `/shipments/${encodeURIComponent(id)}`);
+  if (result.ok) redirect(`${back}?done=revert`);
+  if (result.error === 'reason_required' || result.error === 'reason_too_long') return { error: result.error, reason: reason.slice(0, 2000) };
+  redirect(`${back}?e=${result.error}&${doneMark()}`);
+}

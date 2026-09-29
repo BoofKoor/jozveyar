@@ -33,6 +33,9 @@ const config: NextConfig = {
     return config;
   },
   eslint: { ignoreDuringBuilds: true },
+  // فایل پست تا ۲ مگابایت با فرم server action می‌آید (برش ۶٫۱، ADR-045)؛ پیش‌فرض نکست ۱ مگابایت است. کمی بیش از سقف فایل، برای
+  // بدنهٔ چندبخشی؛ سقف خود فایل را سرویس می‌سنجد، و Nginx همین ۳ مگابایت را.
+  experimental: { serverActions: { bodySizeLimit: '3mb' } },
   poweredByHeader: false,
   // سرآیندهای امنیتی روی استاتیک هم (middleware از `/_next/static/` نمی‌گذرد).
   async headers() {

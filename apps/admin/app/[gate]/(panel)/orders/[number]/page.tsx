@@ -2,11 +2,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { FILE_MARGIN_MS, isPaidStatus, type PanelOrderDetails, type PanelOrderItem } from '@jozveyar/db';
+import { Fragment } from 'react';
+
+import { FILE_MARGIN_MS, IRAN_POST, isPaidStatus, type PanelOrderDetails, type PanelOrderItem } from '@jozveyar/db';
 import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
 import { AssignForm } from '../../../../../components/AssignForm';
+import { Barcode } from '../../../../../components/Barcode';
 import { NoAccess } from '../../../../../components/NoAccess';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { ReasonForm } from '../../../../../components/ReasonForm';
@@ -17,6 +20,7 @@ import { tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
+import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
 import {
   REASON_MAX,
   STATUS_LABELS,
@@ -76,6 +80,7 @@ const PAGE_ERRORS = new Set([
   'order_partner_changed',
   'assign_closed',
   'partner_inactive',
+  'order_has_shipment',
 ]);
 
 /** فرم باز ستون کنار یا کارت گیرنده (`?do=`): لغو، برگرداندن، ویرایش گیرنده، یا جابه‌جایی چاپخانه (۵٫۲)؛ هر چیز دیگر یعنی هیچ. */
@@ -444,12 +449,19 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
     const moved = lastMoveTo(details.statusEvents, 'handed_to_post');
     // مهلت پایان انحصاری روز است: تحویل پیش از آن، به‌موقع.
     const onTime = order.postHandoffDueAt !== null && order.handedToPostAt.getTime() < order.postHandoffDueAt.getTime();
+    // «ثبت» فایل پست (۶٫۱): زمان همان روز پست است، و کننده «فایل پست، حسن» (طرح `m-order-shipped`).
+    const fromFile = (moved?.note as { source?: unknown } | null)?.source === 'post_file';
+    const live = details.shipments.filter((shipment) => shipment.voidedAt === null);
     return (
       <section className="jy-card ad-status" aria-labelledby="t-st" data-status={order.status}>
         <h2 id="t-st" className="jy-card__title">
           به پست رسید
         </h2>
-        <p className="ad-meta">{byWhom(order.handedToPostAt, now, moved?.adminName)}</p>
+        <p className="ad-meta">
+          {fromFile
+            ? `${whenText(order.handedToPostAt, now)} · فایل پست${moved?.adminName ? `، ${moved.adminName}` : ''}`
+            : byWhom(order.handedToPostAt, now, moved?.adminName)}
+        </p>
         <div className="ad-status__badges">
           {onTime ? (
             <span className="jy-badge jy-badge--success">
@@ -463,7 +475,31 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
             </span>
           )}
         </div>
-        <p className="jy-note ad-gap">کد رهگیری را فایل پست می‌آورد و به موبایل مشتری پیامک می‌شود.</p>
+        {live.length > 0 ? (
+          <p className="jy-note ad-gap" data-tracking="">
+            <span>
+              کد رهگیری{' '}
+              {live.map((shipment, i) => (
+                <Fragment key={shipment.id}>
+                  {i > 0 ? '، ' : null}
+                  <Barcode code={shipment.barcode} />
+                </Fragment>
+              ))}{' '}
+              از فایل پست آمد.
+            </span>
+          </p>
+        ) : (
+          <p className="jy-note ad-gap">کد رهگیری را فایل پست می‌آورد و به موبایل مشتری پیامک می‌شود.</p>
+        )}
+        {view.revertBlockedBy ? (
+          <p className="ad-hint ad-gap">
+            با کد رهگیری به «در حال چاپ» برنمی‌گردد؛ اگر اشتباه است، اول ورود{' '}
+            <Link className="jy-link" href={panelPath(gate, `/shipments/${view.revertBlockedBy.importId}`)}>
+              <bdi>{view.revertBlockedBy.filename}</bdi>
+            </Link>{' '}
+            را برگردان.
+          </p>
+        ) : null}
         {onlyRevert}
       </section>
     );
@@ -564,6 +600,89 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
       ) : (
         <p className="ad-meta">بی چاپخانه.</p>
       )}
+    </section>
+  );
+}
+
+/**
+ * بستهٔ پستی سفارش (طرح پنل `m-order-shipped`، برش ۶٫۱، ADR-047): کد رهگیری هر بسته با پیوند سایت پست (فقط `<a>`، قاعدهٔ ۸)، وزن
+ * واقعی در برابر برآورد، کرایه و مالیات پست فقط با `orders.money`، و ورود فایل پستی که آورد؛ کد کنارگذاشته با دلیلش. سفارش بی کد
+ * این کارت را ندارد.
+ */
+function ParcelCard({ gate, view, canImports }: { gate: string; view: OrderDetailsView; canImports: boolean }) {
+  const { details, bounds } = view;
+  if (details.shipments.length === 0) return null;
+  const now = bounds.at;
+  const live = details.shipments.filter((shipment) => shipment.voidedAt === null);
+  const voided = details.shipments.filter((shipment) => shipment.voidedAt !== null);
+  const fileLink = (shipment: (typeof live)[number]) =>
+    canImports ? (
+      <Link className="jy-link" href={panelPath(gate, `/shipments/${shipment.importId}`)}>
+        <bdi>{shipment.filename}</bdi>
+      </Link>
+    ) : (
+      <bdi>{shipment.filename}</bdi>
+    );
+  return (
+    <section className="jy-card" aria-labelledby="t-parcel" data-parcels={live.length}>
+      <div className="jy-card__head">
+        <h2 id="t-parcel" className="jy-card__title">
+          بستهٔ پستی
+        </h2>
+        <span className="jy-card__meta">
+          {details.shippingMethodName ? `${details.shippingMethodName} · ` : ''}
+          {live.length > 0 ? parcelsCount(live.length) : 'بی کد زنده'}
+        </span>
+      </div>
+      {live.map((shipment) => (
+        <Fragment key={shipment.id}>
+          <div className="ad-parcel">
+            <Barcode code={shipment.barcode} large />
+            {/* فقط پیوند؛ چیزی از سایت پست بار نمی‌شود (قاعدهٔ ۸، ADR-047). */}
+            <a className="jy-btn jy-btn--secondary" href={IRAN_POST.trackingUrl(shipment.barcode)} target="_blank" rel="noopener noreferrer">
+              رهگیری در سایت پست<span className="sr-only"> (زبانهٔ تازه)</span>
+            </a>
+          </div>
+          <dl className="ad-facts">
+            <div>
+              <dt>وزن</dt>
+              <dd>
+                <Segments segs={weightSegs(shipment.weightGrams)} />
+                {live.length === 1 ? (
+                  <>
+                    {' · برآورد '}
+                    <Segments segs={weightSegs(details.order.estWeightGrams)} />
+                  </>
+                ) : null}
+              </dd>
+            </div>
+            {view.canMoney ? (
+              <div>
+                <dt>کرایهٔ پست</dt>
+                <dd>
+                  <span className="num">{formatTomans(shipment.fareRials, false)}</span> + مالیات{' '}
+                  <span className="num">{formatTomans(shipment.taxRials, false)}</span> تومان
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>فایل پست</dt>
+              <dd>
+                {fileLink(shipment)}، سطر <span className="num">{shipment.rowNo}</span>
+                {` · ${shipment.adminName ? `${shipment.adminName}، ` : ''}${whenText(shipment.createdAt, now)}`}
+              </dd>
+            </div>
+          </dl>
+        </Fragment>
+      ))}
+      {voided.map((shipment) => (
+        <p key={shipment.id} className="ad-hint ad-gap" data-voided="">
+          کد <Barcode code={shipment.barcode} /> کنار رفت
+          {shipment.voidedAt ? ` ${whenText(shipment.voidedAt, now)}` : ''}
+          {shipment.voidedByName ? ` با ${shipment.voidedByName}` : ''}
+          {shipment.voidReason ? `: «${shipment.voidReason}»` : ''} (از {fileLink(shipment)}).
+        </p>
+      ))}
     </section>
   );
 }
@@ -771,6 +890,8 @@ export default async function OrderPage({
               </dl>
             </section>
           )}
+
+          <ParcelCard gate={gate} view={view} canImports={can(session, 'shipments.import')} />
 
           {view.canMoney ? (
             <>

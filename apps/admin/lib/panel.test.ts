@@ -297,8 +297,61 @@ describe('رویدادها', () => {
       ['کلید «قالب کد پیامکی کاوه‌نگار» وارد شد'],
       ['کلید «کلید API کاوه‌نگار» به ', { ltr: '.env' }, ' برگشت'],
     ]);
-    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'تعرفه', 'تنظیمات و کلیدها', 'چاپخانه‌ها', 'ادمین‌ها']);
-    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'tariff', 'settings', 'partners', 'admins']);
+    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'ارسال', 'تعرفه', 'تنظیمات و کلیدها', 'چاپخانه‌ها', 'ادمین‌ها']);
+    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'shipments', 'tariff', 'settings', 'partners', 'admins']);
+  });
+
+  it('ارسال (۶٫۱): بارگذاری، ثبت با شمارها و سفارش‌هایی که تحویل پست شدند، دور انداختن، و برگرداندن با دلیل', () => {
+    const imported = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'shipment_import', detail });
+    const lines = eventLines([
+      imported('shipments.upload', { filename: 'FileName-1981.xls', sizeBytes: 16_384 }),
+      imported('shipments.commit', {
+        filename: 'FileName-1981.xls',
+        shipments: 9,
+        counts: { matched: 9, review: 4, unmatched: 1, duplicate: 1 },
+        handed: [10013, 10017],
+      }),
+      imported('shipments.commit', { filename: 'FileName-1982.xls', shipments: 0, counts: { unmatched: 2 }, handed: [] }),
+      imported('shipments.discard', { filename: 'FileName-1983.xls' }),
+      imported('shipments.revert', { filename: 'FileName-1966.xls', voided: 6, reopened: [10013], kept: [], reason: 'نسخهٔ ناقص فایل بود' }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['فایل پست ', { ltr: 'FileName-1981.xls' }, ' بارگذاری شد'],
+      [
+        'فایل پست ',
+        { ltr: 'FileName-1981.xls' },
+        ' ثبت شد: ',
+        { ltr: '9' },
+        ' کد رهگیری',
+        '، ',
+        { ltr: '4' },
+        ' سطر در صف تأیید',
+        '، ',
+        { ltr: '1' },
+        ' پیدا نشد',
+        '، ',
+        { ltr: '1' },
+        ' تکراری',
+        '؛ سفارش ',
+        { ltr: '10013' },
+        ' و ',
+        { ltr: '10017' },
+        ' تحویل پست شد',
+      ],
+      ['فایل پست ', { ltr: 'FileName-1982.xls' }, ' ثبت شد: ', { ltr: '0' }, ' کد رهگیری', '، ', { ltr: '2' }, ' پیدا نشد'],
+      ['فایل پست ', { ltr: 'FileName-1983.xls' }, ' دور انداخته شد'],
+      [
+        'ورود ',
+        { ltr: 'FileName-1966.xls' },
+        ' برگشت: ',
+        { ltr: '6' },
+        ' کد رهگیری کنار رفت',
+        '؛ سفارش ',
+        { ltr: '10013' },
+        ' به «در حال چاپ» برگشت',
+        '؛ نسخهٔ ناقص فایل بود',
+      ],
+    ]);
   });
 
   it('چاپخانه‌ها (۵٫۲): افزودن، ویرایش با قبل و بعد، پیش‌فرض، غیرفعال و فعال؛ جابه‌جایی سفارش زیر «سفارش» با نام همان روز و دلیل', () => {

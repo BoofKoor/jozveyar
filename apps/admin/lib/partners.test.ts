@@ -12,7 +12,7 @@ import type { Seg } from './orders';
 import { assignmentNote, assignmentText, cityLabel, partnerCard, partnerCityLabel, partnerMeta, partnerNameOf, pickCity } from './partners';
 
 const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
-const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : s.ltr)).join('');
+const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
 const nums = (segs: readonly Seg[]) => segs.filter((s): s is { num: string } => typeof s === 'object' && 'num' in s).map((s) => s.num);
 
 describe('فرم چاپخانه', () => {

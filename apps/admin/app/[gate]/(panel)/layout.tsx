@@ -9,24 +9,28 @@ import { logoutAction } from '../actions';
 
 /**
  * پوستهٔ پنل (طرح پنل، تصمیم ۲۴): سربرگ سفید با لوگو، «پنل مدیریت»، نام و نقش ادمین و «خروج»، و زبانه‌ها. کاربر چاپخانه (برش
- * ۵٫۳) به جای نقش نام چاپخانه‌اش را دارد («حسن · چاپ نور») و فقط «پیشخوان» و «سفارش‌ها». هر صفحه هم خودش نشست و مجوز را
- * می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
+ * ۵٫۳) به جای نقش نام چاپخانه‌اش را دارد («حسن · چاپ نور») و فقط «پیشخوان» و «سفارش‌ها». از ۶٫۱ «ارسال» کنار «سفارش‌ها»؛ و تا
+ * زبانه‌ها در گوشی ۳۲۰ پیکسلی جا شوند، «تعرفه»ی مالک با بخش‌های مالک (در دسکتاپ کنارشان، در گوشی زیر «بیشتر»)، و متصدی همان
+ * ردیف (طرح برش ۶). هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
  */
 export default async function PanelLayout({ children, params }: { children: React.ReactNode; params: Promise<{ gate: string }> }) {
   const { gate } = await params;
   const session = await requireSession(gate);
   const home = panelPath(gate);
-  const primary = [
-    { href: home, label: 'پیشخوان' },
-    ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
-    ...(can(session, 'tariff.read') ? [{ href: panelPath(gate, '/tariff'), label: 'تعرفه' }] : []),
-  ];
-  const owner = [
+  const tariff = can(session, 'tariff.read') ? [{ href: panelPath(gate, '/tariff'), label: 'تعرفه' }] : [];
+  const ownerOnly = [
     ...(can(session, 'settings.edit') || can(session, 'secrets.edit') ? [{ href: panelPath(gate, '/settings'), label: 'تنظیمات' }] : []),
     ...(can(session, 'partners.manage') ? [{ href: panelPath(gate, '/partners'), label: 'چاپخانه‌ها' }] : []),
     ...(can(session, 'admins.manage') ? [{ href: panelPath(gate, '/admins'), label: 'ادمین‌ها' }] : []),
     ...(can(session, 'events.read') ? [{ href: panelPath(gate, '/events'), label: 'رویدادها' }] : []),
   ];
+  const primary = [
+    { href: home, label: 'پیشخوان' },
+    ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
+    ...(can(session, 'shipments.import') ? [{ href: panelPath(gate, '/shipments'), label: 'ارسال' }] : []),
+    ...(ownerOnly.length > 0 ? [] : tariff),
+  ];
+  const owner = ownerOnly.length > 0 ? [...tariff, ...ownerOnly] : [];
 
   return (
     <>

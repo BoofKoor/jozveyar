@@ -349,7 +349,7 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
                         const errors = errorsAt(`ship.${key}`);
                         const warnings = warningsAt(`ship.${key}`);
                         const place = weightLabel(row.minGrams, row.maxGrams)
-                          .map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : s.ltr))
+                          .map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode))
                           .join('');
                         return row.prices[column] === null ? (
                           <td key={zone.id}>—</td>

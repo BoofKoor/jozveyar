@@ -45,8 +45,8 @@ import { normalizeIranMobile, tidyInputFa } from '@jozveyar/text/input';
 import { tehranDay } from './format';
 import { assignmentText } from './partners';
 
-/** تکهٔ متن: رشته، عدد (`.num`)، یا نام لاتین (`bdi`). */
-export type Seg = string | { num: string } | { ltr: string };
+/** تکهٔ متن: رشته، عدد (`.num`)، نام لاتین (`bdi`)، یا کد رهگیری پست (`jy-barcode`، برش ۶٫۱). */
+export type Seg = string | { num: string } | { ltr: string } | { barcode: string };
 
 const num = (value: number): Seg => ({ num: formatNumber(value) });
 
@@ -97,9 +97,9 @@ export function orderNumberOf(value: string): number | null {
 }
 
 /**
- * جست‌وجوی کادر «شمارهٔ سفارش، موبایل یا نام گیرنده»: ارقام فارسی و فاصله و خط تیره مهم نیستند. موبایل کامل
- * (هر شکلی که `normalizeIranMobile` بپذیرد) یعنی همان موبایل؛ عدد یعنی شمارهٔ سفارش یا، از ۴ رقم، ته موبایل؛ و
- * بقیه نام گیرنده، فارسی‌نرمال مثل خود نام (`tidyInputFa`).
+ * جست‌وجوی کادر «شمارهٔ سفارش، موبایل، نام گیرنده یا کد رهگیری»: ارقام فارسی و فاصله و خط تیره مهم نیستند. موبایل کامل
+ * (هر شکلی که `normalizeIranMobile` بپذیرد) یعنی همان موبایل؛ ۲۴ رقم کد رهگیری پست (برش ۶٫۱)؛ عدد دیگر شمارهٔ سفارش یا، از
+ * ۴ رقم، ته موبایل؛ و بقیه نام گیرنده، فارسی‌نرمال مثل خود نام (`tidyInputFa`).
  */
 export function parseSearch(input: string | undefined): PanelSearch | null {
   const text = tidyInputFa(input ?? '').slice(0, 100);
@@ -107,6 +107,7 @@ export function parseSearch(input: string | undefined): PanelSearch | null {
   const mobile = normalizeIranMobile(text);
   if (mobile) return { kind: 'mobile', mobile };
   const digits = toLatinDigits(text).replace(/[\s-]/g, '');
+  if (/^\d{24}$/.test(digits)) return { kind: 'barcode', barcode: digits };
   if (/^\d+$/.test(digits)) {
     return {
       kind: 'digits',
@@ -821,7 +822,10 @@ export interface TimelineEntry {
 export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const event of details.statusEvents) {
-    const who = event.adminName ?? ACTORS[event.actor] ?? event.actor;
+    // «تحویل پست شد» با «ثبت» فایل پست، و برگشتش با برگرداندن ورود (برش ۶٫۱، طرح `m-order-shipped`): «حسن، فایل پست».
+    const source = (event.note as { source?: unknown } | null)?.source;
+    const fromFile = source === 'post_file' || source === 'post_file_revert';
+    const who = `${event.adminName ?? ACTORS[event.actor] ?? event.actor}${fromFile ? '، فایل پست' : ''}`;
     const from = event.fromStatus;
     const to = event.toStatus;
     if (from === null) entries.push({ at: event.at, text: ['سفارش ساخته شد'], who });
@@ -839,6 +843,21 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   }
   for (const assignment of details.assignments) {
     entries.push({ at: assignment.at, text: assignmentText(assignment), who: assignment.actor === 'system' ? 'سیستم' : assignment.adminName ?? 'ادمین' });
+  }
+  // کد رهگیری هر بسته از کدام فایل پست، و اگر کنار رفت، کی و چرا (برش ۶٫۱).
+  for (const shipment of details.shipments) {
+    entries.push({
+      at: shipment.createdAt,
+      text: ['کد رهگیری ', { barcode: shipment.barcode }, ' از ', { ltr: shipment.filename }],
+      who: shipment.adminName ?? 'ادمین',
+    });
+    if (shipment.voidedAt) {
+      entries.push({
+        at: shipment.voidedAt,
+        text: ['کد رهگیری ', { barcode: shipment.barcode }, ` کنار رفت${shipment.voidReason ? `؛ ${shipment.voidReason}` : ''}`],
+        who: shipment.voidedByName ?? 'ادمین',
+      });
+    }
   }
   const many = details.items.length > 1;
   const jozve = (seq: number): Seg[] => (many ? ['جزوهٔ ', num(seq)] : ['جزوه']);
@@ -918,7 +937,12 @@ const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed'
 export function partnerView(details: PanelOrderDetails, partnerId: string): PanelOrderDetails {
   return {
     ...details,
-    statusEvents: details.statusEvents.map((event) => ({ ...event, note: null })),
+    // یادداشت‌ها (دلیل لغو و برگرداندن) نه؛ فقط اینکه «تحویل پست شد» از فایل پست بود (۶٫۱).
+    statusEvents: details.statusEvents.map((event) => {
+      const source = (event.note as { source?: unknown } | null)?.source;
+      return { ...event, note: typeof source === 'string' ? { source } : null };
+    }),
+    shipments: details.shipments.map((shipment) => ({ ...shipment, voidReason: null })),
     assignments: details.assignments
       .filter((assignment) => assignment.toPartnerId === partnerId)
       .map((assignment) => ({ ...assignment, fromName: null, reason: null })),

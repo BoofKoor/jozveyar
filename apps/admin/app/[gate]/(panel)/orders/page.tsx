@@ -78,7 +78,7 @@ export default async function OrdersPage({
           name="q"
           defaultValue={q}
           maxLength={100}
-          placeholder="شمارهٔ سفارش، موبایل یا نام گیرنده"
+          placeholder="شمارهٔ سفارش، موبایل، نام گیرنده یا کد رهگیری"
           aria-label="جست‌وجوی سفارش"
           autoComplete="off"
         />

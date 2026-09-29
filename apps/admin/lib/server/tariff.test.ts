@@ -328,7 +328,7 @@ describe('فعال کردن با کد تازه', () => {
     expect(back.value.again).toBe(true);
     expect(back.value.active.version).toBe(2);
     expect(back.value.problems).toEqual([]);
-    expect(back.value.changes.lines.map((l) => l.value.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : s.ltr)).join(''))).toEqual([
+    expect(back.value.changes.lines.map((l) => l.value.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join(''))).toEqual([
       '1,700 ← 1,600 تومان',
       '2,200 ← 2,000 تومان',
       'عوض شد (کاغذ، وزن جلد یا روش‌های ارسال)',

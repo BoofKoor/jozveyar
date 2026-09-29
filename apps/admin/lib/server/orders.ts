@@ -133,6 +133,11 @@ export interface OrderDetailsView {
   /** برگرداندن یک قدم (فقط مالک)، و وضعیتی که سفارش به آن برمی‌گردد؛ null اگر از وضعیت امروز ممکن نیست. */
   canRevert: boolean;
   revertTo: OrderStatus | null;
+  /**
+   * «تحویل پست شد»ی که کد رهگیری زنده دارد برنمی‌گردد (برش ۶٫۱، ADR-046): اول ورود فایل پستش برمی‌گردد. ورود همان کد، برای
+   * پیوند راه جلو؛ null یعنی مانعی نیست.
+   */
+  revertBlockedBy: { importId: string; filename: string } | null;
   /** ویرایش گیرنده: مجوزش، و فقط تا پیش از پست. */
   canEditRecipient: boolean;
   /** جابه‌جایی چاپخانه (۵٫۲): مجوزش، فقط «در صف چاپ»، و فقط وقتی چاپخانهٔ فعال دیگری هست. */
@@ -254,8 +259,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const unpriced = canMoney ? found : withoutMoney(found);
       const details = scope.kind === 'partner' ? partnerView(unpriced, scope.partnerId) : unpriced;
       const { status } = details.order;
-      // سفارشی که فایل‌هایش پاک شد به صف چاپ برنمی‌گردد (ADR-044).
+      // سفارشی که فایل‌هایش پاک شد به صف چاپ برنمی‌گردد (ADR-044)؛ و «تحویل پست شد»ی که کد رهگیری زنده دارد، تا ورودش برنگشته.
       const revertTo = details.order.filesDeletedAt ? null : transitionOf('revert', status, details.statusEvents);
+      const live = status === 'handed_to_post' ? details.shipments.find((shipment) => shipment.voidedAt === null) : undefined;
       const partnerOptions =
         can(session, 'orders.assign') && status === 'paid'
           ? (await store.partnerOptions(scope)).filter((partner) => partner.id !== details.order.printPartnerId)
@@ -266,8 +272,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         canDownload: can(session, 'files.download'),
         canStatus: can(session, 'orders.status'),
         canCancel: can(session, 'orders.cancel'),
-        canRevert: can(session, 'orders.revert') && revertTo !== null,
+        canRevert: can(session, 'orders.revert') && revertTo !== null && !live,
         revertTo,
+        revertBlockedBy: can(session, 'orders.revert') && live && revertTo !== null ? { importId: live.importId, filename: live.filename } : null,
         canEditRecipient: can(session, 'orders.address') && (RECIPIENT_EDITABLE as readonly OrderStatus[]).includes(status),
         canAssign: partnerOptions.length > 0,
         partnerOptions,
@@ -303,6 +310,8 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         if (reason.length > REASON_MAX) return fail(400, 'reason_too_long');
       }
       if (details.order.filesDeletedAt) return fail(409, 'files_deleted');
+      // کد رهگیری یعنی «تحویل پست شد» (ADR-046): تا ورودش برنگشته، سفارش برنمی‌گردد. پایگاه داده هم در COMMIT (`hasShipment`).
+      if (action === 'revert' && details.shipments.some((shipment) => shipment.voidedAt === null)) return fail(409, 'order_has_shipment');
       // «شروع چاپ» فقط با چاپخانه (۵٫۲)، و از همان که ادمین دید: جابه‌جایی هم‌زمان و «شروع چاپ» فقط یکی می‌شوند.
       const partner = action === 'start_print' ? partnerIdOf(form.partner) : undefined;
       if (action === 'start_print' && !details.order.printPartnerId) return fail(409, 'print_needs_partner');
@@ -334,6 +343,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (written.current === null) return fail(404, 'order_not_found');
       if (written.filesDeleted) return fail(409, 'files_deleted');
       if (written.partnerChanged) return fail(409, 'order_partner_changed');
+      if (written.hasShipment) return fail(409, 'order_has_shipment');
       return written.current === to ? ok({ status: to }) : fail(409, 'status_changed', { current: written.current });
     },
 
