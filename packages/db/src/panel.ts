@@ -146,6 +146,11 @@ export interface PanelOrderLine {
   paidAt: Date | null;
   postHandoffDueAt: Date | null;
   handedToPostAt: Date | null;
+  /**
+   * «تحویل پست شد» را «ثبت» فایل پست زد (برش ۶٫۱): فایل فقط روز پست را دارد، پس `handedToPostAt` پایان همان روز است و ساعتش
+   * نشان داده نمی‌شود (سؤال ۷۰).
+   */
+  handedByFile: boolean;
   /** آخرین «لغو شد» (برش ۴٫۳)؛ فقط برای سفارشی که هنوز لغوشده است. */
   cancelledAt: Date | null;
   /** صفحه‌های جزوه‌ها، یک نسخه. */
@@ -595,6 +600,8 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       paidAt: orders.paidAt,
       postHandoffDueAt: orders.postHandoffDueAt,
       handedToPostAt: orders.handedToPostAt,
+      handedByFile: sql<boolean>`EXISTS (SELECT 1 FROM shipments s
+        WHERE s.order_id = ${orders.id} AND s.handed_order AND s.voided_at IS NULL)`,
       cancelledAt: sql<Date | null>`CASE WHEN ${orders.status} = 'cancelled' THEN (SELECT max(e.at) FROM order_status_events e
         WHERE e.order_id = ${orders.id} AND e.to_status = 'cancelled') END`.mapWith(orders.createdAt),
       pageCount: sql<number>`(SELECT coalesce(sum(i.page_count), 0)::int FROM order_items i WHERE i.order_id = ${orders.id})`,

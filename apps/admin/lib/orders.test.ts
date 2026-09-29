@@ -255,6 +255,7 @@ function line(over: Partial<PanelOrderLine> = {}): PanelOrderLine {
     paidAt: NOW,
     postHandoffDueAt: END_MONDAY,
     handedToPostAt: null,
+    handedByFile: false,
     cancelledAt: null,
     pageCount: 120,
     itemCount: 1,

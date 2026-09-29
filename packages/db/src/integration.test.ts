@@ -4465,7 +4465,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(details!.shipments).toMatchObject([{ barcode: barcodeOf(1), handedOrder: true, adminName: 'علی محمدی', rowNo: 1, voidedAt: null }]);
       const search: PanelSearch = { kind: 'barcode', barcode: barcodeOf(1) };
       const clock: PanelClock = { at: NOW, staleBefore: NOW, unreturnedBefore: NOW };
-      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search, clock, limit: 10, offset: 0 })).map((o) => o.id)).toEqual([taheri.id]);
+      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search, clock, limit: 10, offset: 0 })).map((o) => [o.id, o.handedByFile])).toEqual([
+        [taheri.id, true],
+      ]);
+      // «تحویل پست شد»ی که پیش از فایل دستی خورده بود کار فایل نیست: ساعتش واقعی است و نشان داده می‌شود.
+      const manual: PanelSearch = { kind: 'barcode', barcode: barcodeOf(2) };
+      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search: manual, clock, limit: 10, offset: 0 })).map((o) => [o.id, o.handedByFile])).toEqual([
+        [rahmani.id, false],
+      ]);
     });
 
     it('فایل هم‌پوشان: همان کد برای همان سفارش «تکراری» و مرسولهٔ دوم نمی‌سازد؛ همان کد برای سفارش دیگر صف تأیید؛ چند بسته برای یک سفارش', async () => {
@@ -4604,6 +4611,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect((await shipmentsOf(rahmani.id)).every((s) => s.voidedAt !== null)).toBe(true);
       expect((await change(rahmani, 'handed_to_post', 'printing', 'اشتباه')).ok).toBe(true);
       expect((await orderOf(rahmani.id)).status).toBe('printing');
+      // «تحویل پست شد» دستی پس از برگرداندن کار فایل نیست، هرچند کد کنارگذاشته‌اش `handed_order` دارد: ساعتش واقعی است.
+      expect((await change(taheri, 'printing', 'handed_to_post')).ok).toBe(true);
+      const clock: PanelClock = { at: NOW, staleBefore: NOW, unreturnedBefore: NOW };
+      const search: PanelSearch = { kind: 'barcode', barcode: barcodeOf(1) };
+      expect((await panelStore().list(ALL_ORDERS, { bucket: 'all', search, clock, limit: 10, offset: 0 })).map((o) => [o.id, o.handedByFile])).toEqual([
+        [taheri.id, false],
+      ]);
     });
 
     it('دور بینداز: فقط پیش از «ثبت»؛ بایت خام و جدول‌ها پاک؛ همان فایل دوباره واردشدنی', async () => {

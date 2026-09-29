@@ -3,7 +3,7 @@ import Link from 'next/link';
 import type { PanelOrderLine } from '@jozveyar/db';
 import { formatTomans } from '@jozveyar/text';
 
-import { whenText } from '../lib/format';
+import { dayText, whenText } from '../lib/format';
 import { panelPath } from '../lib/gate';
 import { dueBadge, isOpen, jozveSegs, rowState, type DayBounds } from '../lib/orders';
 import { DueBadge } from './OrderBadges';
@@ -72,7 +72,10 @@ export function OrderRows({
                 {due ? (
                   <DueBadge kind={due.kind}>{due.label}</DueBadge>
                 ) : when ? (
-                  <span className="ad-row__city">{whenText(when, bounds.at)}</span>
+                  <span className="ad-row__city">
+                    {/* روز پستِ فایل پست ساعت ندارد (برش ۶٫۱). */}
+                    {dates === 'handed' && row.handedByFile ? dayText(when, bounds.at) : whenText(when, bounds.at)}
+                  </span>
                 ) : (
                   <span className="ad-row__none">
                     <span aria-hidden="true">—</span>

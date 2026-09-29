@@ -16,7 +16,7 @@ import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
-import { tehranDay, whenText } from '../../../../../lib/format';
+import { dayHeading, tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
@@ -449,7 +449,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
     const moved = lastMoveTo(details.statusEvents, 'handed_to_post');
     // مهلت پایان انحصاری روز است: تحویل پیش از آن، به‌موقع.
     const onTime = order.postHandoffDueAt !== null && order.handedToPostAt.getTime() < order.postHandoffDueAt.getTime();
-    // «ثبت» فایل پست (۶٫۱): زمان همان روز پست است، و کننده «فایل پست، حسن» (طرح `m-order-shipped`).
+    // «ثبت» فایل پست (۶٫۱): فایل فقط روز پست را دارد (سؤال ۷۰)، پس روز بی ساعت، و کننده «فایل پست، حسن» (طرح `m-order-shipped`).
     const fromFile = (moved?.note as { source?: unknown } | null)?.source === 'post_file';
     const live = details.shipments.filter((shipment) => shipment.voidedAt === null);
     return (
@@ -459,7 +459,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
         </h2>
         <p className="ad-meta">
           {fromFile
-            ? `${whenText(order.handedToPostAt, now)} · فایل پست${moved?.adminName ? `، ${moved.adminName}` : ''}`
+            ? `${dayHeading(order.handedToPostAt, now)} · فایل پست${moved?.adminName ? `، ${moved.adminName}` : ''}`
             : byWhom(order.handedToPostAt, now, moved?.adminName)}
         </p>
         <div className="ad-status__badges">

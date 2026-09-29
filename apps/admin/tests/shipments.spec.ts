@@ -6,7 +6,7 @@ import postgres from 'postgres';
 import { POST_HEADERS, barcodeOf, parcel, totalRow } from '@jozveyar/db/postfile.fixtures';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
-import { formatJalaliNumeric, tehranDayStart } from '@jozveyar/text';
+import { formatJalaliNumeric, formatJalaliWeekday, tehranDayStart } from '@jozveyar/text';
 
 import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
@@ -41,7 +41,7 @@ interface Seeded {
  * سفارش پرداخت‌شده همان‌طور که سرور می‌نویسد (سفارش، پرداخت و چاپخانه در پرداخت)، در تهران؛ `printing`: و «شروع چاپ» خورده. بی
  * کارهای PDF: خواندن فایل پست به فایل چاپ کاری ندارد.
  */
-async function paidOrder(name: string, phone: string, printing = true): Promise<Seeded> {
+async function paidOrder(name: string, phone: string, printing = true, paidAt = new Date(Date.now() - 60 * MINUTE)): Promise<Seeded> {
   const docId = randomUUID();
   await sql`
     INSERT INTO documents (id, original_name, source_kind, mime_type, size_bytes, storage_key, status, page_count,
@@ -54,7 +54,6 @@ async function paidOrder(name: string, phone: string, printing = true): Promise<
     { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
     SEED_PRICE_LIST,
   );
-  const paidAt = new Date(Date.now() - 60 * MINUTE);
   return sql.begin(async (tx) => {
     const [user] = await tx<{ id: string }[]>`
       INSERT INTO users (mobile) VALUES (${phone}) ON CONFLICT (mobile) DO UPDATE SET last_login_at = now() RETURNING id`;
@@ -124,9 +123,11 @@ test.describe.serial('ارسال در پنل', () => {
   let operatorContext: BrowserContext;
   let operatorPage: Page;
   let operatorProblems: string[] = [];
-  const o = {} as Record<'A' | 'B' | 'C', Seeded>;
+  const o = {} as Record<'A' | 'B' | 'C' | 'D', Seeded>;
   let firstId = '';
   let firstName = '';
+  /** ورود هم‌پوشانی که ثبت شد و برنمی‌گردد (تست ۳)، برای گوشی و دسکتاپ. */
+  let overlapId = '';
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(180_000);
@@ -138,6 +139,8 @@ test.describe.serial('ارسال در پنل', () => {
     o.A = await paidOrder('مهسا طاهری', phone(1));
     o.B = await paidOrder('امید شریفی', phone(2));
     o.C = await paidOrder('زهرا محمدی', phone(3), false);
+    // پرداخت سه روز پیش: بسته‌ای که پست دیروز گرفت پیش از پرداخت نیست.
+    o.D = await paidOrder('نرگس احمدی', phone(4), true, new Date(Date.now() - 3 * 24 * 60 * MINUTE));
 
     ownerContext = await newContext(browser);
     ownerPage = await ownerContext.newPage();
@@ -226,7 +229,8 @@ test.describe.serial('ارسال در پنل', () => {
     await page.goto(at(`/orders/${o.A.number}`));
     const side = page.locator('.ad-status');
     await expect(side.getByRole('heading', { name: 'به پست رسید' })).toBeVisible();
-    await expect(side.locator('.ad-meta').first()).toHaveText(/^امروز \d\d:\d\d · فایل پست، علی محمدی$/);
+    // فایل پست فقط روز را دارد (سؤال ۷۰): روز، بی ساعت.
+    await expect(side.locator('.ad-meta').first()).toHaveText(`امروز، ${formatJalaliWeekday(new Date())} · فایل پست، علی محمدی`);
     await expect(side).toContainText('از فایل پست آمد.');
     const card = page.locator('section[aria-labelledby="t-parcel"]');
     await expect(card.getByRole('heading', { name: 'بستهٔ پستی' })).toBeVisible();
@@ -245,6 +249,19 @@ test.describe.serial('ارسال در پنل', () => {
     await page.getByRole('searchbox', { name: 'جست‌وجوی سفارش' }).press('Enter');
     await expect(page.locator('.ad-row')).toHaveCount(1);
     await expect(page.locator(`.ad-row[data-order="${o.B.number}"]`)).toBeVisible();
+
+    // بسته‌ای که پست دیروز گرفت: «به پست رسید» و ستون «به پست رسید» فهرست فقط روز را می‌گویند؛ پایان روزِ ذخیره‌شده ساعت نیست.
+    const yesterday = new Date(tehranDayStart(new Date()).getTime() - 12 * 60 * MINUTE);
+    await upload(page, `FileName-${RUN}5.xls`, postFile([parcel(1, code(10), `احمدی ${o.D.number}`, 'تهران', 900, 1_295_000, { date: formatJalaliNumeric(yesterday) })]));
+    await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('پیش‌نمایش', { timeout: 30_000 });
+    await page.locator('.ad-commit').getByRole('button', { name: 'ثبت: 1 کد رهگیری' }).click();
+    await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('ثبت شد');
+    await page.goto(at(`/orders/${o.D.number}`));
+    await expect(page.locator('.ad-status .ad-meta').first()).toHaveText(`دیروز، ${formatJalaliWeekday(yesterday)} · فایل پست، علی محمدی`);
+    await expect(page.locator('.ad-status')).toContainText('به‌موقع');
+    await page.goto(at('/orders?status=handed'));
+    await expect(page.locator(`.ad-row[data-order="${o.D.number}"] .ad-row__due`)).toHaveText('دیروز');
+    await expect(page.locator(`.ad-row[data-order="${o.A.number}"] .ad-row__due`)).toHaveText('امروز');
     expect(operatorProblems).toEqual([]);
   });
 
@@ -265,6 +282,7 @@ test.describe.serial('ارسال در پنل', () => {
     await expect(page.locator('main')).toContainText('همین فایل پیش‌تر وارد شده؛ این همان ورود است.');
 
     const overlap = await upload(page, `FileName-${RUN}2.xls`, postFile([row(1, code(1), `طاهری ${o.A.number}`), row(2, code(6), `شریفی ${o.B.number}`)]));
+    overlapId = overlap;
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('پیش‌نمایش', { timeout: 30_000 });
     await expect(page.locator('[data-count="dup"] .ad-tile__n')).toHaveText('1');
     await expect(page.locator('[data-group="dup"]')).toContainText(`برای همین سفارش (${o.A.number}، مهسا طاهری) آمد؛ دوباره ثبت نمی‌شود.`);
@@ -345,7 +363,7 @@ test.describe.serial('ارسال در پنل', () => {
       const page = await context.newPage();
       const problems = watch(page);
       await enroll(page, serverInvite(`view${RUN}${width}`, '--name', 'بیننده'));
-      for (const path of ['/shipments', `/shipments/${preview}`, `/shipments/${firstId}`, `/orders/${o.B.number}`]) {
+      for (const path of ['/shipments', `/shipments/${preview}`, `/shipments/${overlapId}`, `/shipments/${firstId}`, `/orders/${o.B.number}`]) {
         await page.goto(at(path));
         const { overflow, small, blank } = await layoutProblems(page);
         expect(overflow, `${width} ${path}`).toBeLessThanOrEqual(0);

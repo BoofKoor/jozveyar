@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { AdminEventView } from '@jozveyar/db';
 
 import { byDay, EVENT_KINDS, eventLines } from './events';
-import { dayHeading, whenText } from './format';
+import { dayHeading, dayText, whenText } from './format';
 import { gateOf, panelPath } from './gate';
 import { roleLabel } from './messages';
 import { contentSecurityPolicy, originOf, sameOrigin } from './security';
@@ -133,6 +133,11 @@ describe('زمان پنل', () => {
     expect(dayHeading(tehran('2026-10-05 00:05'), NOW)).toBe('امروز، دوشنبه 13 مهر');
     expect(dayHeading(tehran('2026-10-04 12:00'), NOW)).toBe('دیروز، یکشنبه 12 مهر');
     expect(dayHeading(tehran('2026-10-03 12:00'), NOW)).toBe('شنبه 11 مهر');
+    // روز پستِ فایل پست ساعت ندارد (۶٫۱): پایان روز تهران فقط همان روز است.
+    expect(dayText(tehran('2026-10-05 00:05'), NOW)).toBe('امروز');
+    expect(dayText(tehran('2026-10-04 23:59'), NOW)).toBe('دیروز');
+    expect(dayText(tehran('2026-10-03 23:59'), NOW)).toBe('شنبه 11 مهر');
+    expect(dayText(tehran('2026-03-10 23:59'), NOW)).toBe('19 اسفند 1404');
   });
 });
 
