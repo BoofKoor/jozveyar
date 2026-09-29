@@ -145,7 +145,8 @@ test.describe.serial('پنل ادمین', () => {
     await expect(page.getByText('سارا رضایی تو را متصدی پنل جزوه‌یار کرده است.')).toBeVisible();
     await enroll(page, link);
     await expect(page.locator('.ad-user')).toContainText('علی محمدی · متصدی');
-    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'تعرفه']);
+    // از ۶٫۱ «ارسال» کنار «سفارش‌ها»؛ «تعرفه»ی متصدی در همان ردیف (طرح برش ۶).
+    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه']);
     for (const path of ['/admins', '/events', '/admins/new', '/settings']) {
       await page.goto(at(path));
       await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
