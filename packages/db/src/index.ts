@@ -25,6 +25,7 @@ export * from './panel.js';
 export * from './assignment.js';
 export * from './partners.js';
 export * from './postfile.js';
+export * from './candidates.js';
 export * from './shipments.js';
 export * from './tariff.js';
 export * from './settings.js';

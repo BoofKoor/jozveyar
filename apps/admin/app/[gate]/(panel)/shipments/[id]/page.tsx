@@ -25,6 +25,7 @@ import {
   numbersText,
   postDaysText,
   previewRows,
+  tileTexts,
   totalsText,
   unreadableText,
   type ImportRowView,
@@ -73,9 +74,13 @@ function AnotherFile({ gate }: { gate: string }) {
   );
 }
 
-/** کاشی‌های شمار (طرح): قطعی، صف تأیید، پیدا نشد و تکراری همیشه؛ خوانده نشد و غیرفعال فقط اگر هست. */
-function CountTiles({ counts, committed }: { counts: RowCounts; committed: boolean }) {
-  const tiles: { id: string; n: number; badge: React.ReactNode; text: string; show: boolean }[] = [
+/**
+ * کاشی‌های شمار (طرح): قطعی، صف تأیید، پیدا نشد و تکراری همیشه؛ خوانده نشد و غیرفعال فقط اگر هست. چاپخانه (۶٫۲) صف را «بررسی
+ * جزوه‌یار» می‌بیند. شمار حکم «ثبت» است؛ متن ورود ثبت‌شده حال امروز سطرها (`tileTexts`، ۶٫۲).
+ */
+function CountTiles({ counts, rows, state, partner }: { counts: RowCounts; rows: readonly ImportRowView[]; state: 'preview' | 'committed' | 'reverted'; partner: boolean }) {
+  const texts = tileTexts(rows, { state, partner });
+  const tiles: { id: string; n: number; badge: React.ReactNode; text: Seg[]; show: boolean }[] = [
     {
       id: 'ok',
       n: counts.matched,
@@ -85,7 +90,7 @@ function CountTiles({ counts, committed }: { counts: RowCounts; committed: boole
           قطعی
         </span>
       ),
-      text: committed ? 'کد رهگیری نشست' : 'کد رهگیری، با «ثبت»',
+      text: texts.ok,
       show: true,
     },
     {
@@ -94,14 +99,20 @@ function CountTiles({ counts, committed }: { counts: RowCounts; committed: boole
       badge: (
         <span className="jy-badge jy-badge--warning">
           <span className="jy-icon jy-icon-warning" aria-hidden="true" />
-          صف تأیید
+          {partner ? 'بررسی جزوه‌یار' : 'صف تأیید'}
         </span>
       ),
-      text: 'تا تأیید مالک یا متصدی، بی کد',
+      text: texts.review,
       show: true,
     },
-    { id: 'nf', n: counts.unmatched, badge: <span className="jy-badge jy-badge--neutral">پیدا نشد</span>, text: 'سفارش ما نیست؛ ثبت نمی‌شود', show: true },
-    { id: 'dup', n: counts.duplicate, badge: <span className="jy-badge jy-badge--neutral">تکراری</span>, text: 'همین کد پیش‌تر آمده', show: true },
+    {
+      id: 'nf',
+      n: counts.unmatched,
+      badge: <span className="jy-badge jy-badge--neutral">پیدا نشد</span>,
+      text: texts.nf,
+      show: true,
+    },
+    { id: 'dup', n: counts.duplicate, badge: <span className="jy-badge jy-badge--neutral">تکراری</span>, text: ['همین کد پیش‌تر آمده'], show: true },
     {
       id: 'invalid',
       n: counts.invalid,
@@ -111,10 +122,10 @@ function CountTiles({ counts, committed }: { counts: RowCounts; committed: boole
           خوانده نشد
         </span>
       ),
-      text: 'کد، عدد یا تاریخ درست نیست',
+      text: ['کد، عدد یا تاریخ درست نیست'],
       show: counts.invalid > 0,
     },
-    { id: 'inactive', n: counts.inactive, badge: <span className="jy-badge jy-badge--neutral">غیرفعال در پست</span>, text: 'وضعیتش «فعال» نیست', show: counts.inactive > 0 },
+    { id: 'inactive', n: counts.inactive, badge: <span className="jy-badge jy-badge--neutral">غیرفعال در پست</span>, text: ['وضعیتش «فعال» نیست'], show: counts.inactive > 0 },
   ];
   return (
     <ul className="ad-tiles ad-counts" aria-label="شمار سطرها">
@@ -125,7 +136,9 @@ function CountTiles({ counts, committed }: { counts: RowCounts; committed: boole
             <a className="ad-tile" href={tile.n > 0 ? `#g-${tile.id}` : undefined} data-count={tile.id}>
               {tile.badge}
               <span className="ad-tile__n num">{formatNumber(tile.n)}</span>
-              <span className="ad-tile__t">{tile.text}</span>
+              <span className="ad-tile__t">
+                <Segments segs={tile.text} />
+              </span>
             </a>
           </li>
         ))}
@@ -139,28 +152,53 @@ const handedNumbers = (rows: readonly ImportRowView[]) =>
     (a, b) => a - b,
   );
 
-/** گروه‌های سطرها، به ترتیب طرح. */
-function Groups({ gate, rows, committed, money, reverted }: { gate: string; rows: ImportRowView[]; committed: boolean; money: boolean; reverted: boolean }) {
+/** زیرعنوان هر گروه، با حال ورود و از چشم چاپخانه (۶٫۲). */
+function groupSub(group: (typeof ROW_GROUPS)[number], view: ImportPageView, partner: string | null): string {
+  const committed = view.kind === 'committed';
+  const reverted = view.import.status === 'reverted';
+  switch (group.verdict) {
+    case 'matched':
+      return reverted
+        ? 'این ورود برگشت و کدهایش کنار رفت.'
+        : committed
+          ? 'کد رهگیری هر بسته در صفحهٔ سفارشش نشست.'
+          : 'با «ثبت»، کد رهگیری هر بسته در صفحهٔ سفارشش می‌نشیند.';
+    case 'review':
+      return partner ? `به سفارشی از ${partner} نشست، ولی قطعی نیست؛ جزوه‌یار تأیید یا کنار می‌گذارد.` : group.sub;
+    case 'unmatched':
+      if (partner) return 'سفارش جزوه‌یار نیست؛ ثبت نمی‌شود.';
+      return committed && !reverted && view.canReview ? `${group.sub} اگر مال ماست، دستی به سفارشی بده.` : group.sub;
+    default:
+      return group.sub;
+  }
+}
+
+/** گروه‌های سطرها، به ترتیب طرح؛ صف تأیید چاپخانه «در انتظار بررسی جزوه‌یار» (طرح). */
+function Groups({ gate, rows, view, partner }: { gate: string; rows: ImportRowView[]; view: ImportPageView; partner: string | null }) {
+  const committed = view.kind === 'committed';
+  const queue =
+    committed && view.canReview && view.import.status === 'committed' && rows.some((row) => row.queued) ? (
+      <Link href={panelPath(gate, '/shipments/review')} className="jy-btn jy-btn--text ad-card-head-btn">
+        صف تأیید
+      </Link>
+    ) : null;
   return (
     <>
       {ROW_GROUPS.map((group) => (
         <ImportRows
           key={group.id}
           gate={gate}
+          importId={view.import.id}
           id={group.id}
-          title={group.title}
-          sub={
-            group.verdict === 'matched'
-              ? reverted
-                ? 'این ورود برگشت و کدهایش کنار رفت.'
-                : committed
-                  ? 'کد رهگیری هر بسته در صفحهٔ سفارشش نشست.'
-                  : 'با «ثبت»، کد رهگیری هر بسته در صفحهٔ سفارشش می‌نشیند.'
-              : group.sub
-          }
+          title={group.verdict === 'review' && partner ? 'در انتظار بررسی جزوه‌یار' : group.title}
+          sub={groupSub(group, view, partner)}
+          head={group.verdict === 'review' ? queue : undefined}
           rows={rows.filter((row) => row.verdict === group.verdict)}
           committed={committed}
-          money={money}
+          money={view.money}
+          canReview={view.canReview}
+          partner={partner !== null}
+          now={view.now}
         />
       ))}
     </>
@@ -183,7 +221,7 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
   if (!result.ok) notFound();
   const view = result.value;
   const imp = view.import;
-  const money = can(session, 'orders.money');
+  const partner = session.partner?.name ?? null;
   const error = one(query, 'e');
   const back = (
     <Link href={panelPath(gate, '/shipments')} className="ad-back">
@@ -194,6 +232,17 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
   const notes = (
     <>
       {error && PAGE_ERRORS.has(error) ? <Alert tone="error">{messageOf(error)}</Alert> : null}
+      {(one(query, 'done') === 'approve' || one(query, 'done') === 'assign') && /^\d{1,9}$/.test(one(query, 'o') ?? '') ? (
+        <Alert tone="success">
+          کد رهگیری {one(query, 'done') === 'assign' ? 'دستی ' : ''}به{' '}
+          <Link className="jy-link" href={panelPath(gate, `/orders/${one(query, 'o')}`)}>
+            سفارش <span className="num">{one(query, 'o')}</span>
+          </Link>{' '}
+          نشست{one(query, 'h') === '1' ? ' و سفارش «تحویل پست شد»' : ''}.
+        </Alert>
+      ) : one(query, 'done') === 'dismiss' ? (
+        <Alert tone="success">سطر کنار گذاشته شد («هیچ‌کدام»). اگر اشتباه بود، از همین صفحه به سفارش درستش بده.</Alert>
+      ) : null}
       {one(query, 'same') === '1' ? (
         <Alert tone="info">
           همین فایل پیش‌تر وارد شده؛ این همان ورود است. یک فایل دو بار ثبت نمی‌شود؛ اگر آن ورود اشتباه بود، مالک برش می‌گرداند و بعد
@@ -290,28 +339,29 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
     );
   }
 
-  const committed = view.kind === 'committed';
   const rows = view.kind === 'preview' ? previewRows(view.preview) : committedRows(view.committed);
   const counts = countsOf(rows);
   const totals =
     view.kind === 'preview' && view.preview.sheet.ok
-      ? totalsText(view.preview.sheet.sums, view.preview.sheet.fileTotal)
+      ? totalsText(view.preview.sheet.sums, view.preview.sheet.fileTotal, { money: view.money })
       : view.kind === 'committed'
-        ? (({ sums, file }) => totalsText(sums, file))(committedTotals(view.committed))
+        ? (({ sums, file }) => totalsText(sums, file, { money: view.money }))(committedTotals(view.committed))
         : null;
+  const queued = rows.filter((row) => row.queued).length;
   const days = postDaysText(
     rows.reduce<Date | null>((first, row) => (row.postDay && (!first || row.postDay < first) ? row.postDay : first), null),
     rows.reduce<Date | null>((last, row) => (row.postDay && (!last || row.postDay > last) ? row.postDay : last), null),
   );
   const handed = handedNumbers(rows);
   const reverted = imp.status === 'reverted';
+  // سفارش‌هایی که کدی از همین ورود «تحویل پست شد»شان کرده بود و حالا «در حال چاپ»اند (قطعی، تأیید یا دستی).
   const reopened =
     reverted && view.kind === 'committed'
       ? [
           ...new Set(
-            rows
-              .filter((row) => row.shipment?.handedOrder && row.order?.status === 'printing')
-              .map((row) => row.order!.orderNumber),
+            view.committed.shipments
+              .filter((s) => s.handedOrder && view.committed.orders.find((order) => order.id === s.orderId)?.status === 'printing')
+              .map((s) => s.orderNumber),
           ),
         ].sort((a, b) => a - b)
       : [];
@@ -349,7 +399,8 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
             هنوز چیزی ثبت نشده.{' '}
             {counts.matched > 0 ? (
               <>
-                با «ثبت»، <span className="num">{formatNumber(counts.matched)}</span> کد رهگیری به سفارش‌ها می‌نشیند
+                با «ثبت»، <span className="num">{formatNumber(counts.matched)}</span> کد رهگیری به {partner ? `سفارش‌های ${partner}` : 'سفارش‌ها'}{' '}
+                می‌نشیند
                 {handed.length > 0 ? (
                   <>
                     ؛ سفارش <Segments segs={numbersText(handed)} /> هم از «در حال چاپ» «تحویل پست شد» {handed.length > 1 ? 'می‌شوند' : 'می‌شود'}، با روز
@@ -385,9 +436,25 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
                 سفارش <Segments segs={numbersText(handed)} /> «تحویل پست شد» {handed.length > 1 ? 'شدند' : 'شد'}.
               </>
             ) : null}
+            {queued > 0 ? (
+              partner ? (
+                <>
+                  {' '}
+                  <span className="num">{formatNumber(queued)}</span> سطر در انتظار بررسی جزوه‌یار است.
+                </>
+              ) : view.canReview ? (
+                <>
+                  {' '}
+                  <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
+                    <span className="num">{formatNumber(queued)}</span> سطر در صف تأیید
+                  </Link>{' '}
+                  است.
+                </>
+              ) : null
+            ) : null}
           </Alert>
         )}
-        <CountTiles counts={counts} committed={committed} />
+        <CountTiles counts={counts} rows={rows} state={view.kind === 'preview' ? 'preview' : reverted ? 'reverted' : 'committed'} partner={partner !== null} />
         {totals ? (
           totals.agree === false ? (
             <Alert tone="warning">
@@ -424,7 +491,7 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
             <p className="ad-commit__note">«ثبت» همین حکم‌ها را دوباره می‌سنجد؛ اگر در این فاصله سفارشی عوض شده باشد، پیش‌نمایش تازه می‌بینی.</p>
           </div>
         ) : null}
-        <Groups gate={gate} rows={rows} committed={committed} money={money} reverted={reverted} />
+        <Groups gate={gate} rows={rows} view={view} partner={partner} />
       </div>
     </>
   );

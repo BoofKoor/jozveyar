@@ -52,6 +52,16 @@ const PARTNER_B = '22222222-2222-4222-8222-222222222222';
 
 const SUMMARY: PanelDueSummary = { overdue: 1, today: 3, tomorrow: 4, later: 2, overdueRange: null, laterRange: null };
 
+/**
+ * تحویل‌های پست بی کد زنده (۶٫۲)، به ترتیب روز تحویل، همان‌طور که ذخیره‌گاه می‌دهد: چهارشنبه ۸ مهر دو سفارش (پنجشنبه و جمعه روز کاری
+ * نیستند، پس دو روز کاری شنبه و یکشنبه است و دوشنبه هشدار)، یکشنبه ۱۲ مهر (هنوز نه: دو روز کاری‌اش دوشنبه و سه‌شنبه است).
+ */
+const UNTRACKED = [
+  { orderNumber: 10009, handedToPostAt: new Date('2026-09-30T14:30:00Z') },
+  { orderNumber: 10025, handedToPostAt: new Date('2026-09-30T15:00:00Z') },
+  { orderNumber: 10040, handedToPostAt: new Date('2026-10-04T12:00:00Z') },
+];
+
 /** یک فراخوانی ذخیره‌گاه ساختگی: نام، آرگومان‌ها جز محدوده، و محدوده (برش ۵٫۳) جدا، تا هر تست هر دو را بسنجد. */
 interface Call {
   method: string;
@@ -71,7 +81,13 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     };
   const store: PanelOrderStore = {
     dueSummary: record('dueSummary', SUMMARY),
-    alerts: record('alerts', { failedPdf: [10031], unreturned: [{ orderNumber: 10030, attempts: 2 }], unassigned: [10037] }),
+    alerts: record('alerts', {
+      failedPdf: [10031],
+      unreturned: [{ orderNumber: 10030, attempts: 2 }],
+      unassigned: [10037],
+      reviewRows: 5,
+      untracked: UNTRACKED,
+    }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
     stats: record('stats', { printing: 2, handed: 42, onTime: 41 }),
@@ -200,7 +216,13 @@ describe('پیشخوان', () => {
       tomorrowStart: new Date('2026-10-05T20:30:00Z'),
       dayAfterStart: new Date('2026-10-06T20:30:00Z'),
     });
-    const clock = { at: NOW, staleBefore: new Date(NOW.getTime() + 60 * MINUTE), unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE) };
+    // «کد رهگیری ندارد» فقط تحویل‌های ۴۵ روز اخیر (تصمیم ۸۲).
+    const clock = {
+      at: NOW,
+      staleBefore: new Date(NOW.getTime() + 60 * MINUTE),
+      unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE),
+      untrackedSince: new Date(NOW.getTime() - 45 * 24 * 60 * MINUTE),
+    };
     expect(find('alerts')).toEqual(clock);
     expect(find('list')).toEqual({ bucket: 'open', search: null, clock, limit: 5, offset: 0 });
     // «هفتهٔ گذشته» سطر آمار: هفت روز تا همین حالا، صریح.
@@ -208,6 +230,24 @@ describe('پیشخوان', () => {
     if (!result.ok) return;
     expect(result.value).toMatchObject({ open: 10, slaDays: 3, alerts: { failedPdf: [10031] }, stats: { printing: 2, handed: 42, onTime: 41 } });
     expect(result.value.tiles.map((t) => t.count)).toEqual([1, 3, 4, 2]);
+  });
+
+  it('«کد رهگیری ندارد» (۶٫۲): دو روز کاری پس از روز تحویل، با تعطیلی‌ها، روزبه‌روز؛ صف تأیید فقط با `shipments.review`', async () => {
+    const days = (value: { day: Date; orderNumbers: number[] }[]) => value.map((d) => [d.day.toISOString(), d.orderNumbers]);
+    const plain = await service().orders.dashboard(session());
+    // تحویل چهارشنبه ۸ مهر: شنبه و یکشنبه دو روز کاری‌اند، پس دوشنبه ۱۱:۲۰ هشدار؛ یکشنبه ۱۲ مهر هنوز نه.
+    expect(plain.ok && days(plain.value.untracked)).toEqual([['2026-09-29T20:30:00.000Z', [10009, 10025]]]);
+    // شنبه ۱۱ مهر تعطیل: دو روز کاری یکشنبه و دوشنبه می‌شود، پس هنوز هیچ.
+    const holiday = await service({
+      setting: async (key: string) => (key === 'calendar.holidays' ? [{ date: '1405/07/11', title: 'تعطیل' }] : undefined),
+    }).orders.dashboard(session());
+    expect(holiday.ok && holiday.value.untracked).toEqual([]);
+    // صف تأیید برای متصدی و مالک؛ کسی که `shipments.review` ندارد (چاپخانه) صفر می‌بیند، ولی «کد رهگیری ندارد» را همان.
+    expect(plain.ok && plain.value.alerts.reviewRows).toBe(0);
+    const staff = await service().orders.dashboard(session(['orders.read', 'shipments.review']));
+    expect(staff.ok && staff.value.alerts.reviewRows).toBe(5);
+    const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
+    expect(noor.ok && [noor.value.alerts.reviewRows, days(noor.value.untracked)]).toEqual([0, [['2026-09-29T20:30:00.000Z', [10009, 10025]]]]);
   });
 
   it('روز کاری تعهد: تنظیم خراب یا نبودنش یعنی پیش‌فرض ۲، و بلند در لاگ', async () => {

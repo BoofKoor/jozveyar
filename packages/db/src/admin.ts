@@ -56,10 +56,15 @@ export const ADMIN_PERMISSIONS = {
   'secrets.edit': 'کلیدهای سرویس‌ها',
   /** زبانهٔ «چاپخانه‌ها»: افزودن، ویرایش، پیش‌فرض و غیرفعال کردن (برش ۵٫۲): فقط مالک. */
   'partners.manage': 'چاپخانه‌ها',
-  /** زبانهٔ «ارسال»: بارگذاری فایل پست، پیش‌نمایش، «ثبت» و «دور بینداز» (برش ۶٫۱، ADR-046): مالک و متصدی؛ چاپخانه از ۶٫۲. */
+  /**
+   * زبانهٔ «ارسال»: بارگذاری فایل پست، پیش‌نمایش، «ثبت» و «دور بینداز» (برش ۶٫۱، ADR-046): مالک و متصدی؛ از ۶٫۲ کاربر چاپخانه
+   * هم، فقط فایل خودش و فقط برای سفارش‌های چاپخانهٔ خودش.
+   */
   'shipments.import': 'ورود فایل پست',
-  /** برگرداندن کل یک ورود فایل پست، با دلیل (برش ۶٫۱، ADR-045): فقط مالک. */
-  'shipments.revert': 'برگرداندن ورود فایل پست',
+  /** صف تأیید: «همین است»، «هیچ‌کدام» و دادن دستی کد رهگیری به سفارش (برش ۶٫۲، ADR-046): مالک و متصدی، نه چاپخانه. */
+  'shipments.review': 'صف تأیید فایل پست',
+  /** برگرداندن کل یک ورود فایل پست (۶٫۱) و کنار گذاشتن یک کد رهگیری (۶٫۲)، با دلیل (ADR-045): فقط مالک. */
+  'shipments.revert': 'برگرداندن ورود فایل پست و کنار گذاشتن کد رهگیری',
   'admins.manage': 'ادمین‌ها',
   'events.read': 'رویدادها',
 } as const;
@@ -70,9 +75,10 @@ const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
 
 /**
  * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز؛ متصدی سفارش، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه (۵٫۲)، مبلغ، دانلود، دیدن تعرفه، و
- * از ۶٫۱ ورود فایل پست.
+ * از ۶٫۱ ورود فایل پست و از ۶٫۲ صف تأیید.
  * «چاپخانه» (برش ۵٫۳، ADR-042) فقط دیدن، «شروع چاپ» و «تحویل پست شد»، و دانلود و «دوباره بساز» فایل‌ها، همه فقط روی سفارش‌هایی
- * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش.
+ * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش. از ۶٫۲ فایل پست
+ * خودش را هم وارد می‌کند، فقط برای همان سفارش‌ها؛ صف تأیید نه (تأیید کد به مشتری می‌فرستد، ADR-046).
  */
 export const ADMIN_ROLES = {
   owner: { nameFa: 'مالک', permissions: ALL_PERMISSIONS },
@@ -88,11 +94,12 @@ export const ADMIN_ROLES = {
       'files.download',
       'tariff.read',
       'shipments.import',
+      'shipments.review',
     ] as AdminPermission[],
   },
   print_partner: {
     nameFa: 'چاپخانه',
-    permissions: ['orders.read', 'orders.status', 'files.download'] as AdminPermission[],
+    permissions: ['orders.read', 'orders.status', 'files.download', 'shipments.import'] as AdminPermission[],
   },
 } as const satisfies Record<string, { nameFa: string; permissions: readonly AdminPermission[] }>;
 

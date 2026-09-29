@@ -262,6 +262,40 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         ],
       };
     }
+    case 'shipments.approve':
+    case 'shipments.assign': {
+      // «همین است» و دادن دستی (۶٫۲): کد کدام سطر کدام فایل به کدام سفارش نشست، و اگر «تحویل پست شد» هم کرد، از کجا.
+      const handed = detail.handed === true ? [`؛ ${statusOf(detail.from)} ← تحویل پست شد`] : [];
+      return {
+        badge: null,
+        text: [
+          'سطر ',
+          ltrOf(detail.rowNo),
+          ' فایل پست ',
+          { ltr: str(detail.filename) },
+          event.action === 'shipments.approve' ? ' با تأیید به سفارش ' : ' دستی به سفارش ',
+          ...orderRef(detail),
+          ' نشست',
+          ...handed,
+        ],
+      };
+    }
+    case 'shipments.dismiss':
+      return {
+        badge: null,
+        text: ['سطر ', ltrOf(detail.rowNo), ' فایل پست ', { ltr: str(detail.filename) }, ' کنار گذاشته شد («هیچ‌کدام»)'],
+      };
+    case 'shipments.void':
+      return {
+        badge: null,
+        text: [
+          'کد رهگیری سفارش ',
+          ...orderRef(detail),
+          ' کنار رفت',
+          ...(detail.reopened === true ? ['؛ سفارش به «در حال چاپ» برگشت'] : []),
+          ...(str(detail.reason) ? [`؛ ${str(detail.reason)}`] : []),
+        ],
+      };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -311,7 +345,8 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
 
 /**
  * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲،
- * ارسال ۶٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش».
+ * ارسال ۶٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک
+ * کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷).
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },

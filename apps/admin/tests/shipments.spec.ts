@@ -3,12 +3,12 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-import { POST_HEADERS, barcodeOf, parcel, totalRow } from '@jozveyar/db/postfile.fixtures';
+import { POST_HEADERS, barcodeOf, parcel } from '@jozveyar/db/postfile.fixtures';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { formatJalaliNumeric, formatJalaliWeekday, tehranDayStart } from '@jozveyar/text';
 
-import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, postFile, serverInvite, uploadPostFile as upload, watch } from './helpers';
 
 /**
  * ارسال در پنل، سرتاسری (برش ۶٫۱؛ طرح `docs/ui/mockups/admin.html`، ADR-045 و ADR-046): بارگذاری فایل پست (جدول HTML با پسوند
@@ -91,14 +91,6 @@ async function paidOrder(name: string, phone: string, printing = true, paidAt = 
   });
 }
 
-const escape = (cell: string) => cell.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\u00a0/g, '&nbsp;');
-
-/** جدول HTML با پسوند `.xls`، همان شکل فایل پست: سرستون، سطرها و «جمع کل»، با CRLF. */
-function postFile(rows: string[][], { total = true, headers = POST_HEADERS } = {}): Buffer {
-  const lines = [headers, ...rows, ...(total ? [totalRow(rows)] : [])].map((cells) => `<tr>${cells.map((c) => `<td>${escape(c)}</td>`).join('')}</tr>`);
-  return Buffer.from(`<table border="1">\r\n${lines.join('\r\n')}\r\n</table>\r\n`, 'utf8');
-}
-
 /** بسته‌ای که پست امروز گرفت. کد رهگیری یکتای همین اجرا. */
 const today = () => formatJalaliNumeric(new Date());
 const code = (n: number) => barcodeOf(RUN * 1000 + n);
@@ -107,14 +99,6 @@ const row = (n: number, barcode: string, nameG: string, grams = 820 + n * 10) =>
 
 const statusOf = async (o: Seeded) => (await sql<{ status: string }[]>`SELECT status::text FROM orders WHERE id = ${o.id}`)[0]!.status;
 const importStatus = async (id: string) => (await sql<{ status: string }[]>`SELECT status FROM shipment_imports WHERE id = ${id}`)[0]!.status;
-
-/** بارگذاری از زبانهٔ «ارسال»؛ برمی‌گرداند شناسهٔ ورود را، از نشانی صفحه‌اش. */
-async function upload(page: Page, name: string, body: Buffer): Promise<string> {
-  await page.goto(at('/shipments'));
-  await page.locator('input[type="file"][name="file"]').setInputFiles({ name, mimeType: 'application/vnd.ms-excel', buffer: body });
-  await page.waitForURL(/\/shipments\/[0-9a-f-]{36}/);
-  return /\/shipments\/([0-9a-f-]{36})/.exec(page.url())![1]!;
-}
 
 test.describe.serial('ارسال در پنل', () => {
   let ownerContext: BrowserContext;
@@ -176,7 +160,8 @@ test.describe.serial('ارسال در پنل', () => {
         row(2, code(2), `شریفی ${o.B.number}`),
         row(3, code(3), `محمدی ${o.C.number}`),
         row(4, code(4), 'طهماسبی 6103'),
-        row(5, code(5), 'احمدی'),
+        // بی شماره و بی نامزد: «پیدا نشد» (از ۶٫۲ سطر بی شماره‌ای که نامزد دارد صف تأیید است؛ `review.spec.ts`).
+        row(5, code(5), 'ناشناس'),
       ]),
     );
     firstId = id;
@@ -275,7 +260,7 @@ test.describe.serial('ارسال در پنل', () => {
         row(2, code(2), `شریفی ${o.B.number}`),
         row(3, code(3), `محمدی ${o.C.number}`),
         row(4, code(4), 'طهماسبی 6103'),
-        row(5, code(5), 'احمدی'),
+        row(5, code(5), 'ناشناس'),
       ]),
     );
     expect(again).toBe(firstId);
@@ -340,7 +325,7 @@ test.describe.serial('ارسال در پنل', () => {
     await page.goto(at(`/orders/${o.B.number}`));
     const side = page.locator('.ad-status');
     await expect(side.getByRole('link', { name: 'برگرداندن به «در حال چاپ»' })).toHaveCount(0);
-    await expect(side).toContainText('با کد رهگیری به «در حال چاپ» برنمی‌گردد؛ اگر اشتباه است، اول ورود');
+    await expect(side).toContainText('با کد رهگیری به «در حال چاپ» برنمی‌گردد؛ اگر کد اشتباه است، از کارت «بستهٔ پستی» کنارش بگذار');
     await expect(page.locator('section[aria-labelledby="t-parcel"] [data-voided]')).toContainText('کنار رفت');
 
     // فهرست ورودها: برگشته با شمار کدهایی که کنار رفت.

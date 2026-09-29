@@ -17,8 +17,9 @@ export const metadata: Metadata = { title: 'برگرداندن ورود فایل
 
 /**
  * برگرداندن یک ورود (طرح پنل `m-ship-revert`، ADR-045): فقط مالک (`shipments.revert`)، با دلیل و بی کد تازه. پیش از دکمه می‌گوید چه
- * می‌شود: کدها کنار می‌روند نه پاک، سفارش‌هایی که همین ورود «تحویل پست شد» کرد به «در حال چاپ» برمی‌گردند (اگر کد زندهٔ دیگری
- * ندارند)، و فایل برای سابقه می‌ماند و دوباره واردشدنی است.
+ * می‌شود: کدها کنار می‌روند نه پاک (از ۶٫۲ کد تأیید و دستی هم)، سفارش‌هایی که کدی از همین ورود «تحویل پست شد»شان کرد به «در حال
+ * چاپ» برمی‌گردند (اگر کد زندهٔ دیگری ندارند)، سطرهای صف تأیید این فایل بیرون می‌روند (تصمیم ۷۹)، و فایل برای سابقه می‌ماند و
+ * دوباره واردشدنی است.
  */
 export default async function RevertImportPage({ params }: { params: Promise<{ gate: string; id: string }> }) {
   const { gate, id } = await params;
@@ -34,8 +35,9 @@ export default async function RevertImportPage({ params }: { params: Promise<{ g
   const rows = committedRows(view.committed);
   const live = view.committed.shipments.filter((shipment) => shipment.voidedAt === null).length;
   const handed = [
-    ...new Set(rows.filter((row) => row.shipment?.handedOrder && row.shipment.voidedAt === null && row.order).map((row) => row.order!.orderNumber)),
+    ...new Set(view.committed.shipments.filter((shipment) => shipment.voidedAt === null && shipment.handedOrder).map((shipment) => shipment.orderNumber)),
   ].sort((a, b) => a - b);
+  const queued = rows.filter((row) => row.queued).length;
 
   return (
     <>
@@ -43,7 +45,7 @@ export default async function RevertImportPage({ params }: { params: Promise<{ g
         <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
         <bdi>{view.import.filename}</bdi>
       </Link>
-      <section className="jy-card" style={{ maxWidth: '36rem' }} aria-labelledby="t-revert">
+      <section className="jy-card ad-narrow" aria-labelledby="t-revert">
         <h1 id="t-revert" className="jy-card__title">
           برگرداندن <bdi>{view.import.filename}</bdi>
         </h1>
@@ -67,6 +69,14 @@ export default async function RevertImportPage({ params }: { params: Promise<{ g
               )}
             </span>
           </li>
+          {queued > 0 ? (
+            <li>
+              <span className="ad-changes__k">صف تأیید</span>
+              <span>
+                <span className="num">{formatNumber(queued)}</span> سطر این فایل از صف بیرون می‌رود
+              </span>
+            </li>
+          ) : null}
           <li>
             <span className="ad-changes__k">فایل</span>
             <span>برای سابقه می‌ماند و دوباره واردشدنی است</span>

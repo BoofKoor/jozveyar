@@ -1481,6 +1481,55 @@
       padding-inline: 16px;
     }
   }
+  /* «به سفارشی بده» و «بررسی» زیر دلیل سطر (۶٫۲، طرح `m-ship-done`): دکمهٔ متنی هم‌تراز متن، با همان هدف لمسی */
+  .ad-prow__act .jy-btn {
+    margin-block: -6px;
+    margin-inline-start: -12px;
+  }
+  /* صف تأیید (۶٫۲، طرح `m-ship-review`) */
+  .ad-rv__file {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 14px;
+    margin-block-start: 4px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-rv .jy-tile__note b {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .ad-rv__no {
+    max-width: 12rem;
+  }
+  /* «سفارش دیگر» و کارت سفارش دادن دستی: کاشی بی رادیو، پس بی جای رادیو و بی دست‌نما */
+  .ad-rv .jy-tile.ad-rv__other,
+  .ad-rv .jy-tile.ad-rv__pick {
+    padding-inline-start: 16px;
+    cursor: default;
+  }
+  .ad-rv .jy-tile.ad-rv__other:hover,
+  .ad-rv .jy-tile.ad-rv__pick:hover {
+    border-color: var(--color-green-200);
+  }
+  .ad-rv__otherrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-block-start: 6px;
+  }
+  .ad-rv__otherrow .jy-input {
+    flex: 1 1 8rem;
+  }
+  /* نامزدی که «همین است»ش بسته است: رادیوی خاموش، بی دست‌نما */
+  .ad-rv .jy-tile:has(.jy-radio:disabled) {
+    cursor: not-allowed;
+  }
+  .ad-rv .jy-tile:has(.jy-radio:disabled):hover {
+    border-color: var(--color-green-200);
+  }
   /* بستهٔ پستی در جزئیات سفارش */
   .ad-parcel {
     display: flex;

@@ -12,8 +12,9 @@
   هم‌زمان در پنل پشت قفل می‌ماند و بعد با تریگر `orders_files_deleted` رد می‌شود. پاک کردن بایت‌ها تکرارپذیر است: کارگری که
   وسط کار بمیرد، بار بعد همان را از نو پاک می‌کند.
 - فایل پست (برش ۶٫۱، ADR-045)، با همان N و همان دور: N روز پس از ورود، بایت خام و جدول‌ها پاک می‌شوند، پیش‌نویسی که ثبت نشد
-  «دور انداخته» می‌شود (بی کننده)، و متن سطرهایی که مرسولهٔ ما نشدند (نام و مقصد مشتری‌های دیگر چاپخانه) هم. سطرهای سفارش‌های
-  ما، حکم‌ها و مرسوله‌ها می‌مانند؛ تریگرهای 0022 جز همین پاک کردن را نمی‌گذارند.
+  «دور انداخته» می‌شود (بی کننده)، و متن سطرهایی که مرسولهٔ ما نشدند (نام و مقصد مشتری‌های دیگر چاپخانه) هم، از ۶٫۲ با سطرهایی
+  که «هیچ‌کدام» خوردند (تصمیم ۸۸). سطری که کدی گرفت، حتی کنارگذاشته یا دستی، و سطر منتظر صف تأیید، حکم‌ها و مرسوله‌ها می‌مانند؛
+  تریگرهای 0022 و 0024 جز همین پاک کردن را نمی‌گذارند.
 """
 
 from __future__ import annotations
@@ -66,12 +67,14 @@ PURGE_IMPORTS_SQL = """
 UPDATE shipment_imports SET raw = NULL, tables = NULL, purged_at = now()
  WHERE purged_at IS NULL AND status NOT IN ('reading', 'read') AND created_at <= now() - make_interval(days => %(days)s)
 """
-# متن سطرهایی که مرسولهٔ ما نشدند؛ شماره، بارکد، اعداد و حکم می‌مانند.
+# متن سطرهایی که مرسولهٔ ما نشدند؛ شماره، بارکد، اعداد و حکم می‌مانند. از ۶٫۲ (تصمیم ۸۸) سطری هم که «هیچ‌کدام» خورد؛ و سطری که
+# کدی گرفت، حتی کنارگذاشته یا دستی، هرگز. همان قاعدهٔ تریگر `shipment_import_rows_frozen` (0024)، تا یک سطر آن را نشکند و همه برنگردد.
 PURGE_ROWS_SQL = """
 UPDATE shipment_import_rows r SET cells = NULL, name_g = NULL, destination = NULL
   FROM shipment_imports i
  WHERE i.id = r.import_id AND i.created_at <= now() - make_interval(days => %(days)s)
-   AND r.verdict IN ('unmatched', 'invalid', 'inactive', 'total')
+   AND (r.verdict IN ('unmatched', 'invalid', 'inactive', 'total') OR r.dismissed_at IS NOT NULL)
+   AND NOT EXISTS (SELECT 1 FROM shipments s WHERE s.import_id = r.import_id AND s.row_no = r.row_no)
    AND (r.cells IS NOT NULL OR r.name_g IS NOT NULL OR r.destination IS NOT NULL)
 """
 

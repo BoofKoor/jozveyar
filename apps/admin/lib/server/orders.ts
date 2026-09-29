@@ -30,6 +30,8 @@ import {
   PAYMENT_ATTEMPT_TTL_MS,
   PREPARE_ORDER_JOB,
   PREPARE_TICKET_JOB,
+  TRACKING_ALERT_DAYS,
+  TRACKING_GRACE_WORKDAYS,
   isPaidStatus,
   readSetting,
   type AdminEventInput,
@@ -46,6 +48,7 @@ import {
   type PanelSearch,
 } from '@jozveyar/db';
 import type { StorageDriver } from '@jozveyar/storage';
+import { postHandoffDue, tehranDayStart } from '@jozveyar/text';
 import { checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
 
 import {
@@ -95,10 +98,23 @@ export interface PanelOrdersDeps {
   log?: (message: string, error?: unknown) => void;
 }
 
+/** سفارش‌هایی که یک روز «تحویل پست شد» شدند و هنوز کد رهگیری ندارند (برش ۶٫۲، ADR-047). */
+export interface UntrackedDay {
+  /** آغاز روز تحویل پست به وقت تهران. */
+  day: Date;
+  orderNumbers: number[];
+}
+
 export interface DashboardView {
   bounds: DayBounds;
   tiles: DueTile[];
+  /** `reviewRows` فقط با `shipments.review` (مالک و متصدی)؛ بقیه ۰. */
   alerts: PanelAlerts;
+  /**
+   * «کد رهگیری ندارد» (تصمیم ۸۲): تحویل‌هایی که دو روز کاری از روزشان گذشته و هنوز کد زنده ندارند، روزبه‌روز، قدیمی‌ترین اول؛
+   * چاپخانه فقط سفارش‌های خودش (محدوده در خود کوئری).
+   */
+  untracked: UntrackedDay[];
   /** سفارش‌های باز (پرداخت‌شده و هنوز نه به پست) و چند تای اولشان به ترتیب مهلت. */
   open: number;
   queue: PanelOrderLine[];
@@ -185,6 +201,23 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** شناسهٔ چاپخانه از فرم؛ خالی یا بدشکل null. */
 const partnerIdOf = (value: unknown) => (typeof value === 'string' && UUID.test(value) ? value : null);
 
+/**
+ * «کد رهگیری ندارد» (تصمیم ۸۲): از تحویل‌های پست بی کد زنده، آن‌هایی که `TRACKING_GRACE_WORKDAYS` روز کاری (با تعطیلی‌های
+ * `calendar.holidays`) از روز تحویلشان گذشته، روزبه‌روز؛ فایل پست تا همین دو روز کاری می‌رسد (سؤال ۶۰). تحویل چهارشنبه یعنی
+ * هشدار از دوشنبه، چون پنجشنبه و جمعه روز کاری نیستند.
+ */
+export function untrackedDays(untracked: PanelAlerts['untracked'], at: Date, holidays: ReadonlySet<string>): UntrackedDay[] {
+  const days: UntrackedDay[] = [];
+  for (const { orderNumber, handedToPostAt } of untracked) {
+    if (at.getTime() < postHandoffDue(handedToPostAt, TRACKING_GRACE_WORKDAYS, holidays).getTime()) continue;
+    const day = tehranDayStart(handedToPostAt);
+    const last = days.at(-1);
+    if (last && last.day.getTime() === day.getTime()) last.orderNumbers.push(orderNumber);
+    else days.push({ day, orderNumbers: [orderNumber] });
+  }
+  return days;
+}
+
 export function createPanelOrders(deps: PanelOrdersDeps) {
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((message, error) => console.error(message, error ?? ''));
@@ -194,6 +227,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     at,
     staleBefore: new Date(at.getTime() + FILE_MARGIN_MS),
     unreturnedBefore: new Date(at.getTime() - PAYMENT_ATTEMPT_TTL_MS),
+    untrackedSince: new Date(at.getTime() - TRACKING_ALERT_DAYS * 86_400_000),
   });
 
   return {
@@ -203,17 +237,19 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const at = now();
       const bounds = dayBounds(at);
       const clock = clockOf(at);
-      const [summary, alerts, queue, slaDays, stats] = await Promise.all([
+      const [summary, alerts, queue, slaDays, stats, holidays] = await Promise.all([
         store.dueSummary(scope, { at, tomorrowStart: bounds.tomorrowStart, dayAfterStart: bounds.dayAfterStart }),
         store.alerts(scope, clock),
         store.list(scope, { bucket: 'open', search: null, clock, limit: QUEUE_SIZE, offset: 0 }),
         readSetting((key) => store.setting(key), 'order.sla_days', log),
         store.stats(scope, { since: new Date(at.getTime() - STATS_WINDOW_MS), at }),
+        readSetting((key) => store.setting(key), 'calendar.holidays', log),
       ]);
       return ok({
         bounds,
         tiles: dueTiles(summary, bounds),
-        alerts,
+        alerts: { ...alerts, reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0 },
+        untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
         queue: can(session, 'orders.money') ? queue : linesWithoutMoney(queue),
         slaDays,

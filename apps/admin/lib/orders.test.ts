@@ -890,6 +890,66 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
   });
 });
 
+describe('کد رهگیری در رویدادهای سفارش (۶٫۲)', () => {
+  it('کد با تأیید یا دستی کنار خود سطرش؛ رویدادهای ادمین همان کارها دوباره نوشته نمی‌شوند؛ کنار رفتن با دلیل و برگشت وضعیت', () => {
+    const at = (time: string) => tehran(`2026-10-05 ${time}`);
+    const parcel = (over: Partial<PanelOrderDetails['shipments'][number]>) =>
+      ({
+        id: 's',
+        barcode: '118800000000000000000101',
+        importId: 'i',
+        filename: 'FileName-1981.xls',
+        rowNo: 6,
+        weightGrams: 910,
+        fareRials: 1_295_000,
+        taxRials: 129_500,
+        postDay: at('00:00'),
+        handedOrder: true,
+        matchedBy: 'rule',
+        adminName: 'علی',
+        createdAt: at('11:05'),
+        voidedAt: null,
+        voidedByName: null,
+        voidReason: null,
+        ...over,
+      }) as PanelOrderDetails['shipments'][number];
+    const d = details({
+      order: { status: 'handed_to_post' },
+      rest: {
+        statusEvents: [
+          statusEvent({ id: 1, fromStatus: 'printing', toStatus: 'handed_to_post', at: at('11:05'), adminName: 'علی', note: { source: 'post_file', via: 'review' } }),
+          statusEvent({ id: 2, fromStatus: 'handed_to_post', toStatus: 'printing', at: at('12:00'), adminName: 'سارا', note: { source: 'shipment_void', reason: 'اشتباه' } }),
+          statusEvent({ id: 3, fromStatus: 'printing', toStatus: 'handed_to_post', at: at('12:30'), adminName: 'علی', note: { source: 'post_file', via: 'manual' } }),
+        ],
+        shipments: [
+          parcel({ id: 'a', matchedBy: 'review', voidedAt: at('12:00'), voidedByName: 'سارا', voidReason: 'اشتباه' }),
+          parcel({ id: 'b', matchedBy: 'manual', barcode: '118800000000000000000202', createdAt: at('12:30'), rowNo: 7 }),
+        ],
+        assignments: [],
+        events: [
+          { id: 7, at: at('11:05'), action: 'shipments.approve', detail: { orderNumber: 10027 }, adminName: 'علی' },
+          { id: 8, at: at('12:00'), action: 'shipments.void', detail: { orderNumber: 10027, reason: 'اشتباه' }, adminName: 'سارا' },
+          { id: 9, at: at('12:30'), action: 'shipments.assign', detail: { orderNumber: 10027 }, adminName: 'علی' },
+        ],
+      },
+    });
+    expect(orderTimeline(d).map((e) => [text(e.text), e.who])).toEqual([
+      ['در حال چاپ ← تحویل پست شد', 'علی، فایل پست'],
+      ['کد رهگیری 118800000000000000000101 از FileName-1981.xls، با تأیید', 'علی'],
+      ['برگرداندن: تحویل پست شد ← در حال چاپ؛ اشتباه', 'سارا'],
+      ['کد رهگیری 118800000000000000000101 کنار رفت؛ اشتباه', 'سارا'],
+      ['در حال چاپ ← تحویل پست شد', 'علی، فایل پست'],
+      ['کد رهگیری 118800000000000000000202 از FileName-1981.xls، دستی', 'علی'],
+    ]);
+    // بی مبلغ: کرایه و مالیات پست هر بسته هم صفر (تصمیم ۸۱).
+    const hidden = withoutMoney(d);
+    expect(hidden.shipments.map((s) => [s.fareRials, s.taxRials, s.weightGrams])).toEqual([
+      [0, 0, 910],
+      [0, 0, 910],
+    ]);
+  });
+});
+
 /* ───────────────────────── بی مبلغ، و از چشم چاپخانه (۵٫۳) ───────────────────────── */
 
 describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {

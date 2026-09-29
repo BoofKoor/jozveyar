@@ -359,6 +359,31 @@ describe('رویدادها', () => {
     ]);
   });
 
+  it('صف تأیید و کنار گذاشتن یک کد (۶٫۲): «همین است»، دستی، «هیچ‌کدام» و کنار رفتن، با سطر و فایل و سفارش', () => {
+    const lines = eventLines([
+      event('shipments.approve', {
+        targetType: 'order',
+        detail: { orderNumber: 10014, importId: 'i', filename: 'FileName-1981.xls', rowNo: 6, from: 'printing', handed: true, score: 7 },
+      }),
+      event('shipments.approve', {
+        targetType: 'order',
+        detail: { orderNumber: 10019, filename: 'FileName-1981.xls', rowNo: 12, from: 'paid', handed: true },
+      }),
+      event('shipments.assign', { targetType: 'order', detail: { orderNumber: 10005, filename: 'FileName-1981.xls', rowNo: 13, from: 'handed_to_post', handed: false } }),
+      event('shipments.dismiss', { targetType: 'shipment_import', detail: { filename: 'FileName-1977.xls', rowNo: 3, orderNumber: 10025 } }),
+      event('shipments.void', { targetType: 'order', detail: { orderNumber: 10014, reason: 'کد مال سفارش دیگری بود', reopened: true } }),
+      event('shipments.void', { targetType: 'order', detail: { orderNumber: 10006, reason: 'بستهٔ دوم نبود', reopened: false } }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['سطر ', { ltr: '6' }, ' فایل پست ', { ltr: 'FileName-1981.xls' }, ' با تأیید به سفارش ', { ltr: '10014' }, ' نشست', '؛ در حال چاپ ← تحویل پست شد'],
+      ['سطر ', { ltr: '12' }, ' فایل پست ', { ltr: 'FileName-1981.xls' }, ' با تأیید به سفارش ', { ltr: '10019' }, ' نشست', '؛ در صف چاپ ← تحویل پست شد'],
+      ['سطر ', { ltr: '13' }, ' فایل پست ', { ltr: 'FileName-1981.xls' }, ' دستی به سفارش ', { ltr: '10005' }, ' نشست'],
+      ['سطر ', { ltr: '3' }, ' فایل پست ', { ltr: 'FileName-1977.xls' }, ' کنار گذاشته شد («هیچ‌کدام»)'],
+      ['کد رهگیری سفارش ', { ltr: '10014' }, ' کنار رفت', '؛ سفارش به «در حال چاپ» برگشت', '؛ کد مال سفارش دیگری بود'],
+      ['کد رهگیری سفارش ', { ltr: '10006' }, ' کنار رفت', '؛ بستهٔ دوم نبود'],
+    ]);
+  });
+
   it('چاپخانه‌ها (۵٫۲): افزودن، ویرایش با قبل و بعد، پیش‌فرض، غیرفعال و فعال؛ جابه‌جایی سفارش زیر «سفارش» با نام همان روز و دلیل', () => {
     const partner = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'partner', detail });
     const lines = eventLines([

@@ -198,3 +198,60 @@ def test_post_files_are_purged_after_the_retention_days_and_only_then(conn, admi
     # دور دوم چیزی از این‌ها برای پاک کردن ندارد.
     retention.purge_post_files(conn, 30)
     assert state(conn, committed)[0] == "committed"
+
+
+def handed_order(conn) -> str:
+    """سفارش «تحویل پست شد» که کد دستی می‌گیرد، مثل `order` تست نگهداری، بی فایل."""
+    version = conn.execute("SELECT version FROM price_lists WHERE is_active").fetchone()[0]
+    user_id = conn.execute(
+        """INSERT INTO users (mobile) VALUES ('09120000045')
+           ON CONFLICT (mobile) DO UPDATE SET last_login_at = now() RETURNING id"""
+    ).fetchone()[0]
+    order_id = conn.execute(
+        """INSERT INTO orders (checkout_key, user_id, price_list_version, price_breakdown, subtotal_rials, shipping_rials,
+                               total_rials, est_weight_grams, sla_days, shipping_method_id, shipping_zone_id, province_id,
+                               recipient_name, recipient_phone, address_text)
+           VALUES (gen_random_uuid(), %s, %s, '{}', 1000, 500, 1500, 300, 2, 'post', 'tehran', 8,
+                   'سارا احمدی', '09120000045', 'تهران، خیابان ولیعصر')
+        RETURNING id::text""",
+        (user_id, version),
+    ).fetchone()[0]
+    conn.execute("UPDATE orders SET status = 'paid', paid_at = now(), post_handoff_due_at = now() + interval '2 days' WHERE id = %s", (order_id,))
+    conn.execute("UPDATE orders SET status = 'printing' WHERE id = %s", (order_id,))
+    conn.execute("UPDATE orders SET status = 'handed_to_post', handed_to_post_at = now() WHERE id = %s", (order_id,))
+    return order_id
+
+
+def test_row_text_goes_for_dismissed_and_never_shipped_rows_only(conn, admin):
+    """۶٫۲ (تصمیم ۸۸): متن سطر «هیچ‌کدام» و «پیدا نشد»ی که کدی نگرفت پس از N روز می‌رود؛ سطر منتظر صف و سطری که کد دستی گرفت نه."""
+    imp = new_import(conn, admin, unique(b"<table><tr><td>6.2</td></tr></table>"), days_ago=31, status="read")
+    conn.execute("UPDATE shipment_imports SET status = 'committed', committed_at = now(), committed_by = %s WHERE id = %s", (admin, imp))
+    suffix = uuid.uuid4().int % 10**12
+    barcode = lambda n: f"1188{suffix:012d}{n:08d}"  # noqa: E731 — یکتا میان اجراها، ۲۴ رقم
+    for row_no, verdict in ((1, "review"), (2, "review"), (3, "unmatched"), (4, "unmatched")):
+        conn.execute(
+            """INSERT INTO shipment_import_rows (import_id, row_no, cells, barcode, name_g, destination, weight_grams, fare_rials,
+                                                 tax_rials, post_day, post_status, verdict, reason)
+               VALUES (%s, %s, '["a"]', %s, 'طهماسبی', 'مشهد', 820, 1295000, 129500, now(), 'فعال', %s, 'no_number')""",
+            (imp, row_no, barcode(row_no), verdict),
+        )
+    conn.execute("UPDATE shipment_import_rows SET dismissed_at = now(), dismissed_by = %s WHERE import_id = %s AND row_no = 1", (admin, imp))
+    order_id = handed_order(conn)
+    conn.execute(
+        """INSERT INTO shipments (order_id, barcode, import_id, row_no, weight_grams, fare_rials, tax_rials, post_day, matched_by, admin_user_id)
+           SELECT %s, barcode, import_id, row_no, weight_grams, fare_rials, tax_rials, post_day, 'manual', %s
+             FROM shipment_import_rows WHERE import_id = %s AND row_no = 3""",
+        (order_id, admin, imp),
+    )
+    conn.commit()
+
+    retention.purge_post_files(conn, 30)
+    rows = conn.execute(
+        "SELECT row_no, cells, name_g, destination FROM shipment_import_rows WHERE import_id = %s ORDER BY row_no", (imp,)
+    ).fetchall()
+    assert rows == [
+        (1, None, None, None),
+        (2, ["a"], "طهماسبی", "مشهد"),
+        (3, ["a"], "طهماسبی", "مشهد"),
+        (4, None, None, None),
+    ]

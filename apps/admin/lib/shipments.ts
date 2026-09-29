@@ -8,19 +8,27 @@
  *   داده می‌شوند (قاعدهٔ ۳).
  */
 
-import type {
-  CommittedImport,
-  ImportShipment,
-  PanelShipment,
-  PostColumn,
-  ShipmentElsewhere,
-  ShipmentImportLine,
-  ShipmentImportStatus,
-  ShipmentImportView,
-  ShipmentOrderFacts,
-  ShipmentPreview,
-  StoredVerdict,
-  VerdictReason,
+import {
+  CRITERION_ORDER,
+  handedAtOf,
+  type CommittedImport,
+  type CriterionKey,
+  type Criteria,
+  type ImportShipment,
+  type PanelShipment,
+  type PostColumn,
+  type ReviewBlock,
+  type ReviewCandidates,
+  type ReviewRow,
+  type ShipmentElsewhere,
+  type ShipmentImportLine,
+  type ShipmentImportPage,
+  type ShipmentImportStatus,
+  type ShipmentImportView,
+  type ShipmentOrderFacts,
+  type ShipmentPreview,
+  type StoredVerdict,
+  type VerdictReason,
 } from '@jozveyar/db';
 import { formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans, recipientSurname, weightParts } from '@jozveyar/text';
 
@@ -30,7 +38,7 @@ import type { Seg } from './orders';
 const num = (value: number): Seg => ({ num: formatNumber(value) });
 
 /** تکه‌ها با جداکننده؛ `last` پیش از آخری: «10013، 10017 و 10021». */
-function joined(parts: Seg[][], separator = ' · ', last = separator): Seg[] {
+export function joined(parts: Seg[][], separator = ' · ', last = separator): Seg[] {
   return parts.flatMap((part, i) => (i === 0 ? part : [i === parts.length - 1 ? last : separator, ...part]));
 }
 
@@ -84,10 +92,11 @@ export function importMeta(line: ShipmentImportLine, now: Date): Seg[] {
 }
 
 /**
- * سطر سوم هر ورود ثبت‌شده (طرح): «15 بسته: 9 کد رهگیری · 4 در صف تأیید · 1 پیدا نشد · 1 تکراری»؛ برگشته «6 بسته: 6 کد رهگیری
- * کنار رفت». ورود ثبت‌نشده جمله‌ای دارد که کار بعدی را می‌گوید.
+ * سطر سوم هر ورود ثبت‌شده (طرح): «15 بسته: 9 کد رهگیری · 4 در صف تأیید · 1 پیدا نشد · 1 تکراری»، با حال امروز هر سطر (۶٫۲): کد
+ * زنده، صف، «هیچ‌کدام»، و «پیدا نشد»ی که هنوز کدی نگرفت؛ هر سطر در یکی. برای چاپخانه صف «در انتظار بررسی جزوه‌یار» است (طرح).
+ * برگشته «6 بسته: 6 کد رهگیری کنار رفت». ورود ثبت‌نشده جمله‌ای دارد که کار بعدی را می‌گوید.
  */
-export function importCounts(line: ShipmentImportLine): Seg[] {
+export function importCounts(line: ShipmentImportLine, { partner = false }: { partner?: boolean } = {}): Seg[] {
   if (line.status === 'reading') return ['در حال خواندن فایل…'];
   if (line.status === 'read') return ['پیش‌نمایش؛ هنوز ثبت نشده.'];
   if (line.status === 'unreadable') return ['خوانده نشد؛ چیزی ثبت نشد.'];
@@ -95,15 +104,16 @@ export function importCounts(line: ShipmentImportLine): Seg[] {
   const counts = line.counts;
   const parcels = (['matched', 'review', 'unmatched', 'duplicate', 'invalid', 'inactive'] as const).reduce((sum, v) => sum + (counts[v] ?? 0), 0);
   if (line.status === 'reverted') return [num(parcels), ' بسته: ', num(line.voidedShipments), ' کد رهگیری کنار رفت'];
-  const parts: Seg[][] = [[num(line.liveShipments + line.voidedShipments), ' کد رهگیری']];
-  const more: [StoredVerdict, string][] = [
-    ['review', ' در صف تأیید'],
-    ['unmatched', ' پیدا نشد'],
-    ['duplicate', ' تکراری'],
-    ['invalid', ' خوانده نشد'],
-    ['inactive', ' غیرفعال در پست'],
+  const parts: Seg[][] = [[num(line.liveShipments), ' کد رهگیری']];
+  const more: [number, string][] = [
+    [line.queuedRows, partner ? ' در انتظار بررسی جزوه‌یار' : ' در صف تأیید'],
+    [line.dismissedRows, ' کنار گذاشته'],
+    [line.unmatchedRows, ' پیدا نشد'],
+    [counts.duplicate ?? 0, ' تکراری'],
+    [counts.invalid ?? 0, ' خوانده نشد'],
+    [counts.inactive ?? 0, ' غیرفعال در پست'],
   ];
-  for (const [verdict, label] of more) if (counts[verdict]) parts.push([num(counts[verdict]!), label]);
+  for (const [n, label] of more) if (n > 0) parts.push([num(n), label]);
   return [num(parcels), ' بسته: ', ...joined(parts)];
 }
 
@@ -163,10 +173,22 @@ export interface ImportRowView {
   verdict: Exclude<StoredVerdict, 'total'>;
   reason: VerdictReason | null;
   order: ShipmentOrderFacts | null;
-  /** پیش‌نمایش: با «ثبت» «تحویل پست شد» می‌شود؛ ثبت‌شده: همین ورود «تحویل پست شد» کرد. */
+  /** پیش‌نمایش: با «ثبت» «تحویل پست شد» می‌شود؛ ثبت‌شده: «ثبت» همین ورود «تحویل پست شد» کرد. */
   handOver: boolean;
-  /** مرسولهٔ همین سطر (ثبت‌شده). */
+  /** کد زندهٔ همین سطر (ثبت‌شده): قطعی، با تأیید، یا دستی (۶٫۲). */
   shipment: ImportShipment | null;
+  /** سفارش کد زنده، که با تأیید یا دستی می‌تواند جز سفارش حکم باشد. */
+  shipmentOrder: ShipmentOrderFacts | null;
+  /** کدهای کنارگذاشتهٔ همین سطر، به ترتیب ساختن (۶٫۲). */
+  voided: ImportShipment[];
+  /** یکی از کدهای همین سطر، زنده یا کنارگذاشته، سفارشی را «تحویل پست شد» کرد. */
+  handedAny: boolean;
+  /** ثبت‌شده: همین حالا در صف تأیید است (۶٫۲). */
+  queued: boolean;
+  /** «هیچ‌کدام»: کی و با چه کسی (۶٫۲). */
+  dismissed: { at: Date; byName: string | null } | null;
+  /** نامزدهای سطر صف (۶٫۲)؛ null اگر در صف نیست یا نشست نامزدها را نمی‌بیند (چاپخانه). */
+  candidates: ReviewCandidates | null;
   /** کرایه + مالیات با «هزینه کل» نمی‌خواند (فقط پیش‌نمایش). */
   costMismatch: boolean;
   /** «تکراری در همین فایل»: اولین سطر همین کد. */
@@ -205,6 +227,12 @@ export function previewRows(preview: ShipmentPreview): ImportRowView[] {
       order: j.orderId ? (orders.get(j.orderId) ?? null) : null,
       handOver: j.handOver,
       shipment: null,
+      shipmentOrder: null,
+      voided: [],
+      handedAny: false,
+      queued: false,
+      dismissed: null,
+      candidates: preview.candidates[row.rowNo] ?? null,
       costMismatch: row.costMismatch,
       firstRowNo: j.reason === 'same_file' && row.barcode ? (first.get(row.barcode) ?? null) : null,
       elsewhere: row.barcode && (j.reason === 'already' || j.reason === 'barcode_elsewhere') ? (live.get(row.barcode) ?? null) : null,
@@ -213,16 +241,16 @@ export function previewRows(preview: ShipmentPreview): ImportRowView[] {
   });
 }
 
-/** سطرهای ورود ثبت‌شده یا برگشته، بی ردیف «جمع کل». */
+/** سطرهای ورود ثبت‌شده یا برگشته، بی ردیف «جمع کل»، هر کدام با حال امروزش (۶٫۲): کد زنده، کدهای کنارگذاشته، صف، «هیچ‌کدام». */
 export function committedRows(committed: CommittedImport): ImportRowView[] {
   const orders = new Map(committed.orders.map((order) => [order.id, order]));
-  const made = new Map(committed.shipments.map((s) => [s.rowNo, s]));
   const first = new Map<string, number>();
   const rows: ImportRowView[] = [];
   for (const row of committed.rows) {
     if (row.verdict === 'total') continue;
     if (row.barcode && !first.has(row.barcode)) first.set(row.barcode, row.rowNo);
-    const shipment = made.get(row.rowNo) ?? null;
+    const made = committed.shipments.filter((s) => s.rowNo === row.rowNo);
+    const shipment = made.find((s) => s.voidedAt === null) ?? null;
     const reason = (row.reason ?? null) as VerdictReason | null;
     const purged = row.cells === null && row.nameG === null && row.destination === null;
     rows.push({
@@ -241,8 +269,15 @@ export function committedRows(committed: CommittedImport): ImportRowView[] {
       verdict: row.verdict as ImportRowView['verdict'],
       reason,
       order: row.orderId ? (orders.get(row.orderId) ?? null) : null,
-      handOver: shipment?.handedOrder ?? false,
+      // «ثبت» فقط کد قطعی می‌سازد؛ کد تأیید و دستی کار بعد از «ثبت» است.
+      handOver: made.some((s) => s.matchedBy === 'rule' && s.handedOrder),
       shipment,
+      shipmentOrder: shipment ? (orders.get(shipment.orderId) ?? null) : null,
+      voided: made.filter((s) => s.voidedAt !== null),
+      handedAny: made.some((s) => s.handedOrder),
+      queued: row.queued,
+      dismissed: row.dismissedAt ? { at: row.dismissedAt, byName: row.dismissedByName } : null,
+      candidates: committed.candidates[row.rowNo] ?? null,
       costMismatch: false,
       firstRowNo: reason === 'same_file' && row.barcode ? (first.get(row.barcode) ?? null) : null,
       elsewhere:
@@ -279,9 +314,9 @@ const orderRef = (order: ShipmentOrderFacts): Seg[] => [
 
 /**
  * چرا این حکم، به زبان ادمین (طرح): برای صف تأیید، پیدا نشد، تکراری، خوانده نشد و غیرفعال؛ و برای قطعی فقط اگر «تحویل پست شد»
- * هم می‌کند. `committed`: جمله‌های پس از «ثبت».
+ * هم می‌کند. `committed`: جمله‌های پس از «ثبت». `partner` (۶٫۲، طرح `m-ship-done` از چشم چاپخانه): صف را جزوه‌یار بررسی می‌کند.
  */
-export function whyText(row: ImportRowView, { committed }: { committed: boolean }): Seg[] | null {
+export function whyText(row: ImportRowView, { committed, partner = false }: { committed: boolean; partner?: boolean }): Seg[] | null {
   const order = row.order;
   const number = row.orderNumber;
   switch (row.reason) {
@@ -290,8 +325,10 @@ export function whyText(row: ImportRowView, { committed }: { committed: boolean 
       return committed && row.postDay
         ? [`در حال چاپ ← تحویل پست شد، ${formatJalaliWeekday(row.postDay)}`]
         : ['«در حال چاپ» است؛ با «ثبت» «تحویل پست شد» می‌شود، با روز فایل.'];
-    case 'name_mismatch':
-      return order ? ['سفارش ', { num: String(order.orderNumber) }, ` مال «${order.recipientName}» است؛ نام نمی‌خواند.`] : ['نام نمی‌خواند.'];
+    case 'name_mismatch': {
+      const mine = partner ? [' اگر بستهٔ مشتری دیگر خودت است، جزوه‌یار کنارش می‌گذارد.'] : [];
+      return order ? ['سفارش ', { num: String(order.orderNumber) }, ` مال «${order.recipientName}» است؛ نام نمی‌خواند.`, ...mine] : ['نام نمی‌خواند.', ...mine];
+    }
     case 'destination_mismatch':
       return order
         ? [...orderRef(order), ` به ${order.cityName ?? order.provinceName} می‌رود و مقصد فایل «${row.destination}» است.`]
@@ -300,10 +337,10 @@ export function whyText(row: ImportRowView, { committed }: { committed: boolean 
       return order?.paidAt && row.postDay
         ? [`روز فایل (${formatJalaliWeekday(row.postDay)}) پیش از پرداخت `, ...orderRef(order), ` (${formatJalaliWeekday(order.paidAt)}) است.`]
         : ['روز فایل پیش از پرداخت سفارش است.'];
-    case 'queued':
-      return order
-        ? [...orderRef(order), ' هنوز «در صف چاپ» است؛ کد رهگیری با تأیید مالک یا متصدی می‌نشیند.']
-        : ['سفارش هنوز «در صف چاپ» است.'];
+    case 'queued': {
+      const then = partner ? '؛ جزوه‌یار بررسی می‌کند.' : '؛ تأیید، «شروع چاپ» و «تحویل پست شد» را با هم می‌زند.';
+      return order ? [...orderRef(order), ` هنوز «در صف چاپ» است${then}`] : ['سفارش هنوز «در صف چاپ» است.'];
+    }
     case 'cancelled':
       return order ? [...orderRef(order), ' لغو شده؛ کد رهگیری به سفارش لغوشده نمی‌نشیند.'] : ['سفارش لغو شده.'];
     case 'barcode_elsewhere':
@@ -313,6 +350,7 @@ export function whyText(row: ImportRowView, { committed }: { committed: boolean 
     case 'no_number':
       return ['«نام گ» شماره ندارد.'];
     case 'manual_code':
+      if (partner) return number !== null ? [{ num: String(number) }, ' شمارهٔ سفارش جزوه‌یار نیست؛ این بسته ثبت نمی‌شود.'] : ['شمارهٔ سفارش جزوه‌یار نیست.'];
       return number !== null
         ? [{ num: String(number) }, ' شمارهٔ سفارش سایت نیست (سفارش‌های سایت از ', { num: '10001' }, ')؛ شاید سفارش دستی.']
         : ['شمارهٔ سفارش سایت نیست.'];
@@ -366,6 +404,39 @@ export function countsOf(rows: readonly ImportRowView[]): RowCounts {
   return counts;
 }
 
+/**
+ * متن کاشی‌های قطعی، صف تأیید و پیدا نشد (طرح). شمار کاشی حکم «ثبت» است و عوض نمی‌شود؛ متن ورود ثبت‌شده حال امروز را می‌گوید (۶٫۲):
+ * درست پس از «ثبت» همان متن طرح، و بعد چند سطر صف هنوز منتظر است، چند کد قطعی کنار رفت، و چند «پیدا نشد» دستی به سفارشی داده
+ * شد. ورود برگشته: کدها کنار رفت و صف بسته است. چاپخانه صف را جزوه‌یار می‌بیند.
+ */
+export function tileTexts(
+  rows: readonly ImportRowView[],
+  { state, partner = false }: { state: 'preview' | 'committed' | 'reverted'; partner?: boolean },
+): Record<'ok' | 'review' | 'nf', Seg[]> {
+  const of = (verdict: ImportRowView['verdict'], test: (row: ImportRowView) => boolean = () => true) =>
+    rows.filter((row) => row.verdict === verdict && test(row)).length;
+  const review = of('review');
+  const waiting = of('review', (row) => row.queued);
+  const lost = of('matched', (row) => row.shipment === null);
+  const given = of('unmatched', (row) => row.shipment !== null);
+  const reviewText = partner ? 'جزوه‌یار تأیید یا کنار می‌گذارد' : 'تا تأیید مالک یا متصدی، بی کد';
+  const nfText = partner ? 'سفارش جزوه‌یار نیست؛ ثبت نمی‌شود' : 'سفارش ما نیست؛ ثبت نمی‌شود';
+  if (state === 'preview') return { ok: ['کد رهگیری، با «ثبت»'], review: [reviewText], nf: [nfText] };
+  if (state === 'reverted') {
+    return { ok: [of('matched') > 0 ? 'با برگرداندن کنار رفت' : 'کد رهگیری نشست'], review: [review > 0 ? 'ورود برگشت؛ بی کد' : reviewText], nf: [nfText] };
+  }
+  return {
+    ok: lost > 0 ? ['کد رهگیری نشست؛ ', num(lost), ' کنار رفت'] : ['کد رهگیری نشست'],
+    review:
+      waiting === review
+        ? [reviewText]
+        : waiting === 0
+          ? [partner ? 'جزوه‌یار بررسی کرد' : 'همه بررسی شد']
+          : [num(waiting), ` تا هنوز ${partner ? 'در انتظار بررسی جزوه‌یار' : 'منتظر تأیید'}`],
+    nf: given > 0 ? [num(given), partner ? ' را جزوه‌یار دستی به سفارشی داد' : ' دستی به سفارشی داده شد'] : [nfText],
+  };
+}
+
 export interface Totals {
   parcels: number;
   weightGrams: number;
@@ -373,16 +444,15 @@ export interface Totals {
   taxRials: number;
 }
 
-/** جمع سطرها، و «جمع کل» فایل اگر بود: «جمع کل فایل با جمع سطرها می‌خواند: 15 بسته، 20.2 کیلوگرم، کرایه … و مالیات … تومان.» */
-export function totalsText(sums: Totals, file: Omit<Totals, 'parcels'> | null): { agree: boolean | null; text: Seg[] } {
+/**
+ * جمع سطرها، و «جمع کل» فایل اگر بود: «جمع کل فایل با جمع سطرها می‌خواند: 15 بسته، 20.2 کیلوگرم، کرایه … و مالیات … تومان.» بی
+ * `money` (چاپخانه، تصمیم ۸۱) فقط بسته و وزن: «… 5 بسته، 5.8 کیلوگرم.»
+ */
+export function totalsText(sums: Totals, file: Omit<Totals, 'parcels'> | null, { money = true } = {}): { agree: boolean | null; text: Seg[] } {
   const line = (t: Totals | (Omit<Totals, 'parcels'> & { parcels?: number })): Seg[] => [
     ...(t.parcels !== undefined ? [num(t.parcels), ' بسته، '] : []),
     ...weightSegs(t.weightGrams),
-    '، کرایه ',
-    tomans(t.fareRials),
-    ' و مالیات ',
-    tomans(t.taxRials),
-    ' تومان',
+    ...(money ? ['، کرایه ', tomans(t.fareRials), ' و مالیات ', tomans(t.taxRials), ' تومان'] : []),
   ];
   if (!file) return { agree: null, text: ['فایل ردیف «جمع کل» ندارد. جمع سطرها: ', ...line(sums), '.'] };
   const agree = file.weightGrams === sums.weightGrams && file.fareRials === sums.fareRials && file.taxRials === sums.taxRials;
@@ -417,10 +487,212 @@ export function committedTotals(committed: CommittedImport): { sums: Totals; fil
   return { sums, file };
 }
 
+/* ───────────────────────── بی مبلغ (۶٫۲، تصمیم ۸۱) ───────────────────────── */
+
+/**
+ * صفحهٔ ورود بی کرایه، مالیات و خانه‌های خام فایل، برای نشستی که `orders.money` ندارد (چاپخانه): سرویس پیش از صفحه می‌کندش، پس
+ * صفحه‌ای که اشتباهاً کرایه بکشد هم عددی ندارد. جمع فایل فقط بسته و وزن می‌ماند.
+ */
+export function withoutFares(page: ShipmentImportPage): ShipmentImportPage {
+  if (page.kind === 'preview') {
+    const { sheet } = page.preview;
+    if (!sheet.ok) return page;
+    return {
+      ...page,
+      preview: {
+        ...page.preview,
+        sheet: {
+          ...sheet,
+          rows: sheet.rows.map((row) => ({ ...row, cells: [], fareRials: null, taxRials: null, totalRials: null, costMismatch: false })),
+          sums: { ...sheet.sums, fareRials: 0, taxRials: 0 },
+          fileTotal: sheet.fileTotal ? { ...sheet.fileTotal, cells: [], fareRials: 0, taxRials: 0 } : null,
+        },
+      },
+    };
+  }
+  if (page.kind === 'committed') {
+    return { ...page, committed: { ...page.committed, rows: page.committed.rows.map((row) => ({ ...row, cells: null, fareRials: null, taxRials: null })) } };
+  }
+  return page;
+}
+
+/** کارت صف یا دادن دستی بی کرایه و مالیات؛ همان `withoutFares`. */
+export const rowWithoutFares = (review: ReviewRow): ReviewRow => ({ ...review, row: { ...review.row, cells: null, fareRials: null, taxRials: null } });
+
+/* ───────────────────────── صف تأیید (۶٫۲) ───────────────────────── */
+
+/** آنچه ادمین از سفارش دید، در فرم: «printing.0» (وضعیت و شمار کد زنده)؛ سرور «همین است» را فقط از همین می‌کند. */
+export const seenText = (order: Pick<ShipmentOrderFacts, 'status' | 'liveShipments'>) => `${order.status}.${order.liveShipments}`;
+
+/** گزینهٔ نامزد در کارت صف: شناسهٔ سفارش و آنچه ادمین از آن دید، «<شناسه>.printing.0». */
+export const choiceText = (order: Pick<ShipmentOrderFacts, 'id' | 'status' | 'liveShipments'>) => `${order.id}.${seenText(order)}`;
+
+/** نام هر معیار کنار نامزد (طرح `m-ship-review`). */
+export const CRITERION_NAMES: Record<CriterionKey, string> = { number: 'شماره', surname: 'نام خانوادگی', city: 'شهر', weight: 'وزن', day: 'روز' };
+
+/**
+ * معیارهای یک نامزد کنارش (طرح): «می‌خواند: …» و «نمی‌خواند: …» به ترتیب `CRITERION_ORDER`؛ وزن با برآورد سفارش و روز با روز تحویل
+ * پستش، هر جا معنا دارد؛ نامعلوم نوشته نمی‌شود. شمارهٔ دیگر با نام خانوادگی که می‌خواند: «شماره؛ شاید اشتباه تایپی».
+ */
+export function criteriaParts(criteria: Criteria, order: Pick<ShipmentOrderFacts, 'estWeightGrams' | 'handedToPostAt'>): { yes: Seg[][]; no: Seg[][] } {
+  const yes: Seg[][] = [];
+  const no: Seg[][] = [];
+  for (const key of CRITERION_ORDER) {
+    const value = criteria[key];
+    if (value === null) continue;
+    const part: Seg[] = [CRITERION_NAMES[key]];
+    if (key === 'weight' && order.estWeightGrams > 0) part.push(' (برآورد ', ...weightSegs(order.estWeightGrams), ')');
+    if (key === 'day' && order.handedToPostAt) part.push(` (تحویل پست ${formatJalaliWeekday(order.handedToPostAt)})`);
+    if (key === 'number' && value === 'no' && criteria.surname === 'yes') part.push('؛ شاید اشتباه تایپی');
+    (value === 'yes' ? yes : no).push(part);
+  }
+  return { yes, no };
+}
+
+/** یادداشت نامزدی که «همین است»ش بسته است، کنار خودش. */
+export const BLOCK_NOTES: Record<ReviewBlock, string> = {
+  cancelled: 'لغو شده',
+  before_payment: 'بسته پیش از روز پرداختش به پست رسیده',
+  needs_partner: '«در صف چاپ» و بی چاپخانه: اول چاپخانه انتخاب شود',
+  needs_print: '«در صف چاپ» و بی فایل چاپ: اول فایل چاپ ساخته شود',
+  barcode_elsewhere: 'همین کد برای سفارش دیگری زنده است',
+};
+
+/** دکمهٔ اصلی وقتی هیچ نامزدی باز نیست (طرح: «اول لغو برگردد»). */
+export const BLOCK_BUTTONS: Record<ReviewBlock, string> = {
+  cancelled: 'اول لغو برگردد',
+  before_payment: 'نامزدی باز نیست',
+  needs_partner: 'اول چاپخانه انتخاب شود',
+  needs_print: 'اول فایل چاپ ساخته شود',
+  barcode_elsewhere: 'اول کد دیگر کنار برود',
+};
+
+/** «نامزد: 10014، سارا رضایی، تهران.» یا «نامزدها: …؛ ….»؛ بی نامزد «نامزدی پیدا نشد.» (پیش‌نمایش و صفحهٔ ورود). */
+export function candidatesText(list: ReviewCandidates): Seg[] {
+  if (list.candidates.length === 0) return ['نامزدی پیدا نشد.'];
+  const parts = list.candidates.map((c): Seg[] => [
+    { num: String(c.order.orderNumber) },
+    `، ${c.order.recipientName}، ${c.order.cityName ?? c.order.provinceName}`,
+  ]);
+  return [list.candidates.length === 1 ? 'نامزد: ' : 'نامزدها: ', ...joined(parts, '؛ '), '.'];
+}
+
+/** «FileName-1977.xls، سطر 3 · حسن، چاپ نور، یکشنبه 18:10»: فایل، سطر، و کسی که آورد (طرح). */
+export function reviewMeta(review: ReviewRow, now: Date): Seg[] {
+  const who = review.import.partner ? `${review.import.createdByName}، ${review.import.partner.name}` : review.import.createdByName;
+  return [
+    { ltr: review.import.filename },
+    '، سطر ',
+    { num: String(review.row.rowNo) },
+    ` · ${who}، ${whenText(review.import.committedAt ?? review.import.createdAt, now)}`,
+  ];
+}
+
+/**
+ * چرا این سطر در صف است، روی کارتش (طرح `m-ship-review`): کدی که کنار رفت با کننده و دلیلش؛ وگرنه دلیل حکم به زبان کسی که تصمیم
+ * می‌گیرد. فایل چاپخانه با نامی که نمی‌خواند: شاید بستهٔ مشتری دیگر خود چاپخانه است.
+ */
+export function reviewWhy(review: ReviewRow, now: Date): Seg[] {
+  const { row, numbered, elsewhere } = review;
+  const last = review.shipments.filter((s) => s.voidedAt !== null).at(-1);
+  if (last) {
+    return [
+      'کد این سطر برای سفارش ',
+      { num: String(last.orderNumber) },
+      ` کنار رفت${last.voidedAt ? ` ${whenText(last.voidedAt, now)}` : ''}${last.voidedByName ? ` با ${last.voidedByName}` : ''}`,
+      last.voidReason ? `: «${last.voidReason}»` : '',
+      '؛ دوباره تصمیم می‌خواهد.',
+    ];
+  }
+  const partnerHint: Seg[] = review.import.partner
+    ? [` فایل از ${review.import.partner.name} است و شاید بستهٔ مشتری دیگر خود چاپخانه باشد که شماره‌اش مثل سفارش ماست.`]
+    : [];
+  const orderNo = (order: ShipmentOrderFacts): Seg => ({ num: String(order.orderNumber) });
+  switch (row.reason) {
+    case 'name_mismatch':
+      return numbered
+        ? ['سفارش ', orderNo(numbered), ` مال «${numbered.recipientName}» است${numbered.liveShipments > 0 ? ' و کد رهگیری دارد' : ''}؛ نام نمی‌خواند.`, ...partnerHint]
+        : ['نام نمی‌خواند.', ...partnerHint];
+    case 'destination_mismatch':
+      return numbered
+        ? ['سفارش ', orderNo(numbered), ` به ${numbered.cityName ?? numbered.provinceName} می‌رود و مقصد فایل «${row.destination ?? ''}» است.`, ...partnerHint]
+        : ['مقصد با شهر سفارش نمی‌خواند.', ...partnerHint];
+    case 'date_before_payment':
+      return numbered?.paidAt && row.postDay
+        ? [`روز فایل (${formatJalaliWeekday(row.postDay)}) پیش از پرداخت سفارش `, orderNo(numbered), ` (${formatJalaliWeekday(numbered.paidAt)}) است.`]
+        : ['روز فایل پیش از پرداخت سفارش است.'];
+    case 'queued':
+      return numbered ? ['سفارش ', orderNo(numbered), ' هنوز «در صف چاپ» است.'] : ['سفارش هنوز «در صف چاپ» است.'];
+    case 'cancelled':
+      return [
+        ...(numbered ? ['سفارش ', orderNo(numbered), ' لغو شده.'] : ['سفارش لغو شده.']),
+        ' کد رهگیری به سفارش لغوشده نمی‌نشیند: اگر بسته واقعاً رفته، اول مالک لغو را برگرداند؛ وگرنه «هیچ‌کدام».',
+      ];
+    case 'barcode_elsewhere':
+      return elsewhere
+        ? [
+            'همین کد رهگیری برای سفارش ',
+            ...(elsewhere.orderNumber !== null ? [{ num: String(elsewhere.orderNumber) }] : ['دیگری']),
+            ' زنده است و هر کد مال یک سفارش است. اگر آن اشتباه است، اول مالک از صفحهٔ همان سفارش کنارش بگذارد؛ اگر این بسته مال ما نیست، «هیچ‌کدام».',
+          ]
+        : ['همین کد پیش‌تر برای سفارش دیگری ثبت بود و حالا کنار رفته؛ تصمیم با توست.'];
+    case 'no_number':
+      return ['«نام گ» شماره ندارد.'];
+    default:
+      return ['این سطر قطعی نشد.'];
+  }
+}
+
+/** حال سطری که در صف نیست، در صفحهٔ سطر (۶٫۲): کد زنده‌اش، «هیچ‌کدام»، یا چرا به سفارشی داده نمی‌شود. */
+export function rowStateText(review: ReviewRow, now: Date): Seg[] {
+  const { row } = review;
+  const live = review.shipments.find((s) => s.voidedAt === null);
+  if (live) {
+    const via = live.matchedBy === 'review' ? 'با تأیید' : live.matchedBy === 'manual' ? 'دستی' : 'با «ثبت»';
+    return ['کد این سطر به سفارش ', { num: String(live.orderNumber) }, ` نشسته است (${via}${live.adminName ? `، ${live.adminName}` : ''}، ${whenText(live.createdAt, now)}).`];
+  }
+  if (review.import.status !== 'committed') return ['ورود این سطر برگشته است؛ سطرهایش دیگر به سفارشی داده نمی‌شوند.'];
+  if (row.dismissedAt) {
+    return [
+      `«هیچ‌کدام» خورد${row.dismissedByName ? `، ${row.dismissedByName}` : ''}، ${whenText(row.dismissedAt, now)}. اگر اشتباه بود، به سفارش درستش بده.`,
+    ];
+  }
+  switch (row.verdict) {
+    case 'unmatched':
+      return row.reason === 'manual_code' && row.orderNumber !== null
+        ? [{ num: String(row.orderNumber) }, ' شمارهٔ سفارش سایت نیست؛ اگر بسته مال سفارشی از ماست، به همان بده.']
+        : row.reason === 'not_found' && row.orderNumber !== null
+          ? ['سفارش ', { num: String(row.orderNumber) }, ' پیدا نشد؛ اگر بسته مال سفارشی از ماست، به همان بده.']
+          : ['«نام گ» شماره ندارد و نامزدی پیدا نشد؛ اگر بسته مال سفارشی از ماست، به همان بده.'];
+    case 'duplicate':
+      return ['این سطر «تکراری» است؛ همین کد پیش‌تر آمده و به سفارشی داده نمی‌شود.'];
+    case 'invalid':
+      return ['این سطر درست خوانده نشد و به سفارشی داده نمی‌شود.'];
+    case 'inactive':
+      return ['وضعیت این بسته در فایل «فعال» نیست و به سفارشی داده نمی‌شود.'];
+    default:
+      return ['این سطر همین حالا منتظر تصمیمی نیست.'];
+  }
+}
+
+/**
+ * «همین است» برای سفارش «در صف چاپ» (طرح): «شروع چاپ» و «تحویل پست شد» با هم، با روز فایل، و اینکه آن روز در مهلت است یا نه.
+ * `null` برای بقیه.
+ */
+export function queuedNote(order: Pick<ShipmentOrderFacts, 'status' | 'postHandoffDueAt'>, postDay: Date | null, now: Date): Seg[] | null {
+  if (order.status !== 'paid' || !postDay) return null;
+  const handedAt = handedAtOf(postDay, now);
+  const onTime = order.postHandoffDueAt !== null ? handedAt.getTime() < order.postHandoffDueAt.getTime() : null;
+  return [
+    `تأیید، «شروع چاپ» و «تحویل پست شد» را با هم می‌زند، با روز فایل: ${formatJalaliWeekday(postDay)}`,
+    onTime === null ? '.' : onTime ? '، یعنی در مهلت.' : '، یعنی دیرتر از مهلت.',
+    ' فایل چاپ و چاپخانه‌اش آماده‌اند.',
+  ];
+}
+
 /* ───────────────────────── بستهٔ پستی سفارش ───────────────────────── */
 
-/** بارکد ۲۴ رقمی در شش گروه چهارتایی برای خواندن (طرح `jy-barcode`)؛ فاصله در CSS است، پس کپی همان ۲۴ رقم است. */
-export const barcodeGroups = (barcode: string): string[] => barcode.match(/.{1,4}/g) ?? [barcode];
+export { barcodeGroups } from './barcode';
 
 /** «پست پیشتاز · یک بسته»، «دو بسته». */
 export function parcelsCount(live: number): string {

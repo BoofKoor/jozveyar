@@ -567,3 +567,87 @@ export async function revertImportAction(_state: ReasonState, form: FormData): P
   if (result.error === 'reason_required' || result.error === 'reason_too_long') return { error: result.error, reason: reason.slice(0, 2000) };
   redirect(`${back}?e=${result.error}&${doneMark()}`);
 }
+
+/** برگشت کارهای صف تأیید (۶٫۲): به همان صفحهٔ صف، یا صفحهٔ ورود اگر ادمین از آنجا آمده بود؛ صفحهٔ صف فقط عدد. */
+function reviewHome(gate: string, form: FormData): string {
+  const page = /^[1-9]\d{0,3}$/.test(field(form, 'page')) ? field(form, 'page') : '1';
+  const importId = field(form, 'import');
+  return field(form, 'from') === 'import' && /^[0-9a-f-]{36}$/.test(importId)
+    ? panelPath(gate, `/shipments/${importId}`)
+    : `${panelPath(gate, '/shipments/review')}${page === '1' ? '' : `?page=${page}`}`;
+}
+
+const withQuery = (url: string, query: string) => `${url}${url.includes('?') ? '&' : '?'}${query}`;
+
+/**
+ * کارت صف تأیید (۶٫۲، طرح `m-ship-review`): «همین است» با نامزدی که ادمین انتخاب کرد و همان که از آن دید، یا «هیچ‌کدام». موفق به
+ * صفحه‌ای که ادمین از آن آمد (صف، یا صفحهٔ ورود) با نتیجه؛ شکست به همان کارت با پیامش (`r`، و لنگر کارت). کد تازه نمی‌خواهد
+ * (ADR-046): برگشت‌پذیر است و پولی جابه‌جا نمی‌کند.
+ */
+export async function reviewAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const importId = field(form, 'import');
+  const rowNo = field(form, 'row');
+  const ip = await requestIp();
+  const home = reviewHome(gate, form);
+  // شکست روی همان کارت: در صف با شناسهٔ کارت، در صفحهٔ سطر همان صفحه.
+  const here =
+    field(form, 'at') === 'row'
+      ? `${panelPath(gate, `/shipments/${encodeURIComponent(importId)}/rows/${encodeURIComponent(rowNo)}`)}?from=${field(form, 'from') === 'import' ? 'import' : 'queue'}`
+      : home;
+  const card = `r=${encodeURIComponent(`${importId}.${rowNo}`)}`;
+  if (field(form, 'do') === 'dismiss') {
+    const result = await shipments.dismiss(session, { importId, rowNo }, ip);
+    redirect(result.ok ? withQuery(home, `done=dismiss&${card}&${doneMark()}`) : `${withQuery(here, `e=${result.error}&${card}&${doneMark()}`)}#r-${importId}-${rowNo}`);
+  }
+  const result = await shipments.approve(session, { importId, rowNo, choice: field(form, 'choice') }, ip);
+  if (result.ok) {
+    redirect(withQuery(home, `done=approve&o=${result.value.orderNumber}&h=${result.value.handed ? 1 : 0}&${doneMark()}`));
+  }
+  redirect(`${withQuery(here, `e=${result.error}&${card}&${doneMark()}`)}#r-${importId}-${rowNo}`);
+}
+
+/**
+ * دادن دستی (۶٫۲، قدم دوم، تصمیم ۸۳): «همین است» روی کارت سفارشی که ادمین با شماره‌اش آورد، از همان که از آن دید. موفق به صفحه‌ای
+ * که ادمین از آن آمد؛ شکست به همان کارت سفارش با پیامش.
+ */
+export async function assignShipmentAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const importId = field(form, 'import');
+  const rowNo = field(form, 'row');
+  const result = await shipments.assign(
+    session,
+    { importId, rowNo, order: field(form, 'order'), seen: field(form, 'seen') },
+    await requestIp(),
+  );
+  if (result.ok) {
+    redirect(withQuery(reviewHome(gate, form), `done=assign&o=${result.value.orderNumber}&h=${result.value.handed ? 1 : 0}&${doneMark()}`));
+  }
+  const from = field(form, 'from') === 'import' ? 'import' : 'queue';
+  const number = /^\d{1,9}$/.test(field(form, 'number')) ? field(form, 'number') : '';
+  const page = /^[1-9]\d{0,3}$/.test(field(form, 'page')) ? `&page=${field(form, 'page')}` : '';
+  redirect(
+    `${panelPath(gate, `/shipments/${encodeURIComponent(importId)}/rows/${encodeURIComponent(rowNo)}`)}?order=${number}&from=${from}${page}&e=${result.error}&${doneMark()}`,
+  );
+}
+
+/**
+ * کنار گذاشتن یک کد رهگیری (۶٫۲، مالک، از کارت «بستهٔ پستی» سفارش): خطای دلیل همین‌جا با متن نوشته‌شده؛ بقیه به صفحهٔ سفارش با
+ * پیامش یا با نتیجه. کد تازه نمی‌خواهد (ADR-046).
+ */
+export async function voidShipmentAction(_state: ReasonState, form: FormData): Promise<ReasonState> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const reason = field(form, 'reason');
+  const result = await shipments.voidShipment(session, { shipment: field(form, 'shipment'), reason }, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(result.ok ? String(result.value.orderNumber) : number)}`);
+  if (result.ok) redirect(`${back}?done=void&re=${result.value.reopened ? 1 : 0}`);
+  if (result.error === 'reason_required' || result.error === 'reason_too_long') return { error: result.error, reason: reason.slice(0, 2000) };
+  redirect(`${back}?e=${result.error}`);
+}

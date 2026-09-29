@@ -1320,8 +1320,13 @@ export const shipmentImports = pgTable(
  * همهٔ سطرهای ورودی که ثبت شد، با حکم و دلیل (ADR-046). در تراکنش «ثبت» نوشته می‌شوند، فقط برای ورود «ثبت شد»
  * (تریگر `shipment_import_rows_insert`)، و بعد عوض و پاک نمی‌شوند (`shipment_import_rows_frozen`)، جز:
  * - متن سطری که مرسولهٔ ما نشد (`cells`، `name_g`، `destination`؛ نام و مقصد مشتری‌های دیگر چاپخانه) N روز بعد پاک
- *   می‌شود (ADR-045، کارگر)؛
- * - و حکم صف تأیید در ۶٫۲.
+ *   می‌شود (ADR-045، کارگر): «پیدا نشد»، «خوانده نشد»، «غیرفعال»، «جمع کل»، و از ۶٫۲ سطری که «هیچ‌کدام» خورد؛ سطری که
+ *   مرسوله‌ای گرفت، حتی کنارگذاشته، هرگز؛
+ * - و «هیچ‌کدام» صف تأیید (۶٫۲)، یک بار: `dismissed_at` و `dismissed_by`.
+ *
+ * صف تأیید (۶٫۲، ADR-046) ستون تصمیم ندارد: «همین است» و «دادن دستی» خودشان مرسوله‌اند (`shipments.matched_by`، با کننده و
+ * زمان)، و سطر در صف است اگر ورودش «ثبت شد» است، حکمش `review` است یا مرسوله‌اش کنار رفته، مرسولهٔ زنده ندارد و «هیچ‌کدام»
+ * نخورده. پس کنار گذاشتن مرسوله سطرش را خودبه‌خود به صف برمی‌گرداند.
  *
  * حکم‌ها: `matched` (قطعی)، `review` (صف تأیید)، `unmatched` (پیدا نشد)، `duplicate` (تکراری)، `invalid` (خوانده نشد)،
  * `inactive` (وضعیتش در پست «فعال» نیست؛ سؤال ۷۱) و `total` (ردیف «جمع کل»).
@@ -1353,10 +1358,17 @@ export const shipmentImportRows = pgTable(
     reason: text('reason'),
     /** سفارشی که سطر به آن نشست یا اشاره کرد (قطعی، تکراری، یا شمارهٔ صف تأیید). */
     orderId: uuid('order_id').references(() => orders.id, { onDelete: 'cascade' }),
+    /** «هیچ‌کدام» صف تأیید (۶٫۲): سطر از صف بیرون رفت؛ یک بار و برگشت‌ناپذیر (راه اشتباهش «دادن دستی» است). */
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    dismissedBy: uuid('dismissed_by').references(() => adminUsers.id),
   },
   (t) => [
     primaryKey({ columns: [t.importId, t.rowNo] }),
     index('shipment_import_rows_order').on(t.orderId),
+    /** سطرهای صف تأیید که هنوز «هیچ‌کدام» نخورده‌اند: شمار پیشخوان و فهرست صف. */
+    index('shipment_import_rows_review')
+      .on(t.importId, t.rowNo)
+      .where(sql`${t.verdict} = 'review' AND ${t.dismissedAt} IS NULL`),
     check('shipment_import_rows_row_no', sql`${t.rowNo} > 0`),
     check(
       'shipment_import_rows_verdict',
@@ -1367,6 +1379,11 @@ export const shipmentImportRows = pgTable(
     check(
       'shipment_import_rows_matched',
       sql`${t.verdict} <> 'matched' OR (${t.barcode} IS NOT NULL AND ${t.orderId} IS NOT NULL AND ${t.weightGrams} > 0 AND ${t.fareRials} >= 0 AND ${t.taxRials} >= 0 AND ${t.postDay} IS NOT NULL)`,
+    ),
+    /** «هیچ‌کدام» با کننده و زمانش، و فقط برای سطری که می‌توانست کد سفارش ما شود (قطعی، صف تأیید، پیدا نشد). */
+    check(
+      'shipment_import_rows_dismissed',
+      sql`(${t.dismissedAt} IS NULL) = (${t.dismissedBy} IS NULL) AND (${t.dismissedAt} IS NULL OR ${t.verdict} IN ('matched', 'review', 'unmatched'))`,
     ),
   ],
 );
@@ -1395,7 +1412,10 @@ export const shipments = pgTable(
     fareRials: bigint('fare_rials', { mode: 'number' }).notNull(),
     taxRials: bigint('tax_rials', { mode: 'number' }).notNull(),
     postDay: timestamp('post_day', { withTimezone: true }).notNull(),
-    /** `rule` (قطعی)، `review` (تأیید صف، ۶٫۲) یا `manual` (دادن دستی، ۶٫۲). */
+    /**
+     * `rule` (قطعی، در «ثبت»)، `review` («همین است» صف تأیید، ۶٫۲) یا `manual` (دادن دستی با شمارهٔ سفارش، ۶٫۲). مرسولهٔ `rule`
+     * اولین مرسولهٔ سطرش است: کدی که کنار رفت خودش برنمی‌گردد، فقط با تأیید (`shipments_row`، 0024).
+     */
     matchedBy: text('matched_by').notNull(),
     handedOrder: boolean('handed_order').notNull().default(false),
     /** کسی که ثبت یا تأیید کرد. */

@@ -246,10 +246,10 @@ export type Verdict = 'matched' | 'review' | 'unmatched' | 'duplicate' | 'invali
  * دلیل حکم؛ پنل برای هر کدام پیام دارد.
  * - خوانده نشد: `barcode`، `numbers`، `date`، `date_future`.
  * - تکراری: `same_file` (همین بارکد بالاتر در همین فایل)، `already` (پیش‌تر برای همین سفارش ثبت شده).
- * - پیدا نشد: `no_number`، `manual_code` (زیر 10001، سفارش دستی پیش از سایت)، `not_found` (نیست، پرداخت‌نشده، یا بیرون از
- *   محدودهٔ واردکننده؛ فرقشان گفته نمی‌شود، ADR-046).
+ * - پیدا نشد: `no_number` (بی نامزد)، `manual_code` (زیر 10001، سفارش دستی پیش از سایت)، `not_found` (نیست، پرداخت‌نشده، یا
+ *   بیرون از محدودهٔ واردکننده؛ فرقشان گفته نمی‌شود، ADR-046).
  * - صف تأیید: `barcode_elsewhere`، `cancelled`، `queued` («در صف چاپ»)، `name_mismatch`، `destination_mismatch`،
- *   `date_before_payment`.
+ *   `date_before_payment`، و از ۶٫۲ `no_number` با نامزد.
  */
 export type VerdictReason =
   | 'barcode'
@@ -325,27 +325,43 @@ function places() {
 }
 
 /**
- * مقصد با شهر یا استان سفارش ناسازگار نیست (ADR-046): شهری از همان استان (دفتر پست نزدیک)، یا نام همان استان، سازگار است؛
- * نام شهر یا استان دیگری ناسازگار؛ و مقصدی که نمی‌شناسیم بی‌اثر.
+ * مقصد در برابر شهر و استان سفارش: `true` سازگار (شهری از همان استان، که دفتر پست نزدیک است، یا نام همان استان)، `false`
+ * ناسازگار (نام شهر یا استان دیگری از `@jozveyar/geo`)، و `null` مقصدی که نمی‌شناسیم.
  */
-export function destinationFits(destination: string, order: Pick<OrderFacts, 'provinceId' | 'cityId'>): boolean {
+export function destinationMatch(destination: string, order: Pick<OrderFacts, 'provinceId' | 'cityId'>): boolean | null {
   const key = searchKey(destination);
-  if (!key) return true;
+  if (!key) return null;
   const { cities, provinces } = places();
   const asCity = cities.get(key);
   const asProvince = provinces.get(key);
-  if (!asCity && asProvince === undefined) return true;
+  if (!asCity && asProvince === undefined) return null;
   if (asProvince === order.provinceId) return true;
   return (asCity ?? []).some((c) => c.provinceId === order.provinceId || c.cityId === order.cityId);
 }
 
 /**
+ * مقصد با شهر یا استان سفارش ناسازگار نیست (ADR-046): شهری از همان استان (دفتر پست نزدیک)، یا نام همان استان، سازگار است؛
+ * نام شهر یا استان دیگری ناسازگار؛ و مقصدی که نمی‌شناسیم بی‌اثر.
+ */
+export function destinationFits(destination: string, order: Pick<OrderFacts, 'provinceId' | 'cityId'>): boolean {
+  return destinationMatch(destination, order) !== false;
+}
+
+/**
  * حکم هر سطر، به ترتیب (ADR-046): خوانده نشد، غیرفعال در پست، تکراری در همین فایل، بارکد زنده، بی شماره، کد دستی، سفارش
  * ناپیدا، لغوشده، «در صف چاپ»، و بعد نام، مقصد و روز؛ فقط سطری که همه را دارد «قطعی» است.
+ *
+ * سطر بی شماره از ۶٫۲ اگر نامزد دارد به صف تأیید می‌رود، وگرنه «پیدا نشد» (`candidateRows`: شمارهٔ سطرهایی که `candidatesFor`
+ * برایشان دست‌کم یک نامزد یافت، در محدودهٔ واردکننده؛ `candidates.ts`).
  */
 export function judgeRows(
   rows: readonly PostRow[],
-  context: { orders: ReadonlyMap<number, OrderFacts>; live: ReadonlyMap<string, LiveShipment>; now: Date },
+  context: {
+    orders: ReadonlyMap<number, OrderFacts>;
+    live: ReadonlyMap<string, LiveShipment>;
+    now: Date;
+    candidateRows: ReadonlySet<number>;
+  },
 ): Judged[] {
   const today = tehranDayStart(context.now);
   const seen = new Set<string>();
@@ -370,7 +386,7 @@ export function judgeRows(
         ? judged('duplicate', 'already', order.id)
         : judged('review', 'barcode_elsewhere', order?.id ?? null);
     }
-    if (row.orderNumber === null) return judged('unmatched', 'no_number');
+    if (row.orderNumber === null) return judged(context.candidateRows.has(row.rowNo) ? 'review' : 'unmatched', 'no_number');
     if (row.orderNumber < FIRST_ORDER_NUMBER) return judged('unmatched', 'manual_code');
     if (!order || order.status === 'awaiting_payment' || order.status === 'expired') return judged('unmatched', 'not_found');
     if (order.status === 'cancelled') return judged('review', 'cancelled', order.id);
