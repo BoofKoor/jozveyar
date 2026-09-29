@@ -804,6 +804,9 @@ export function purgedNote(details: PanelOrderDetails): Seg[] | null {
 
 const ACTORS: Record<string, string> = { user: 'مشتری', gateway: 'درگاه', system: 'سیستم', admin: 'ادمین' };
 
+/** رویدادهای ادمین با هدف سفارش که سطر کد رهگیری همان را می‌گوید (۶٫۲). */
+const SHIPMENT_EVENTS: ReadonlySet<string> = new Set(['shipments.approve', 'shipments.assign', 'shipments.void']);
+
 /** نام فیلدهای گیرنده در رویداد ویرایش. */
 const RECIPIENT_FIELDS: Record<string, string> = { recipientName: 'نام گیرنده', addressText: 'نشانی', postalCode: 'کد پستی' };
 
@@ -816,8 +819,8 @@ export interface TimelineEntry {
 /**
  * رویدادهای سفارش به ترتیب زمان (طرح پنل): تغییر وضعیت‌ها (از ۴٫۳ با ادمین: «در صف چاپ ← در حال چاپ»، «لغو شد»، و
  * برگرداندن با دلیلش)، PDF جزوه (ساخته شد، یا ماند)، تخصیص چاپخانه (از ۵٫۲: «به چاپ نور سپرده شد، هم‌شهر مشتری» و جابه‌جایی
- * با دلیلش)، و کار ادمین‌ها روی همین سفارش (دانلود، «دوباره بساز»، ویرایش گیرنده). تغییر وضعیت و جابه‌جایی ادمین رویداد ادمین
- * هم دارند، ولی یک بار نشان داده می‌شوند.
+ * با دلیلش)، کد رهگیری هر بسته (از ۶٫۱؛ از ۶٫۲ «با تأیید» یا «دستی»، و کنار رفتنش)، و کار ادمین‌ها روی همین سفارش (دانلود،
+ * «دوباره بساز»، ویرایش گیرنده). تغییر وضعیت، جابه‌جایی، و کارهای صف تأیید رویداد ادمین هم دارند، ولی یک بار نشان داده می‌شوند.
  */
 export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
@@ -844,11 +847,13 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   for (const assignment of details.assignments) {
     entries.push({ at: assignment.at, text: assignmentText(assignment), who: assignment.actor === 'system' ? 'سیستم' : assignment.adminName ?? 'ادمین' });
   }
-  // کد رهگیری هر بسته از کدام فایل پست، و اگر کنار رفت، کی و چرا (برش ۶٫۱).
+  // کد رهگیری هر بسته از کدام فایل پست، با تأیید یا دستی (۶٫۲، تصمیم ۸۷: رویداد ادمین همان کار را جدا نمی‌گوید)، و اگر کنار رفت،
+  // کی و چرا (برش ۶٫۱).
   for (const shipment of details.shipments) {
+    const via = shipment.matchedBy === 'review' ? '، با تأیید' : shipment.matchedBy === 'manual' ? '، دستی' : '';
     entries.push({
       at: shipment.createdAt,
-      text: ['کد رهگیری ', { barcode: shipment.barcode }, ' از ', { ltr: shipment.filename }],
+      text: ['کد رهگیری ', { barcode: shipment.barcode }, ' از ', { ltr: shipment.filename }, via],
       who: shipment.adminName ?? 'ادمین',
     });
     if (shipment.voidedAt) {
@@ -888,7 +893,8 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     const seq = typeof detail.item === 'number' ? detail.item : 1;
     const volume = typeof detail.volume === 'number' && typeof detail.volumes === 'number' && detail.volumes > 1 ? detail.volume : null;
     const who = event.adminName ?? 'ادمین';
-    if (event.action === 'orders.status' || event.action === 'orders.assign') continue; // همان رویداد وضعیت و تخصیص بالا
+    // همان رویداد وضعیت و تخصیص بالا؛ و کارهای صف تأیید و کنار گذاشتن یک کد، که سطر کد رهگیری بالا می‌گویدشان (۶٫۲).
+    if (event.action === 'orders.status' || event.action === 'orders.assign' || SHIPMENT_EVENTS.has(event.action)) continue;
     if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF اصلی ', ...jozve(seq), ' دانلود شد'], who });
     else if (event.action === 'orders.print_download') {
       entries.push({ at: event.at, text: ['فایل چاپ', ...ofJozve(seq), ...(volume ? [' جلد ', num(volume)] : []), ' دانلود شد'], who });
@@ -915,12 +921,14 @@ function zeroRials<T>(value: T): T {
 }
 
 /**
- * جزئیات بی مبلغ (برش ۵٫۳، ADR-042؛ نشستی که `orders.money` ندارد): پرداخت‌ها هیچ، و هر مبلغ سفارش و ریز قیمت منجمدش صفر؛
+ * جزئیات بی مبلغ (برش ۵٫۳، ADR-042؛ نشستی که `orders.money` ندارد): پرداخت‌ها هیچ، و هر مبلغ سفارش و ریز قیمت منجمدش، و از ۶٫۲ کرایه
+ * و مالیات پست هر بسته، صفر؛
  * شمار جلد و برگ هر جلد می‌ماند، چون مشخصات چاپ است. سرویس پیش از صفحه می‌کندش، پس صفحه‌ای که اشتباهاً مبلغ بکشد هم عددی
  * ندارد.
  */
 export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
-  return { ...details, order: zeroRials(details.order), payments: [] };
+  // کرایه و مالیات پست هر بسته هم (۶٫۲، تصمیم ۸۱).
+  return { ...details, order: zeroRials(details.order), payments: [], shipments: zeroRials(details.shipments) };
 }
 
 /** ردیف‌های فهرست و صف پیشخوان بی مبلغ؛ همان `withoutMoney`. */

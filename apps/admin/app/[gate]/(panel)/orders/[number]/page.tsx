@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { Fragment } from 'react';
 
-import { FILE_MARGIN_MS, IRAN_POST, isPaidStatus, type PanelOrderDetails, type PanelOrderItem } from '@jozveyar/db';
+import { FILE_MARGIN_MS, IRAN_POST, isPaidStatus, voidKept, type PanelOrderDetails, type PanelOrderItem, type VoidKept } from '@jozveyar/db';
 import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
@@ -16,6 +16,7 @@ import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
+import { VoidShipmentForm } from '../../../../../components/VoidShipmentForm';
 import { dayHeading, tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
@@ -81,16 +82,38 @@ const PAGE_ERRORS = new Set([
   'assign_closed',
   'partner_inactive',
   'order_has_shipment',
+  'shipment_not_found',
+  'shipment_voided',
+  'reason_required',
 ]);
 
-/** فرم باز ستون کنار یا کارت گیرنده (`?do=`): لغو، برگرداندن، ویرایش گیرنده، یا جابه‌جایی چاپخانه (۵٫۲)؛ هر چیز دیگر یعنی هیچ. */
-type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | null;
+/**
+ * فرم باز ستون کنار یا کارت‌ها (`?do=`): لغو، برگرداندن، ویرایش گیرنده، جابه‌جایی چاپخانه (۵٫۲)، یا کنار گذاشتن یک کد رهگیری (۶٫۲،
+ * با `code`)؛ هر چیز دیگر یعنی هیچ.
+ */
+type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | 'void' | null;
 const modeOf = (value: unknown): Mode =>
-  value === 'cancel' || value === 'revert' || value === 'edit' || value === 'assign' ? value : null;
+  value === 'cancel' || value === 'revert' || value === 'edit' || value === 'assign' || value === 'void' ? value : null;
 
 /** هر فرم، با مجوزی که می‌خواهد؛ کاربر چاپخانه (۵٫۳) هیچ‌کدام را ندارد و به جای سفارش «این بخش برای چاپخانه باز نیست» می‌بیند. */
-const modeAllowed = (mode: Exclude<Mode, null>, view: OrderDetailsView): boolean =>
-  mode === 'cancel' ? view.canCancel : mode === 'revert' ? view.canRevert : mode === 'edit' ? view.canEditRecipient : view.canAssign;
+const modeAllowed = (mode: Exclude<Mode, null>, view: OrderDetailsView, canVoid: boolean): boolean =>
+  mode === 'cancel'
+    ? view.canCancel
+    : mode === 'revert'
+      ? view.canRevert
+      : mode === 'edit'
+        ? view.canEditRecipient
+        : mode === 'void'
+          ? canVoid
+          : view.canAssign;
+
+/** پس از کنار رفتن یک کد، سفارش چه می‌شود (تصمیم ۸۰)؛ همان `voidKept` ذخیره‌گاه. */
+const VOID_OUTCOME: Record<VoidKept | 'reopen', string> = {
+  reopen: 'سفارش یک قدم به «در حال چاپ» برمی‌گردد: همین کد «تحویل پست شد»ش کرده بود و کد دیگری ندارد.',
+  other_code: 'سفارش «تحویل پست شد» می‌ماند: کد رهگیری زندهٔ دیگری دارد.',
+  handed_before: 'سفارش «تحویل پست شد» می‌ماند: پیش از این کد به پست رسیده بود.',
+  files_deleted: 'سفارش «تحویل پست شد» می‌ماند: فایل‌هایش پاک شده و به چاپ برنمی‌گردد.',
+};
 
 /** «(شنبه 11 مهر 14:06 تا 14:21)»: پایان، اگر همان روز است، فقط ساعت. */
 function span(from: Date, to: Date | null, now: Date): string {
@@ -493,7 +516,8 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
         )}
         {view.revertBlockedBy ? (
           <p className="ad-hint ad-gap">
-            با کد رهگیری به «در حال چاپ» برنمی‌گردد؛ اگر اشتباه است، اول ورود{' '}
+            با کد رهگیری به «در حال چاپ» برنمی‌گردد؛ اگر کد اشتباه است، از کارت «بستهٔ پستی» کنارش بگذار، یا اگر کل فایل اشتباه بود،
+            ورود{' '}
             <Link className="jy-link" href={panelPath(gate, `/shipments/${view.revertBlockedBy.importId}`)}>
               <bdi>{view.revertBlockedBy.filename}</bdi>
             </Link>{' '}
@@ -609,10 +633,25 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
  * واقعی در برابر برآورد، کرایه و مالیات پست فقط با `orders.money`، و ورود فایل پستی که آورد؛ کد کنارگذاشته با دلیلش. سفارش بی کد
  * این کارت را ندارد.
  */
-function ParcelCard({ gate, view, canImports }: { gate: string; view: OrderDetailsView; canImports: boolean }) {
+function ParcelCard({
+  gate,
+  view,
+  canImports,
+  canVoid,
+  voiding,
+}: {
+  gate: string;
+  view: OrderDetailsView;
+  canImports: boolean;
+  /** «کنار گذاشتن این کد…» (۶٫۲، فقط مالک، `shipments.revert`). */
+  canVoid: boolean;
+  /** کدی که فرم کنار گذاشتنش باز است (`?do=void&code=`). */
+  voiding: string | null;
+}) {
   const { details, bounds } = view;
   if (details.shipments.length === 0) return null;
   const now = bounds.at;
+  const self = panelPath(gate, `/orders/${details.order.orderNumber}`);
   const live = details.shipments.filter((shipment) => shipment.voidedAt === null);
   const voided = details.shipments.filter((shipment) => shipment.voidedAt !== null);
   const fileLink = (shipment: (typeof live)[number]) =>
@@ -669,10 +708,40 @@ function ParcelCard({ gate, view, canImports }: { gate: string; view: OrderDetai
               <dt>فایل پست</dt>
               <dd>
                 {fileLink(shipment)}، سطر <span className="num">{shipment.rowNo}</span>
-                {` · ${shipment.adminName ? `${shipment.adminName}، ` : ''}${whenText(shipment.createdAt, now)}`}
+                {` · ${shipment.matchedBy === 'review' ? 'با تأیید، ' : shipment.matchedBy === 'manual' ? 'دستی، ' : ''}${shipment.adminName ? `${shipment.adminName}، ` : ''}${whenText(shipment.createdAt, now)}`}
               </dd>
             </div>
           </dl>
+          {canVoid && voiding === shipment.id ? (
+            <section className="ad-step ad-gap" aria-labelledby={`t-void-${shipment.id}`} data-void={shipment.id}>
+              <p id={`t-void-${shipment.id}`} className="ad-step__title">
+                کنار گذاشتن این کد
+              </p>
+              <ul className="ad-changes ad-gap">
+                <li>
+                  <span className="ad-changes__k">کد رهگیری</span>
+                  <span>کنار می‌رود، پاک نمی‌شود؛ سطرش در همان فایل پست به صف تأیید برمی‌گردد</span>
+                </li>
+                <li>
+                  <span className="ad-changes__k">وضعیت</span>
+                  <span>
+                    {
+                      VOID_OUTCOME[
+                        voidKept(shipment, live.some((other) => other.id !== shipment.id), details.order.filesDeletedAt !== null) ?? 'reopen'
+                      ]
+                    }
+                  </span>
+                </li>
+              </ul>
+              <VoidShipmentForm gate={gate} orderNumber={details.order.orderNumber} shipmentId={shipment.id} maxLength={REASON_MAX} back={self} />
+            </section>
+          ) : canVoid ? (
+            <div className="ad-actions">
+              <Link href={`${self}?do=void&code=${shipment.id}`} className="jy-btn jy-btn--text" scroll={false}>
+                کنار گذاشتن این کد…
+              </Link>
+            </div>
+          ) : null}
         </Fragment>
       ))}
       {voided.map((shipment) => (
@@ -716,7 +785,9 @@ export default async function OrderPage({
   if (!result.ok) notFound();
   const view = result.value;
   const mode = modeOf(query.do);
-  if (mode && view.partnerView && !modeAllowed(mode, view)) return <NoAccess gate={gate} partner={session.partner} />;
+  const canVoid = can(session, 'shipments.revert');
+  if (mode && view.partnerView && !modeAllowed(mode, view, canVoid)) return <NoAccess gate={gate} partner={session.partner} />;
+  const voiding = mode === 'void' && canVoid && typeof query.code === 'string' ? query.code : null;
   const { details, bounds, canDownload, canEditRecipient } = view;
   const { order } = details;
   const now = bounds.at;
@@ -747,6 +818,12 @@ export default async function OrderPage({
         </div>
       </div>
       {error ? <Alert tone="error">{messageOf(error)}</Alert> : null}
+      {query.done === 'void' ? (
+        <Alert tone="success">
+          کد رهگیری کنار رفت و سطرش به صف تأیید برگشت
+          {query.re === '1' ? '؛ سفارش به «در حال چاپ» برگشت.' : '.'}
+        </Alert>
+      ) : null}
 
       <div className="ad-grid">
         <aside className="ad-side" aria-label="وضعیت و کار بعدی">
@@ -891,7 +968,7 @@ export default async function OrderPage({
             </section>
           )}
 
-          <ParcelCard gate={gate} view={view} canImports={can(session, 'shipments.import')} />
+          <ParcelCard gate={gate} view={view} canImports={can(session, 'shipments.import')} canVoid={canVoid} voiding={voiding} />
 
           {view.canMoney ? (
             <>

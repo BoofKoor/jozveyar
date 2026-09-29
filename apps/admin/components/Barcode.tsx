@@ -1,4 +1,4 @@
-import { barcodeGroups } from '../lib/shipments';
+import { barcodeGroups } from '../lib/barcode';
 
 /**
  * کد رهگیری پست (کیت `jy-barcode`، طرح برش ۶): ۲۴ رقم در شش گروه چهارتایی برای خواندن. فاصله در CSS است، نه در متن، پس کپی همان

@@ -267,10 +267,10 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
       await page.goto(links[who]);
       await expect(page.getByText(`سارا رضایی تو را کاربر ${partnerName} در پنل جزوه‌یار کرده است.`)).toBeVisible();
       await enroll(page, links[who]);
-      // سربرگ، همان طرح: «حسن · چاپ نور»؛ و فقط پیشخوان و سفارش‌ها.
+      // سربرگ، همان طرح: «حسن · چاپ نور»؛ و فقط پیشخوان، سفارش‌ها و از ۶٫۲ ارسال (فایل پست خودش).
       await expect(page.locator('.ad-user')).toContainText(`${name} · ${partnerName}`);
       const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
-      await expect(nav.getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها']);
+      await expect(nav.getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال']);
       await expect(nav.locator('.ad-more')).toHaveCount(0);
       partner[who] = { context, page, problems };
     }
@@ -542,7 +542,7 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
 
   test('بخش‌های دیگر برای چاپخانه باز نیست: تعرفه، تنظیمات، چاپخانه‌ها، ادمین‌ها و رویدادها؛ مالک و متصدی مثل امروز', async () => {
     const { page, problems } = partner.hasan;
-    for (const path of ['/tariff', '/tariff/1', '/settings', '/partners', '/partners/new', '/admins', '/admins/new', '/events']) {
+    for (const path of ['/tariff', '/tariff/1', '/settings', '/partners', '/partners/new', '/admins', '/admins/new', '/events', '/shipments/review']) {
       await page.goto(at(path));
       await expect(heading(page, NO_ACCESS), path).toBeVisible();
       await expect(page.locator('main').getByRole('link', { name: 'سفارش‌ها' })).toBeVisible();

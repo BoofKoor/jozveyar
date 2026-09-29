@@ -28,9 +28,11 @@ function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: read
 
 /**
  * پیشخوان (طرح پنل، ADR-039): چهار کاشی مهلت تحویل به پست به روز تهران (سفارش‌هایی که هنوز به پست نرسیده‌اند)، سطر آمار
- * (چندتا در حال چاپ است، و هفتهٔ گذشته چندتا به‌موقع به پست رسید)، هشدارها (PDF جزوه‌ای که ساخته نشد، پرداخت بی برگشت، و از ۵٫۲
- * سفارش «در صف چاپ» بی چاپخانه)، و صف تحویل به ترتیب مهلت. کاربر چاپخانه (۵٫۳، طرح `m-dash` با نقش «چاپخانه») همان را فقط برای
- * سفارش‌های چاپخانهٔ خودش می‌بیند، بی مبلغ؛ دو هشدار دیگر هرگز به او نمی‌رسند (سفارش پرداخت‌نشده و بی چاپخانه در محدوده‌اش نیست).
+ * (چندتا در حال چاپ است، و هفتهٔ گذشته چندتا به‌موقع به پست رسید)، هشدارها (PDF جزوه‌ای که ساخته نشد، پرداخت بی برگشت، از ۵٫۲
+ * سفارش «در صف چاپ» بی چاپخانه، و از ۶٫۲ سطرهای صف تأیید و «کد رهگیری ندارد»)، و صف تحویل به ترتیب مهلت. کاربر چاپخانه (۵٫۳، طرح
+ * `m-dash` با نقش «چاپخانه») همان را فقط برای سفارش‌های چاپخانهٔ خودش می‌بیند، بی مبلغ؛ «کد رهگیری ندارد» هم فقط سفارش‌های خودش، با
+ * «فایل پست آن روز را بده» (تصمیم ۸۲). بقیهٔ هشدارها هرگز به او نمی‌رسند (سفارش پرداخت‌نشده و بی چاپخانه در محدوده‌اش نیست، و صف
+ * تأیید با مالک و متصدی است).
  */
 export default async function Dashboard({ params }: { params: Promise<{ gate: string }> }) {
   const { gate } = await params;
@@ -50,7 +52,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   if (!can(session, 'orders.read')) return head;
   const result = await orders.dashboard(session);
   if (!result.ok) return head;
-  const { tiles, alerts, queue, open, slaDays, bounds, stats } = result.value;
+  const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked } = result.value;
   const statsLine = statsSegs(open, stats);
   const ordersHref = panelPath(gate, '/orders');
   const partner = session.partner;
@@ -90,7 +92,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
         ) : null}
       </section>
 
-      {alerts.failedPdf.length > 0 || unreturned > 0 || alerts.unassigned.length > 0 ? (
+      {alerts.failedPdf.length > 0 || unreturned > 0 || alerts.unassigned.length > 0 || alerts.reviewRows > 0 || untracked.length > 0 ? (
         <div className="ad-alerts">
           {alerts.failedPdf.length > 0 ? (
             <p className="jy-note jy-note--error" data-alert="pdf">
@@ -132,6 +134,36 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
               </span>
             </p>
           ) : null}
+          {alerts.reviewRows > 0 ? (
+            // صف تأیید (۶٫۲)، فقط مالک و متصدی؛ بی پیامک تا ۶٫۳.
+            <p className="jy-note jy-note--warning" data-alert="review">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
+                  <span className="num">{formatNumber(alerts.reviewRows)}</span> سطر فایل پست
+                </Link>{' '}
+                منتظر تأیید است؛ تا تأیید نشده، کد رهگیری به سفارشش نمی‌نشیند.
+              </span>
+            </p>
+          ) : null}
+          {untracked.map((day) => {
+            const one = day.orderNumbers.length === 1;
+            return (
+              // «کد رهگیری ندارد» (۶٫۲، تصمیم ۸۲): هر روز تحویل یک یادداشت؛ فایل پست همان روز راه جلوست.
+              <p key={day.day.getTime()} className="jy-note jy-note--warning" data-alert="untracked">
+                <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+                <span>
+                  کد رهگیری {one ? 'سفارش ' : 'سفارش‌های '}
+                  <OrderLinks gate={gate} numbers={day.orderNumbers} /> نرسیده، با اینکه دو روز کاری از تحویل {one ? 'پستش' : 'پستشان'} (
+                  {formatJalaliWeekday(day.day)}) گذشته. فایل پست آن روز را{' '}
+                  <Link className="jy-link" href={panelPath(gate, '/shipments')}>
+                    {partner ? 'بده' : 'وارد کن'}
+                  </Link>
+                  .
+                </span>
+              </p>
+            );
+          })}
         </div>
       ) : null}
 

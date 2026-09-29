@@ -1,7 +1,7 @@
 /**
  * ابزارهای مشترک تست‌های سرتاسری پنل (`admin.spec.ts`، `orders.spec.ts`، `status.spec.ts`، …): دستور سرور، کد برنامهٔ تأیید مثل
- * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، و تخصیص چاپخانه در پرداخت (۵٫۲). طرز اجرا بالای
- * `admin.spec.ts`.
+ * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، تخصیص چاپخانه در پرداخت (۵٫۲)، و فایل پست و
+ * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`). طرز اجرا بالای `admin.spec.ts`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -10,6 +10,8 @@ import { join } from 'node:path';
 
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type postgres from 'postgres';
+
+import { POST_HEADERS, totalRow } from '@jozveyar/db/postfile.fixtures';
 
 import { base32Decode, hotp, totpStep } from '../lib/server/totp';
 
@@ -150,4 +152,20 @@ export async function assignAtPayment(tx: postgres.TransactionSql, orderId: stri
   await tx`INSERT INTO order_assignments (order_id, to_partner_id, at, actor, rule)
            VALUES (${orderId}, ${chosen.id}, ${at}, 'system', ${chosen.rule})`;
   return chosen.id;
+}
+
+const escapeCell = (cell: string) => cell.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\u00a0/g, '&nbsp;');
+
+/** جدول HTML با پسوند `.xls`، همان شکل فایل پست (۶٫۱): سرستون، سطرها و «جمع کل»، با CRLF. */
+export function postFile(rows: string[][], { total = true, headers = POST_HEADERS }: { total?: boolean; headers?: readonly string[] } = {}): Buffer {
+  const lines = [headers, ...rows, ...(total ? [totalRow(rows)] : [])].map((cells) => `<tr>${cells.map((c) => `<td>${escapeCell(c)}</td>`).join('')}</tr>`);
+  return Buffer.from(`<table border="1">\r\n${lines.join('\r\n')}\r\n</table>\r\n`, 'utf8');
+}
+
+/** بارگذاری فایل پست از زبانهٔ «ارسال» (۶٫۱)؛ برمی‌گرداند شناسهٔ ورود را، از نشانی صفحه‌اش. */
+export async function uploadPostFile(page: Page, name: string, body: Buffer): Promise<string> {
+  await page.goto(at('/shipments'));
+  await page.locator('input[type="file"][name="file"]').setInputFiles({ name, mimeType: 'application/vnd.ms-excel', buffer: body });
+  await page.waitForURL(/\/shipments\/[0-9a-f-]{36}/);
+  return /\/shipments\/([0-9a-f-]{36})/.exec(page.url())![1]!;
 }

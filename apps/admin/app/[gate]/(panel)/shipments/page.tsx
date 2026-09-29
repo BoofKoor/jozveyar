@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { POST_FILE_MAX_BYTES } from '@jozveyar/db';
+import { formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../components/Alert';
 import { ImportBadge } from '../../../../components/ImportBadge';
@@ -20,8 +21,9 @@ type Query = Record<string, string | string[] | undefined>;
 const one = (query: Query, key: string) => (typeof query[key] === 'string' ? (query[key] as string) : undefined);
 
 /**
- * ارسال (طرح پنل `m-ship`، برش ۶٫۱، ADR-045): بارگذاری فایل پست و ورودها، تازه‌ترین اول، با وضعیت، کسی که آورد، روز فایل و شمار
- * حکم‌ها؛ هر ورود پیوند صفحهٔ خودش (پیش‌نمایش، یا نتیجهٔ «ثبت»). مالک و متصدی (`shipments.import`)؛ چاپخانه از ۶٫۲.
+ * ارسال (طرح پنل `m-ship`، برش ۶٫۱، ADR-045): بارگذاری فایل پست و ورودها، تازه‌ترین اول، با وضعیت، کسی که آورد، روز فایل و حال
+ * سطرها؛ هر ورود پیوند صفحهٔ خودش (پیش‌نمایش، یا نتیجهٔ «ثبت»). مالک و متصدی (`shipments.import`)، و از ۶٫۲ چاپخانه فقط ورودهای
+ * خودش؛ مالک و متصدی شمار صف تأیید را هم با پیوندش می‌بینند.
  */
 export default async function ShipmentsPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
@@ -31,7 +33,8 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
   if (!can(session, 'shipments.import')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await shipments.list(session, { page: one(query, 'page') });
   if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
-  const { lines, now, page, more } = result.value;
+  const { lines, now, page, more, queued } = result.value;
+  const partner = session.partner;
   const error = one(query, 'e');
   const base = panelPath(gate, '/shipments');
 
@@ -40,7 +43,11 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
       <div className="ad-pagehead">
         <div>
           <h1 className="ad-title">ارسال</h1>
-          <p className="ad-sub">فایل پست کد رهگیری، وزن و کرایهٔ هر بسته را می‌آورد؛ پیش از ثبت، هر سطر را با حکمش می‌بینی.</p>
+          <p className="ad-sub">
+            {partner
+              ? `فایل پست بسته‌هایت را بده؛ کد رهگیری سفارش‌های ${partner.name} در صفحهٔ هر سفارش می‌نشیند. پیش از ثبت، هر سطر را با حکمش می‌بینی.`
+              : 'فایل پست کد رهگیری، وزن و کرایهٔ هر بسته را می‌آورد؛ پیش از ثبت، هر سطر را با حکمش می‌بینی.'}
+          </p>
         </div>
       </div>
       <div className="ad-stack">
@@ -50,6 +57,18 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
           <Alert tone="success">فایل دور انداخته شد؛ چیزی ثبت نشد.</Alert>
         ) : null}
         <PostFileUpload gate={gate} maxMb={POST_FILE_MAX_BYTES / 1024 / 1024} partner={session.partner?.name ?? null} />
+        {queued > 0 ? (
+          // صف تأیید فقط با مالک و متصدی (طرح)؛ بی پیامک تا ۶٫۳.
+          <p className="jy-note jy-note--warning" data-alert="review">
+            <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+            <span>
+              <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
+                <span className="num">{formatNumber(queued)}</span> سطر
+              </Link>{' '}
+              از فایل‌های پست منتظر تأیید است؛ تا تأیید نشده، کد رهگیری به سفارشش نمی‌نشیند.
+            </span>
+          </p>
+        ) : null}
 
         <section className="jy-card ad-list" aria-labelledby="t-imports">
           <div className="jy-card__head">
@@ -73,7 +92,7 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
                       <Segments segs={importMeta(line, now)} />
                     </span>
                     <span className="ad-imp__counts">
-                      <Segments segs={importCounts(line)} />
+                      <Segments segs={importCounts(line, { partner: partner !== null })} />
                     </span>
                   </Link>
                 </li>

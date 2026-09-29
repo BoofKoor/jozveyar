@@ -83,6 +83,19 @@ export type AdminErrorCode =
   | 'import_closed'
   | 'import_not_committed'
   | 'order_has_shipment'
+  /** صف تأیید، دادن دستی و کنار گذاشتن یک کد (۶٫۲). */
+  | 'row_not_found'
+  | 'row_closed'
+  | 'choice_required'
+  | 'order_number_invalid'
+  | 'shipment_order_changed'
+  | 'blocked_cancelled'
+  | 'blocked_before_payment'
+  | 'blocked_needs_partner'
+  | 'blocked_needs_print'
+  | 'barcode_elsewhere'
+  | 'shipment_not_found'
+  | 'shipment_voided'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

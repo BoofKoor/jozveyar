@@ -34,7 +34,8 @@ const IDLE = HOUR;
 const INVITE = 15 * MINUTE;
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 200;
-// لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را، و از ۶٫۱ ورود فایل پست. چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042).
+// لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را، از ۶٫۱ ورود فایل پست و از ۶٫۲ صف تأیید. چاپخانه دیدن، وضعیت و دانلود
+// (ADR-042)، و از ۶٫۲ ورود فایل پست خودش.
 const OPERATOR_PERMISSIONS = [
   'files.download',
   'orders.address',
@@ -44,9 +45,10 @@ const OPERATOR_PERMISSIONS = [
   'orders.read',
   'orders.status',
   'shipments.import',
+  'shipments.review',
   'tariff.read',
 ];
-const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status'];
+const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status', 'shipments.import'];
 
 /** argon2 جدا در `password.test.ts`؛ اینجا همان قرارداد، سریع، با شمارش صدازدن‌ها. */
 function fakePasswords() {
@@ -558,7 +560,7 @@ describe('ورود پنل و ادمین‌ها', () => {
       store.partners.set(AFTAB, { id: AFTAB, name: 'چاپ آفتاب', cityName: 'اصفهان', isDefault: false, active: false });
     });
 
-    it('با پیوند یک‌باره و کد تازه، مثل متصدی؛ نشست محدودهٔ چاپخانه و فقط سه مجوز دارد؛ رویداد با نام چاپخانه', async () => {
+    it('با پیوند یک‌باره و کد تازه، مثل متصدی؛ نشست محدودهٔ چاپخانه و فقط چهار مجوز دارد؛ رویداد با نام چاپخانه', async () => {
       const sara = await enroll('sara');
       later(STEP);
       const invited = await auth.inviteAdmin(
