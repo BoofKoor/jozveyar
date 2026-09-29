@@ -39,6 +39,7 @@ import {
   reviewMeta,
   reviewWhy,
   rowStateText,
+  tileTexts,
   totalsText,
   unreadableText,
   whyText,
@@ -355,6 +356,53 @@ describe('حال امروز سطرهای ثبت‌شده و ورودها (۶٫۲
     };
     expect(text(importCounts(line))).toBe('15 بسته: 11 کد رهگیری · 2 در صف تأیید · 1 کنار گذاشته · 1 تکراری');
     expect(text(importCounts(line, { partner: true }))).toBe('15 بسته: 11 کد رهگیری · 2 در انتظار بررسی جزوه‌یار · 1 کنار گذاشته · 1 تکراری');
+  });
+
+  it('متن کاشی‌ها: پیش‌نمایش و درست پس از «ثبت» همان طرح؛ بعد چند سطر صف مانده، کد قطعی کنارگذاشته و «پیدا نشد» دستی؛ برگشته', () => {
+    const texts = (rows: CommittedImport['rows'], shipments: ImportShipment[], opts: Parameters<typeof tileTexts>[1]) => {
+      const t = tileTexts(committedRows({ rows, orders: [order(10013), order(10014)], shipments, elsewhere: [], candidates: {} }), opts);
+      return [text(t.ok), text(t.review), text(t.nf)];
+    };
+    const matched = row({ rowNo: 1, verdict: 'matched', orderId: 'o-10013', orderNumber: 10013, barcode: barcodeOf(1) });
+    const queued = [2, 3].map((rowNo) => row({ rowNo, verdict: 'review', reason: 'no_number', barcode: barcodeOf(rowNo), queued: true }));
+    const unmatched = row({ rowNo: 4, verdict: 'unmatched', reason: 'no_number', barcode: barcodeOf(4) });
+    const code = shipment({ id: 'a', rowNo: 1, barcode: barcodeOf(1) });
+    // پیش‌نمایش و درست پس از «ثبت»: همان متن طرح.
+    expect(texts([matched, ...queued, unmatched], [code], { state: 'preview' })).toEqual([
+      'کد رهگیری، با «ثبت»',
+      'تا تأیید مالک یا متصدی، بی کد',
+      'سفارش ما نیست؛ ثبت نمی‌شود',
+    ]);
+    expect(texts([matched, ...queued, unmatched], [code], { state: 'committed' })).toEqual([
+      'کد رهگیری نشست',
+      'تا تأیید مالک یا متصدی، بی کد',
+      'سفارش ما نیست؛ ثبت نمی‌شود',
+    ]);
+    // یکی از صف تأیید شد، کد قطعی کنار رفت، و «پیدا نشد» دستی به سفارشی رسید.
+    const later = [
+      shipment({ ...code, voidedAt: NOW, voidReason: 'اشتباه' }),
+      shipment({ id: 'b', rowNo: 2, barcode: barcodeOf(2), orderId: 'o-10014', orderNumber: 10014, matchedBy: 'review' }),
+      shipment({ id: 'c', rowNo: 4, barcode: barcodeOf(4), orderId: 'o-10014', orderNumber: 10014, matchedBy: 'manual' }),
+    ];
+    const decided = [{ ...matched, queued: true }, { ...queued[0]!, queued: false }, queued[1]!, unmatched];
+    expect(texts(decided, later, { state: 'committed' })).toEqual(['کد رهگیری نشست؛ 1 کنار رفت', '1 تا هنوز منتظر تأیید', '1 دستی به سفارشی داده شد']);
+    expect(texts(decided, later, { state: 'committed', partner: true })).toEqual([
+      'کد رهگیری نشست؛ 1 کنار رفت',
+      '1 تا هنوز در انتظار بررسی جزوه‌یار',
+      '1 را جزوه‌یار دستی به سفارشی داد',
+    ]);
+    // همهٔ صف بررسی شد («هیچ‌کدام» هم بررسی است).
+    const all = [matched, { ...queued[0]!, queued: false }, { ...queued[1]!, queued: false, dismissedAt: NOW, dismissedBy: 'u' }, unmatched];
+    expect(texts(all, [code], { state: 'committed' })[1]).toBe('همه بررسی شد');
+    expect(texts(all, [code], { state: 'committed', partner: true })[1]).toBe('جزوه‌یار بررسی کرد');
+    // برگشته: کدها کنار رفت و صف بسته است؛ ورودی بی سطر صف متن طرح را نگه می‌دارد.
+    const off = [{ ...matched }, ...queued.map((r) => ({ ...r, queued: false })), unmatched];
+    expect(texts(off, [shipment({ ...code, voidedAt: NOW })], { state: 'reverted' })).toEqual([
+      'با برگرداندن کنار رفت',
+      'ورود برگشت؛ بی کد',
+      'سفارش ما نیست؛ ثبت نمی‌شود',
+    ]);
+    expect(texts([unmatched], [], { state: 'reverted' })).toEqual(['کد رهگیری نشست', 'تا تأیید مالک یا متصدی، بی کد', 'سفارش ما نیست؛ ثبت نمی‌شود']);
   });
 
   it('دلیل از چشم چاپخانه: نامی که نمی‌خواند، «در صف چاپ»، و شمارهٔ دستی', () => {

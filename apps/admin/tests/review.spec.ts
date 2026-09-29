@@ -273,6 +273,8 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     await page.locator('.ad-commit').getByRole('button', { name: 'ثبت، بی کد رهگیری' }).click();
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('ثبت شد');
     await expect(page.locator('main')).toContainText('ثبت شد: 0 کد رهگیری نشست. 4 سطر در صف تأیید است.');
+    // شمار کاشی حکم «ثبت» است و متنش حال امروز؛ درست پس از «ثبت» همان طرح.
+    await expect(page.locator('[data-count="review"] .ad-tile__t')).toHaveText('تا تأیید مالک یا متصدی، بی کد');
 
     // صف: همین چهار سطر، به ترتیب سطر.
     await page.getByRole('link', { name: '4 سطر در صف تأیید' }).click();
@@ -344,6 +346,10 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     const page = operatorPage;
     await page.goto(at(`/shipments/${staffFile}`));
     const rowOf = (n: number) => page.locator(`.ad-prow[data-row="${n}"]`);
+    const tileText = (id: string) => page.locator(`[data-count="${id}"] .ad-tile__t`);
+    await expect(page.locator('[data-count="review"] .ad-tile__n')).toHaveText('4');
+    await expect(tileText('review')).toHaveText('همه بررسی شد');
+    await expect(tileText('nf')).toHaveText('سفارش ما نیست؛ ثبت نمی‌شود');
     await expect(rowOf(1)).toHaveAttribute('data-state', 'code-review');
     await expect(rowOf(1)).toContainText(`سفارش ${o.A.number} · رضا احمدی، تهران · با تأیید، علی محمدی`);
     await expect(rowOf(2)).toContainText(`سفارش ${o.G.number} · کیوان یوسفی، تهران · دستی، علی محمدی`);
@@ -365,6 +371,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     await manual.getByRole('button', { name: 'همین است' }).click();
     await expect(page.getByRole('heading', { name: staffName })).toBeVisible();
     await expect(page.locator('main')).toContainText(`کد رهگیری دستی به سفارش ${o.B.number} نشست و سفارش «تحویل پست شد».`);
+    await expect(tileText('nf')).toHaveText('1 دستی به سفارشی داده شد');
     expect(await statusOf(o.B)).toBe('handed_to_post');
 
     await page.goto(at('/shipments'));
@@ -421,6 +428,8 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     await expect(back).toContainText('«کد مال سفارش دیگری بود.»؛ دوباره تصمیم می‌خواهد.');
     await expect(back.locator(`[data-candidate="${o.E.number}"]`)).toContainText('کد همین سطر پیش‌تر از این سفارش کنار رفت');
     await expect(back.locator(`[data-candidate="${o.E.number}"]`).getByRole('radio')).not.toBeChecked();
+    await operatorPage.goto(at(`/shipments/${staffFile}`));
+    await expect(operatorPage.locator('[data-count="review"] .ad-tile__t')).toHaveText('2 تا هنوز منتظر تأیید');
     expect(ownerProblems).toEqual([]);
     expect(operatorProblems).toEqual([]);
   });
@@ -482,6 +491,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     await page.locator('.ad-commit').getByRole('button', { name: 'ثبت: 1 کد رهگیری' }).click();
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('ثبت شد');
     await expect(main).toContainText(`سفارش ${o.N1.number} «تحویل پست شد» شد. 1 سطر در انتظار بررسی جزوه‌یار است.`);
+    await expect(page.locator('[data-count="review"] .ad-tile__t')).toHaveText('جزوه‌یار تأیید یا کنار می‌گذارد');
     expect(await statusOf(o.N1)).toBe('handed_to_post');
     expect(await statusOf(o.T)).toBe('printing');
     await page.goto(at('/shipments'));
@@ -521,6 +531,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     // چاپخانه همان را می‌بیند: «با تأیید جزوه‌یار»، بی نام ادمین.
     await page.goto(at(`/shipments/${partnerFile}`));
     await expect(page.locator('.ad-prow[data-row="4"]')).toContainText(`سفارش ${o.N2.number} · حسین اکبری، مشهد · با تأیید جزوه‌یار`);
+    await expect(page.locator('[data-count="review"] .ad-tile__t')).toHaveText('جزوه‌یار بررسی کرد');
     expect(await page.content()).not.toContain('سارا رضایی');
     expect(problems).toEqual([]);
     expect(partner.mina.problems).toEqual([]);
@@ -569,6 +580,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     await page.getByLabel('دلیل').fill('فایل روز اشتباه بود.');
     await page.getByRole('button', { name: 'این ورود را برگردان' }).click();
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('برگشت');
+    await expect(page.locator('[data-count="review"] .ad-tile__t')).toHaveText('ورود برگشت؛ بی کد');
     // G و B را کدهای دستی همین ورود «تحویل پست شد» کرده بودند؛ A و C پیش‌تر دستی به پست رسیده بودند.
     expect(await Promise.all([o.G, o.B, o.A, o.C].map(statusOf))).toEqual(['printing', 'printing', 'handed_to_post', 'handed_to_post']);
     await page.goto(at('/shipments/review'));

@@ -25,6 +25,7 @@ import {
   numbersText,
   postDaysText,
   previewRows,
+  tileTexts,
   totalsText,
   unreadableText,
   type ImportRowView,
@@ -75,10 +76,11 @@ function AnotherFile({ gate }: { gate: string }) {
 
 /**
  * کاشی‌های شمار (طرح): قطعی، صف تأیید، پیدا نشد و تکراری همیشه؛ خوانده نشد و غیرفعال فقط اگر هست. چاپخانه (۶٫۲) صف را «بررسی
- * جزوه‌یار» می‌بیند.
+ * جزوه‌یار» می‌بیند. شمار حکم «ثبت» است؛ متن ورود ثبت‌شده حال امروز سطرها (`tileTexts`، ۶٫۲).
  */
-function CountTiles({ counts, committed, partner }: { counts: RowCounts; committed: boolean; partner: boolean }) {
-  const tiles: { id: string; n: number; badge: React.ReactNode; text: string; show: boolean }[] = [
+function CountTiles({ counts, rows, state, partner }: { counts: RowCounts; rows: readonly ImportRowView[]; state: 'preview' | 'committed' | 'reverted'; partner: boolean }) {
+  const texts = tileTexts(rows, { state, partner });
+  const tiles: { id: string; n: number; badge: React.ReactNode; text: Seg[]; show: boolean }[] = [
     {
       id: 'ok',
       n: counts.matched,
@@ -88,7 +90,7 @@ function CountTiles({ counts, committed, partner }: { counts: RowCounts; committ
           قطعی
         </span>
       ),
-      text: committed ? 'کد رهگیری نشست' : 'کد رهگیری، با «ثبت»',
+      text: texts.ok,
       show: true,
     },
     {
@@ -100,17 +102,17 @@ function CountTiles({ counts, committed, partner }: { counts: RowCounts; committ
           {partner ? 'بررسی جزوه‌یار' : 'صف تأیید'}
         </span>
       ),
-      text: partner ? 'جزوه‌یار تأیید یا کنار می‌گذارد' : 'تا تأیید مالک یا متصدی، بی کد',
+      text: texts.review,
       show: true,
     },
     {
       id: 'nf',
       n: counts.unmatched,
       badge: <span className="jy-badge jy-badge--neutral">پیدا نشد</span>,
-      text: partner ? 'سفارش جزوه‌یار نیست؛ ثبت نمی‌شود' : 'سفارش ما نیست؛ ثبت نمی‌شود',
+      text: texts.nf,
       show: true,
     },
-    { id: 'dup', n: counts.duplicate, badge: <span className="jy-badge jy-badge--neutral">تکراری</span>, text: 'همین کد پیش‌تر آمده', show: true },
+    { id: 'dup', n: counts.duplicate, badge: <span className="jy-badge jy-badge--neutral">تکراری</span>, text: ['همین کد پیش‌تر آمده'], show: true },
     {
       id: 'invalid',
       n: counts.invalid,
@@ -120,10 +122,10 @@ function CountTiles({ counts, committed, partner }: { counts: RowCounts; committ
           خوانده نشد
         </span>
       ),
-      text: 'کد، عدد یا تاریخ درست نیست',
+      text: ['کد، عدد یا تاریخ درست نیست'],
       show: counts.invalid > 0,
     },
-    { id: 'inactive', n: counts.inactive, badge: <span className="jy-badge jy-badge--neutral">غیرفعال در پست</span>, text: 'وضعیتش «فعال» نیست', show: counts.inactive > 0 },
+    { id: 'inactive', n: counts.inactive, badge: <span className="jy-badge jy-badge--neutral">غیرفعال در پست</span>, text: ['وضعیتش «فعال» نیست'], show: counts.inactive > 0 },
   ];
   return (
     <ul className="ad-tiles ad-counts" aria-label="شمار سطرها">
@@ -134,7 +136,9 @@ function CountTiles({ counts, committed, partner }: { counts: RowCounts; committ
             <a className="ad-tile" href={tile.n > 0 ? `#g-${tile.id}` : undefined} data-count={tile.id}>
               {tile.badge}
               <span className="ad-tile__n num">{formatNumber(tile.n)}</span>
-              <span className="ad-tile__t">{tile.text}</span>
+              <span className="ad-tile__t">
+                <Segments segs={tile.text} />
+              </span>
             </a>
           </li>
         ))}
@@ -335,7 +339,6 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
     );
   }
 
-  const committed = view.kind === 'committed';
   const rows = view.kind === 'preview' ? previewRows(view.preview) : committedRows(view.committed);
   const counts = countsOf(rows);
   const totals =
@@ -451,7 +454,7 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
             ) : null}
           </Alert>
         )}
-        <CountTiles counts={counts} committed={committed} partner={partner !== null} />
+        <CountTiles counts={counts} rows={rows} state={view.kind === 'preview' ? 'preview' : reverted ? 'reverted' : 'committed'} partner={partner !== null} />
         {totals ? (
           totals.agree === false ? (
             <Alert tone="warning">

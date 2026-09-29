@@ -404,6 +404,39 @@ export function countsOf(rows: readonly ImportRowView[]): RowCounts {
   return counts;
 }
 
+/**
+ * متن کاشی‌های قطعی، صف تأیید و پیدا نشد (طرح). شمار کاشی حکم «ثبت» است و عوض نمی‌شود؛ متن ورود ثبت‌شده حال امروز را می‌گوید (۶٫۲):
+ * درست پس از «ثبت» همان متن طرح، و بعد چند سطر صف هنوز منتظر است، چند کد قطعی کنار رفت، و چند «پیدا نشد» دستی به سفارشی داده
+ * شد. ورود برگشته: کدها کنار رفت و صف بسته است. چاپخانه صف را جزوه‌یار می‌بیند.
+ */
+export function tileTexts(
+  rows: readonly ImportRowView[],
+  { state, partner = false }: { state: 'preview' | 'committed' | 'reverted'; partner?: boolean },
+): Record<'ok' | 'review' | 'nf', Seg[]> {
+  const of = (verdict: ImportRowView['verdict'], test: (row: ImportRowView) => boolean = () => true) =>
+    rows.filter((row) => row.verdict === verdict && test(row)).length;
+  const review = of('review');
+  const waiting = of('review', (row) => row.queued);
+  const lost = of('matched', (row) => row.shipment === null);
+  const given = of('unmatched', (row) => row.shipment !== null);
+  const reviewText = partner ? 'جزوه‌یار تأیید یا کنار می‌گذارد' : 'تا تأیید مالک یا متصدی، بی کد';
+  const nfText = partner ? 'سفارش جزوه‌یار نیست؛ ثبت نمی‌شود' : 'سفارش ما نیست؛ ثبت نمی‌شود';
+  if (state === 'preview') return { ok: ['کد رهگیری، با «ثبت»'], review: [reviewText], nf: [nfText] };
+  if (state === 'reverted') {
+    return { ok: [of('matched') > 0 ? 'با برگرداندن کنار رفت' : 'کد رهگیری نشست'], review: [review > 0 ? 'ورود برگشت؛ بی کد' : reviewText], nf: [nfText] };
+  }
+  return {
+    ok: lost > 0 ? ['کد رهگیری نشست؛ ', num(lost), ' کنار رفت'] : ['کد رهگیری نشست'],
+    review:
+      waiting === review
+        ? [reviewText]
+        : waiting === 0
+          ? [partner ? 'جزوه‌یار بررسی کرد' : 'همه بررسی شد']
+          : [num(waiting), ` تا هنوز ${partner ? 'در انتظار بررسی جزوه‌یار' : 'منتظر تأیید'}`],
+    nf: given > 0 ? [num(given), partner ? ' را جزوه‌یار دستی به سفارشی داد' : ' دستی به سفارشی داده شد'] : [nfText],
+  };
+}
+
 export interface Totals {
   parcels: number;
   weightGrams: number;
