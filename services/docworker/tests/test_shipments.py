@@ -162,6 +162,17 @@ def test_post_files_are_purged_after_the_retention_days_and_only_then(conn, admi
                VALUES (%s, %s, '["a"]', %s, 'طهماسبی 6103', 'مشهد', %s)""",
             (committed, row_no, barcode, verdict),
         )
+    # شاهدهای ۲۹ روزه برای ورودهایی که پیش‌نویس نیستند: ثبت‌شده با سطر «پیدا نشد»، و «خوانده نشد».
+    young = new_import(conn, admin, unique(b"<table><tr><td>young</td></tr></table>"), days_ago=29, status="read")
+    conn.execute(
+        "UPDATE shipment_imports SET status = 'committed', committed_at = now(), committed_by = %s WHERE id = %s", (admin, young)
+    )
+    conn.execute(
+        """INSERT INTO shipment_import_rows (import_id, row_no, cells, barcode, name_g, destination, verdict)
+           VALUES (%s, 1, '["a"]', NULL, 'طهماسبی 6103', 'مشهد', 'unmatched')""",
+        (young,),
+    )
+    young_unreadable = new_import(conn, admin, unique(b"<p>y</p>"), days_ago=29, status="unreadable")
     conn.commit()
 
     stale_n, purged_n, rows_n = retention.purge_post_files(conn, 30)
@@ -170,8 +181,12 @@ def test_post_files_are_purged_after_the_retention_days_and_only_then(conn, admi
     assert (status, tables, raw_gone, purged, discarded, by) == ("discarded", None, True, True, True, None)
     assert state(conn, unreadable)[0] == "unreadable" and state(conn, unreadable)[5:7] == (True, True)
     assert state(conn, committed)[0] == "committed" and state(conn, committed)[5:7] == (True, True)
-    # شاهد: ورود ۲۹ روزه دست نخورد.
+    # شاهد: ورودهای ۲۹ روزه دست نخوردند، پیش‌نویس، ثبت‌شده و «خوانده نشد»، و متن سطر ثبت‌شده هم.
     assert state(conn, fresh)[:3] == ("read", "html", [[["x"]]]) and state(conn, fresh)[5:8] == (False, False, False)
+    assert state(conn, young)[0] == "committed" and state(conn, young)[5:7] == (False, False)
+    assert state(conn, young_unreadable)[0] == "unreadable" and state(conn, young_unreadable)[5:7] == (False, False)
+    young_rows = conn.execute("SELECT cells, name_g FROM shipment_import_rows WHERE import_id = %s", (young,)).fetchall()
+    assert young_rows == [(["a"], "طهماسبی 6103")]
     rows = conn.execute(
         "SELECT row_no, cells, name_g, destination, verdict FROM shipment_import_rows WHERE import_id = %s ORDER BY row_no", (committed,)
     ).fetchall()
