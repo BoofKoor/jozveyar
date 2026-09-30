@@ -55,6 +55,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # دیوار پیامک و پول واقعی (برش ۷، ADR-049 و ADR-050، سؤال ۱۲۸): هیچ درخواستی از CI به sms.ir یا زیبال نمی‌رود، نه با کلید واقعی و نه
+      # آزمایشی. نام میزبان‌هایشان پیش از هر کدی به نشانی بسته‌ای روی همین اجراگر می‌رود، پس هر تلاش (کد، تست، ایمیج یا اشتباه
+      # پیکربندی) در لحظه «رد شد» می‌گیرد، نه پاسخ واقعی. جای sms.ir سرور ساختگی است (`packages/sms/fake/smsir.mjs`، روی 127.0.0.1).
+      # سنجش فقط از `/etc/hosts` خوانده می‌شود؛ هیچ درخواستی، حتی برای سنجش، به آنها نمی‌رود.
+      - name: دیوار sms.ir و زیبال
+        run: |
+          set -eu
+          hosts='sms.ir api.sms.ir app.sms.ir www.sms.ir zibal.ir api.zibal.ir gateway.zibal.ir www.zibal.ir'
+          for host in $hosts; do
+            printf '127.0.0.9 %s\n::1 %s\n' "$host" "$host" | sudo tee -a /etc/hosts > /dev/null
+          done
+          # هر نشانی‌ای که برمی‌گردد روی همین اجراگر است (glibc برای IPv4 ‏`::1` را 127.0.0.1 هم می‌خواند).
+          for host in $hosts; do
+            addrs=$(getent ahosts "$host" | awk '{ print $1 }' | sort -u)
+            test -n "$addrs" || { echo "دیوار $host نگرفت" >&2; exit 1; }
+            for addr in $addrs; do
+              case "$addr" in 127.*|::1) ;; *) echo "دیوار $host نگرفت: $addr" >&2; exit 1 ;; esac
+            done
+          done
+          echo "✓ دیوار: $hosts"
+
       # پیکربندی Nginx پیش از ادغام، نه هنگام استقرار: همان ایمیج و همان دو پوشه‌ای که compose تولید وصل می‌کند، با
       # گواهی خودامضا و نام سرویس‌ها روی 127.0.0.1. روی سرور nginx-apply.sh باز هم پیش از به کار انداختن می‌سنجد.
       - name: پیکربندی Nginx
@@ -316,6 +337,10 @@ jobs:
       # گزارش ارسال (برش ۶٫۴، ADR-048، `report.spec.ts`): پایگاه دادهٔ دورریختنی مثل `review.spec.ts`؛ کد رهگیری از فایل پستی که همان
       # کارگر می‌خواند، عددهای ماه جاری و ماه قبل، بازه‌های وزن که مالک از گزارش عوض می‌کند و در پایان همان پیش از تست می‌شوند، و متصدی
       # و چاپخانه بی دکمه و بی صفحه.
+      # پیامک sms.ir (برش ۷٫۱، ADR-049): پنل با `SMS_PROVIDER=smsir` و sms.ir ساختگی روی ۳۹۵۰ (`SMSIR_API_URL`)، با کلید `.env` پنل و
+      # `E2E_KEY_PROBE` و سه قالب همین‌جا؛ پس پیامک رهگیری همهٔ تست‌ها از آداپتور واقعی می‌گذرد. `sms.spec.ts` قالب و پارامترها را از
+      # ساختگی می‌خواند و «جواب نداد» را با آن می‌سازد؛ `settings.spec.ts` «آزمایش» کلید و قالب؛ `smsir.spec.ts` اعتبار، سقف کد، هشدارها و
+      # پیامک پرداخت. ساختگی هیچ کلید و بدنه‌ای چاپ نمی‌کند، و لاگش هم با پنل و وب جست‌وجو می‌شود.
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
@@ -326,6 +351,12 @@ jobs:
           S3_BUCKET: jozveyar
           DOCWORKER_POLL_SECONDS: '0.5'
           DOCWORKER_RETENTION_SECONDS: '2'
+          SMS_PROVIDER: smsir
+          SMSIR_API_URL: http://127.0.0.1:3950
+          E2E_SMSIR_URL: http://127.0.0.1:3950
+          SMS_OTP_TEMPLATE: '100001'
+          SMS_PAID_TEMPLATE: '100002'
+          SMS_TRACKING_TEMPLATE: '100003'
         run: |
           set -eu
           docker run --rm --network host -e PGPASSWORD=jozveyar postgres:17-alpine \
@@ -342,16 +373,21 @@ jobs:
           SMS_API_KEY="$(openssl rand -hex 20)"
           E2E_KEY_PROBE="$(openssl rand -hex 20)"
           export SESSION_SECRET SECRETS_KEY ADMIN_BASE_PATH SMS_API_KEY E2E_KEY_PROBE
+          FAKE_SMSIR_KEYS="$SMS_API_KEY,$E2E_KEY_PROBE" \
+          FAKE_SMSIR_TEMPLATES='{"100001":["CODE"],"100002":["ORDER","DAY"],"100003":["ORDER","BARCODE"]}' \
+            node packages/sms/fake/smsir.mjs > "$RUNNER_TEMP/smsir.log" 2>&1 &
+          timeout 30 sh -c 'until grep -qF "✓ sms.ir ساختگی" "$0"; do sleep 1; done' "$RUNNER_TEMP/smsir.log"
           node apps/admin/scripts/serve-standalone.mjs 3200 > "$RUNNER_TEMP/admin.log" 2>&1 &
           timeout 120 sh -c 'until curl -sf http://127.0.0.1:3200/api/health > /dev/null; do sleep 1; done'
           timeout 30 sh -c 'until grep -qF "⚠ پنل ادمین: هنوز هیچ ادمینی" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
           grep -F '✓ پنل ادمین: آماده' "$RUNNER_TEMP/admin.log"
+          grep -F '✓ پنل ادمین: پیامک sms.ir (SMS_PROVIDER=smsir)، نشانی از SMSIR_API_URL' "$RUNNER_TEMP/admin.log"
           if grep -F "$ADMIN_BASE_PATH" "$RUNNER_TEMP/admin.log"; then echo 'مسیر محرمانه در لاگ پنل آمد' >&2; exit 1; fi
           timeout 30 sh -c 'until grep -qF "✓ پنل ادمین: کلیدهای سرویس‌ها — SMS_API_KEY از .env" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
           cd apps/admin
           pnpm exec playwright test
           for secret in "$SMS_API_KEY" "$E2E_KEY_PROBE"; do
-            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/web-admin.log"; do
+            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/web-admin.log" "$RUNNER_TEMP/smsir.log"; do
               if grep -qF "$secret" "$log"; then echo "مقدار کلید در $(basename "$log") آمد" >&2; exit 1; fi
             done
           done
@@ -361,6 +397,7 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/web-admin.log" || true
           cat "$RUNNER_TEMP/admin.log" || true
+          cat "$RUNNER_TEMP/smsir.log" || true
           docker logs docworker-admin || true
 
       # خروجی standalone دو چیز را خودش نمی‌آورد و باید کنار server.js بنشینند.
