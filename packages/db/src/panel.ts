@@ -125,7 +125,12 @@ export type PanelSearch =
   | { kind: 'mobile'; mobile: string }
   | { kind: 'name'; text: string }
   /** کد رهگیری ۲۴ رقمی (برش ۶٫۱): سفارشی که مرسوله‌ای با همین بارکد دارد، زنده یا کنارگذاشته. */
-  | { kind: 'barcode'; barcode: string };
+  | { kind: 'barcode'; barcode: string }
+  /**
+   * «بی کد رهگیری» گزارش ارسال (برش ۶٫۴، تصمیم‌های ۱۰۳ و ۱۰۸): سفارش‌هایی که در `[from, to)` «تحویل پست شد» و مرسولهٔ زنده
+   * ندارند؛ همان‌ها که گزارش جدا می‌شمارد (`handedOrders` با صفر بسته). از نشانی (`?untracked=1405-07`)، نه از کادر جست‌وجو.
+   */
+  | { kind: 'untracked'; from: Date; to: Date };
 
 /** «حالا» و مرزهایی که با آن ساخته می‌شوند. */
 export interface PanelClock {
@@ -628,6 +633,10 @@ function searchWhere(search: PanelSearch | null): SQL | undefined {
       return sql`${orders.recipientName} ILIKE ${`%${likeText(search.text)}%`} ESCAPE '\\'`;
     case 'barcode':
       return sql`EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = ${orders.id} AND s.barcode = ${search.barcode})`;
+    case 'untracked':
+      // زمان تحویل پست فقط در «تحویل پست شد» پر است (`orders_handed_at`)، پس همین شرط وضعیت هم هست.
+      return sql`(${orders.handedToPostAt} >= ${ts(search.from)} AND ${orders.handedToPostAt} < ${ts(search.to)}
+        AND NOT EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = ${orders.id} AND s.voided_at IS NULL))`;
   }
 }
 

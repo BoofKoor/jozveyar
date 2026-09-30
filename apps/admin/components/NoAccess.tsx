@@ -30,8 +30,8 @@ export function NoAccess({ gate, partner }: { gate: string; partner?: { name: st
         این بخش فقط برای مالک است
       </h1>
       <p className="ad-lead">
-        تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها و برگرداندن ورود فایل پست با مالک
-        پنل است.
+        تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، برگرداندن ورود فایل پست و گزارش ارسال
+        با مالک پنل است.
       </p>
       <div className="ad-actions">
         <Link href={panelPath(gate)} className="jy-btn jy-btn--secondary">

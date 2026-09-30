@@ -3,7 +3,7 @@
  *
  *  - منطقه‌های کرایه، استان‌ها و شهرها، از `@jozveyar/geo` — سفارش به شهر و استان کلید خارجی دارد؛
  *  - تعرفهٔ پایه، اگر هنوز هیچ تعرفه‌ای نیست — قیمت قطعی سرور از تعرفهٔ پایگاه داده است (قاعدهٔ ۲)؛
- *  - پیش‌فرض‌های `settings`: روز کاری تحویل به پست و تعطیلی‌های رسمی؛
+ *  - پیش‌فرض‌های `settings`: روز کاری تحویل به پست، تعطیلی‌های رسمی، و از ۶٫۴ بازه‌های وزن گزارش ارسال؛
  *  - نقش‌ها و مجوزهای پنل ادمین (`ADMIN_ROLES`، برش ۴): همیشه دقیقاً همان کد؛
  *  - اولین چاپخانه، «چاپخانهٔ جزوه‌یار» در تهران و پیش‌فرض، اگر هنوز هیچ چاپخانه‌ای نیست (برش ۵٫۲، ADR-042): تخصیص سفارش
  *    در پرداخت از روز اول جایی برای رفتن دارد. نامش از زبانهٔ «چاپخانه‌ها» عوض‌شدنی است و استقرار بعدی برش نمی‌گرداند.
@@ -40,6 +40,8 @@ export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
 export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
 /** فایل‌های سفارش چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (برش ۵٫۱، ADR-044). */
 export const FILES_RETENTION_SETTING = 'order.files_retention_days';
+/** بازه‌های وزن گزارش ارسال (برش ۶٫۴، ADR-048): مرزها به گرم، یا `'tariff'` یعنی همان بازه‌های کرایهٔ تعرفهٔ فعال. */
+export const REPORT_BANDS_SETTING = 'report.weight_bands';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -53,6 +55,9 @@ export const FILES_RETENTION_SETTING = 'order.files_retention_days';
  *
  * فایل‌های سفارش ۳۰ روز پس از پست یا لغو پاک می‌شوند (سؤال ۳۶): چاپ دوباره برای بستهٔ گم‌شده یا آسیب‌دیده در همین چند
  * هفته پیش می‌آید، و بیشتر از آن فقط دیسک است.
+ *
+ * بازه‌های وزن گزارش ارسال همان بازه‌های کرایهٔ تعرفهٔ فعال‌اند (تصمیم ۱۰۱)، تا مالک از گزارش عوضشان کند؛ پیش‌فرض عدد نیست،
+ * `'tariff'` است، تا گزارش با هر نسخهٔ تازهٔ تعرفه همراه شود.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
@@ -60,6 +65,7 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [OFFICIAL_THROUGH_SETTING]: 1405,
   [OTP_SITE_LIMIT_SETTING]: 300,
   [FILES_RETENTION_SETTING]: 30,
+  [REPORT_BANDS_SETTING]: 'tariff',
 };
 
 /**

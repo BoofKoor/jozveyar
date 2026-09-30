@@ -1563,4 +1563,99 @@
     background: var(--color-green-50);
     border-radius: var(--radius-md);
   }
+
+  /* ===== گزارش ارسال (۶٫۴، طرح `m-ship-report`): جدول در دسکتاپ؛ در گوشی هر ردیف یک کارت کوچک، هر عدد با برچسبش ===== */
+  .ad-tiles--money .ad-tile__n {
+    font-size: var(--text-h2);
+  }
+  .ad-table--margin :is(th, td) {
+    white-space: nowrap;
+  }
+  .ad-table--margin tbody th {
+    white-space: normal;
+  }
+  .ad-table--margin .ad-total > * {
+    border-block-start: 1px solid var(--color-line);
+  }
+  .ad-pct {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  @media (max-width: 520px) {
+    .ad-tiles--money .ad-tile__n {
+      font-size: var(--text-h4);
+    }
+    .ad-table--margin thead {
+      display: none;
+    }
+    .ad-table--margin,
+    .ad-table--margin tbody {
+      display: block;
+    }
+    .ad-table--margin tr {
+      display: flex;
+      flex-direction: column;
+      padding-block: 10px;
+      border-block-end: 1px solid var(--color-green-100);
+    }
+    .ad-table--margin tr:last-child {
+      border-block-end: 0;
+    }
+    .ad-table--margin :is(th, td) {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 2px 0;
+      border: 0;
+      white-space: normal;
+    }
+    .ad-table--margin .ad-total > * {
+      border: 0;
+    }
+    .ad-table--margin tbody th {
+      font-weight: 600;
+    }
+    .ad-table--margin td::before {
+      content: attr(data-k);
+      font-size: var(--text-small);
+      color: var(--color-muted);
+    }
+  }
+  /* بازه‌های وزن گزارش: منبع و «بازه‌ها را عوض کن»، و فرمش با یک فیلد برای هر مرز (تصمیم ۱۱۰) */
+  .ad-bands {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    margin-block-start: 12px;
+    padding-block-start: 12px;
+    border-block-start: 1px solid var(--color-green-100);
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .ad-bands__text {
+    flex: 1 1 16rem;
+  }
+  .ad-bands .jy-btn {
+    margin-inline-end: -12px;
+  }
+  .ad-bounds {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+    gap: 12px;
+    margin-block-start: 8px;
+  }
+  .ad-bounds .jy-field {
+    min-width: 0;
+  }
+  .ad-bounds-form {
+    margin-block-start: 12px;
+    padding-block-start: 12px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-bounds-form fieldset {
+    border: 0;
+    min-width: 0;
+  }
 }

@@ -15,6 +15,18 @@ export const holidaySchema = z.object({
 });
 export type Holiday = z.infer<typeof holidaySchema>;
 
+/** بیشترین شمار مرز بازه‌های وزن گزارش ارسال (برش ۶٫۴): هشت مرز، نه بازه. */
+export const REPORT_BOUNDS_MAX = 8;
+/** بزرگ‌ترین مرز، گرم (صد کیلو)؛ بیشتر یعنی صفر اضافه. */
+export const REPORT_BOUND_MAX_GRAMS = 100_000;
+
+/** مرزهای بازه‌های وزن گزارش: گرم، صعودی، بی تکرار. */
+const reportBoundsSchema = z
+  .array(z.number().int().min(1).max(REPORT_BOUND_MAX_GRAMS))
+  .min(1)
+  .max(REPORT_BOUNDS_MAX)
+  .refine((bounds) => bounds.every((grams, i) => i === 0 || grams > bounds[i - 1]!), { message: 'مرزها صعودی نیستند' });
+
 export const SETTING_SCHEMAS = {
   /** روز کاری تا تحویل به پست (ADR-013). */
   'order.sla_days': z.number().int().min(1).max(30),
@@ -33,6 +45,12 @@ export const SETTING_SCHEMAS = {
    * (`services/docworker/docworker/retention.py`) و مقدار بیرون از آن را به کار نمی‌برد: هیچ فایلی پاک نمی‌شود.
    */
   'order.files_retention_days': z.number().int().min(7).max(365),
+  /**
+   * بازه‌های وزن گزارش ارسال (برش ۶٫۴، ADR-048، تصمیم ۱۰۱): مرزها به گرم، صعودی؛ `[1000, 3000]` یعنی زیر 1 کیلو، 1 تا 3
+   * کیلو و بالای 3 کیلو، و هر بازه از مرز پایینش، مثل بازه‌های کرایهٔ تعرفه. `'tariff'` (پیش‌فرض) یعنی همان بازه‌های کرایهٔ
+   * تعرفهٔ فعال، که با هر نسخهٔ تازه همراه می‌شود. فقط گزارش را می‌چیند: قیمت، کرایه و تعرفه را دست نمی‌زند (قاعدهٔ ۶).
+   */
+  'report.weight_bands': z.union([z.literal('tariff'), reportBoundsSchema]),
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

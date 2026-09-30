@@ -28,7 +28,7 @@ test.use({ baseURL: BASE });
 const RUN = randomInt(1000, 9999);
 const DAY = 86_400_000;
 const NO_ACCESS = 'این بخش فقط برای مالک است';
-/** مقداری که مالک برای کلید API کاوه‌نگار وارد می‌کند. */
+/** مقداری که مالک برای کلید API sms.ir وارد می‌کند. */
 const PROBE = env.E2E_KEY_PROBE?.trim() || randomBytes(20).toString('hex');
 /** همان `.env` پنل. */
 const ENV_KEY = env.SMS_API_KEY?.trim() ?? '';
@@ -125,7 +125,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await operatorPage.goto(at('/settings'));
     await expect(operatorPage.getByRole('heading', { name: NO_ACCESS })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
-      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها و برگرداندن ورود فایل پست با مالک پنل است.',
+      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، برگرداندن ورود فایل پست و گزارش ارسال با مالک پنل است.',
     );
     expect((await html(operatorPage)).includes('کلیدهای سرویس‌ها')).toBe(false);
 
@@ -179,7 +179,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(keys.locator('.jy-note--info')).toHaveText(
       'کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود. مقدار پنل بر مقدار .env مقدم است. سایت از این کلیدها با راه افتادن درگاه و پنل پیامک واقعی استفاده می‌کند.',
     );
-    await expect(keys.locator('.ad-keys__name')).toHaveText(['کلید API کاوه‌نگار', 'قالب کد پیامکی کاوه‌نگار', 'کد پذیرندهٔ زیبال']);
+    await expect(keys.locator('.ad-keys__name')).toHaveText(['کلید API sms.ir', 'قالب کد پیامکی sms.ir', 'کد پذیرندهٔ زیبال']);
     const api = keyRow(page, 'SMS_API_KEY');
     if (ENV_KEY) {
       await expect(api.locator('.jy-badge')).toHaveText('از .env');
@@ -188,7 +188,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
       expect((await html(page)).includes(ENV_KEY)).toBe(false);
     }
     await expect(keyRow(page, 'SMS_OTP_TEMPLATE').locator('.jy-badge')).toHaveText('خالی');
-    await expect(keyRow(page, 'SMS_OTP_TEMPLATE').locator('.ad-keys__meta')).toContainText('نام قالبی که در پنل کاوه‌نگار تأیید می‌شود');
+    await expect(keyRow(page, 'SMS_OTP_TEMPLATE').locator('.ad-keys__meta')).toContainText('نام قالبی که در پنل sms.ir تأیید می‌شود');
     await expect(keyRow(page, 'SMS_OTP_TEMPLATE').getByRole('link', { name: 'وارد کن' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'برگرداندن به .env' })).toHaveCount(0);
   });
@@ -411,7 +411,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await value.fill(PROBE);
     await api.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await api.getByRole('button', { name: 'ذخیره' }).click();
-    await expect(successIn(page, '#keys')).toHaveText('«کلید API کاوه‌نگار» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
+    await expect(successIn(page, '#keys')).toHaveText('«کلید API sms.ir» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
     await expect(api.locator('.jy-badge')).toHaveText('از پنل');
     await expect(api.locator('.ad-mask')).toHaveText(`••••••••${PROBE.slice(-4)}`);
     await expect(api.locator('.ad-keys__meta')).toContainText(`سارا رضایی، ${formatJalaliNumeric(new Date())}`);
@@ -433,7 +433,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await template.getByLabel('نام قالب').fill('jozveyar-otp');
     await template.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await template.getByRole('button', { name: 'ذخیره' }).click();
-    await expect(successIn(page, '#keys')).toHaveText('«قالب کد پیامکی کاوه‌نگار» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
+    await expect(successIn(page, '#keys')).toHaveText('«قالب کد پیامکی sms.ir» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
     const stale = keyRow(other, 'SMS_OTP_TEMPLATE');
     await stale.getByLabel('نام قالب').fill('another-template');
     await stale.getByLabel('کد برنامهٔ تأیید تو').fill('000000');
@@ -454,13 +454,13 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     );
     await api.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await api.getByRole('button', { name: 'به .env برگردان' }).click();
-    await expect(successIn(page, '#keys')).toContainText('«کلید API کاوه‌نگار» به .env برگشت');
+    await expect(successIn(page, '#keys')).toContainText('«کلید API sms.ir» به .env برگشت');
     await expect(api.locator('.jy-badge')).toHaveText(ENV_KEY ? 'از .env' : 'خالی');
     await page.goto(at('/settings?revert=SMS_OTP_TEMPLATE'));
     await expect(template.locator('.jy-note--warning')).toHaveText('مقدار پنل پاک می‌شود و .env این کلید را ندارد؛ پس از این، کلید خالی است.');
     await template.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await template.getByRole('button', { name: 'به .env برگردان' }).click();
-    await expect(successIn(page, '#keys')).toHaveText('«قالب کد پیامکی کاوه‌نگار» به .env برگشت؛ .env این کلید را ندارد و کلید خالی است.');
+    await expect(successIn(page, '#keys')).toHaveText('«قالب کد پیامکی sms.ir» به .env برگشت؛ .env این کلید را ندارد و کلید خالی است.');
     expect((await sql`SELECT 1 FROM service_secrets`).length).toBe(0);
 
     expect((await settingEvents()).filter((e) => e.action.startsWith('settings.key_')).map((e) => [e.action, e.detail])).toEqual([
@@ -474,9 +474,9 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await page.goto(at('/events?kind=settings'));
     await expect(page.getByRole('link', { name: 'تنظیمات و کلیدها' })).toHaveAttribute('aria-current', 'page');
     const log = page.locator('.ad-log');
-    await expect(log.first()).toContainText('کلید «کلید API کاوه‌نگار» به .env برگشت');
-    await expect(log.first()).toContainText(`کلید «کلید API کاوه‌نگار» ${ENV_KEY ? 'عوض شد' : 'وارد شد'}`);
-    await expect(log.first()).toContainText('کلید «قالب کد پیامکی کاوه‌نگار» وارد شد');
+    await expect(log.first()).toContainText('کلید «کلید API sms.ir» به .env برگشت');
+    await expect(log.first()).toContainText(`کلید «کلید API sms.ir» ${ENV_KEY ? 'عوض شد' : 'وارد شد'}`);
+    await expect(log.first()).toContainText('کلید «قالب کد پیامکی sms.ir» وارد شد');
     await expect(log.first()).toContainText('روز کاری تحویل به پست: 3 ← 4');
     await expect(log.first()).toContainText('سقف ساعتی کد پیامکی کل سایت: 300 ← 1,000');
     await expect(log.first()).toContainText('روزهای نگهداری فایل‌های سفارش: 30 ← 31');

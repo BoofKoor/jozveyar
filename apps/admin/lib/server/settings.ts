@@ -1,6 +1,6 @@
 /**
  * تنظیمات و کلیدها در پنل (برش ۴٫۶، ADR-041؛ طرح پنل `m-settings` و `m-key-edit`): روز کاری تحویل به پست، سقف ساعتی کد
- * پیامکی کل سایت، تعطیلی‌ها، و کلیدهای سرویس‌های بیرونی.
+ * پیامکی کل سایت، تعطیلی‌ها، و کلیدهای سرویس‌های بیرونی؛ و از ۶٫۴ بازه‌های وزن گزارش ارسال، که فرمش در خود صفحهٔ گزارش است.
  *
  * - **مجوز در سرور** (ADR-038): تنظیم‌ها با `settings.edit` و کلیدها با `secrets.edit`، هر دو فقط مالک.
  * - **سرور منبع حقیقت است:** هر مقدار با همان `SETTING_SCHEMAS` سنجیده می‌شود که سایت با آن می‌خواند (`readSetting`)، و
@@ -21,18 +21,22 @@ import { createHash } from 'node:crypto';
 import { SETTING_SCHEMAS, type Holiday, type SettingKey, type SettingValue } from '@jozveyar/contracts';
 import {
   DEFAULT_SETTINGS,
+  REPORT_BANDS_SETTING,
   SERVICE_KEYS,
+  bandsDecision,
   isServiceKeyName,
   readSetting,
   resolveServiceKey,
   seal,
   serviceKeyContext,
+  type ReportBands,
   type SecretStore,
   type ServiceKeyName,
   type ServiceSecretRow,
   type SettingsStore,
 } from '@jozveyar/db';
 
+import { readBoundsInput, type BoundError } from '../report';
 import {
   isNumberSetting,
   keyTail,
@@ -117,6 +121,19 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
       envTail: fromEnv === null ? null : keyTail(fromEnv),
       seen: keySeenOf(row?.sealed ?? null),
     };
+  }
+
+  /** بازه‌های گزارش زیر قفل تنظیم‌ها، با رویداد `settings.update` (کلید، از و به). */
+  async function changeBands(session: AdminSession, bands: ReportBands, seen: unknown, ip: string) {
+    const result = await deps.settings.change({
+      key: REPORT_BANDS_SETTING,
+      action: 'settings.update',
+      at: now(),
+      actor: actor(session, ip),
+      decide: bandsDecision(bands, text(seen)),
+    });
+    if (!result.ok) return fail(result.reason === 'invalid' ? 400 : 409, result.reason === 'invalid' ? 'invalid_bands' : 'setting_changed', { key: REPORT_BANDS_SETTING });
+    return ok({ bands, written: result.written });
   }
 
   /** پیش از کد تازه: کلید همان است که صفحه نشان داد («همان که دیده شد»)؛ جوابش بی کد است. */
@@ -270,6 +287,28 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
         },
       });
       return result.ok ? ok({ year }) : fail(400, 'invalid_setting');
+    },
+
+    /**
+     * بازه‌های وزن گزارش ارسال (برش ۶٫۴، تصمیم‌های ۱۰۱ و ۱۱۰)، از خود صفحهٔ گزارش: مرزها، هر فیلد یک مرز (خالی یعنی نیست)؛ خطای
+     * هر فیلد با جایش. فقط مالک: تنظیم است (`settings.edit`) و فقط برای گزارش (`reports.read`). مقصد یکسان موفق است، بی رویداد؛
+     * وگرنه فقط اگر امروز همان است که صفحه نشان داد (`seen`)، زیر قفل (`bandsDecision`). روی قیمت و تعرفه اثری ندارد.
+     */
+    async saveReportBands(
+      session: AdminSession,
+      input: { values: readonly unknown[]; seen: unknown },
+      ip: string,
+    ): Promise<Result<{ bands: ReportBands; written: boolean }>> {
+      if (!can(session, 'settings.edit') || !can(session, 'reports.read')) return fail(403, 'forbidden');
+      const read = readBoundsInput(input.values);
+      if ('errors' in read) return fail(400, 'invalid_bands', { errors: read.errors satisfies (BoundError | null)[] });
+      return changeBands(session, read.bounds, input.seen, ip);
+    },
+
+    /** «برگرداندن به بازه‌های تعرفه» (تصمیم ۱۰۹): از این لحظه گزارش با بازه‌های کرایهٔ تعرفهٔ فعال همراه می‌شود. */
+    async resetReportBands(session: AdminSession, input: { seen: unknown }, ip: string): Promise<Result<{ bands: ReportBands; written: boolean }>> {
+      if (!can(session, 'settings.edit') || !can(session, 'reports.read')) return fail(403, 'forbidden');
+      return changeBands(session, 'tariff', input.seen, ip);
     },
 
     /**

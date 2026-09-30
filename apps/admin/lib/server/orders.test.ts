@@ -283,6 +283,22 @@ describe('فهرست', () => {
     const awaiting = await orders.list(session(), { status: 'awaiting', q: 'مريم' });
     expect(awaiting).toMatchObject({ ok: true, value: { bucket: 'awaiting', q: 'مريم', search: { kind: 'name', text: 'مریم' } } });
   });
+
+  it('«بی کد رهگیری» یک ماه از گزارش ارسال (۶٫۴، تصمیم ۱۰۸): بازهٔ ماه تهران، چیپ «تحویل پست شد»، بی جست‌وجو؛ ماه بدشکل فهرست همیشگی', async () => {
+    const { orders, calls } = service();
+    const untracked = await orders.list(session(), { untracked: '1405-07', status: 'open', q: '10027' });
+    expect(untracked).toMatchObject({
+      ok: true,
+      value: { bucket: 'handed', q: '', untracked: { key: '1405-07', label: ['مهر ', { num: '1405' }] } },
+    });
+    const search = { kind: 'untracked', from: new Date('2026-09-22T20:30:00Z'), to: new Date('2026-10-22T20:30:00Z') };
+    expect(calls.at(-1)!.args[0]).toMatchObject({ bucket: 'handed', search });
+    expect(calls.filter((c) => c.method === 'counts').at(-1)!.args[0]).toMatchObject({ search });
+    for (const bad of ['1405-13', '1405/07', 'x']) {
+      const plain = await orders.list(session(), { untracked: bad });
+      expect(plain).toMatchObject({ ok: true, value: { bucket: 'open', untracked: null, search: null } });
+    }
+  });
 });
 
 describe('جزئیات', () => {

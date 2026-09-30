@@ -10,11 +10,14 @@
 
 import { redirect } from 'next/navigation';
 
+import { REPORT_BOUNDS_MAX } from '@jozveyar/contracts';
+import { bandsSeen } from '@jozveyar/db';
 import { findCity } from '@jozveyar/geo';
 import { formatTehranTime } from '@jozveyar/text';
 
 import { panelPath } from '../../lib/gate';
 import { cityLabel } from '../../lib/partners';
+import { boundErrorText, monthKey, parseMonthKey, type BoundError } from '../../lib/report';
 import { draftFormFromEntries, type DraftIssue } from '../../lib/tariff';
 import type { IssuedInvite } from '../../lib/server/auth';
 import {
@@ -671,4 +674,54 @@ export async function resendSmsAction(form: FormData): Promise<void> {
       ? withQuery(back, `done=sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
       : withQuery(back, `e=${result.error}&${doneMark()}`),
   );
+}
+
+/* ───────────────────────── گزارش ارسال (۶٫۴) ───────────────────────── */
+
+export interface BandsState {
+  error?: AdminErrorCode;
+  /** پیام خطای هر فیلد، به ترتیب فیلدها؛ null یعنی آن فیلد درست است. */
+  errors?: (string | null)[];
+  /** نوشته‌های فرم، تا پس از خطا بمانند. */
+  values?: string[];
+}
+
+/** صفحهٔ گزارش همان ماه (`?month=`)، اگر شکلش درست است. */
+function reportHome(gate: string, month: string) {
+  const parsed = parseMonthKey(month);
+  return panelPath(gate, `/shipments/report${parsed ? `?month=${monthKey(parsed)}` : ''}`);
+}
+
+/**
+ * «بازه‌ها را عوض کن» (تصمیم‌های ۱۰۱ و ۱۱۰، طرح `m-ship-report`): هر فیلد یک مرز؛ خطای هر فیلد زیر خودش با نوشته‌ها؛ «همین حالا
+ * جای دیگری عوض شد» به گزارش با پیامش و بازه‌های تازه؛ موفق به گزارش با پیام، فقط اگر هنوز راست است (`b`). کد تازه نمی‌خواهد:
+ * فقط چیدن گزارش را عوض می‌کند، و رویدادش می‌ماند.
+ */
+export async function saveBandsAction(_state: BandsState, form: FormData): Promise<BandsState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const values = form
+    .getAll('b')
+    .slice(0, REPORT_BOUNDS_MAX)
+    .map((value) => (typeof value === 'string' ? value.slice(0, 20) : ''));
+  const result = await settings.saveReportBands(session, { values, seen: field(form, 'seen') }, await requestIp());
+  const home = reportHome(gate, field(form, 'month'));
+  if (result.ok) redirect(withQuery(home, `done=bands&b=${bandsSeen(result.value.bands)}&${doneMark()}#weights`));
+  if (result.error === 'setting_changed') redirect(withQuery(home, `e=setting_changed&${doneMark()}#weights`));
+  if (result.error === 'invalid_bands' && Array.isArray(result.errors)) {
+    const errors = (result.errors as (BoundError | null)[]).map((error) => (error ? boundErrorText(error) : null));
+    return { error: result.error, errors, values };
+  }
+  return { error: result.error, values };
+}
+
+/** «برگرداندن به بازه‌های تعرفه» (تصمیم ۱۰۹): به گزارش با پیام یا خطا، مثل ذخیره. */
+export async function resetBandsAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await settings.resetReportBands(session, { seen: field(form, 'seen') }, await requestIp());
+  const home = reportHome(gate, field(form, 'month'));
+  redirect(withQuery(home, result.ok ? `done=bands&b=tariff&${doneMark()}#weights` : `e=${result.error}&${doneMark()}#weights`));
 }

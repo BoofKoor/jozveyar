@@ -98,6 +98,8 @@ export type AdminErrorCode =
   | 'shipment_voided'
   /** «دوباره بفرست» پیامک رهگیری (۶٫۳). */
   | 'sms_not_failed'
+  /** بازه‌های وزن گزارش ارسال (۶٫۴): خطای هر فیلد در `errors`. */
+  | 'invalid_bands'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

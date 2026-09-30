@@ -272,6 +272,77 @@ describe('تنظیم‌های عددی', () => {
   });
 });
 
+describe('بازه‌های وزن گزارش ارسال (۶٫۴)', () => {
+  const OWNER_REPORTS = session(['settings.edit', 'secrets.edit', 'tariff.read', 'reports.read']);
+  const fields = (...values: string[]) => values;
+
+  it('فقط مالک: تنظیم است (`settings.edit`) و فقط برای گزارش (`reports.read`)؛ بی مجوز پیش از هر سنجش', async () => {
+    const { panel, settings } = service();
+    for (const who of [OPERATOR, OWNER, session(['reports.read'])]) {
+      expect(await panel.saveReportBands(who, { values: fields('bad'), seen: 'tariff' }, 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+      expect(await panel.resetReportBands(who, { seen: 'tariff' }, 'ip')).toMatchObject({ status: 403 });
+    }
+    expect(settings.events).toEqual([]);
+  });
+
+  it('مرزها با ارقام فارسی؛ رویداد `settings.update` با از و به؛ مقصد یکسان بی رویداد دوم', async () => {
+    const { panel, settings } = service();
+    expect(settings.values.get('report.weight_bands')).toBe('tariff');
+    expect(await panel.saveReportBands(OWNER_REPORTS, { values: fields('۷۵۰', '1,500', '', '3000'), seen: 'tariff' }, 'ip')).toEqual({
+      ok: true,
+      value: { bands: [750, 1_500, 3_000], written: true },
+    });
+    expect(settings.values.get('report.weight_bands')).toEqual([750, 1_500, 3_000]);
+    expect(settings.events).toEqual([
+      expect.objectContaining({
+        action: 'settings.update',
+        targetType: 'setting',
+        targetId: 'report.weight_bands',
+        detail: { key: 'report.weight_bands', from: 'tariff', to: [750, 1_500, 3_000] },
+      }),
+    ]);
+    expect(await panel.saveReportBands(OWNER_REPORTS, { values: fields('750', '1500', '3000'), seen: 'tariff' }, 'ip')).toEqual({
+      ok: true,
+      value: { bands: [750, 1_500, 3_000], written: false },
+    });
+    expect(settings.events).toHaveLength(1);
+  });
+
+  it('خطای هر فیلد با جایش، بی نوشتن', async () => {
+    const { panel, settings } = service();
+    expect(await panel.saveReportBands(OWNER_REPORTS, { values: fields('1000', '500', 'x'), seen: 'tariff' }, 'ip')).toMatchObject({
+      ok: false,
+      status: 400,
+      error: 'invalid_bands',
+      errors: [null, { code: 'order', after: 1_000 }, { code: 'number' }],
+    });
+    expect(await panel.saveReportBands(OWNER_REPORTS, { values: fields('', ''), seen: 'tariff' }, 'ip')).toMatchObject({
+      error: 'invalid_bands',
+      errors: [{ code: 'empty' }, null],
+    });
+    expect(settings.values.get('report.weight_bands')).toBe('tariff');
+    expect(settings.events).toEqual([]);
+  });
+
+  it('همان که دیده شد: صفحه‌ای که بازه‌های کهنه را دید رونویسی نمی‌کند؛ برگرداندن به بازه‌های تعرفه (تصمیم ۱۰۹)', async () => {
+    const { panel, settings } = service();
+    settings.values.set('report.weight_bands', [2_000]);
+    expect(await panel.saveReportBands(OWNER_REPORTS, { values: fields('1000'), seen: 'tariff' }, 'ip')).toMatchObject({
+      ok: false,
+      status: 409,
+      error: 'setting_changed',
+    });
+    expect(await panel.resetReportBands(OWNER_REPORTS, { seen: 'tariff' }, 'ip')).toMatchObject({ error: 'setting_changed' });
+    expect(settings.values.get('report.weight_bands')).toEqual([2_000]);
+    expect(await panel.resetReportBands(OWNER_REPORTS, { seen: '2000' }, 'ip')).toEqual({ ok: true, value: { bands: 'tariff', written: true } });
+    expect(settings.values.get('report.weight_bands')).toBe('tariff');
+    expect(settings.events.map((e) => e.detail)).toEqual([{ key: 'report.weight_bands', from: [2_000], to: 'tariff' }]);
+    // دوباره برگرداندن (دو کلیک): موفق، بی رویداد.
+    expect(await panel.resetReportBands(OWNER_REPORTS, { seen: '2000' }, 'ip')).toEqual({ ok: true, value: { bands: 'tariff', written: false } });
+    expect(settings.events).toHaveLength(1);
+  });
+});
+
 describe('تعطیلی‌ها', () => {
   it('افزودن: روز آینده با ارقام فارسی، به ترتیب تاریخ؛ رویداد با تاریخ و مناسبت', async () => {
     const { panel, settings } = service();
