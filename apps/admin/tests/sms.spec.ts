@@ -16,6 +16,7 @@ import {
   enroll,
   fakeMode,
   fakeSms,
+  type FakeSms,
   GATE,
   layoutProblems,
   newContext,
@@ -225,8 +226,10 @@ test.describe.serial('پیامک رهگیری', () => {
     expect((await trackingRows(o.B)).map((m) => m.body)).toEqual([trackingText(o.B.number, code(3))]);
     expect(await trackingRows(o.C)).toEqual([]);
     if (SMSIR) {
-      // به sms.ir فقط قالب رهگیری با دو پارامترش رفت، نه متن؛ شناسهٔ پیامک و هزینه در ردیف.
-      const sent = (await fakeSms()).messages.slice(sentBefore);
+      // به sms.ir فقط قالب رهگیری با دو پارامترش رفت، نه متن؛ شناسهٔ پیامک و هزینه در ردیف. پیامک‌ها تا ۴ هم‌زمان می‌روند
+      // (`deliverQueued`)، پس ترتیب رسیدنشان ثابت نیست: به ترتیب بارکد.
+      const barcodeIn = (m: FakeSms) => m.parameters.find((p) => p.name === 'BARCODE')?.value ?? '';
+      const sent = (await fakeSms()).messages.slice(sentBefore).sort((x, y) => barcodeIn(x).localeCompare(barcodeIn(y)));
       expect(sent.map((m) => [m.mobile, m.templateId, m.parameters])).toEqual(
         [
           [o.A.phone, code(1)],
