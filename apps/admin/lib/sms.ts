@@ -10,11 +10,12 @@ import { resendable, smsState, type SmsState } from '@jozveyar/sms';
 import { whenText } from './format';
 import { phoneText, type Seg } from './orders';
 
-/** علت «نرفت» به زبان ادمین؛ کد ناشناس همان «جواب نداد». */
+/** علت «نرفت» به زبان ادمین؛ کد ناشناس همان «جواب نداد». از ۷٫۱ «خالی» هم: کلید یا قالب sms.ir در «تنظیمات» نیست. */
 const SMS_ERRORS: Record<string, string> = {
   unavailable: 'پنل پیامک جواب نداد.',
   rejected: 'پنل پیامک نپذیرفت.',
   interrupted: 'فرستادنش نیمه‌کاره ماند.',
+  unconfigured: 'کلید یا قالب sms.ir در «تنظیمات» خالی است.',
 };
 
 export interface SmsView {
@@ -82,4 +83,23 @@ export function smsRowNote(sms: ShipmentSms | null, shipmentCreatedAt: Date, now
   if (view.state === 'unknown') return { text: 'معلوم نیست پیامک رفت یا نه: فرستادنش نیمه‌کاره ماند.', failed: true, resendable: true };
   const why = sms.status === 'pending' ? SMS_ERRORS.interrupted : (SMS_ERRORS[sms.error ?? ''] ?? SMS_ERRORS.unavailable);
   return { text: `پیامک نرفت: ${why}`, failed: true, resendable: true };
+}
+
+/**
+ * پیامک پرداخت زیر تلاش موفق کارت «پرداخت‌ها» (۷٫۱، ADR-049؛ طرح: «پیامک پرداخت به 0915 234 5678 رفت، 14:05» یا «پیامک پرداخت نرفت:
+ * …» با «دوباره بفرست»). همان `smsState`؛ «دوباره بفرست» فقط تا سفارش در صف یا در حال چاپ است، مثل سرور.
+ */
+export function paidSmsView(sms: ShipmentSms, orderStatus: string, now: Date): { state: SmsState; text: Seg[]; resendable: boolean } {
+  const state = smsState(sms, now);
+  const to: Seg = { num: phoneText(sms.toMobile) };
+  const why = sms.status === 'pending' ? SMS_ERRORS.interrupted : (SMS_ERRORS[sms.error ?? ''] ?? SMS_ERRORS.unavailable);
+  const text: Seg[] =
+    state === 'sent'
+      ? ['پیامک پرداخت به ', to, ` رفت، ${whenText(sms.sentAt ?? sms.createdAt, now)}`]
+      : state === 'sending'
+        ? ['پیامک پرداخت در حال فرستادن به ', to, '…']
+        : state === 'unknown'
+          ? ['معلوم نیست پیامک پرداخت به ', to, ' رفت یا نه: فرستادنش نیمه‌کاره ماند.']
+          : [`پیامک پرداخت نرفت: ${why}`];
+  return { state, text, resendable: resendable(state) && (orderStatus === 'paid' || orderStatus === 'printing') };
 }

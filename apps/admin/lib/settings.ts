@@ -11,6 +11,7 @@
 
 import type { Holiday } from '@jozveyar/contracts';
 import type { ServiceKeyName } from '@jozveyar/db';
+import type { SmsPurpose } from '@jozveyar/sms';
 import { formatJalaliNumeric, jalaliYear, toLatinDigits } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
 
@@ -28,8 +29,17 @@ export const HOLIDAYS_SHOWN = 5;
 /** از بهمن، نبودن تعطیلی‌های سال بعد هشدار است: نوروز سال بعد در مهلت سفارش‌های اسفند می‌افتد. */
 export const NEXT_YEAR_WARNING_MONTH = 11;
 
-/** تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044). */
-export const NUMBER_SETTINGS = ['order.sla_days', 'otp.site_hourly_limit', 'order.files_retention_days'] as const;
+/**
+ * تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044)، و از ۷٫۱ سقف روزانهٔ کد پیامکی و آستانهٔ
+ * هشدار اعتبار sms.ir (ADR-049).
+ */
+export const NUMBER_SETTINGS = [
+  'order.sla_days',
+  'otp.site_hourly_limit',
+  'otp.site_daily_limit',
+  'order.files_retention_days',
+  'sms.credit_alert',
+] as const;
 export type NumberSettingKey = (typeof NUMBER_SETTINGS)[number];
 export const isNumberSetting = (value: unknown): value is NumberSettingKey =>
   typeof value === 'string' && (NUMBER_SETTINGS as readonly string[]).includes(value);
@@ -134,36 +144,68 @@ export function holidaysView(list: readonly Holiday[], officialThrough: number, 
 /* ───────────────────────── کلیدها ───────────────────────── */
 
 /**
- * مقدار تازهٔ یک کلید: ارقام لاتین و بی فاصلهٔ دو سر؛ ۱ تا ۵۱۲ نویسهٔ دیدنی ASCII، بی فاصله. null اگر نه. کلید API،
- * نام قالب و کد پذیرنده همه همین‌اند؛ آزمایش خود مقدار با پنل پیامک و درگاه واقعی در برش ۷.
+ * مقدار تازهٔ یک کلید: ارقام لاتین و بی فاصلهٔ دو سر؛ ۱ تا ۵۱۲ نویسهٔ دیدنی ASCII، بی فاصله. null اگر نه. کلید API و کد پذیرنده
+ * همین‌اند؛ شناسهٔ قالب sms.ir از ۷٫۱ فقط عدد (`templateIdOf` آداپتور، بستهٔ رسمی: `templateId: number`).
  */
-export function readKeyValue(input: unknown): string | null {
+export function readKeyValue(input: unknown, name?: ServiceKeyName): string | null {
   if (typeof input !== 'string') return null;
   const value = toLatinDigits(input).trim();
+  if (name && KEY_TESTS[name] !== undefined && KEY_TESTS[name] !== 'credit') return /^[1-9]\d{0,8}$/.test(value) ? value : null;
   return new RegExp(`^[\\x21-\\x7E]{1,${KEY_VALUE_MAX}}$`).test(value) ? value : null;
 }
 
-/** ۴ نویسهٔ آخر، فقط برای کلید دست‌کم ۸ نویسه‌ای؛ کلید کوتاه‌تر هیچ، تا بخش بزرگی از آن دیده نشود. */
-export const keyTail = (value: string): string | null => (value.length >= KEY_TAIL_MIN_LENGTH ? value.slice(-KEY_TAIL) : null);
+/**
+ * کلیدهایی که پیش از ذخیره با خود sms.ir آزموده می‌شوند (۷٫۱، سؤال ۱۱۹): کلید API با اعتبار حساب، بی پیامک؛ و هر قالب با یک پیامک
+ * آزمایشی با پارامترهای نمونه. کد پذیرندهٔ زیبال با درگاه (۷٫۲).
+ */
+export const KEY_TESTS: Partial<Record<ServiceKeyName, 'credit' | SmsPurpose>> = {
+  SMS_API_KEY: 'credit',
+  SMS_OTP_TEMPLATE: 'otp',
+  SMS_PAID_TEMPLATE: 'order_paid',
+  SMS_TRACKING_TEMPLATE: 'tracking',
+};
 
 /**
- * نام و متن‌های هر کلید در صفحه (طرح `m-settings`). `dots` شمار نقطه‌های پیش از ۴ نویسهٔ آخر، مثل طرح. پنل پیامک sms.ir است، نه
- * کاوه‌نگار (صاحب پروژه، ۱۴۰۵/۰۷/۰۸): از ۶٫۴ برچسب‌ها و راهنماها هم (تصمیم‌های ۱۰۷ و ۱۱۱؛ فقط متن، نام کلیدها همان).
+ * ۴ نویسهٔ آخر، فقط برای کلید دست‌کم ۸ نویسه‌ای؛ کلید کوتاه‌تر هیچ، تا بخش بزرگی از آن دیده نشود. شناسهٔ قالب sms.ir (۷٫۱) راز نیست و
+ * کوتاه است (طرح: «••2716»)، پس از ۵ رقم.
+ */
+export const keyTail = (value: string, name?: ServiceKeyName): string | null => {
+  const template = name !== undefined && KEY_TESTS[name] !== undefined && KEY_TESTS[name] !== 'credit';
+  return value.length >= (template ? 5 : KEY_TAIL_MIN_LENGTH) ? value.slice(-KEY_TAIL) : null;
+};
+
+/**
+ * نام و متن‌های هر کلید در صفحه (طرح `m-settings` و از ۷٫۱ `m-key-test`). `dots` شمار نقطه‌های پیش از ۴ نویسهٔ آخر، مثل طرح. پنل
+ * پیامک sms.ir است، نه کاوه‌نگار (صاحب پروژه، ۱۴۰۵/۰۷/۰۸). شناسهٔ قالب عدد است (۷٫۱): «شناسهٔ قالب»، نه «نام قالب».
  */
 export const KEY_INFO: Record<ServiceKeyName, { label: string; field: string; about: string; test: string; dots: number }> = {
   SMS_API_KEY: {
     label: 'کلید API sms.ir',
     field: 'کلید تازه',
     about: 'کلیدی که پنل sms.ir می‌دهد',
-    test: 'آزمایش کلید با خود پنل پیامک واقعی می‌آید.',
+    test: '«آزمایش» اعتبار حساب را از sms.ir می‌خواند؛ پیامکی نمی‌رود.',
     dots: 8,
   },
   SMS_OTP_TEMPLATE: {
-    label: 'قالب کد پیامکی sms.ir',
-    field: 'نام قالب',
-    about: 'نام قالبی که در پنل sms.ir تأیید می‌شود',
-    test: 'آزمایش قالب با خود پنل پیامک واقعی می‌آید.',
-    dots: 4,
+    label: 'قالب کد تأیید sms.ir',
+    field: 'شناسهٔ قالب',
+    about: 'شناسهٔ قالبی که sms.ir تأیید کرده',
+    test: 'عددی که sms.ir بعد از تأیید قالب می‌دهد.',
+    dots: 2,
+  },
+  SMS_PAID_TEMPLATE: {
+    label: 'قالب پرداخت sms.ir',
+    field: 'شناسهٔ قالب',
+    about: 'شناسهٔ قالبی که sms.ir تأیید کرده',
+    test: 'عددی که sms.ir بعد از تأیید قالب می‌دهد.',
+    dots: 2,
+  },
+  SMS_TRACKING_TEMPLATE: {
+    label: 'قالب رهگیری sms.ir',
+    field: 'شناسهٔ قالب',
+    about: 'شناسهٔ قالبی که sms.ir تأیید کرده',
+    test: 'عددی که sms.ir بعد از تأیید قالب می‌دهد.',
+    dots: 2,
   },
   PAYMENT_MERCHANT_ID: {
     label: 'کد پذیرندهٔ زیبال',

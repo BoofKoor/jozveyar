@@ -23,7 +23,7 @@ import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
-import { smsView } from '../../../../../lib/sms';
+import { paidSmsView, smsView } from '../../../../../lib/sms';
 import {
   REASON_MAX,
   STATUS_LABELS,
@@ -57,7 +57,7 @@ import {
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
 import type { OrderDetailsView } from '../../../../../lib/server/orders';
-import { advanceOrderAction, rebuildPdfAction } from '../../../actions';
+import { advanceOrderAction, rebuildPdfAction, resendPaidSmsAction } from '../../../actions';
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const orderNumber = orderNumberOf((await params).number);
@@ -878,6 +878,13 @@ export default async function OrderPage({
           <Alert tone="error">پیامک رهگیری باز نرفت؛ پنل پیامک جواب نداد. کمی بعد دوباره بفرست، یا کد را خودت به مشتری بگو.</Alert>
         )
       ) : null}
+      {query.done === 'paid_sms_resend' ? (
+        query.sent === '1' ? (
+          <Alert tone="success">پیامک پرداخت دوباره فرستاده شد و رفت.</Alert>
+        ) : (
+          <Alert tone="error">پیامک پرداخت باز نرفت؛ پنل پیامک جواب نداد. کمی بعد دوباره بفرست.</Alert>
+        )
+      ) : null}
       {query.done === 'void' ? (
         <Alert tone="success">
           کد رهگیری کنار رفت و سطرش به صف تأیید برگشت
@@ -1077,6 +1084,8 @@ export default async function OrderPage({
                   <ol className="ad-pay">
                     {details.payments.map((payment) => {
                       const view = paymentView(payment, now);
+                      // پیامک پرداخت زیر تلاش موفق (۷٫۱، ADR-049؛ طرح): رفت، در راه، نرفت با «دوباره بفرست».
+                      const paid = view.kind === 'succeeded' && details.paidSms ? paidSmsView(details.paidSms, order.status, now) : null;
                       return (
                         <li key={payment.id} data-payment={view.kind}>
                           <PaymentBadge kind={view.kind} />
@@ -1084,6 +1093,27 @@ export default async function OrderPage({
                           <span className="ad-pay__meta">
                             <Segments segs={view.meta} />
                           </span>
+                          {paid ? (
+                            // div، نه p: فرم «دوباره بفرست» درون p نمی‌نشیند (مرورگر p را پیش از form می‌بندد).
+                            <div className={`ad-pay__sms${paid.state === 'sent' || paid.state === 'sending' ? '' : ' is-bad'}`} data-paid-sms={paid.state}>
+                              <span
+                                className={`jy-icon jy-icon-${paid.state === 'sent' ? 'success' : paid.state === 'sending' ? 'info' : 'error'}`}
+                                aria-hidden="true"
+                              />
+                              <span>
+                                <Segments segs={paid.text} />
+                              </span>
+                              {paid.resendable ? (
+                                <form action={resendPaidSmsAction} className="ad-inline-form">
+                                  <input type="hidden" name="gate" value={gate} />
+                                  <input type="hidden" name="number" value={order.orderNumber} />
+                                  <button type="submit" className="jy-btn jy-btn--text" data-resend-paid="">
+                                    دوباره بفرست
+                                  </button>
+                                </form>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </li>
                       );
                     })}

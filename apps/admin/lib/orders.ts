@@ -942,7 +942,8 @@ function zeroRials<T>(value: T): T {
  */
 export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
   // کرایه و مالیات پست هر بسته هم (۶٫۲، تصمیم ۸۱).
-  return { ...details, order: zeroRials(details.order), payments: [], shipments: zeroRials(details.shipments) };
+  // پیامک پرداخت (۷٫۱) مال کارت پرداخت است، که بی مبلغ نیست.
+  return { ...details, order: zeroRials(details.order), payments: [], paidSms: null, shipments: zeroRials(details.shipments) };
 }
 
 /** ردیف‌های فهرست و صف پیشخوان بی مبلغ؛ همان `withoutMoney`. */

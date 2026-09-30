@@ -16,10 +16,13 @@ import {
   createShipmentStore,
   createShippingReportStore,
   createSmsOutbox,
+  createSmsStatsStore,
   createTariffStore,
   getDb,
+  readServiceKey,
+  smsIrKeysOf,
 } from '@jozveyar/db';
-import { consoleTransport } from '@jozveyar/sms';
+import { SmsError, consoleTransport, smsIrCredit, smsIrSendVerify, smsIrTransport, smsProviderOf } from '@jozveyar/sms';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
@@ -32,6 +35,7 @@ import { argon2Passwords } from './password';
 import { createPanelReport, type PanelReport } from './report';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelShipments, type PanelShipments } from './shipments';
+import { createCreditReader, createPanelSms, type PanelSms } from './sms';
 import { createPanelTariff, type PanelTariff } from './tariff';
 
 interface Panel {
@@ -43,11 +47,23 @@ interface Panel {
   partners: PanelPartners;
   shipments: PanelShipments;
   report: PanelReport;
+  sms: PanelSms;
 }
 
 let cached: Panel | null | undefined;
 
 function build(config: AdminConfig): Panel {
+  // پیامک پنل (۷٫۱، سؤال ۱۱۴، ADR-049): `SMS_PROVIDER=smsir` واقعی، هر چیز دیگر کنسولی؛ جدا از `CHECKOUT_MODE`، پس ترمز مسیر خرید
+  // پیامک رهگیری سفارش‌های پرداخت‌شده را نمی‌بندد. کلید و قالب sms.ir با هر پیامک از پنل یا `.env` (ADR-041)، و نشانی پایه از
+  // `SMSIR_API_URL` (تست و CI فقط سرور ساختگی).
+  const provider = smsProviderOf(process.env.SMS_PROVIDER);
+  const baseUrl = process.env.SMSIR_API_URL;
+  const secrets = createSecretStore(getDb());
+  const settingsStore = createSettingsStore(getDb());
+  const keyLog = (message: string) => console.error(message);
+  const transport =
+    provider === 'smsir' ? smsIrTransport({ baseUrl, keys: smsIrKeysOf(secrets, process.env, config.secretsKey, keyLog) }) : consoleTransport();
+  const sms = { transport, outbox: createSmsOutbox(getDb(), transport.name) };
   const auth = createAdminAuth({
     store: createAdminStore(getDb()),
     passwords: argon2Passwords(),
@@ -61,14 +77,18 @@ function build(config: AdminConfig): Panel {
     orders: createPanelOrders({
       store: createPanelOrderStore(getDb()),
       storage: storageFromEnv(process.env)?.driver ?? null,
+      // «دوباره بفرست» پیامک پرداخت (۷٫۱).
+      sms,
       secret: config.secret,
     }),
     // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
     tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
     // کلیدها کار حساس‌اند (کد تازه)؛ مقدار `.env` هر کلید از همان `.env` کانتینر، با هر درخواست (ADR-041).
+    // «آزمایش» کلیدهای sms.ir (۷٫۱، سؤال ۱۱۹) با همان آداپتور، هر `SMS_PROVIDER`: کار دستی مالک پیش از روشن کردن پیامک واقعی.
     settings: createPanelSettings({
-      settings: createSettingsStore(getDb()),
-      secrets: createSecretStore(getDb()),
+      settings: settingsStore,
+      secrets,
+      smsTester: { credit: (apiKey) => smsIrCredit({ baseUrl }, apiKey), send: (input) => smsIrSendVerify({ baseUrl }, input) },
       stepUp: auth.stepUp,
       secretsKey: config.secretsKey,
       env: process.env,
@@ -77,14 +97,29 @@ function build(config: AdminConfig): Panel {
     // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
     partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),
     // ارسال (۶٫۱): ورود فایل پست؛ خواندن فایل با کارگر است، پس پنل بایت‌ها را فقط در پایگاه داده می‌گذارد (ADR-045). پیامک رهگیری
-    // (۶٫۳، ADR-047): تا برش ۷ همیشه کنسولی، هر چه `.env` بگوید؛ نه `SMS_PROVIDER` خوانده می‌شود و نه کلید پنل پیامک (ADR-035).
+    // (۶٫۳، ADR-047) از ۷٫۱ با همان آداپتور بالا.
     shipments: createPanelShipments({
       store: createShipmentStore(getDb()),
-      sms: { transport: consoleTransport(), outbox: createSmsOutbox(getDb(), 'console') },
+      sms,
       secret: config.secret,
     }),
     // گزارش ارسال (۶٫۴، ADR-048): فقط خواندن، کوئری زنده؛ بازه‌های وزنش را سرویس تنظیمات عوض می‌کند.
     report: createPanelReport({ store: createShippingReportStore(getDb()) }),
+    // سقف کد و اعتبار پیامک (۷٫۱): اعتبار فقط با پیامک واقعی خوانده می‌شود.
+    sms: createPanelSms({
+      stats: createSmsStatsStore(getDb()),
+      setting: (key) => settingsStore.read(key),
+      provider,
+      credit: createCreditReader({
+        enabled: provider === 'smsir',
+        read: async () => {
+          const apiKey = (await readServiceKey(secrets, 'SMS_API_KEY', process.env, config.secretsKey, keyLog)).value;
+          if (!apiKey) throw new SmsError('unconfigured');
+          return smsIrCredit({ baseUrl }, apiKey);
+        },
+        log: keyLog,
+      }),
+    }),
   };
 }
 

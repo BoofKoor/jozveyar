@@ -24,6 +24,10 @@ interface Props {
   /** پیام خطای مقدار، با بازه. */
   rangeError: string;
   hint: React.ReactNode;
+  /**
+   * درون کارتی که صفحه خودش می‌چیند (۷٫۱: «سقف کد پیامکی» با دو سقف و «اعتبار پیامک» با آستانه): بی کارت و بی تیتر، فقط فرم.
+   */
+  bare?: boolean;
 }
 
 /**
@@ -32,7 +36,7 @@ interface Props {
  * مقدار همین‌جا با عدد نوشته‌شده؛ عددی که صفحه نشان داد با فرم می‌رود (`seen`)، تا اگر زبانه یا ادمین دیگری همین حالا
  * عوضش کرده باشد، رونویسی نشود.
  */
-export function NumberSettingForm({ gate, settingKey, title, label, id, value, min, max, stepper, rangeError, hint }: Props) {
+export function NumberSettingForm({ gate, settingKey, title, label, id, value, min, max, stepper, rangeError, hint, bare = false }: Props) {
   const [state, action, pending] = useActionState<SettingState, FormData>(saveSettingAction, {});
   const input = useRef<HTMLInputElement>(null);
   const [current, setCurrent] = useState(value);
@@ -85,13 +89,9 @@ export function NumberSettingForm({ gate, settingKey, title, label, id, value, m
     />
   );
 
-  return (
-    <section className="jy-card" aria-labelledby={`t-${id}`} data-setting={settingKey}>
-      <h2 id={`t-${id}`} className="jy-card__title">
-        {title}
-      </h2>
-      {/* سنجش با سرور و پیام خودش زیر فیلد، نه حباب مرورگر برای min و max */}
-      <form action={action} noValidate>
+  const form = (
+    // سنجش با سرور و پیام خودش زیر فیلد، نه حباب مرورگر برای min و max
+    <form action={action} noValidate data-setting={bare ? settingKey : undefined} aria-label={bare ? title : undefined}>
         <input type="hidden" name="gate" value={gate} />
         <input type="hidden" name="key" value={settingKey} />
         <input type="hidden" name="seen" value={value} />
@@ -118,6 +118,14 @@ export function NumberSettingForm({ gate, settingKey, title, label, id, value, m
           </button>
         </div>
       </form>
+  );
+  if (bare) return form;
+  return (
+    <section className="jy-card" aria-labelledby={`t-${id}`} data-setting={settingKey}>
+      <h2 id={`t-${id}`} className="jy-card__title">
+        {title}
+      </h2>
+      {form}
     </section>
   );
 }

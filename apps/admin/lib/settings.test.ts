@@ -140,4 +140,19 @@ describe('کلید', () => {
     expect(maskText(4, 'c2d8')).toBe('••••c2d8');
     expect(maskText(4, null)).toBe('••••');
   });
+
+  it('شناسهٔ قالب sms.ir (۷٫۱): عدد مثبت تا ۹ رقم بی صفر اول، ارقام فارسی هم؛ راز نیست، پس ۴ رقم آخر از ۵ رقم', () => {
+    for (const name of ['SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE'] as const) {
+      expect(readKeyValue(' ۸۷۲۷۱۶ ', name), name).toBe('872716');
+      expect(readKeyValue('123456789', name)).toBe('123456789');
+      for (const bad of ['', '0', '0123', '1234567890', '12.5', '-5', 'otp', 'x1']) expect(readKeyValue(bad, name), `${name} ${bad}`).toBeNull();
+      expect(keyTail('872716', name)).toBe('2716');
+      expect(keyTail('82716', name)).toBe('2716');
+      expect(keyTail('2716', name)).toBeNull();
+    }
+    // کلید API و کد پذیرنده همان قاعدهٔ ۴٫۶.
+    expect(readKeyValue('abc-def', 'SMS_API_KEY')).toBe('abc-def');
+    expect(keyTail('abcdefg', 'SMS_API_KEY')).toBeNull();
+    expect(keyTail('82716', 'PAYMENT_MERCHANT_ID')).toBeNull();
+  });
 });

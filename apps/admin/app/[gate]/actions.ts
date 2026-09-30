@@ -30,6 +30,7 @@ import {
   setSessionCookie,
 } from '../../lib/server/context';
 import type { AdminErrorCode, Failure } from '../../lib/server/result';
+import type { KeyTestView } from '../../lib/server/settings';
 
 export interface FormState {
   error?: AdminErrorCode;
@@ -396,7 +397,7 @@ export async function keyAction(_state: FormState, form: FormData): Promise<Form
   const revert = field(form, 'intent') === 'revert';
   const result = revert
     ? await settings.revertKey(session, input, await requestIp())
-    : await settings.setKey(session, { ...input, value: form.get('value') }, await requestIp());
+    : await settings.setKey(session, { ...input, value: form.get('value'), test: form.get('test') }, await requestIp());
   const home = panelPath(gate, '/settings');
   const anchor = /^[A-Z_]{1,40}$/.test(name) ? `#key-${name}` : '';
   if (result.ok) redirect(`${home}?done=${revert ? 'key_revert' : 'key_set'}&k=${result.value.name}&${doneMark()}${anchor}`);
@@ -404,6 +405,49 @@ export async function keyAction(_state: FormState, form: FormData): Promise<Form
     redirect(`${home}?e=${result.error}&${doneMark()}${anchor}`);
   }
   return failure(result);
+}
+
+/** نتیجهٔ «آزمایش» کلید sms.ir (۷٫۱) برای فرم؛ مقدار کلید هرگز برنمی‌گردد. */
+export interface KeyTestState {
+  error?: AdminErrorCode;
+  test?: KeyTestView;
+}
+
+/**
+ * «آزمایش» کلید یا قالب sms.ir (۷٫۱، سؤال ۱۱۹؛ طرح `m-key-test`): نتیجه زیر همان فرم؛ «درست» و «در دسترس نیست» با نشانی ذخیره، «رد
+ * شد» بی آن. کلیدی که همین حالا جای دیگری عوض شد به صفحه با پیامش.
+ */
+export async function keyTestAction(_state: KeyTestState, form: FormData): Promise<KeyTestState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const name = field(form, 'name');
+  const result = await settings.testKey(
+    session,
+    { name, value: form.get('value'), seen: field(form, 'seen'), mobile: form.get('mobile') },
+    await requestIp(),
+  );
+  if (result.ok) return { test: result.value };
+  if (result.error === 'key_changed' || result.error === 'key_not_found' || result.error === 'forbidden') {
+    const anchor = /^[A-Z_]{1,40}$/.test(name) ? `#key-${name}` : '';
+    redirect(`${panelPath(gate, '/settings')}?e=${result.error}&${doneMark()}${anchor}`);
+  }
+  return { error: result.error };
+}
+
+/** «دوباره بفرست» پیامک پرداخت (۷٫۱؛ کارت «پرداخت‌ها»): برگشت به صفحهٔ سفارش با نتیجه. */
+export async function resendPaidSmsAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const result = await orders.resendPaidSms(session, number, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(result.ok ? String(result.value.orderNumber) : number)}`);
+  redirect(
+    result.ok
+      ? withQuery(back, `done=paid_sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
+      : withQuery(back, `e=${result.error}&${doneMark()}`),
+  );
 }
 
 /* ───────────────────────── چاپخانه‌ها (۵٫۲) ───────────────────────── */

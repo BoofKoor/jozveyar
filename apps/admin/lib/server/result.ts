@@ -98,6 +98,13 @@ export type AdminErrorCode =
   | 'shipment_voided'
   /** «دوباره بفرست» پیامک رهگیری (۶٫۳). */
   | 'sms_not_failed'
+  /** پیامک sms.ir (۷٫۱): «آزمایش» کلید، ذخیرهٔ کلید آزموده، و «دوباره بفرست» پیامک پرداخت. */
+  | 'invalid_template_id'
+  | 'invalid_mobile'
+  | 'key_test_limit'
+  | 'key_untested'
+  | 'paid_sms_not_failed'
+  | 'paid_sms_closed'
   /** بازه‌های وزن گزارش ارسال (۶٫۴): خطای هر فیلد در `errors`. */
   | 'invalid_bands'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */

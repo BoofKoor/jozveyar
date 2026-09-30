@@ -9,12 +9,29 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { trackingText } from '@jozveyar/sms';
 import { formatJalaliNumeric, tehranDayStart } from '@jozveyar/text';
 
-import { assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, postFile, serverInvite, uploadPostFile as upload, watch } from './helpers';
+import {
+  assignAtPayment,
+  at,
+  BASE,
+  enroll,
+  fakeMode,
+  fakeSms,
+  GATE,
+  layoutProblems,
+  newContext,
+  postFile,
+  SENT_STATUS,
+  serverInvite,
+  SMSIR,
+  uploadPostFile as upload,
+  watch,
+} from './helpers';
 
 /**
  * پیامک رهگیری، سرتاسری (برش ۶٫۳؛ طرح `docs/ui/mockups/admin.html`: `m-ship-preview`، `m-ship-done`، `m-ship-revert`،
  * `m-order-shipped`، `m-dash`، `m-c-shipped` و `m-c-guest`؛ ADR-047): فایل پست با **کارگر واقعی**؛ پیش‌نمایش با «و برای هر کدام یک
- * پیامک می‌رود» و نمونهٔ متن؛ «ثبت» با پیامک کنسولی هر کد در `sms_messages`؛ ردیف «پیامک» کارت «بستهٔ پستی»؛ پیامکی که نیمه‌کاره ماند
+ * پیامک می‌رود» و نمونهٔ متن؛ «ثبت» با پیامک هر کد در `sms_messages` (از ۷٫۱ در CI با sms.ir ساختگی: قالب رهگیری با دو پارامترش؛ بی آن
+ * کنسولی)؛ ردیف «پیامک» کارت «بستهٔ پستی»؛ پیامکی که نیمه‌کاره ماند
  * با هشدار پیشخوان و «دوباره بفرست»؛ برگرداندن با فهرست پیامک‌گرفته‌ها و همان فایل دوباره بی پیامک تازه (سؤال ۶۷)؛ و صفحهٔ سفارش
  * مشتری روی همان وب: صاحب با کد و پیوند پست، غریبه بی کد، کد کنارگذاشته نه، و هیچ درخواست بیرونی؛ و گوشی و دسکتاپ.
  *
@@ -185,8 +202,9 @@ test.describe.serial('پیامک رهگیری', () => {
     await sql?.end();
   });
 
-  test('پیش‌نمایش و «ثبت»: یک پیامک برای هر کد قطعی، کنسولی در sms_messages؛ صف تأیید بی پیامک؛ شمار پیامک‌ها در صفحهٔ ورود', async () => {
+  test('پیش‌نمایش و «ثبت»: یک پیامک برای هر کد قطعی در sms_messages؛ صف تأیید بی پیامک؛ شمار پیامک‌ها در صفحهٔ ورود', async () => {
     const page = operatorPage;
+    const sentBefore = SMSIR ? (await fakeSms()).messages.length : 0;
     fileId = await upload(page, fileName, postFile(rows));
     await expect(page.locator('[data-count="ok"] .ad-tile__n')).toHaveText('3', { timeout: 30_000 });
     await expect(page.locator('main')).toContainText(
@@ -201,11 +219,33 @@ test.describe.serial('پیامک رهگیری', () => {
 
     const a = await trackingRows(o.A);
     expect(a.map((m) => [m.status, m.body, m.to_mobile, m.attempts])).toEqual([
-      ['logged', trackingText(o.A.number, code(1)), o.A.phone, 1],
-      ['logged', trackingText(o.A.number, code(2)), o.A.phone, 1],
+      [SENT_STATUS, trackingText(o.A.number, code(1)), o.A.phone, 1],
+      [SENT_STATUS, trackingText(o.A.number, code(2)), o.A.phone, 1],
     ]);
     expect((await trackingRows(o.B)).map((m) => m.body)).toEqual([trackingText(o.B.number, code(3))]);
     expect(await trackingRows(o.C)).toEqual([]);
+    if (SMSIR) {
+      // به sms.ir فقط قالب رهگیری با دو پارامترش رفت، نه متن؛ شناسهٔ پیامک و هزینه در ردیف.
+      const sent = (await fakeSms()).messages.slice(sentBefore);
+      expect(sent.map((m) => [m.mobile, m.templateId, m.parameters])).toEqual(
+        [
+          [o.A.phone, code(1)],
+          [o.A.phone, code(2)],
+          [o.B.phone, code(3)],
+        ].map(([mobile, barcode]) => [
+          mobile,
+          Number(env.SMS_TRACKING_TEMPLATE),
+          [
+            { name: 'ORDER', value: String(mobile === o.A.phone ? o.A.number : o.B.number) },
+            { name: 'BARCODE', value: barcode },
+          ],
+        ]),
+      );
+      const [row] = await sql<{ provider: string; provider_message_id: string; cost: number }[]>`
+        SELECT provider, provider_message_id, cost FROM sms_messages WHERE id = ${a[0]!.id}`;
+      expect([row!.provider, row!.cost]).toEqual(['smsir', 1]);
+      expect(sent.map((m) => String(m.id))).toContain(row!.provider_message_id);
+    }
     const [linked] = await sql<{ n: number }[]>`
       SELECT count(DISTINCT s.sms_message_id)::int AS n FROM shipments s WHERE s.import_id = ${fileId} AND s.voided_at IS NULL`;
     expect(linked!.n).toBe(3);
@@ -245,15 +285,29 @@ test.describe.serial('پیامک رهگیری', () => {
     await expect(alert).toContainText(`پیامک رهگیری سفارش ${o.C.number} نرفت؛ از کارت «بستهٔ پستی» دوباره بفرست.`);
     await alert.getByRole('link', { name: String(o.C.number) }).click();
     await expect(page.locator('[data-sms="failed"]')).toContainText('نرفت: فرستادنش نیمه‌کاره ماند.');
+    if (SMSIR) {
+      // sms.ir جواب نداد (۷٫۱): «باز نرفت» با علتش، و «دوباره بفرست» می‌ماند.
+      await fakeMode('down');
+      try {
+        await page.getByRole('button', { name: 'دوباره بفرست' }).click();
+        await expect(page.getByText('پیامک رهگیری باز نرفت؛ پنل پیامک جواب نداد.', { exact: false })).toBeVisible();
+        await expect(page.locator('[data-sms="failed"]')).toContainText('نرفت: پنل پیامک جواب نداد.');
+      } finally {
+        await fakeMode('ok');
+      }
+    }
     await page.getByRole('button', { name: 'دوباره بفرست' }).click();
     await expect(page.getByText('پیامک رهگیری دوباره فرستاده شد و رفت.')).toBeVisible();
     await expect(page.locator('[data-sms="sent"]')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'دوباره بفرست' })).toHaveCount(0);
     await expect(page.locator('.ad-log')).toContainText('دوباره رفت');
-    expect((await trackingRows(o.C)).map((m) => [m.status, m.attempts])).toEqual([['logged', 1]]);
-    const [event] = await sql<{ detail: { outcome: string; orderNumber: number } }[]>`
-      SELECT detail FROM admin_events WHERE action = 'shipments.sms_resend' AND target_id = ${o.C.id}`;
-    expect(event!.detail).toMatchObject({ outcome: 'sent', orderNumber: o.C.number });
+    expect((await trackingRows(o.C)).map((m) => [m.status, m.attempts])).toEqual([[SENT_STATUS, SMSIR ? 2 : 1]]);
+    const events = await sql<{ detail: { outcome: string; orderNumber: number; error?: string } }[]>`
+      SELECT detail FROM admin_events WHERE action = 'shipments.sms_resend' AND target_id = ${o.C.id} ORDER BY id`;
+    expect(events.map((e) => e.detail)).toMatchObject([
+      ...(SMSIR ? [{ outcome: 'failed', orderNumber: o.C.number, error: 'unavailable' }] : []),
+      { outcome: 'sent', orderNumber: o.C.number },
+    ]);
     await page.goto(at('/'));
     await expect(page.locator('[data-alert="sms"]')).toHaveCount(0);
     // «رویدادها» مال مالک است؛ با چیپ «ارسال».

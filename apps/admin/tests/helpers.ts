@@ -89,6 +89,44 @@ export async function enroll(page: Page, link: string): Promise<string> {
   return secret;
 }
 
+/**
+ * sms.ir ساختگی همین اجرا (۷٫۱، ADR-049؛ `packages/sms/fake/smsir.mjs`)، که پنل با `SMS_PROVIDER=smsir` و `SMSIR_API_URL` می‌بیند: CI
+ * همیشه؛ بی آن (اجرای محلی بی ساختگی) پیامک پنل کنسولی است و تست‌های پیامک ردیف «ثبت‌شده» را می‌سنجند. هیچ درخواستی به sms.ir واقعی.
+ */
+export const SMSIR = process.env.E2E_SMSIR_URL?.trim() || null;
+/**
+ * تستی که به sms.ir درخواست می‌زند («آزمایش» کلید، پیامک پرداخت) بی ساختگی رد نمی‌شود، می‌افتد: پنلی که `SMSIR_API_URL` ندارد
+ * «آزمایش» را به sms.ir واقعی می‌فرستاد، پس تست پیش از هر کلیک با پیام روشن می‌ایستد.
+ */
+export function requireSmsIr(): string {
+  if (!SMSIR) throw new Error('E2E_SMSIR_URL لازم است: sms.ir ساختگی، و پنل با SMSIR_API_URL همان؛ هیچ درخواستی به sms.ir واقعی نمی‌رود.');
+  return SMSIR;
+}
+
+/** حال پیامکی که پنل فرستاد: «رفت» با sms.ir، «ثبت شد» با کنسولی. */
+export const SENT_STATUS = SMSIR ? 'sent' : 'logged';
+
+/** پیامکی که sms.ir ساختگی گرفت: همان بدنهٔ `POST /v1/send/verify`. */
+export interface FakeSms {
+  id: number;
+  mobile: string;
+  templateId: number;
+  parameters: { name: string; value: string }[];
+}
+
+/** پیامک‌ها و اعتبار sms.ir ساختگی (فرمان تست، فقط همان سرور ساختگی). */
+export async function fakeSms(): Promise<{ messages: FakeSms[]; requests: number; credit: number }> {
+  const res = await fetch(`${SMSIR}/__fake/messages`);
+  expect(res.status).toBe(200);
+  return (await res.json()) as { messages: FakeSms[]; requests: number; credit: number };
+}
+
+/** حالت sms.ir ساختگی: `down` (۵۰۰ بی JSON)، `limit` (۴۲۹)، یا دوباره `ok`. */
+export async function fakeMode(mode: 'ok' | 'down' | 'limit') {
+  const res = await fetch(`${SMSIR}/__fake/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode }) });
+  expect(res.status).toBe(200);
+}
+
 /** پیام خطا یا هشدار صفحه؛ اعلان‌گر مسیر نکست هم `role=alert` دارد ولی بیرون `main` است. */
 export const alertOf = (page: Page) => page.locator('main').getByRole('alert');
 

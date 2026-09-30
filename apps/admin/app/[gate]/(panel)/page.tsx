@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 
 import { formatJalaliWeekday, formatNumber, formatTehranTime } from '@jozveyar/text';
 
@@ -36,7 +36,7 @@ function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: read
  */
 export default async function Dashboard({ params }: { params: Promise<{ gate: string }> }) {
   const { gate } = await params;
-  const { orders } = requirePanel(gate);
+  const { orders, sms: smsPanel } = requirePanel(gate);
   const session = await requireSession(gate);
   const now = new Date();
   const head = (
@@ -50,7 +50,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
     </div>
   );
   if (!can(session, 'orders.read')) return head;
-  const result = await orders.dashboard(session);
+  const [result, sms] = await Promise.all([orders.dashboard(session), smsPanel.alerts(session)]);
   if (!result.ok) return head;
   const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked } = result.value;
   const statsLine = statsSegs(open, stats);
@@ -60,6 +60,193 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   const unreturned = alerts.unreturned.reduce((sum, u) => sum + u.attempts, 0);
   const oneFailed = alerts.failedPdf.length === 1;
   const oneUnassigned = alerts.unassigned.length === 1;
+
+  // هشدارها به ترتیب شدت (سؤال ۱۳۸): خطا (مشتری همین حالا گیر است)، هشدار (کاری با ماست)، اطلاع (خودش درست می‌شود).
+  const notes: { tone: 'error' | 'warning' | 'info'; node: ReactNode }[] = [];
+  if (alerts.failedPdf.length > 0) {
+    notes.push({
+      tone: 'error',
+      node: (
+        <p key="pdf" className="jy-note jy-note--error" data-alert="pdf">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            PDF جزوهٔ {oneFailed ? 'سفارش ' : 'سفارش‌های '}
+            <OrderLinks gate={gate} numbers={alerts.failedPdf} /> ساخته نشد؛ پیش از چاپ دوباره {oneFailed ? 'بسازش' : 'بسازشان'}.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (sms.daily) {
+    // سقف روزانهٔ کد (۷٫۱، ADR-049؛ طرح `m-dash7`): مالک و متصدی.
+    notes.push({
+      tone: 'error',
+      node: (
+        <p key="otp-day" className="jy-note jy-note--error" data-alert="otp-day">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            <b>سقف روزانهٔ کد پیامکی پر شد</b> (<span className="num">{formatNumber(sms.daily.limit)}</span> کد، ساعت{' '}
+            <span className="num">{formatTehranTime(sms.daily.at)}</span>). مشتری تازه تا پایان امروز کد نمی‌گیرد؛ گوشی‌ای که در{' '}
+            <span className="num">30</span> روز گذشته تأیید شده کد نمی‌خواهد. اگر ربات نیست، سقف را در{' '}
+            {can(session, 'settings.edit') ? (
+              <Link className="jy-link" href={panelPath(gate, '/settings')}>
+                تنظیمات
+              </Link>
+            ) : (
+              'تنظیمات (مالک)'
+            )}{' '}
+            بالا ببر.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (sms.hourly) {
+    notes.push({
+      tone: 'error',
+      node: (
+        <p key="otp-hour" className="jy-note jy-note--error" data-alert="otp-hour">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            <b>سقف ساعتی کد پیامکی امروز پر شد</b> (<span className="num">{formatNumber(sms.hourly.limit)}</span> کد در ساعت، ساعت{' '}
+            <span className="num">{formatTehranTime(sms.hourly.at)}</span>). تا یک ساعت پس از آن مشتری تازه کد نمی‌گرفت. اگر ربات نیست، سقف را در{' '}
+            {can(session, 'settings.edit') ? (
+              <Link className="jy-link" href={panelPath(gate, '/settings')}>
+                تنظیمات
+              </Link>
+            ) : (
+              'تنظیمات (مالک)'
+            )}{' '}
+            بالا ببر.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (alerts.unassigned.length > 0) {
+    // همان الگوی «PDF ساخته نشد» (۵٫۲): هر شماره پیوند سفارش، این‌بار یکراست به فرم انتخاب چاپخانه.
+    notes.push({
+      tone: 'warning',
+      node: (
+        <p key="partner" className="jy-note jy-note--warning" data-alert="partner">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            {oneUnassigned ? 'سفارش ' : 'سفارش‌های '}
+            <OrderLinks gate={gate} numbers={alerts.unassigned} query={can(session, 'orders.assign') ? '?do=assign' : ''} />{' '}
+            {oneUnassigned
+              ? 'چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.'
+              : 'چاپخانه ندارند: هنگام پرداختشان هیچ چاپخانهٔ فعالی نبود. برای هر کدام یکی انتخاب کن.'}
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (alerts.reviewRows > 0) {
+    // صف تأیید (۶٫۲)، فقط مالک و متصدی.
+    notes.push({
+      tone: 'warning',
+      node: (
+        <p key="review" className="jy-note jy-note--warning" data-alert="review">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
+              <span className="num">{formatNumber(alerts.reviewRows)}</span> سطر فایل پست
+            </Link>{' '}
+            منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (alerts.smsFailed.length > 0) {
+    // پیامک رهگیری که نرفت (۶٫۳؛ در طرح نبود): فقط مالک و متصدی، که «دوباره بفرست» دارند.
+    notes.push({
+      tone: 'warning',
+      node: (
+        <p key="sms" className="jy-note jy-note--warning" data-alert="sms">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            پیامک رهگیری {alerts.smsFailed.length === 1 ? 'سفارش ' : 'سفارش‌های '}
+            <OrderLinks gate={gate} numbers={alerts.smsFailed} /> نرفت؛ از کارت «بستهٔ پستی» دوباره بفرست.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (alerts.paidSmsFailed.length > 0) {
+    // پیامک پرداخت که نرفت (۷٫۱، مثل رهگیری): مالک و متصدی، از کارت «پرداخت‌ها».
+    notes.push({
+      tone: 'warning',
+      node: (
+        <p key="paid-sms" className="jy-note jy-note--warning" data-alert="paid-sms">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            پیامک پرداخت {alerts.paidSmsFailed.length === 1 ? 'سفارش ' : 'سفارش‌های '}
+            <OrderLinks gate={gate} numbers={alerts.paidSmsFailed} /> نرفت؛ از کارت «پرداخت‌ها» دوباره بفرست.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (sms.credit) {
+    notes.push({
+      tone: 'warning',
+      node: (
+        <p key="credit" className="jy-note jy-note--warning" data-alert="credit">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            <b>اعتبار پیامک کم است:</b> <span className="num">{formatNumber(Math.floor(sms.credit.credit))}</span> پیامک، زیر آستانهٔ{' '}
+            <span className="num">{formatNumber(sms.credit.threshold)}</span>. در پنل sms.ir شارژ کن؛ بی اعتبار نه کد تأیید می‌رود، نه پیامک
+            پرداخت و رهگیری.
+          </span>
+        </p>
+      ),
+    });
+  }
+  for (const day of untracked) {
+    const one = day.orderNumbers.length === 1;
+    // «کد رهگیری ندارد» (۶٫۲، تصمیم ۸۲): هر روز تحویل یک یادداشت؛ فایل پست همان روز راه جلوست.
+    notes.push({
+      tone: 'warning',
+      node: (
+        <p key={`untracked-${day.day.getTime()}`} className="jy-note jy-note--warning" data-alert="untracked">
+          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+          <span>
+            کد رهگیری {one ? 'سفارش ' : 'سفارش‌های '}
+            <OrderLinks gate={gate} numbers={day.orderNumbers} /> نرسیده، با اینکه دو روز کاری از تحویل {one ? 'پستش' : 'پستشان'} (
+            {formatJalaliWeekday(day.day)}) گذشته. فایل پست آن روز را{' '}
+            <Link className="jy-link" href={panelPath(gate, '/shipments')}>
+              {partner ? 'بده' : 'وارد کن'}
+            </Link>
+            .
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (unreturned > 0) {
+    notes.push({
+      tone: 'info',
+      node: (
+        <p key="unreturned" className="jy-note jy-note--info" data-alert="unreturned">
+          <span className="jy-icon jy-icon-info" aria-hidden="true" />
+          <span>
+            <Link
+              className="jy-link"
+              href={
+                alerts.unreturned.length === 1
+                  ? panelPath(gate, `/orders/${alerts.unreturned[0]!.orderNumber}`)
+                  : `${ordersHref}?status=awaiting`
+              }
+            >
+              <span className="num">{formatNumber(unreturned)}</span> تلاش پرداخت
+            </Link>{' '}
+            از درگاه برنگشت.
+          </span>
+        </p>
+      ),
+    });
+  }
 
   return (
     <>
@@ -92,90 +279,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
         ) : null}
       </section>
 
-      {alerts.failedPdf.length > 0 || unreturned > 0 || alerts.unassigned.length > 0 || alerts.reviewRows > 0 || alerts.smsFailed.length > 0 || untracked.length > 0 ? (
-        <div className="ad-alerts">
-          {alerts.failedPdf.length > 0 ? (
-            <p className="jy-note jy-note--error" data-alert="pdf">
-              <span className="jy-icon jy-icon-error" aria-hidden="true" />
-              <span>
-                PDF جزوهٔ {oneFailed ? 'سفارش ' : 'سفارش‌های '}
-                <OrderLinks gate={gate} numbers={alerts.failedPdf} /> ساخته نشد؛ پیش از چاپ دوباره {oneFailed ? 'بسازش' : 'بسازشان'}.
-              </span>
-            </p>
-          ) : null}
-          {unreturned > 0 ? (
-            <p className="jy-note jy-note--info" data-alert="unreturned">
-              <span className="jy-icon jy-icon-info" aria-hidden="true" />
-              <span>
-                <Link
-                  className="jy-link"
-                  href={
-                    alerts.unreturned.length === 1
-                      ? panelPath(gate, `/orders/${alerts.unreturned[0]!.orderNumber}`)
-                      : `${ordersHref}?status=awaiting`
-                  }
-                >
-                  <span className="num">{formatNumber(unreturned)}</span> تلاش پرداخت
-                </Link>{' '}
-                از درگاه برنگشت.
-              </span>
-            </p>
-          ) : null}
-          {alerts.unassigned.length > 0 ? (
-            // همان الگوی «PDF ساخته نشد» (۵٫۲): هر شماره پیوند سفارش، این‌بار یکراست به فرم انتخاب چاپخانه.
-            <p className="jy-note jy-note--warning" data-alert="partner">
-              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
-              <span>
-                {oneUnassigned ? 'سفارش ' : 'سفارش‌های '}
-                <OrderLinks gate={gate} numbers={alerts.unassigned} query={can(session, 'orders.assign') ? '?do=assign' : ''} />{' '}
-                {oneUnassigned
-                  ? 'چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.'
-                  : 'چاپخانه ندارند: هنگام پرداختشان هیچ چاپخانهٔ فعالی نبود. برای هر کدام یکی انتخاب کن.'}
-              </span>
-            </p>
-          ) : null}
-          {alerts.reviewRows > 0 ? (
-            // صف تأیید (۶٫۲)، فقط مالک و متصدی.
-            <p className="jy-note jy-note--warning" data-alert="review">
-              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
-              <span>
-                <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
-                  <span className="num">{formatNumber(alerts.reviewRows)}</span> سطر فایل پست
-                </Link>{' '}
-                منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.
-              </span>
-            </p>
-          ) : null}
-          {alerts.smsFailed.length > 0 ? (
-            // پیامک رهگیری که نرفت (۶٫۳؛ در طرح نبود): فقط مالک و متصدی، که «دوباره بفرست» دارند.
-            <p className="jy-note jy-note--warning" data-alert="sms">
-              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
-              <span>
-                پیامک رهگیری {alerts.smsFailed.length === 1 ? 'سفارش ' : 'سفارش‌های '}
-                <OrderLinks gate={gate} numbers={alerts.smsFailed} /> نرفت؛ از کارت «بستهٔ پستی» دوباره بفرست.
-              </span>
-            </p>
-          ) : null}
-          {untracked.map((day) => {
-            const one = day.orderNumbers.length === 1;
-            return (
-              // «کد رهگیری ندارد» (۶٫۲، تصمیم ۸۲): هر روز تحویل یک یادداشت؛ فایل پست همان روز راه جلوست.
-              <p key={day.day.getTime()} className="jy-note jy-note--warning" data-alert="untracked">
-                <span className="jy-icon jy-icon-warning" aria-hidden="true" />
-                <span>
-                  کد رهگیری {one ? 'سفارش ' : 'سفارش‌های '}
-                  <OrderLinks gate={gate} numbers={day.orderNumbers} /> نرسیده، با اینکه دو روز کاری از تحویل {one ? 'پستش' : 'پستشان'} (
-                  {formatJalaliWeekday(day.day)}) گذشته. فایل پست آن روز را{' '}
-                  <Link className="jy-link" href={panelPath(gate, '/shipments')}>
-                    {partner ? 'بده' : 'وارد کن'}
-                  </Link>
-                  .
-                </span>
-              </p>
-            );
-          })}
-        </div>
-      ) : null}
+      {notes.length > 0 ? <div className="ad-alerts">{notes.map((note) => note.node)}</div> : null}
 
       <section className={`jy-card ad-list${money ? '' : ' ad-list--nosum'}`} aria-labelledby="t-queue">
         <div className="jy-card__head">

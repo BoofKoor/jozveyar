@@ -1658,4 +1658,89 @@
     border: 0;
     min-width: 0;
   }
+
+  /* ===== پیامک sms.ir (۷٫۱، طرح برش ۷): متن قالب یک‌منبع، نتیجهٔ «آزمایش»، آخرین آزمایش هر کلید، اعتبار، و پیامک پرداخت ===== */
+  .ad-tpl {
+    margin-block-start: 6px;
+    padding: 10px 14px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    line-height: 1.9;
+    user-select: all;
+  }
+  .ad-tpl__p {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-weight: 600;
+    color: var(--color-green-700);
+  }
+  .ad-keys__form > form > .ad-hint:first-of-type {
+    margin-block-end: 2px;
+  }
+  .ad-keys__form .ad-tpl + .ad-hint {
+    margin-block: 4px 16px;
+  }
+  .ad-keys__test {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-block-start: 16px;
+  }
+  .ad-keys__last {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-keys__last .jy-icon {
+    width: 14px;
+    height: 14px;
+    vertical-align: -2px;
+  }
+  .ad-keys__last .jy-icon-success {
+    color: var(--color-success-text);
+  }
+  .ad-keys__last .jy-icon-error {
+    color: var(--color-error-text);
+  }
+  .ad-keys__last .jy-icon-warning {
+    color: var(--color-warning-text);
+  }
+  .ad-credit__n {
+    margin-block-start: 8px;
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .ad-credit__n small {
+    margin-inline-start: 6px;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .ad-pay__sms {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 6px;
+    flex-basis: 100%;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-pay__sms .jy-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--color-success-text);
+  }
+  .ad-pay__sms.is-bad {
+    font-weight: 600;
+    color: var(--color-error-text);
+  }
+  .ad-pay__sms.is-bad .jy-icon {
+    color: var(--color-error-text);
+  }
+  .ad-pay__sms .jy-btn {
+    margin-block: -6px;
+    margin-inline-start: -12px;
+  }
 }

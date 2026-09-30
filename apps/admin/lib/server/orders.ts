@@ -47,6 +47,7 @@ import {
   type PanelPartnerOption,
   type PanelSearch,
 } from '@jozveyar/db';
+import { deliverQueued, resendable, smsState, type SmsErrorCode, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import type { StorageDriver } from '@jozveyar/storage';
 import { postHandoffDue, tehranDayStart } from '@jozveyar/text';
 import { checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
@@ -94,6 +95,8 @@ export interface PanelOrdersDeps {
   store: PanelOrderStore;
   /** null یعنی استوریج پیکربندی نشده: دانلود بسته، بقیه باز. */
   storage: StorageDriver | null;
+  /** «دوباره بفرست» پیامک پرداخت (۷٫۱، ADR-049): همان آداپتور و درگاه ردیف‌های منتظر پیامک رهگیری پنل. */
+  sms?: { transport: SmsTransport; outbox: SmsOutbox; log?: (message: string, error?: unknown) => void };
   /** `SESSION_SECRET`: کلید HMAC IP، مثل ورود. */
   secret: string;
   now?: () => Date;
@@ -260,6 +263,8 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
           ...alerts,
           reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
           smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
+          // پیامک پرداخت (۷٫۱): کارت پرداخت و «دوباره بفرست»ش با `orders.money` است.
+          paidSmsFailed: can(session, 'orders.money') ? alerts.paidSmsFailed : [],
         },
         untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
@@ -494,6 +499,43 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
      * یا زیر دست کارگر نیست. فایل چاپ فایل‌های مشتری را فقط برای جزوه‌ای می‌خواهد که PDFش ساخته نشده؛ وگرنه کارگر باز با
      * `file_missing` می‌افتاد. کار با رویداد در یک تراکنش در صف می‌رود؛ دو کلیک هم‌زمان یک بار.
      */
+    /**
+     * «دوباره بفرست» پیامک پرداخت (۷٫۱، ADR-049؛ طرح کارت «پرداخت‌ها»): مالک و متصدی (`orders.money`)، فقط پیامکی که نرفت یا معلوم
+     * نیست رفت، و فقط تا سفارش در صف یا در حال چاپ است (پس از آن پیامک «پرداخت شد» گمراه‌کننده است؛ تریگر `sms_messages_live` هم).
+     * همان ردیف و همان «در حال فرستادن» یک‌باره؛ رویداد `orders.sms_resend` با نتیجه.
+     */
+    async resendPaidSms(
+      session: AdminSession,
+      numberParam: string,
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: 'sent' | 'failed'; error: SmsErrorCode | null }>> {
+      if (!can(session, 'orders.money')) return fail(403, 'forbidden');
+      const orderNumber = orderNumberOf(numberParam);
+      const found = orderNumber === null ? null : await store.paidSms(scopeOf(session), orderNumber);
+      if (!found) return fail(404, 'order_not_found');
+      const at = now();
+      if (!found.sms || !resendable(smsState(found.sms, at))) return fail(409, 'paid_sms_not_failed', { orderNumber: found.orderNumber });
+      if (found.status !== 'paid' && found.status !== 'printing') return fail(409, 'paid_sms_closed', { orderNumber: found.orderNumber });
+      if (!deps.sms) return fail(503, 'unavailable');
+      const [delivery] = await deliverQueued(
+        { outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log },
+        [found.sms.id],
+        { mode: 'retry' },
+      );
+      if (!delivery || delivery.outcome === 'skipped') return fail(409, 'paid_sms_not_failed', { orderNumber: found.orderNumber });
+      const outcome = delivery.outcome === 'sent' ? 'sent' : 'failed';
+      await store.logEvent({
+        adminUserId: session.userId,
+        action: 'orders.sms_resend',
+        targetType: 'order',
+        targetId: found.orderId,
+        ipHash: ipHashOf(deps.secret, ip),
+        detail: { orderNumber: found.orderNumber, outcome, ...(delivery.error ? { error: delivery.error } : {}) },
+        at: now(),
+      });
+      return ok({ orderNumber: found.orderNumber, outcome, error: delivery.error ?? null });
+    },
+
     async rebuild(session: AdminSession, numberParam: string, kind: 'print' | 'ticket', ip: string): Promise<Result<true>> {
       if (!can(session, 'files.download')) return fail(403, 'forbidden');
       const scope = scopeOf(session);

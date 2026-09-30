@@ -38,7 +38,7 @@ export interface EventLine {
   at: Date;
   /** کننده؛ null برای تلاش ورود بی نشست، و «سرور» برای دستور روی سرور. */
   who: string | null;
-  badge: 'login_failed' | 'code_failed' | null;
+  badge: 'login_failed' | 'code_failed' | 'test_rejected' | null;
   count: number;
   text: Segment[];
 }
@@ -76,7 +76,9 @@ const versionRef = (value: unknown): Segment[] => [{ ltr: typeof value === 'numb
 const SETTING_NAMES: Record<string, string> = {
   'order.sla_days': 'روز کاری تحویل به پست',
   'otp.site_hourly_limit': 'سقف ساعتی کد پیامکی کل سایت',
+  'otp.site_daily_limit': 'سقف روزانهٔ کد پیامکی کل سایت',
   'order.files_retention_days': 'روزهای نگهداری فایل‌های سفارش',
+  'sms.credit_alert': 'آستانهٔ هشدار اعتبار پیامک',
 };
 
 /** عدد یا تاریخ، جدا از جملهٔ فارسی. */
@@ -207,6 +209,25 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: [`کلید «${keyName(detail.name)}» ${detail.from === 'empty' ? 'وارد شد' : 'عوض شد'}`] };
     case 'settings.key_revert':
       return { badge: null, text: [`کلید «${keyName(detail.name)}» به `, { ltr: '.env' }, ' برگشت'] };
+    case 'settings.key_test': {
+      // «آزمایش» کلید sms.ir (۷٫۱، سؤال ۱۳۹؛ طرح): نام و نتیجه، هرگز مقدار.
+      const credit = typeof detail.credit === 'number' ? Math.floor(detail.credit) : null;
+      const http = typeof detail.http === 'number' ? [' (پاسخ ', { ltr: String(detail.http) }, ')'] : [];
+      const result: Segment[] =
+        detail.result === 'ok'
+          ? credit !== null
+            ? ['درست، اعتبار ', { ltr: formatNumber(credit) }, ' پیامک']
+            : ['درست، پیامک آزمایشی رفت']
+          : detail.result === 'rejected'
+            ? ['رد شد', ...http]
+            : detail.result === 'unconfigured'
+              ? ['آزموده نشد، کلید API خالی بود']
+              : ['sms.ir جواب نداد', ...http];
+      return {
+        badge: detail.result === 'rejected' ? 'test_rejected' : null,
+        text: [`«${keyName(detail.name)}» آزموده شد: `, ...result],
+      };
+    }
     case 'orders.assign': {
       // نام‌ها همان لحظه در جزئیات رویداد نشسته‌اند (۵٫۲): چاپخانه‌ای که بعداً نامش عوض شد، اینجا همان نام آن روز است.
       const from = (detail.from ?? null) as { name?: unknown } | null;
@@ -312,6 +333,12 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return {
         badge: null,
         text: ['پیامک رهگیری سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
+      };
+    case 'orders.sms_resend':
+      // «دوباره بفرست» پیامک پرداخت (۷٫۱؛ طرح: «پیامک پرداخت سفارش 10044 دوباره فرستاده شد»).
+      return {
+        badge: null,
+        text: ['پیامک پرداخت سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
       };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];

@@ -12,7 +12,7 @@ import { requirePanel, requireSession } from '../../../../lib/server/context';
 
 export const metadata: Metadata = { title: 'رویدادها' };
 
-const BADGES = { login_failed: 'ورود ناموفق', code_failed: 'کد نادرست' } as const;
+const BADGES = { login_failed: 'ورود ناموفق', code_failed: 'کد نادرست', test_rejected: 'رد شد' } as const;
 
 function Text({ segments }: { segments: Segment[] }) {
   return (
@@ -99,7 +99,13 @@ export default async function EventsPage({
                     {line.who ? ` · ${line.who}` : ''}
                   </span>
                   <span>
-                    {line.badge ? (
+                    {line.badge === 'test_rejected' ? (
+                      // «آزمایش» کلیدی که sms.ir رد کرد (۷٫۱، طرح): نشان خطا.
+                      <span className="jy-badge jy-badge--error">
+                        <span className="jy-icon jy-icon-error" aria-hidden="true" />
+                        {BADGES[line.badge]}
+                      </span>
+                    ) : line.badge ? (
                       <span className="jy-badge jy-badge--warning">
                         <span className="jy-icon jy-icon-warning" aria-hidden="true" />
                         {BADGES[line.badge]}

@@ -19,15 +19,17 @@ import {
   type SettingsStore,
 } from '@jozveyar/db';
 
+import { SmsError } from '@jozveyar/sms';
+
 import type { AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
-import { createPanelSettings, keySeenOf } from './settings';
+import { KEY_TESTS_PER_HOUR, KEY_TEST_TTL_MS, createPanelSettings, keySeenOf, type SmsKeyTester } from './settings';
 
 /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
 const SECRET = 's'.repeat(64);
 const KEY = Buffer.from('00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff', 'hex');
-const ENV_VALUE = 'env-kavenegar-key-00003f9a';
+const ENV_VALUE = 'env-smsir-key-00003f9a';
 const PANEL_VALUE = 'panel-zibal-merchant-c2d8';
 
 function session(permissions: string[]): AdminSession {
@@ -65,10 +67,14 @@ function memorySettings() {
   return { store, values, events };
 }
 
-/** ذخیره‌گاه کلیدها؛ `before` پیش از هر نوشتن اجرا می‌شود، برای کلیدی که «همین حالا» جای دیگری عوض شد. */
+/**
+ * ذخیره‌گاه کلیدها؛ `before` پیش از هر نوشتن اجرا می‌شود، برای کلیدی که «همین حالا» جای دیگری عوض شد. رویدادهای «آزمایش» (۷٫۱) جدا در
+ * `tests`، با همان قرارداد نسخهٔ پستگرس: سقف روی آزمایش‌های ساعت گذشته، و رویداد پس از نتیجه.
+ */
 function memorySecrets() {
   const rows = new Map<ServiceKeyName, ServiceSecretRow>();
   const events: AdminEventInput[] = [];
+  const tests: AdminEventInput[] = [];
   const hooks: { before?: () => void } = {};
   const store: SecretStore = {
     async list() {
@@ -92,8 +98,36 @@ function memorySecrets() {
       events.push({ adminUserId: input.actor.adminUserId, action: 'settings.key_revert', targetType: 'service_key', targetId: input.name, detail: { ...input.detail, name: input.name }, at: input.at });
       return 'ok';
     },
+    async runTest(input, run) {
+      const since = input.at.getTime() - 3_600_000;
+      if (tests.filter((e) => e.at.getTime() > since).length >= input.limit) return null;
+      const { value, detail } = await run();
+      tests.push({ adminUserId: input.actor.adminUserId, action: 'settings.key_test', targetType: 'service_key', targetId: input.name, ipHash: input.actor.ipHash, detail: { ...detail, name: input.name }, at: input.at });
+      return value;
+    },
+    async lastTests() {
+      const last = new Map<ServiceKeyName, { at: Date; detail: Record<string, unknown> }>();
+      for (const e of tests) last.set(e.targetId as ServiceKeyName, { at: e.at, detail: e.detail as Record<string, unknown> });
+      return last;
+    },
   };
-  return { store, rows, events, hooks };
+  return { store, rows, events, tests, hooks };
+}
+
+/** sms.ir ساختگی برای «آزمایش»: هر درخواست با مقدارش ثبت می‌شود (فقط در همین تست)؛ پاسخ پیش‌فرض موفق، یا همان که تست می‌دهد. */
+function fakeTester(over: Partial<SmsKeyTester>) {
+  const calls: Record<string, unknown>[] = [];
+  const tester: SmsKeyTester = {
+    async credit(apiKey) {
+      calls.push({ kind: 'credit', apiKey });
+      return over.credit ? over.credit(apiKey) : 165.3;
+    },
+    async send(input) {
+      calls.push({ kind: 'send', ...input });
+      return over.send ? over.send(input) : { messageId: '872364912', cost: 1.1 };
+    },
+  };
+  return { tester, calls };
 }
 
 const panelRow = (name: ServiceKeyName, value: string, key = KEY, context = serviceKeyContext(name)): ServiceSecretRow => ({
@@ -103,22 +137,34 @@ const panelRow = (name: ServiceKeyName, value: string, key = KEY, context = serv
   updatedBy: { id: 'admin-1', name: 'سارا' },
 });
 
-function service(options: { stepUp?: Result<true>; secretsKey?: Buffer; env?: Record<string, string> } = {}) {
+function service(
+  options: { stepUp?: Result<true>; secretsKey?: Buffer; env?: Record<string, string>; tester?: Partial<SmsKeyTester> | null } = {},
+) {
   const settings = memorySettings();
   const secrets = memorySecrets();
+  const sms = fakeTester(options.tester ?? {});
+  const clock = { now: NOW };
   const logs: string[] = [];
   const stepUp = vi.fn(async (_session: AdminSession, _code: unknown, _ip: string): Promise<Result<true>> => options.stepUp ?? ok<true>(true));
   const panel = createPanelSettings({
     settings: settings.store,
     secrets: secrets.store,
+    ...(options.tester === null ? {} : { smsTester: sms.tester }),
     stepUp,
     secretsKey: options.secretsKey ?? KEY,
     env: options.env ?? { SMS_API_KEY: ENV_VALUE, PAYMENT_MERCHANT_ID: 'env-merchant-0000' },
     secret: SECRET,
-    now: () => NOW,
+    now: () => clock.now,
     log: (message, error) => logs.push(`${message} ${error ?? ''}`),
   });
-  return { panel, settings, secrets, stepUp, logs };
+  return { panel, settings, secrets, stepUp, logs, sms, clock };
+}
+
+/** «آزمایش» یک کلید sms.ir با مالک، همان راه فرم؛ نشانی ذخیره‌اش. */
+async function testedToken(panel: ReturnType<typeof service>['panel'], name: ServiceKeyName, value: string, seen = 'none') {
+  const result = await panel.testKey(OWNER, { name, value, seen, mobile: '09123456789' }, 'ip');
+  if (!result.ok || !result.value.token) throw new Error(result.ok ? result.value.outcome : result.error);
+  return result.value.token;
 }
 
 /** هیچ‌جای این‌ها مقدار کلید نیست. */
@@ -169,10 +215,14 @@ describe('نمای صفحه', () => {
     expect(view.keys.map((k) => [k.name, k.source, k.tail, k.updatedBy, k.envSet, k.envTail])).toEqual([
       ['SMS_API_KEY', 'env', '3f9a', null, true, '3f9a'],
       ['SMS_OTP_TEMPLATE', 'empty', null, null, false, null],
+      ['SMS_PAID_TEMPLATE', 'empty', null, null, false, null],
+      ['SMS_TRACKING_TEMPLATE', 'empty', null, null, false, null],
       ['PAYMENT_MERCHANT_ID', 'panel', 'c2d8', 'سارا', true, '0000'],
     ]);
-    expect(view.keys[2]!.seen).toBe(keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed));
+    expect(view.keys[4]!.seen).toBe(keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed));
     expect(view.keys[0]!.seen).toBe('none');
+    // هنوز هیچ «آزمایش»ی (۷٫۱).
+    expect(view.keys.map((k) => k.lastTest)).toEqual([null, null, null, null, null]);
     expect(leaks(PANEL_VALUE, view)).toBe(false);
     expect(leaks(ENV_VALUE, view)).toBe(false);
     // مهروموم هم نه: نسخهٔ دیده‌شده اثر انگشت آن است.
@@ -192,7 +242,7 @@ describe('نمای صفحه', () => {
     // مقدار مهروموم‌شدهٔ کلید API در ردیف کد پذیرنده.
     swapped.secrets.rows.set('PAYMENT_MERCHANT_ID', panelRow('PAYMENT_MERCHANT_ID', PANEL_VALUE, KEY, serviceKeyContext('SMS_API_KEY')));
     const view = await swapped.panel.overview(OWNER);
-    expect(view.ok && view.value.keys[2]!.source).toBe('unreadable');
+    expect(view.ok && view.value.keys[4]!.source).toBe('unreadable');
   });
 
   it('تنظیم خراب: پیش‌فرض و لاگ بلند (readSetting)، نه شکستن صفحه', async () => {
@@ -403,24 +453,33 @@ describe('تعطیلی‌ها', () => {
 });
 
 describe('کلیدها', () => {
-  it('مقدار پنل با کد تازه: مهروموم در جای خودش، رویداد با نام و منبع قبلی؛ مقدار نه در رویداد، نه پاسخ، نه لاگ', async () => {
+  it('مقدار پنل با کد تازه: مهروموم در جای خودش، رویداد با نام، منبع قبلی و نتیجهٔ آزمایش؛ مقدار نه در رویداد، نه پاسخ، نه لاگ', async () => {
     const { panel, secrets, stepUp, logs } = service();
-    const value = 'fresh-kavenegar-key-77aa';
-    const result = await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: `  ${value}\n`, seen: 'none', code: '123456' }, '10.0.0.1');
+    const value = 'fresh-smsir-key-77aa';
+    const test = await testedToken(panel, 'SMS_API_KEY', value);
+    const result = await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: `  ${value}\n`, seen: 'none', code: '123456', test }, '10.0.0.1');
     expect(result).toEqual(ok({ name: 'SMS_API_KEY' }));
     expect(stepUp).toHaveBeenCalledWith(OWNER, '123456', '10.0.0.1');
     const row = secrets.rows.get('SMS_API_KEY')!;
     expect(unseal(KEY, row.sealed, serviceKeyContext('SMS_API_KEY'))).toBe(value);
     expect(row.sealed).not.toContain(value);
     expect(() => unseal(KEY, row.sealed, serviceKeyContext('PAYMENT_MERCHANT_ID'))).toThrow();
-    expect(secrets.events).toMatchObject([{ action: 'settings.key_set', targetId: 'SMS_API_KEY', detail: { name: 'SMS_API_KEY', from: 'env' } }]);
-    expect(leaks(value, result, secrets.events, logs)).toBe(false);
+    expect(secrets.events).toEqual([
+      expect.objectContaining({ action: 'settings.key_set', targetId: 'SMS_API_KEY', detail: { name: 'SMS_API_KEY', from: 'env', tested: 'ok' } }),
+    ]);
+    expect(leaks(value, result, secrets.events, secrets.tests, logs)).toBe(false);
     const view = await panel.overview(OWNER);
     expect(view.ok && view.value.keys[0]).toMatchObject({ source: 'panel', tail: '77aa', envTail: '3f9a' });
     expect(leaks(value, view)).toBe(false);
-    // خالی پیش از این: «وارد شد».
-    expect(await panel.setKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: 'jozveyar-otp', seen: 'none', code: '1' }, 'ip')).toMatchObject({ ok: true });
-    expect(secrets.events[1]).toMatchObject({ detail: { name: 'SMS_OTP_TEMPLATE', from: 'empty' } });
+    // خالی پیش از این: «وارد شد»؛ شناسهٔ قالب عدد است (۷٫۱)، با ارقام فارسی هم، و ۴ رقم آخرش راز نیست.
+    const otp = await testedToken(panel, 'SMS_OTP_TEMPLATE', '872716');
+    expect(await panel.setKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '۸۷۲۷۱۶', seen: 'none', code: '1', test: otp }, 'ip')).toMatchObject({ ok: true });
+    expect(secrets.events[1]).toMatchObject({ detail: { name: 'SMS_OTP_TEMPLATE', from: 'empty', tested: 'ok' } });
+    const after = await panel.overview(OWNER);
+    expect(after.ok && after.value.keys[1]).toMatchObject({ source: 'panel', tail: '2716' });
+    // کد پذیرندهٔ زیبال آزمایش ندارد (با درگاه، ۷٫۲): مثل ۴٫۶، بی نشانی.
+    expect(await panel.setKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', value: 'merchant-new-9f1e', seen: 'none', code: '2' }, 'ip')).toMatchObject({ ok: true });
+    expect(secrets.events[2]!.detail).toEqual({ name: 'PAYMENT_MERCHANT_ID', from: 'env' });
   });
 
   it('پیش از کد: مقدار نادرست، کلید ناشناس، و کلیدی که همین حالا جای دیگری عوض شد؛ کد نه مصرف می‌شود نه «نادرست»', async () => {
@@ -430,6 +489,19 @@ describe('کلیدها', () => {
         status: 400,
         error: 'invalid_key_value',
       });
+    }
+    // شناسهٔ قالب (۷٫۱): عدد مثبت تا ۹ رقم، بی صفر اول.
+    for (const value of ['', 'jozveyar-otp', '0', '0123', '1234567890', '12.5', '-5']) {
+      expect(await panel.setKey(OWNER, { name: 'SMS_PAID_TEMPLATE', value, seen: 'none', code: '123456' }, 'ip'), value).toMatchObject({
+        status: 400,
+        error: 'invalid_template_id',
+      });
+    }
+    // کلید sms.ir بی آزمایشی که همین مقدار را ذخیره‌شدنی گفت، یا با نشانی ساختگی (۷٫۱).
+    for (const test of [undefined, '', '99999999999999.ok.' + 'A'.repeat(43), 'not-a-token']) {
+      expect(await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none', code: '1', test }, 'ip'), String(test)).toEqual(
+        fail(409, 'key_untested', { name: 'SMS_API_KEY' }),
+      );
     }
     for (const name of ['CHECKOUT_MODE', 'SMS_PROVIDER', 'SECRETS_KEY', 'sms_api_key', undefined]) {
       expect(await panel.setKey(OWNER, { name, value: 'abcdefgh1234', seen: 'none', code: '1' }, 'ip'), String(name)).toMatchObject({
@@ -452,7 +524,8 @@ describe('کلیدها', () => {
   it('کد نادرست یا قفل: هیچ نوشته نمی‌شود، و همان خطای کد برمی‌گردد', async () => {
     for (const failure of [fail(400, 'wrong_code'), fail(400, 'code_used'), fail(423, 'account_locked', { lockedUntil: NOW })]) {
       const { panel, secrets } = service({ stepUp: failure });
-      expect(await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none', code: '000000' }, 'ip')).toEqual(failure);
+      const test = await testedToken(panel, 'SMS_API_KEY', 'abcdefgh1234');
+      expect(await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none', code: '000000', test }, 'ip')).toEqual(failure);
       expect(secrets.rows.size).toBe(0);
       secrets.rows.set('PAYMENT_MERCHANT_ID', panelRow('PAYMENT_MERCHANT_ID', PANEL_VALUE));
       const seen = keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed);
@@ -464,8 +537,9 @@ describe('کلیدها', () => {
 
   it('کلیدی که میان سنجش و نوشتن عوض شد: زیر قفل هم «همین حالا عوض شد»، نه رونویسی', async () => {
     const { panel, secrets } = service();
+    const test = await testedToken(panel, 'SMS_API_KEY', 'mine-value-5678');
     secrets.hooks.before = () => secrets.rows.set('SMS_API_KEY', panelRow('SMS_API_KEY', 'another-tab-value-1234'));
-    expect(await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'mine-value-5678', seen: 'none', code: '1' }, 'ip')).toMatchObject({
+    expect(await panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'mine-value-5678', seen: 'none', code: '1', test }, 'ip')).toMatchObject({
       status: 409,
       error: 'key_changed',
     });
@@ -475,7 +549,7 @@ describe('کلیدها', () => {
   it('برگرداندن به .env با کد تازه: مقدار پنل پاک، از این لحظه .env؛ رویداد با مقصد', async () => {
     const { panel, secrets, stepUp } = service();
     secrets.rows.set('PAYMENT_MERCHANT_ID', panelRow('PAYMENT_MERCHANT_ID', PANEL_VALUE));
-    secrets.rows.set('SMS_OTP_TEMPLATE', panelRow('SMS_OTP_TEMPLATE', 'jozveyar-otp'));
+    secrets.rows.set('SMS_OTP_TEMPLATE', panelRow('SMS_OTP_TEMPLATE', '872716'));
     const seenOf = (name: ServiceKeyName) => keySeenOf(secrets.rows.get(name)!.sealed);
     expect(await panel.revertKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', seen: seenOf('PAYMENT_MERCHANT_ID'), code: '1' }, 'ip')).toEqual(
       ok({ name: 'PAYMENT_MERCHANT_ID' }),
@@ -487,6 +561,253 @@ describe('کلیدها', () => {
       { name: 'SMS_OTP_TEMPLATE', to: 'empty' },
     ]);
     const view = await panel.overview(OWNER);
-    expect(view.ok && view.value.keys.map((k) => k.source)).toEqual(['env', 'empty', 'env']);
+    expect(view.ok && view.value.keys.map((k) => k.source)).toEqual(['env', 'empty', 'empty', 'empty', 'env']);
+  });
+});
+
+describe('«آزمایش» کلیدهای sms.ir (۷٫۱)', () => {
+  it('کلید API: اعتبار حساب با همان مقدار تازه، بی پیامک؛ رویداد با نتیجه و اعتبار، بی مقدار؛ «آزموده» زیر نامش', async () => {
+    const { panel, secrets, sms, logs } = service();
+    const value = 'fresh-smsir-key-77aa';
+    const result = await panel.testKey(OWNER, { name: 'SMS_API_KEY', value: ` ${value} `, seen: 'none' }, 'ip');
+    expect(result).toMatchObject({
+      ok: true,
+      value: { name: 'SMS_API_KEY', outcome: 'ok', credit: 165.3, http: null, status: null, messageId: null, cost: null, mobile: null },
+    });
+    expect(result.ok && result.value.token).toMatch(/^\d+\.ok\.[\w-]{43}$/);
+    expect(sms.calls).toEqual([{ kind: 'credit', apiKey: value }]);
+    expect(secrets.tests).toEqual([
+      expect.objectContaining({
+        action: 'settings.key_test',
+        targetType: 'service_key',
+        targetId: 'SMS_API_KEY',
+        detail: { name: 'SMS_API_KEY', result: 'ok', credit: 165.3 },
+      }),
+    ]);
+    expect(leaks(value, result, secrets.tests, logs)).toBe(false);
+    // آزمایش ذخیره نیست.
+    expect(secrets.rows.size).toBe(0);
+    expect(secrets.events).toEqual([]);
+    const view = await panel.overview(OWNER);
+    expect(view.ok && view.value.keys[0]!.lastTest).toEqual({ at: NOW, outcome: 'ok', http: null, status: null, credit: 165.3 });
+  });
+
+  it('قالب: یک پیامک آزمایشی با پارامترهای نمونه به شمارهٔ مالک، با کلید API امروز (پنل مقدم)؛ شماره در رویداد نیست', async () => {
+    const { panel, secrets, sms } = service();
+    const result = await panel.testKey(OWNER, { name: 'SMS_PAID_TEMPLATE', value: '۵۵۱۲۰۰', seen: 'none', mobile: '۰۹۱۲ ۳۴۵ ۶۷۸۹' }, 'ip');
+    expect(result).toMatchObject({ ok: true, value: { outcome: 'ok', messageId: '872364912', cost: 1.1, mobile: '09123456789', credit: null } });
+    expect(sms.calls).toEqual([
+      {
+        kind: 'send',
+        apiKey: ENV_VALUE,
+        templateId: 551200,
+        mobile: '09123456789',
+        parameters: [
+          { name: 'ORDER', value: '10027' },
+          { name: 'DAY', value: 'دوشنبه 6 مهر' },
+        ],
+      },
+    ]);
+    expect(secrets.tests[0]!.detail).toEqual({ name: 'SMS_PAID_TEMPLATE', result: 'ok', messageId: '872364912', cost: 1.1 });
+    expect(JSON.stringify(secrets.tests)).not.toContain('9123456789');
+    // کلید API پنل بر .env مقدم است، همان که پیامک واقعی با آن می‌رود.
+    secrets.rows.set('SMS_API_KEY', panelRow('SMS_API_KEY', PANEL_VALUE));
+    expect((await panel.testKey(OWNER, { name: 'SMS_TRACKING_TEMPLATE', value: '551300', seen: 'none', mobile: '09123456789' }, 'ip')).ok).toBe(true);
+    expect(sms.calls[1]).toMatchObject({
+      apiKey: PANEL_VALUE,
+      templateId: 551300,
+      parameters: [
+        { name: 'ORDER', value: '10027' },
+        { name: 'BARCODE', value: '118800000000000000000101' },
+      ],
+    });
+    await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '551100', seen: 'none', mobile: '09123456789' }, 'ip');
+    expect(sms.calls[2]).toMatchObject({ templateId: 551100, parameters: [{ name: 'CODE', value: '12345' }] });
+  });
+
+  it('پیش از درخواست: مجوز، کلید بی آزمایش، مقدار و شمارهٔ نادرست، و کلیدی که همین حالا عوض شد؛ نه درخواستی به sms.ir، نه رویدادی', async () => {
+    const { panel, secrets, sms } = service();
+    expect(await panel.testKey(OPERATOR, { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none' }, 'ip')).toMatchObject({ status: 403 });
+    expect(await panel.testKey(session(['settings.edit']), { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none' }, 'ip')).toMatchObject({
+      status: 403,
+    });
+    for (const name of ['PAYMENT_MERCHANT_ID', 'SECRETS_KEY', 'SMS_PROVIDER', undefined]) {
+      expect(await panel.testKey(OWNER, { name, value: 'abcdefgh1234', seen: 'none' }, 'ip'), String(name)).toMatchObject({
+        status: 404,
+        error: 'key_not_found',
+      });
+    }
+    expect(await panel.testKey(OWNER, { name: 'SMS_API_KEY', value: 'a b', seen: 'none' }, 'ip')).toMatchObject({ status: 400, error: 'invalid_key_value' });
+    for (const value of ['', 'abc', '0', '012', '1234567890', '12.5']) {
+      expect(await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value, seen: 'none', mobile: '09123456789' }, 'ip'), value).toMatchObject({
+        status: 400,
+        error: 'invalid_template_id',
+      });
+    }
+    for (const mobile of [undefined, '', '0912345678', '02112345678', 'x']) {
+      expect(await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', mobile }, 'ip'), String(mobile)).toMatchObject({
+        status: 400,
+        error: 'invalid_mobile',
+      });
+    }
+    secrets.rows.set('SMS_OTP_TEMPLATE', panelRow('SMS_OTP_TEMPLATE', '100200'));
+    expect(await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100300', seen: 'none', mobile: '09123456789' }, 'ip')).toEqual(
+      fail(409, 'key_changed', { name: 'SMS_OTP_TEMPLATE' }),
+    );
+    expect(sms.calls).toEqual([]);
+    expect(secrets.tests).toEqual([]);
+    // بی آزمایشگر نه آزمایش و نه ذخیرهٔ کلید پیامک؛ کد پذیرنده همان ۴٫۶.
+    const bare = service({ tester: null });
+    expect(await bare.panel.testKey(OWNER, { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none' }, 'ip')).toMatchObject({ status: 404 });
+    expect(await bare.panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'abcdefgh1234', seen: 'none', code: '1' }, 'ip')).toMatchObject({
+      status: 409,
+      error: 'key_untested',
+    });
+    expect(bare.stepUp).not.toHaveBeenCalled();
+  });
+
+  it('«رد شد» ذخیره نمی‌شود؛ «در دسترس نیست» و «آزموده نشد» (بی کلید API) ذخیره‌شدنی‌اند، با نتیجه در رویداد', async () => {
+    const rejected = service({
+      tester: {
+        credit: async () => {
+          throw new SmsError('rejected', 'sms.ir: HTTP 401', 401, 0);
+        },
+      },
+    });
+    const denied = await rejected.panel.testKey(OWNER, { name: 'SMS_API_KEY', value: 'bad-key-12345678', seen: 'none' }, 'ip');
+    expect(denied).toEqual(
+      ok({ name: 'SMS_API_KEY', outcome: 'rejected', http: 401, status: 0, credit: null, messageId: null, cost: null, mobile: null, token: null }),
+    );
+    expect(rejected.secrets.tests[0]!.detail).toEqual({ name: 'SMS_API_KEY', result: 'rejected', http: 401, status: 0 });
+    const lastRejected = await rejected.panel.overview(OWNER);
+    expect(lastRejected.ok && lastRejected.value.keys[0]!.lastTest).toEqual({ at: NOW, outcome: 'rejected', http: 401, status: 0, credit: null });
+
+    const down = service({
+      tester: {
+        credit: async () => {
+          throw new SmsError('unavailable', 'sms.ir: timeout', null, null);
+        },
+      },
+    });
+    const maybe = await down.panel.testKey(OWNER, { name: 'SMS_API_KEY', value: 'maybe-key-12345678', seen: 'none' }, 'ip');
+    expect(maybe).toMatchObject({ ok: true, value: { outcome: 'unavailable', http: null, status: null } });
+    const token = maybe.ok ? maybe.value.token : null;
+    expect(token).toMatch(/^\d+\.unavailable\./);
+    // «در دسترس نیست» به «موفق» دست‌کاری‌شده: امضا نمی‌خواند.
+    expect(
+      await down.panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'maybe-key-12345678', seen: 'none', code: '1', test: token!.replace('.unavailable.', '.ok.') }, 'ip'),
+    ).toEqual(fail(409, 'key_untested', { name: 'SMS_API_KEY' }));
+    expect(down.stepUp).not.toHaveBeenCalled();
+    expect(await down.panel.setKey(OWNER, { name: 'SMS_API_KEY', value: 'maybe-key-12345678', seen: 'none', code: '1', test: token }, 'ip')).toEqual(
+      ok({ name: 'SMS_API_KEY' }),
+    );
+    expect(down.secrets.events[0]!.detail).toEqual({ name: 'SMS_API_KEY', from: 'env', tested: 'unavailable' });
+
+    // خطای ناشناس (نه SmsError): «در دسترس نیست»، و لاگ فقط نام خطا، نه متنش.
+    const odd = service({
+      tester: {
+        credit: async () => {
+          throw new TypeError('odd-detail maybe-key-12345678');
+        },
+      },
+    });
+    expect(await odd.panel.testKey(OWNER, { name: 'SMS_API_KEY', value: 'maybe-key-12345678', seen: 'none' }, 'ip')).toMatchObject({
+      value: { outcome: 'unavailable' },
+    });
+    expect(odd.logs.join('\n')).toContain('TypeError');
+    expect(odd.logs.join('\n')).not.toContain('maybe-key');
+
+    // قالب بی کلید API (نه پنل، نه .env): درخواستی نمی‌رود، «آزموده نشد»، ذخیره‌شدنی.
+    const empty = service({ env: {} });
+    const unconfigured = await empty.panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', mobile: '09123456789' }, 'ip');
+    expect(unconfigured).toMatchObject({ ok: true, value: { outcome: 'unconfigured', messageId: null } });
+    expect(empty.sms.calls).toEqual([]);
+    const saved = await empty.panel.setKey(
+      OWNER,
+      { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', code: '1', test: unconfigured.ok ? unconfigured.value.token : null },
+      'ip',
+    );
+    expect(saved).toEqual(ok({ name: 'SMS_OTP_TEMPLATE' }));
+    expect(empty.secrets.events[0]!.detail).toEqual({ name: 'SMS_OTP_TEMPLATE', from: 'empty', tested: 'unconfigured' });
+  });
+
+  it('«آزموده» از رویداد: نتیجهٔ ناشناس «در دسترس نیست»، هرگز «درست»؛ عدد خراب هیچ', async () => {
+    const { panel, secrets } = service();
+    secrets.tests.push({
+      adminUserId: 'admin-1',
+      action: 'settings.key_test',
+      targetType: 'service_key',
+      targetId: 'SMS_API_KEY',
+      detail: { name: 'SMS_API_KEY', result: 'عجیب', http: '401', credit: Number.NaN },
+      at: NOW,
+    });
+    const view = await panel.overview(OWNER);
+    expect(view.ok && view.value.keys[0]!.lastTest).toEqual({ at: NOW, outcome: 'unavailable', http: null, status: null, credit: null });
+  });
+
+  it('قالبی که sms.ir نپذیرفت (شناسه یا پارامتر): «رد شد» با کد پاسخ؛ پیامکی نرفت', async () => {
+    const { panel, secrets } = service({
+      tester: {
+        send: async () => {
+          throw new SmsError('rejected', 'sms.ir: status 0', 400, 0);
+        },
+      },
+    });
+    const result = await panel.testKey(OWNER, { name: 'SMS_TRACKING_TEMPLATE', value: '551300', seen: 'none', mobile: '09123456789' }, 'ip');
+    expect(result).toMatchObject({ ok: true, value: { outcome: 'rejected', http: 400, status: 0, messageId: null, token: null } });
+    expect(secrets.tests[0]!.detail).toEqual({ name: 'SMS_TRACKING_TEMPLATE', result: 'rejected', http: 400, status: 0 });
+  });
+
+  it('نشانی آزمایش فقط همین مقدار، همین کلید، همین ادمین، همین نسخه، و کمتر از ده دقیقه', async () => {
+    const { panel, secrets, stepUp, clock } = service();
+    const value = 'tested-key-12345678';
+    const token = await testedToken(panel, 'SMS_API_KEY', value);
+    const save = (over: Record<string, unknown> = {}, who = OWNER) =>
+      panel.setKey(who, { name: 'SMS_API_KEY', value, seen: 'none', code: '1', test: token, ...over }, 'ip');
+    const untested = fail(409, 'key_untested', { name: 'SMS_API_KEY' });
+    expect(await save({ value: 'other-key-12345678' })).toEqual(untested);
+    expect(await panel.setKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', code: '1', test: token }, 'ip')).toMatchObject({
+      error: 'key_untested',
+    });
+    expect(await save({}, { ...OWNER, userId: 'admin-2' })).toEqual(untested);
+    // قالب دیگر با همان شناسه: آزمایش مال همان کلید است.
+    const otp = await testedToken(panel, 'SMS_OTP_TEMPLATE', '551200');
+    expect(await panel.setKey(OWNER, { name: 'SMS_PAID_TEMPLATE', value: '551200', seen: 'none', code: '1', test: otp }, 'ip')).toEqual(
+      fail(409, 'key_untested', { name: 'SMS_PAID_TEMPLATE' }),
+    );
+    const [until, ...rest] = token.split('.');
+    expect(await save({ test: [String(Number(until) + 60_000), ...rest].join('.') })).toEqual(untested);
+    // زبانهٔ دیگری میان آزمایش و ذخیره مقدار پنلی گذاشت: صفحهٔ تازه نسخهٔ تازه را دارد، ولی آزمایش مال نسخهٔ قبل است.
+    secrets.rows.set('SMS_API_KEY', panelRow('SMS_API_KEY', 'another-tab-value-1234'));
+    expect(await save({ seen: keySeenOf(secrets.rows.get('SMS_API_KEY')!.sealed) })).toEqual(untested);
+    secrets.rows.delete('SMS_API_KEY');
+    // ده دقیقه: درست پیش از مرز پذیرفته، در مرز نه.
+    expect(KEY_TEST_TTL_MS).toBe(10 * 60_000);
+    clock.now = new Date(NOW.getTime() + KEY_TEST_TTL_MS);
+    expect(await save()).toEqual(untested);
+    expect(stepUp).not.toHaveBeenCalled();
+    clock.now = new Date(NOW.getTime() + KEY_TEST_TTL_MS - 1);
+    expect(await save()).toEqual(ok({ name: 'SMS_API_KEY' }));
+    expect(stepUp).toHaveBeenCalledTimes(1);
+  });
+
+  it('سقف ۱۰ آزمایش در ساعت برای کل پنل (هر آزمایش قالب یک پیامک است)؛ یازدهمی بی درخواست، و ساعت بعد دوباره', async () => {
+    const { panel, sms, secrets, clock } = service();
+    expect(KEY_TESTS_PER_HOUR).toBe(10);
+    for (let i = 0; i < 10; i++) {
+      clock.now = new Date(NOW.getTime() + i * 60_000);
+      expect((await panel.testKey(OWNER, { name: 'SMS_API_KEY', value: `key-number-${i}-abcdef`, seen: 'none' }, 'ip')).ok).toBe(true);
+    }
+    expect(await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', mobile: '09123456789' }, 'ip')).toEqual(
+      fail(429, 'key_test_limit', { name: 'SMS_OTP_TEMPLATE' }),
+    );
+    expect(sms.calls).toHaveLength(10);
+    expect(secrets.tests).toHaveLength(10);
+    // یک ساعت پس از اولی، یک جا باز می‌شود.
+    clock.now = new Date(NOW.getTime() + 3_600_000);
+    expect((await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', mobile: '09123456789' }, 'ip')).ok).toBe(true);
+    expect(await panel.testKey(OWNER, { name: 'SMS_OTP_TEMPLATE', value: '100200', seen: 'none', mobile: '09123456789' }, 'ip')).toMatchObject({
+      status: 429,
+    });
   });
 });

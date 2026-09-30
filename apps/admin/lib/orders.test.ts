@@ -403,6 +403,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     shippingMethodName: 'پست پیشتاز',
     items: [item],
     payments: [],
+    paidSms: null,
     statusEvents: [],
     pdfJob: { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: order.paidAt!, updatedAt: order.paidAt!, finishedAt: order.paidAt! },
     ticketJob: null,
@@ -670,6 +671,7 @@ describe('جزئیات سفارش', () => {
       raw: null,
       createdAt: NOW,
       verifiedAt: null,
+      smsMessageId: null,
       ...over,
     });
     const view = (p: PaymentRow) => {

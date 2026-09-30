@@ -4,7 +4,7 @@ import type { ShipmentSms } from '@jozveyar/db';
 import { SMS_STUCK_MS } from '@jozveyar/sms';
 
 import type { Seg } from './orders';
-import { smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
+import { paidSmsView, smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
 
 /** «حالا»ی طرح: دوشنبه 13 مهر 1405، 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -66,5 +66,34 @@ describe('پیامک رهگیری در پنل (۶٫۳)', () => {
     expect(text(smsCountsText(smsCounts(items, NOW)))).toBe('پیامک: 2 رفت، 1 نرفت.');
     expect(smsCountsText({ sent: 0, failed: 0, sending: 0 })).toEqual([]);
     expect(smsReached(items, NOW)).toEqual([10005, 10006]);
+  });
+});
+
+describe('پیامک پرداخت در کارت «پرداخت‌ها» (۷٫۱)', () => {
+  it('رفت با ساعت، در راه، نرفت با علت (از ۷٫۱ «خالی» هم)، و معلوم نیست؛ «دوباره بفرست» فقط نرفته و فقط تا سفارش در صف یا در حال چاپ', () => {
+    const sent = paidSmsView(sms({ status: 'sent' }), 'paid', NOW);
+    expect([sent.state, text(sent.text), sent.resendable]).toEqual(['sent', 'پیامک پرداخت به 0915 234 5678 رفت، امروز 11:10', false]);
+    const fresh = new Date(NOW.getTime() - 60_000);
+    expect(text(paidSmsView(sms({ status: 'pending', createdAt: fresh, attemptedAt: null, sentAt: null }), 'paid', NOW).text)).toBe(
+      'پیامک پرداخت در حال فرستادن به 0915 234 5678…',
+    );
+    const failed = sms({ status: 'failed', sentAt: null, error: 'unconfigured' });
+    expect([text(paidSmsView(failed, 'paid', NOW).text), paidSmsView(failed, 'paid', NOW).resendable]).toEqual([
+      'پیامک پرداخت نرفت: کلید یا قالب sms.ir در «تنظیمات» خالی است.',
+      true,
+    ]);
+    expect(paidSmsView(failed, 'printing', NOW).resendable).toBe(true);
+    for (const status of ['handed_to_post', 'cancelled']) expect(paidSmsView(failed, status, NOW).resendable, status).toBe(false);
+    const stuck = new Date(AT.getTime() + SMS_STUCK_MS + 1);
+    const unknown = paidSmsView(sms({ status: 'sending', sentAt: null }), 'paid', stuck);
+    expect([unknown.state, unknown.resendable, text(unknown.text)]).toEqual([
+      'unknown',
+      true,
+      'معلوم نیست پیامک پرداخت به 0915 234 5678 رفت یا نه: فرستادنش نیمه‌کاره ماند.',
+    ]);
+    // منتظری که پنج دقیقه ماند: نرفت، چون فرستنده پیش از پنل پیامک افتاد.
+    expect(text(paidSmsView(sms({ status: 'pending', sentAt: null, attemptedAt: null }), 'paid', stuck).text)).toBe(
+      'پیامک پرداخت نرفت: فرستادنش نیمه‌کاره ماند.',
+    );
   });
 });

@@ -1,18 +1,20 @@
 import { randomBytes, randomInt } from 'node:crypto';
 
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Response } from '@playwright/test';
 import postgres from 'postgres';
 
 import { formatJalaliNumeric, jalaliYear, tehranDayStart, toPersianDigits } from '@jozveyar/text';
 
 import { holidaysView } from '../lib/settings';
-import { alertOf, at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { alertOf, at, BASE, codeFor, enroll, fakeSms, GATE, layoutProblems, newContext, requireSmsIr, serverInvite, watch } from './helpers';
 
 /**
  * تنظیمات و کلیدها در پنل، سرتاسری (برش ۴٫۶؛ طرح `docs/ui/mockups/admin.html` حالت‌های `m-settings` و `m-key-edit`، ADR-041):
  * فقط مالک؛ روز کاری تحویل به پست با شمارنده و سایت (وب روی ۳۱۰۱) با ISR تا یک دقیقه؛ سقف ساعتی کد پیامکی؛ روزهای نگهداری
  * فایل‌های سفارش (برش ۵٫۱، ADR-044)؛ تعطیلی‌ها با افزودن و حذف و «با تقویم رسمی تطبیق دادم»؛ و کلیدهای سرویس‌ها با کد تازه،
- * فقط ۴ نویسهٔ آخر، و «برگرداندن به .env».
+ * فقط ۴ نویسهٔ آخر، و «برگرداندن به .env». از ۷٫۱ (ADR-049، طرح `m-key-test`) کلید و قالب sms.ir پیش از کد با «آزمایش» از خود
+ * sms.ir: اینجا فقط sms.ir ساختگی (`E2E_SMSIR_URL`، که پنل با `SMSIR_API_URL` می‌بیند)؛ بی آن، تست کلیدها پیش از هر کلیک می‌افتد
+ * تا هیچ درخواستی به sms.ir واقعی نرود.
  *
  * همان پنل و پایگاه دادهٔ `admin.spec.ts` (طرز اجرا بالای همان)، و برای سایت `E2E_WEB_BASE_URL=http://127.0.0.1:3101`. کلید
  * `.env` پنل همان `SMS_API_KEY` محیط همین اجراست (CI تصادفی می‌سازد)، و مقداری که تست از پنل وارد می‌کند `E2E_KEY_PROBE`
@@ -32,7 +34,18 @@ const NO_ACCESS = 'این بخش فقط برای مالک است';
 const PROBE = env.E2E_KEY_PROBE?.trim() || randomBytes(20).toString('hex');
 /** همان `.env` پنل. */
 const ENV_KEY = env.SMS_API_KEY?.trim() ?? '';
-const SETTING_KEYS = ['order.sla_days', 'otp.site_hourly_limit', 'order.files_retention_days', 'calendar.holidays', 'calendar.official_through'];
+const SETTING_KEYS = [
+  'order.sla_days',
+  'otp.site_hourly_limit',
+  'otp.site_daily_limit',
+  'sms.credit_alert',
+  'order.files_retention_days',
+  'calendar.holidays',
+  'calendar.official_through',
+];
+/** شناسهٔ قالب کد تأیید در `.env` پنل (CI: همان که sms.ir ساختگی می‌شناسد)؛ وگرنه عددی که ساختگی هم می‌شناسد. */
+const ENV_OTP_TEMPLATE = env.SMS_OTP_TEMPLATE?.trim() ?? '';
+const OTP_TEMPLATE = ENV_OTP_TEMPLATE || '100001';
 
 let sql: postgres.Sql;
 /** رویدادهای پیش از این اجرا (رویدادها فقط افزودنی‌اند؛ اجرای دوباره روی همان پایگاه داده). */
@@ -47,6 +60,8 @@ const settingEvents = async () =>
     SELECT action, target_id AS target, detail FROM admin_events WHERE id > ${eventsBefore} AND action LIKE 'settings.%' ORDER BY id`;
 const codeFailures = async () =>
   Number((await sql<{ n: string }[]>`SELECT count(*) AS n FROM admin_events WHERE id > ${eventsBefore} AND action = 'auth.code_failed'`)[0]!.n);
+const keyTests = async () =>
+  Number((await sql<{ n: string }[]>`SELECT count(*) AS n FROM admin_events WHERE id > ${eventsBefore} AND action = 'settings.key_test'`)[0]!.n);
 /** مهلت سفارش‌های ثبت‌شده (اگر `orders.spec.ts` پیش از این نشانده): تعطیلی‌ها و روز کاری تازه عوضشان نمی‌کنند. */
 const deadlines = async () => sql<{ id: string; due: Date | null; sla: number }[]>`
   SELECT id, post_handoff_due_at AS due, sla_days AS sla FROM orders ORDER BY id`;
@@ -57,7 +72,8 @@ async function siteSlaDays(): Promise<number | null> {
   return json ? (JSON.parse(json) as { slaDays: number }).slaDays : null;
 }
 
-const card = (page: Page, key: string) => page.locator(`section[data-setting="${key}"]`);
+/** کارت یک تنظیم، یا فرمش درون کارت مشترک (سقف کد و اعتبار پیامک، ۷٫۱). */
+const card = (page: Page, key: string) => page.locator(`[data-setting="${key}"]`);
 /** فیلد عدد شمارنده (گروه شمارنده هم همین نام را دارد). */
 const slaField = (page: Page) => page.getByRole('spinbutton', { name: 'روز کاری بعد از پرداخت' });
 const keepField = (page: Page) => page.getByRole('spinbutton', { name: 'روز نگهداری بعد از «تحویل پست شد» یا «لغو شد»' });
@@ -95,6 +111,8 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     // اجرای قبلی که وسط کار افتاد: پیش‌فرض‌های عددی دوباره (تعطیلی‌ها همان که هست).
     await sql`UPDATE settings SET value = '2' WHERE key = 'order.sla_days'`;
     await sql`UPDATE settings SET value = '300' WHERE key = 'otp.site_hourly_limit'`;
+    await sql`UPDATE settings SET value = '2000' WHERE key = 'otp.site_daily_limit'`;
+    await sql`UPDATE settings SET value = '1000' WHERE key = 'sms.credit_alert'`;
     await sql`UPDATE settings SET value = '30' WHERE key = 'order.files_retention_days'`;
     await sql`UPDATE settings SET value = '1405' WHERE key = 'calendar.official_through'`;
     before = await sql<{ key: string; value: unknown }[]>`SELECT key, value FROM settings WHERE key IN ${sql(SETTING_KEYS)}`;
@@ -143,10 +161,15 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(card(page, 'order.sla_days').locator('.jy-hint')).toHaveText(
       'روز کاری شنبه تا چهارشنبه است، بی تعطیلی رسمی. سایت («تحویل پست تا 2 روز کاری») و سفارش‌های تازه از همین می‌خوانند؛ سفارش ثبت‌شده مهلت خودش را دارد.',
     );
-    await expect(card(page, 'otp.site_hourly_limit').getByRole('heading')).toHaveText('سقف کد پیامکی');
+    // سقف کد پیامکی (۷٫۱، سؤال ۱۱۷): ساعتی و روزانهٔ کل سایت در یک کارت، با لایه‌های ثابت زیرش.
+    const otp = page.locator('[data-card="otp"]');
+    await expect(otp.getByRole('heading')).toHaveText('سقف کد پیامکی');
+    await expect(otp.locator('[data-otp-usage]')).toContainText('امروز');
     await expect(page.getByLabel('کد در ساعت، برای کل سایت')).toHaveValue('300');
-    await expect(card(page, 'otp.site_hourly_limit').locator('.jy-hint')).toHaveText(
-      'جلوی رباتی که با شماره‌ها و اینترنت‌های زیاد پیامک می‌فرستد. سقف هر شماره (5) و هر اینترنت (20) ثابت است.',
+    await expect(card(page, 'otp.site_hourly_limit').locator('.jy-hint')).toHaveText('جلوی رباتی که با شماره‌ها و اینترنت‌های زیاد پیامک می‌فرستد.');
+    await expect(page.getByLabel('کد در روز، برای کل سایت')).toHaveValue('2000');
+    await expect(card(page, 'otp.site_daily_limit').locator('.jy-hint')).toHaveText(
+      'بدترین مصرف روزانهٔ کد همین است؛ روز از نیمه‌شب تهران. زیرش ثابت: کد فقط برای مرورگری که جزوهٔ آماده روی سرور دارد؛ هر مرورگر 5 در ساعت، هر شماره 5 در ساعت و 10 در 24 ساعت، و هر اینترنت 20 در ساعت.',
     );
     // نگهداری فایل‌های سفارش (۵٫۱): پیش‌فرض ۳۰ روز.
     await expect(card(page, 'order.files_retention_days').getByRole('heading')).toHaveText('فایل‌های سفارش');
@@ -177,9 +200,15 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(keys.getByRole('heading')).toHaveText('کلیدهای سرویس‌ها');
     await expect(keys.locator('.jy-card__meta')).toHaveText('فقط مالک');
     await expect(keys.locator('.jy-note--info')).toHaveText(
-      'کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود. مقدار پنل بر مقدار .env مقدم است. سایت از این کلیدها با راه افتادن درگاه و پنل پیامک واقعی استفاده می‌کند.',
+      'کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود. مقدار پنل بر مقدار .env مقدم است. کلید و قالب‌های sms.ir پیش از ذخیره با خود sms.ir آزموده می‌شوند؛ رد شده ذخیره نمی‌شود.',
     );
-    await expect(keys.locator('.ad-keys__name')).toHaveText(['کلید API sms.ir', 'قالب کد پیامکی sms.ir', 'کد پذیرندهٔ زیبال']);
+    await expect(keys.locator('.ad-keys__name')).toHaveText([
+      'کلید API sms.ir',
+      'قالب کد تأیید sms.ir',
+      'قالب پرداخت sms.ir',
+      'قالب رهگیری sms.ir',
+      'کد پذیرندهٔ زیبال',
+    ]);
     const api = keyRow(page, 'SMS_API_KEY');
     if (ENV_KEY) {
       await expect(api.locator('.jy-badge')).toHaveText('از .env');
@@ -187,9 +216,17 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
       await expect(api.getByRole('link', { name: 'تغییر' })).toBeVisible();
       expect((await html(page)).includes(ENV_KEY)).toBe(false);
     }
-    await expect(keyRow(page, 'SMS_OTP_TEMPLATE').locator('.jy-badge')).toHaveText('خالی');
-    await expect(keyRow(page, 'SMS_OTP_TEMPLATE').locator('.ad-keys__meta')).toContainText('نام قالبی که در پنل sms.ir تأیید می‌شود');
-    await expect(keyRow(page, 'SMS_OTP_TEMPLATE').getByRole('link', { name: 'وارد کن' })).toBeVisible();
+    // شناسهٔ قالب راز نیست و کوتاه است: ۴ رقم آخرش از ۵ رقم (طرح «••2716»).
+    const otpKey = keyRow(page, 'SMS_OTP_TEMPLATE');
+    if (ENV_OTP_TEMPLATE) {
+      await expect(otpKey.locator('.jy-badge')).toHaveText('از .env');
+      await expect(otpKey.locator('.ad-mask')).toHaveText(`••${ENV_OTP_TEMPLATE.length >= 5 ? ENV_OTP_TEMPLATE.slice(-4) : ''}`);
+      await expect(otpKey.getByRole('link', { name: 'تغییر' })).toBeVisible();
+    } else {
+      await expect(otpKey.locator('.jy-badge')).toHaveText('خالی');
+      await expect(otpKey.locator('.ad-keys__meta')).toContainText('شناسهٔ قالبی که sms.ir تأیید کرده');
+      await expect(otpKey.getByRole('link', { name: 'وارد کن' })).toBeVisible();
+    }
     await expect(page.getByRole('link', { name: 'برگرداندن به .env' })).toHaveCount(0);
   });
 
@@ -380,8 +417,16 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     expect(ownerProblems).toEqual([]);
   });
 
-  test('کلیدها: کد تازه، فقط ۴ نویسهٔ آخر، مقدار نه در صفحه و نه در پایگاه داده و رویداد؛ «همین حالا عوض شد» پیش از کد؛ برگرداندن به .env', async () => {
+  test('کلیدها: «آزمایش» با sms.ir پیش از کد (رد شده ذخیره نمی‌شود)، کد تازه، فقط ۴ نویسهٔ آخر، مقدار نه در صفحه و نه در پایگاه داده و رویداد؛ «همین حالا عوض شد» پیش از آزمایش؛ برگرداندن به .env', async () => {
+    requireSmsIr();
     const page = ownerPage;
+    // هیچ پاسخی از پنل مقدار کلید را برنمی‌گرداند (آزمایش، کد نادرست، ذخیره)؛ مقدار فقط در فیلدی است که مالک خودش تایپ کرد.
+    const origin = new URL(BASE!).origin;
+    const bodies: Promise<string>[] = [];
+    const collect = (response: Response) => {
+      if (response.url().startsWith(origin)) bodies.push(response.text().catch(() => ''));
+    };
+    page.on('response', collect);
     await page.goto(at('/settings'));
     const api = keyRow(page, 'SMS_API_KEY');
     await api.getByRole('link', { name: ENV_KEY ? 'تغییر' : 'وارد کن' }).click();
@@ -389,32 +434,51 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     const value = api.getByLabel('کلید تازه');
     await expect(value).toHaveAttribute('type', 'password');
     await expect(value).toHaveAttribute('autocomplete', 'off');
-    await expect(api.locator('.jy-hint').first()).toHaveText('بعد از ذخیره فقط 4 نویسهٔ آخرش دیده می‌شود. آزمایش کلید با خود پنل پیامک واقعی می‌آید.');
-
-    // مقدار نادرست پیش از کد: نه کد مصرف می‌شود، نه «کد نادرست».
+    await expect(api.locator('#k-SMS_API_KEY-hint')).toHaveText(
+      '«آزمایش» اعتبار حساب را از sms.ir می‌خواند؛ پیامکی نمی‌رود. بعد از ذخیره فقط 4 نویسهٔ آخرش دیده می‌شود.',
+    );
+    // پیش از «آزمایش» نه کد هست، نه ذخیره.
+    await expect(api.getByLabel('کد برنامهٔ تأیید تو')).toHaveCount(0);
+    await expect(api.getByRole('button', { name: 'ذخیره' })).toHaveCount(0);
     const failures = await codeFailures();
-    await value.fill('دو کلمه');
-    await api.getByLabel('کد برنامهٔ تأیید تو').fill('000000');
-    await api.getByRole('button', { name: 'ذخیره' }).click();
-    await expect(api.locator(`#k-SMS_API_KEY-error`)).toHaveText('فقط نویسهٔ لاتین، رقم و نشانه، بی فاصله؛ حداکثر 512 نویسه.');
-    expect(await codeFailures()).toBe(failures);
+    const requests = (await fakeSms()).requests;
 
-    // کد نادرست: هیچ نوشته نمی‌شود، و فیلد کلید خالی برمی‌گردد (مقدار هرگز از سرور برنمی‌گردد).
+    // مقدار نادرست: خطا زیر فیلد، بی درخواست به sms.ir و بی رویداد.
+    await value.fill('دو کلمه');
+    await api.getByRole('button', { name: 'آزمایش' }).click();
+    await expect(api.locator('#k-SMS_API_KEY-error')).toHaveText('فقط نویسهٔ لاتین، رقم و نشانه، بی فاصله؛ حداکثر 512 نویسه.');
+    expect((await fakeSms()).requests).toBe(requests);
+    expect(await keyTests()).toBe(0);
+
+    // کلیدی که sms.ir نمی‌شناسد: «رد شد»، و راهی به کد و ذخیره نیست.
+    await value.fill(randomBytes(20).toString('hex'));
+    await api.getByRole('button', { name: 'آزمایش' }).click();
+    await expect(api.locator('[data-test-outcome="rejected"] .jy-note')).toHaveText(
+      'sms.ir رد کرد: کلید درست نیست (پاسخ 401، کد 11). رد شده ذخیره نمی‌شود.',
+    );
+    await expect(api.getByRole('button', { name: 'رد شد؛ ذخیره نمی‌شود' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(api.getByLabel('کد برنامهٔ تأیید تو')).toHaveCount(0);
+
+    // مقدار عوض شد: آزمایش از نو. کلید درست: اعتبار حساب، بعد کد تازه.
     await value.fill(PROBE);
+    await expect(api.locator('[data-test-outcome]')).toHaveCount(0);
+    await api.getByRole('button', { name: 'آزمایش' }).click();
+    await expect(api.locator('[data-test-outcome="ok"] .jy-note')).toContainText(/درست است\. اعتبار حساب [\d,]+ پیامک\./);
+    // کد نادرست: هیچ نوشته نمی‌شود؛ مقدار فقط در همین فرم است، هرگز از سرور.
     await api.getByLabel('کد برنامهٔ تأیید تو').fill('000000');
     await api.getByRole('button', { name: 'ذخیره' }).click();
     await expect(api.locator('#step-code-error')).toHaveText('کد برنامهٔ تأیید درست نیست. کد تازهٔ برنامه را بزن.');
-    await expect(value).toHaveValue('');
     expect(await codeFailures()).toBe(failures + 1);
     expect((await sql`SELECT 1 FROM service_secrets`).length).toBe(0);
+    await expect(value).toHaveValue(PROBE);
 
-    await value.fill(PROBE);
     await api.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await api.getByRole('button', { name: 'ذخیره' }).click();
     await expect(successIn(page, '#keys')).toHaveText('«کلید API sms.ir» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
     await expect(api.locator('.jy-badge')).toHaveText('از پنل');
     await expect(api.locator('.ad-mask')).toHaveText(`••••••••${PROBE.slice(-4)}`);
     await expect(api.locator('.ad-keys__meta')).toContainText(`سارا رضایی، ${formatJalaliNumeric(new Date())}`);
+    await expect(api.locator('[data-last-test="ok"]')).toContainText(/آزموده: درست، اعتبار [\d,]+ پیامک · امروز/);
     await expect(api.getByRole('link', { name: 'برگرداندن به .env' })).toBeVisible();
     expect((await html(page)).includes(PROBE)).toBe(false);
     const [row] = await sql<{ sealed: string; updated_by: string | null }[]>`SELECT sealed, updated_by FROM service_secrets WHERE name = 'SMS_API_KEY'`;
@@ -423,28 +487,42 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     expect(row!.updated_by).not.toBeNull();
     expect(JSON.stringify(await sql`SELECT * FROM admin_events WHERE id > ${eventsBefore}`).includes(PROBE)).toBe(false);
 
-    // دو زبانه: زبانهٔ دیگر «وارد کن» قالب را باز کرده، این یکی زودتر واردش می‌کند؛ آن یکی پیش از سنجش کد رد می‌شود.
+    // دو زبانه: زبانهٔ دیگر قالب کد تأیید را باز کرده، این یکی زودتر آزمایش و ذخیره می‌کند؛ «آزمایش» آن یکی پیش از هر درخواست
+    // به sms.ir و پیش از کد رد می‌شود.
     const other = await ownerContext.newPage();
     const otherProblems = watch(other);
     await other.goto(at('/settings?key=SMS_OTP_TEMPLATE'));
-    await expect(keyRow(other, 'SMS_OTP_TEMPLATE').getByLabel('نام قالب')).toBeVisible();
+    const stale = keyRow(other, 'SMS_OTP_TEMPLATE');
+    await expect(stale.getByLabel('شناسهٔ قالب')).toBeVisible();
     await page.goto(at('/settings?key=SMS_OTP_TEMPLATE'));
     const template = keyRow(page, 'SMS_OTP_TEMPLATE');
-    await template.getByLabel('نام قالب').fill('jozveyar-otp');
+    // متن قالب با نام پارامترش، همان که در پنل sms.ir نوشته می‌شود.
+    await expect(template.locator('.ad-tpl')).toHaveText('کد تأیید جزوه‌یار: ‹CODE›این کد را به کسی نده.');
+    await expect(template.locator('.ad-tpl__p')).toHaveText(['‹CODE›']);
+    await template.getByLabel('شناسهٔ قالب').fill(toPersianDigits(OTP_TEMPLATE));
+    await template.getByLabel('موبایل برای پیامک آزمایشی').fill('۰۹۱۲ ۰۰۰ ۱۲۳۴');
+    const sentBefore = (await fakeSms()).messages.length;
+    await template.getByRole('button', { name: 'آزمایش' }).click();
+    await expect(template.locator('[data-test-outcome="ok"] .jy-note')).toContainText('درست است. پیامک آزمایشی به 0912 000 1234 رفت');
+    // به sms.ir فقط قالب با پارامتر نمونه رفت، به همان شماره.
+    const probe = (await fakeSms()).messages.slice(sentBefore);
+    expect(probe.map((m) => [m.mobile, m.templateId, m.parameters])).toEqual([['09120001234', Number(OTP_TEMPLATE), [{ name: 'CODE', value: '12345' }]]]);
     await template.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await template.getByRole('button', { name: 'ذخیره' }).click();
-    await expect(successIn(page, '#keys')).toHaveText('«قالب کد پیامکی sms.ir» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
-    const stale = keyRow(other, 'SMS_OTP_TEMPLATE');
-    await stale.getByLabel('نام قالب').fill('another-template');
-    await stale.getByLabel('کد برنامهٔ تأیید تو').fill('000000');
-    await stale.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(successIn(page, '#keys')).toHaveText('«قالب کد تأیید sms.ir» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
+    await expect(template.locator('[data-last-test="ok"]')).toContainText('آزموده: درست، پیامک آزمایشی رفت');
+    const staleRequests = (await fakeSms()).requests;
+    await stale.getByLabel('شناسهٔ قالب').fill('100009');
+    await stale.getByLabel('موبایل برای پیامک آزمایشی').fill('09120001234');
+    await stale.getByRole('button', { name: 'آزمایش' }).click();
     await expect(alertOf(other)).toHaveText('این کلید همین حالا جای دیگری عوض شد؛ وضعیت تازه را ببین و اگر هنوز لازم است، دوباره بزن.');
     await expect(keyRow(other, 'SMS_OTP_TEMPLATE').locator('.jy-badge')).toHaveText('از پنل');
+    expect((await fakeSms()).requests).toBe(staleRequests);
     expect(await codeFailures()).toBe(failures + 1);
     expect(otherProblems).toEqual([]);
     await other.close();
 
-    // برگرداندن به .env: کلید API به .env، و قالب (که .env ندارد) به خالی.
+    // برگرداندن به .env: کلید API به .env، و قالب به .env یا خالی.
     await page.goto(at('/settings'));
     await api.getByRole('link', { name: 'برگرداندن به .env' }).click();
     await expect(api.locator('.jy-note--warning')).toHaveText(
@@ -457,18 +535,35 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(successIn(page, '#keys')).toContainText('«کلید API sms.ir» به .env برگشت');
     await expect(api.locator('.jy-badge')).toHaveText(ENV_KEY ? 'از .env' : 'خالی');
     await page.goto(at('/settings?revert=SMS_OTP_TEMPLATE'));
-    await expect(template.locator('.jy-note--warning')).toHaveText('مقدار پنل پاک می‌شود و .env این کلید را ندارد؛ پس از این، کلید خالی است.');
+    await expect(template.locator('.jy-note--warning')).toHaveText(
+      ENV_OTP_TEMPLATE
+        ? `مقدار پنل پاک می‌شود و از این لحظه مقدار .env به کار می‌رود (••${ENV_OTP_TEMPLATE.length >= 5 ? ENV_OTP_TEMPLATE.slice(-4) : ''}). مقدار پنل دیگر برنمی‌گردد، مگر دوباره واردش کنی.`
+        : 'مقدار پنل پاک می‌شود و .env این کلید را ندارد؛ پس از این، کلید خالی است.',
+    );
     await template.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await template.getByRole('button', { name: 'به .env برگردان' }).click();
-    await expect(successIn(page, '#keys')).toHaveText('«قالب کد پیامکی sms.ir» به .env برگشت؛ .env این کلید را ندارد و کلید خالی است.');
+    await expect(successIn(page, '#keys')).toHaveText(
+      ENV_OTP_TEMPLATE ? '«قالب کد تأیید sms.ir» به .env برگشت.' : '«قالب کد تأیید sms.ir» به .env برگشت؛ .env این کلید را ندارد و کلید خالی است.',
+    );
     expect((await sql`SELECT 1 FROM service_secrets`).length).toBe(0);
 
-    expect((await settingEvents()).filter((e) => e.action.startsWith('settings.key_')).map((e) => [e.action, e.detail])).toEqual([
-      ['settings.key_set', { name: 'SMS_API_KEY', from: ENV_KEY ? 'env' : 'empty' }],
-      ['settings.key_set', { name: 'SMS_OTP_TEMPLATE', from: 'empty' }],
-      ['settings.key_revert', { name: 'SMS_API_KEY', to: ENV_KEY ? 'env' : 'empty' }],
-      ['settings.key_revert', { name: 'SMS_OTP_TEMPLATE', to: 'empty' }],
+    const keyEvents = (await settingEvents()).filter((e) => e.action.startsWith('settings.key_'));
+    expect(keyEvents.map((e) => [e.action, e.target, e.detail.result ?? null])).toEqual([
+      ['settings.key_test', 'SMS_API_KEY', 'rejected'],
+      ['settings.key_test', 'SMS_API_KEY', 'ok'],
+      ['settings.key_set', 'SMS_API_KEY', null],
+      ['settings.key_test', 'SMS_OTP_TEMPLATE', 'ok'],
+      ['settings.key_set', 'SMS_OTP_TEMPLATE', null],
+      ['settings.key_revert', 'SMS_API_KEY', null],
+      ['settings.key_revert', 'SMS_OTP_TEMPLATE', null],
     ]);
+    expect(keyEvents[0]!.detail).toEqual({ name: 'SMS_API_KEY', result: 'rejected', http: 401, status: 11 });
+    expect(keyEvents[2]!.detail).toEqual({ name: 'SMS_API_KEY', from: ENV_KEY ? 'env' : 'empty', tested: 'ok' });
+    expect(keyEvents[4]!.detail).toEqual({ name: 'SMS_OTP_TEMPLATE', from: ENV_OTP_TEMPLATE ? 'env' : 'empty', tested: 'ok' });
+    expect(keyEvents[5]!.detail).toEqual({ name: 'SMS_API_KEY', to: ENV_KEY ? 'env' : 'empty' });
+    expect(keyEvents[6]!.detail).toEqual({ name: 'SMS_OTP_TEMPLATE', to: ENV_OTP_TEMPLATE ? 'env' : 'empty' });
+    // شمارهٔ پیامک آزمایشی هیچ‌جای رویدادها نیست.
+    expect(JSON.stringify(keyEvents).includes('09120001234')).toBe(false);
 
     // صفحهٔ رویدادها: چیپ «تنظیمات و کلیدها»، بی مقدار.
     await page.goto(at('/events?kind=settings'));
@@ -476,11 +571,17 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     const log = page.locator('.ad-log');
     await expect(log.first()).toContainText('کلید «کلید API sms.ir» به .env برگشت');
     await expect(log.first()).toContainText(`کلید «کلید API sms.ir» ${ENV_KEY ? 'عوض شد' : 'وارد شد'}`);
-    await expect(log.first()).toContainText('کلید «قالب کد پیامکی sms.ir» وارد شد');
+    await expect(log.first()).toContainText(`کلید «قالب کد تأیید sms.ir» ${ENV_OTP_TEMPLATE ? 'عوض شد' : 'وارد شد'}`);
+    await expect(log.first()).toContainText('«کلید API sms.ir» آزموده شد: رد شد (پاسخ 401)');
+    await expect(log.first()).toContainText('«قالب کد تأیید sms.ir» آزموده شد: درست، پیامک آزمایشی رفت');
     await expect(log.first()).toContainText('روز کاری تحویل به پست: 3 ← 4');
     await expect(log.first()).toContainText('سقف ساعتی کد پیامکی کل سایت: 300 ← 1,000');
     await expect(log.first()).toContainText('روزهای نگهداری فایل‌های سفارش: 30 ← 31');
     expect((await html(page)).includes(PROBE)).toBe(false);
+    page.off('response', collect);
+    const answered = await Promise.all(bodies);
+    expect(answered.length).toBeGreaterThan(10);
+    expect(answered.some((body) => body.includes(PROBE))).toBe(false);
     expect(ownerProblems).toEqual([]);
   });
 

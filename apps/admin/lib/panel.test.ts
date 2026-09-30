@@ -313,11 +313,38 @@ describe('رویدادها', () => {
       ['تعطیلی ', { ltr: '1406/04/01' }, ' افزوده شد: آزمایش'],
       ['تعطیلی ', { ltr: '1405/10/02' }, ' حذف شد: ولادت امام علی (ع) / روز پدر'],
       ['کلید «کد پذیرندهٔ زیبال» عوض شد'],
-      ['کلید «قالب کد پیامکی sms.ir» وارد شد'],
+      ['کلید «قالب کد تأیید sms.ir» وارد شد'],
       ['کلید «کلید API sms.ir» به ', { ltr: '.env' }, ' برگشت'],
     ]);
     expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'ارسال', 'تعرفه', 'تنظیمات و کلیدها', 'چاپخانه‌ها', 'ادمین‌ها']);
     expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'shipments', 'tariff', 'settings', 'partners', 'admins']);
+  });
+
+  it('پیامک sms.ir (۷٫۱): سقف روزانه و آستانهٔ اعتبار، «آزمایش» هر کلید با نتیجه، و «دوباره بفرست» پیامک پرداخت؛ هرگز مقدار کلید', () => {
+    const setting = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'setting', detail });
+    const test = (detail: Record<string, unknown>) => event('settings.key_test', { targetType: 'service_key', detail });
+    const lines = eventLines([
+      setting('settings.update', { key: 'otp.site_daily_limit', from: 2000, to: 3000 }),
+      setting('settings.update', { key: 'sms.credit_alert', from: 200, to: 0 }),
+      test({ name: 'SMS_API_KEY', result: 'ok', credit: 12480.6 }),
+      test({ name: 'SMS_PAID_TEMPLATE', result: 'ok', messageId: '872364912', cost: 1.1 }),
+      test({ name: 'SMS_API_KEY', result: 'rejected', http: 401, status: 0 }),
+      test({ name: 'SMS_TRACKING_TEMPLATE', result: 'unavailable' }),
+      test({ name: 'SMS_OTP_TEMPLATE', result: 'unconfigured' }),
+      event('orders.sms_resend', { targetType: 'order', detail: { orderNumber: 10044, outcome: 'sent' } }),
+      event('orders.sms_resend', { targetType: 'order', detail: { orderNumber: 10044, outcome: 'failed', error: 'unavailable' } }),
+    ]);
+    expect(lines.map((l) => [l.badge, l.text])).toEqual([
+      [null, ['سقف روزانهٔ کد پیامکی کل سایت: ', { ltr: '2,000' }, ' ← ', { ltr: '3,000' }]],
+      [null, ['آستانهٔ هشدار اعتبار پیامک: ', { ltr: '200' }, ' ← ', { ltr: '0' }]],
+      [null, ['«کلید API sms.ir» آزموده شد: ', 'درست، اعتبار ', { ltr: '12,480' }, ' پیامک']],
+      [null, ['«قالب پرداخت sms.ir» آزموده شد: ', 'درست، پیامک آزمایشی رفت']],
+      ['test_rejected', ['«کلید API sms.ir» آزموده شد: ', 'رد شد', ' (پاسخ ', { ltr: '401' }, ')']],
+      [null, ['«قالب رهگیری sms.ir» آزموده شد: ', 'sms.ir جواب نداد']],
+      [null, ['«قالب کد تأیید sms.ir» آزموده شد: ', 'آزموده نشد، کلید API خالی بود']],
+      [null, ['پیامک پرداخت سفارش ', { ltr: '10044' }, ' دوباره فرستاده شد و رفت']],
+      [null, ['پیامک پرداخت سفارش ', { ltr: '10044' }, ' دوباره فرستاده شد و باز نرفت']],
+    ]);
   });
 
   it('ارسال (۶٫۱): بارگذاری، ثبت با شمارها و سفارش‌هایی که تحویل پست شدند، دور انداختن، و برگرداندن با دلیل', () => {

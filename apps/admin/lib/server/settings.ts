@@ -11,20 +11,29 @@
  * - **کلیدها کار حساس‌اند:** کد تازهٔ برنامهٔ تأیید (`stepUp`)، فقط پس از هر سنجشی که بی کد جواب دارد (مقدار، و «همان که دیده
  *   شد»)، تا کد برای کاری که انجام‌شدنی نیست نه مصرف شود و نه «نادرست» شمرده شود. مقدار کلید هیچ‌جا نمی‌رود جز مهروموم در
  *   پایگاه داده: نه نما (فقط ۴ نویسهٔ آخر)، نه رویداد، نه لاگ، نه پاسخ.
+ * - **آزمایش پیش از ذخیره** (۷٫۱، ADR-049، سؤال‌های ۱۱۹ و ۱۳۹): کلیدهای sms.ir پیش از کد تازه با مقدار تازه از خود sms.ir آزموده
+ *   می‌شوند: کلید API با اعتبار حساب (بی پیامک)، هر قالب با یک پیامک آزمایشی با پارامترهای نمونه به شماره‌ای که مالک می‌نویسد. «رد
+ *   شد» ذخیره نمی‌شود؛ «در دسترس نیست» و «آزموده نشد» (کلید API خالی) با هشدار ذخیره‌شدنی‌اند. نتیجه با نشانی امضاشده (`testToken`،
+ *   HMAC با `SESSION_SECRET`: نام، هش مقدار، نسخهٔ دیده‌شده، ادمین، نتیجه و ده دقیقه) به فرم برمی‌گردد، و ذخیره بی همان نشانی نیست؛
+ *   پس کلید آزموده‌نشده از راه فرم دست‌ساز هم نمی‌نشیند. سقف ۱۰ آزمایش در ساعت برای کل پنل (هر آزمایش قالب پیامک است)، و رویداد
+ *   `settings.key_test` با نام و نتیجه، هرگز مقدار و شمارهٔ آزمایش.
  *
  * بی نکست؛ هر وابستگی از درگاه می‌آید (`SettingsStore`، `SecretStore`، `stepUp`، `.env`)، پس با ذخیره‌گاه و ساعت ساختگی تست
  * می‌شود. قفل و تراکنش روی پستگرس در تست یکپارچگی `packages/db`.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 import { SETTING_SCHEMAS, type Holiday, type SettingKey, type SettingValue } from '@jozveyar/contracts';
+import { SMS_TEMPLATES, SmsError, templateIdOf, type SmsErrorCode, type SmsIrSent } from '@jozveyar/sms';
+import { normalizeIranMobile } from '@jozveyar/text/input';
 import {
   DEFAULT_SETTINGS,
   REPORT_BANDS_SETTING,
   SERVICE_KEYS,
   bandsDecision,
   isServiceKeyName,
+  readServiceKey,
   readSetting,
   resolveServiceKey,
   seal,
@@ -38,6 +47,7 @@ import {
 
 import { readBoundsInput, type BoundError } from '../report';
 import {
+  KEY_TESTS,
   isNumberSetting,
   keyTail,
   parseWholeNumber,
@@ -49,9 +59,50 @@ import {
 import { can, ipHashOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 
+/** درخواست‌های «آزمایش» به sms.ir (۷٫۱)؛ واقعی همان `smsIrCredit` و `smsIrSendVerify` آداپتور، با `SMSIR_API_URL`. */
+export interface SmsKeyTester {
+  credit(apiKey: string): Promise<number>;
+  send(input: { apiKey: string; templateId: number; mobile: string; parameters: { name: string; value: string }[] }): Promise<SmsIrSent>;
+}
+
+/** سقف «آزمایش» کلید در ساعت، برای کل پنل (ADR-049). */
+export const KEY_TESTS_PER_HOUR = 10;
+/** نشانی آزمایش تا این مدت ذخیره را باز نگه می‌دارد. */
+export const KEY_TEST_TTL_MS = 10 * 60_000;
+
+export type KeyTestOutcome = 'ok' | 'rejected' | 'unavailable' | 'unconfigured';
+
+/** نتیجهٔ «آزمایش» برای فرم؛ مقدار هرگز. */
+export interface KeyTestView {
+  name: ServiceKeyName;
+  outcome: KeyTestOutcome;
+  /** پاسخ sms.ir: کد HTTP و `status` بدنه، اگر پاسخی آمد. */
+  http: number | null;
+  status: number | null;
+  /** کلید API: اعتبار حساب. */
+  credit: number | null;
+  /** قالب: شناسه و هزینهٔ پیامک آزمایشی، و شماره‌ای که به آن رفت. */
+  messageId: string | null;
+  cost: number | null;
+  mobile: string | null;
+  /** ذخیره با همین نتیجه؛ «رد شد» ندارد. */
+  token: string | null;
+}
+
+/** آخرین آزمایش یک کلید، زیر نامش در صفحه (سؤال ۱۳۹). */
+export interface KeyLastTest {
+  at: Date;
+  outcome: KeyTestOutcome;
+  http: number | null;
+  status: number | null;
+  credit: number | null;
+}
+
 export interface PanelSettingsDeps {
   settings: SettingsStore;
   secrets: SecretStore;
+  /** «آزمایش» کلیدهای sms.ir (۷٫۱)؛ بی آن، کلیدهای پیامک ذخیره‌شدنی نیستند. */
+  smsTester?: SmsKeyTester;
   /** کد تازهٔ برنامهٔ تأیید برای کار حساس؛ همان `AdminAuth.stepUp`، با سقف اشتباه و قفلش. */
   stepUp: (session: AdminSession, code: unknown, ip: string) => Promise<Result<true>>;
   /** `SECRETS_KEY`: مهروموم کلیدها. */
@@ -78,14 +129,24 @@ export interface KeyView {
   envTail: string | null;
   /** نسخه‌ای که صفحه نشان داد، برای «همان که دیده شد». */
   seen: string;
+  /** آخرین «آزمایش» (۷٫۱)؛ null یعنی هرگز. */
+  lastTest: KeyLastTest | null;
 }
 
 export interface SettingsView {
   now: Date;
   canSettings: boolean;
   canSecrets: boolean;
-  /** تنظیم‌ها، اگر `settings.edit`. */
-  values: { slaDays: number; otpLimit: number; retentionDays: number; holidays: Holiday[]; officialThrough: number } | null;
+  /** تنظیم‌ها، اگر `settings.edit`؛ از ۷٫۱ سقف روزانهٔ کد و آستانهٔ هشدار اعتبار. */
+  values: {
+    slaDays: number;
+    otpLimit: number;
+    otpDaily: number;
+    creditAlert: number;
+    retentionDays: number;
+    holidays: Holiday[];
+    officialThrough: number;
+  } | null;
   /** کلیدها، اگر `secrets.edit`؛ به ترتیب `SERVICE_KEYS`. */
   keys: KeyView[];
 }
@@ -95,6 +156,20 @@ export const keySeenOf = (sealed: string | null) =>
   sealed === null ? 'none' : `panel:${createHash('sha256').update(sealed).digest('hex').slice(0, 32)}`;
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
+
+const numberOr = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+/** رویداد `settings.key_test` به «آزموده: …» (۷٫۱)؛ رویداد نتیجهٔ ناشناس «در دسترس نیست» است. */
+function lastTestOf(last: { at: Date; detail: Record<string, unknown> }): KeyLastTest {
+  const result = last.detail.result;
+  return {
+    at: last.at,
+    outcome: result === 'ok' || result === 'rejected' || result === 'unconfigured' ? result : 'unavailable',
+    http: numberOr(last.detail.http),
+    status: numberOr(last.detail.status),
+    credit: numberOr(last.detail.credit),
+  };
+}
 
 /** مقدار خام امروز به شکل قرارداد، یا پیش‌فرض؛ همان `readSetting`، زیر قفل و بی لاگ. */
 function effective<K extends SettingKey>(key: K, raw: unknown): SettingValue<K> {
@@ -108,17 +183,18 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
   const actor = (session: AdminSession, ip: string) => ({ adminUserId: session.userId, ipHash: ipHashOf(deps.secret, ip) });
   const envOf = (name: ServiceKeyName) => deps.env[name]?.trim() || null;
 
-  function keyView(name: ServiceKeyName, row: ServiceSecretRow | null): KeyView {
+  function keyView(name: ServiceKeyName, row: ServiceSecretRow | null, last: { at: Date; detail: Record<string, unknown> } | undefined): KeyView {
     const state = resolveServiceKey(name, row, deps.env, deps.secretsKey, (message) => log(message));
     const fromEnv = envOf(name);
     return {
+      lastTest: last ? lastTestOf(last) : null,
       name,
       source: state.source,
-      tail: state.value === null ? null : keyTail(state.value),
+      tail: state.value === null ? null : keyTail(state.value, name),
       updatedAt: row?.updatedAt ?? null,
       updatedBy: row?.updatedBy?.name ?? null,
       envSet: fromEnv !== null,
-      envTail: fromEnv === null ? null : keyTail(fromEnv),
+      envTail: fromEnv === null ? null : keyTail(fromEnv, name),
       seen: keySeenOf(row?.sealed ?? null),
     };
   }
@@ -144,13 +220,39 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
     return ok({ row, seen });
   }
 
+  /**
+   * نشانی «آزمایش»: `<پایان>.<نتیجه>.<HMAC>` روی نام، هش مقدار، نسخهٔ دیده‌شده، ادمین، نتیجه و پایان. مقدار در آن نیست؛ فرم مقدار را
+   * خودش دوباره می‌فرستد و سرور با همین هش می‌سنجد.
+   */
+  function testSignature(name: ServiceKeyName, value: string, seen: string, userId: string, outcome: KeyTestOutcome, until: number) {
+    const valueHash = createHash('sha256').update(value).digest('hex');
+    return createHmac('sha256', deps.secret).update(['key_test', name, valueHash, seen, userId, outcome, String(until)].join('\0')).digest('base64url');
+  }
+
+  function testToken(name: ServiceKeyName, value: string, seen: string, userId: string, outcome: KeyTestOutcome): string {
+    const until = now().getTime() + KEY_TEST_TTL_MS;
+    return `${until}.${outcome}.${testSignature(name, value, seen, userId, outcome, until)}`;
+  }
+
+  /** نتیجهٔ آزمایشی که همین مقدار را برای همین ادمین و همین نسخه، کمتر از ده دقیقه پیش، ذخیره‌شدنی گفت؛ وگرنه null. */
+  function passedTest(name: ServiceKeyName, value: string, seen: string, userId: string, token: unknown): KeyTestOutcome | null {
+    const match = /^(\d{1,16})\.(ok|unavailable|unconfigured)\.([A-Za-z0-9_-]{43})$/.exec(text(token));
+    if (!match) return null;
+    const until = Number(match[1]);
+    const outcome = match[2] as KeyTestOutcome;
+    if (until <= now().getTime()) return null;
+    const expected = Buffer.from(testSignature(name, value, seen, userId, outcome, until));
+    const given = Buffer.from(match[3]!);
+    return expected.length === given.length && timingSafeEqual(expected, given) ? outcome : null;
+  }
+
   return {
     async overview(session: AdminSession): Promise<Result<SettingsView>> {
       const canSettings = can(session, 'settings.edit');
       const canSecrets = can(session, 'secrets.edit');
       if (!canSettings && !canSecrets) return fail(403, 'forbidden');
       const read = (key: string) => deps.settings.read(key);
-      const [values, rows] = await Promise.all([
+      const [values, rows, tests] = await Promise.all([
         canSettings
           ? Promise.all([
               readSetting(read, 'order.sla_days', log),
@@ -158,9 +260,12 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               readSetting(read, 'calendar.holidays', log),
               readSetting(read, 'calendar.official_through', log),
               readSetting(read, 'order.files_retention_days', log),
+              readSetting(read, 'otp.site_daily_limit', log),
+              readSetting(read, 'sms.credit_alert', log),
             ])
           : null,
         canSecrets ? deps.secrets.list() : [],
+        canSecrets ? deps.secrets.lastTests() : new Map<ServiceKeyName, { at: Date; detail: Record<string, unknown> }>(),
       ]);
       return ok({
         now: now(),
@@ -170,13 +275,85 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
           ? {
               slaDays: values[0],
               otpLimit: values[1],
+              otpDaily: values[5],
+              creditAlert: values[6],
               retentionDays: values[4],
               holidays: sortHolidays(values[2]),
               officialThrough: values[3],
             }
           : null,
-        keys: canSecrets ? SERVICE_KEYS.map((name) => keyView(name, rows.find((row) => row.name === name) ?? null)) : [],
+        keys: canSecrets
+          ? SERVICE_KEYS.map((name) => keyView(name, rows.find((row) => row.name === name) ?? null, tests.get(name)))
+          : [],
       });
+    },
+
+    /**
+     * «آزمایش» مقدار تازهٔ یک کلید sms.ir (۷٫۱، سؤال ۱۱۹)، پیش از کد تازه: مجوز، نام، مقدار، «همان که دیده شد» و برای قالب شمارهٔ
+     * پیامک آزمایشی؛ بعد زیر سقف ساعتی، درخواست به خود sms.ir با همین مقدار تازه (مقدار فقط در حافظهٔ همین درخواست). نتیجه با نشانی
+     * ذخیره، جز «رد شد».
+     */
+    async testKey(
+      session: AdminSession,
+      input: { name: unknown; value: unknown; seen: unknown; mobile?: unknown },
+      ip: string,
+    ): Promise<Result<KeyTestView>> {
+      if (!can(session, 'secrets.edit')) return fail(403, 'forbidden');
+      if (!isServiceKeyName(input.name) || !KEY_TESTS[input.name] || !deps.smsTester) return fail(404, 'key_not_found');
+      const name = input.name;
+      const kind = KEY_TESTS[name]!;
+      const tester = deps.smsTester;
+      const value = readKeyValue(input.value, name);
+      if (value === null) return fail(400, kind === 'credit' ? 'invalid_key_value' : 'invalid_template_id', { name });
+      const mobile = kind === 'credit' ? null : normalizeIranMobile(text(input.mobile));
+      if (kind !== 'credit' && !mobile) return fail(400, 'invalid_mobile', { name });
+      const target = await seenRow(name, input.seen);
+      if (!target.ok) return target;
+      const { seen } = target.value;
+
+      const view = await deps.secrets.runTest(
+        { name, at: now(), actor: actor(session, ip), limit: KEY_TESTS_PER_HOUR },
+        async () => {
+          const result: KeyTestView = { name, outcome: 'ok', http: null, status: null, credit: null, messageId: null, cost: null, mobile, token: null };
+          try {
+            if (kind === 'credit') {
+              result.credit = await tester.credit(value);
+            } else {
+              // قالب با کلید API امروز (پنل یا .env)؛ بی آن آزموده نمی‌شود، و درخواستی نمی‌رود.
+              const apiKey = (await readServiceKey(deps.secrets, 'SMS_API_KEY', deps.env, deps.secretsKey, (message) => log(message))).value;
+              if (!apiKey) {
+                result.outcome = 'unconfigured';
+              } else {
+                const template = SMS_TEMPLATES[kind];
+                const sent = await tester.send({
+                  apiKey,
+                  templateId: templateIdOf(value)!,
+                  mobile: mobile!,
+                  parameters: template.params.map((param, i) => ({ name: param, value: template.sample[i]! })),
+                });
+                result.messageId = sent.messageId;
+                result.cost = sent.cost;
+              }
+            }
+          } catch (error) {
+            const code: SmsErrorCode = error instanceof SmsError ? error.code : 'unavailable';
+            result.outcome = code === 'rejected' ? 'rejected' : code === 'unconfigured' ? 'unconfigured' : 'unavailable';
+            result.http = error instanceof SmsError ? error.http : null;
+            result.status = error instanceof SmsError ? error.status : null;
+            if (!(error instanceof SmsError)) log(`✗ آزمایش ${name} شکست خورد`, error instanceof Error ? error.name : 'error');
+          }
+          const detail: Record<string, unknown> = { result: result.outcome };
+          if (result.http !== null) detail.http = result.http;
+          if (result.status !== null) detail.status = result.status;
+          if (result.credit !== null) detail.credit = result.credit;
+          if (result.messageId !== null) detail.messageId = result.messageId;
+          if (result.cost !== null) detail.cost = result.cost;
+          return { value: result, detail };
+        },
+      );
+      if (!view) return fail(429, 'key_test_limit', { name });
+      if (view.outcome !== 'rejected') view.token = testToken(name, value, seen, session.userId, view.outcome);
+      return ok(view);
     },
 
     /**
@@ -317,17 +494,21 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
      */
     async setKey(
       session: AdminSession,
-      input: { name: unknown; value: unknown; seen: unknown; code: unknown },
+      input: { name: unknown; value: unknown; seen: unknown; code: unknown; test?: unknown },
       ip: string,
     ): Promise<Result<{ name: ServiceKeyName }>> {
       if (!can(session, 'secrets.edit')) return fail(403, 'forbidden');
       if (!isServiceKeyName(input.name)) return fail(404, 'key_not_found');
       const name = input.name;
-      const value = readKeyValue(input.value);
-      if (value === null) return fail(400, 'invalid_key_value', { name });
+      const tested = KEY_TESTS[name] !== undefined;
+      const value = readKeyValue(input.value, name);
+      if (value === null) return fail(400, !tested || KEY_TESTS[name] === 'credit' ? 'invalid_key_value' : 'invalid_template_id', { name });
       const target = await seenRow(name, input.seen);
       if (!target.ok) return target;
       const { row, seen } = target.value;
+      // کلید sms.ir فقط با آزمایشی که همین مقدار را ذخیره‌شدنی گفت (۷٫۱)؛ پیش از کد، تا کد برای کار ناشدنی نسوزد.
+      const outcome = tested ? passedTest(name, value, seen, session.userId, input.test) : null;
+      if (tested && !outcome) return fail(409, 'key_untested', { name });
 
       const stepped = await deps.stepUp(session, input.code, ip);
       if (!stepped.ok) return stepped;
@@ -337,7 +518,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
         verify: (current) => keySeenOf(current) === seen,
         at: now(),
         actor: actor(session, ip),
-        detail: { from: row ? 'panel' : envOf(name) ? 'env' : 'empty' },
+        detail: { from: row ? 'panel' : envOf(name) ? 'env' : 'empty', ...(outcome ? { tested: outcome } : {}) },
       });
       return done === 'ok' ? ok({ name }) : fail(409, 'key_changed', { name });
     },

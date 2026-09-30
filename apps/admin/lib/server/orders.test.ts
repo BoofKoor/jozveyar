@@ -22,7 +22,9 @@ import {
   type PanelStatusEvent,
   type PanelTicketFile,
   type PanelVolumeFile,
+  type ShipmentSms,
 } from '@jozveyar/db';
+import { SmsError, type QueuedSms, type SmsOutbox, type SmsResult, type SmsTransport } from '@jozveyar/sms';
 import { MemoryDriver } from '@jozveyar/storage';
 
 import type { AdminSession } from './auth';
@@ -88,6 +90,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       reviewRows: 5,
       untracked: UNTRACKED,
       smsFailed: [10018],
+      paidSmsFailed: [10019],
     }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
@@ -96,6 +99,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     jozveFile: record('jozveFile', null),
     printVolume: record('printVolume', null),
     ticketFile: record('ticketFile', null),
+    paidSms: record('paidSms', null),
     requeue: async (scope, orderId, kind, event) => {
       calls.push({ method: 'requeue', args: [orderId, kind, event], scope });
       events.push(event);
@@ -249,6 +253,15 @@ describe('پیشخوان', () => {
     expect(staff.ok && staff.value.alerts.reviewRows).toBe(5);
     const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
     expect(noor.ok && [noor.value.alerts.reviewRows, days(noor.value.untracked)]).toEqual([0, [['2026-09-29T20:30:00.000Z', [10009, 10025]]]]);
+  });
+
+  it('پیامک پرداختی که نرفت (۷٫۱): فقط با `orders.money` (مالک و متصدی)، که «دوباره بفرست» دارند؛ چاپخانه نه', async () => {
+    const plain = await service().orders.dashboard(session(['orders.read', 'orders.status']));
+    expect(plain.ok && plain.value.alerts.paidSmsFailed).toEqual([]);
+    const noor = await service().orders.dashboard(session(['orders.read', 'orders.status', 'files.download'], { id: PARTNER_B, name: 'چاپ نور' }));
+    expect(noor.ok && noor.value.alerts.paidSmsFailed).toEqual([]);
+    const staff = await service().orders.dashboard(session(['orders.read', 'orders.money']));
+    expect(staff.ok && staff.value.alerts.paidSmsFailed).toEqual([10019]);
   });
 
   it('روز کاری تعهد: تنظیم خراب یا نبودنش یعنی پیش‌فرض ۲، و بلند در لاگ', async () => {
@@ -1181,5 +1194,115 @@ describe('نقش چاپخانه و محدوده', () => {
       ok: true,
       value: { bucket: 'awaiting', buckets: ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] },
     });
+  });
+});
+
+describe('«دوباره بفرست» پیامک پرداخت (۷٫۱)', () => {
+  const ip = '1.2.3.4';
+  const STAFF = ['orders.read', 'orders.money'];
+  /** پیامک پرداختی که نرفت: پنل پیامک جواب نداد. */
+  const failedSms: ShipmentSms = { id: 501, toMobile: '09152345678', status: 'failed', error: 'unavailable', attempts: 1, createdAt: NOW, attemptedAt: NOW, sentAt: null };
+
+  /** درگاه ردیف‌ها و آداپتور ساختگی: هر برداشتن و هر نتیجه ثبت می‌شود. */
+  function outbox(claimable = true) {
+    const claims: { id: number; mode: string }[] = [];
+    const finished: { id: number; result: SmsResult }[] = [];
+    const port: SmsOutbox = {
+      async claim(id, _at, mode) {
+        claims.push({ id, mode });
+        return claimable ? ({ id, to: '09152345678', purpose: 'order_paid', body: 'متن', params: ['10027', 'شنبه 15 مهر'] } satisfies QueuedSms) : null;
+      },
+      async finish(id, _at, result) {
+        finished.push({ id, result });
+      },
+    };
+    return { port, claims, finished };
+  }
+
+  function paidService(found: { status: OrderStatus; sms: typeof failedSms | null } | null, transport: SmsTransport | null, box = outbox()) {
+    const fake = fakeStore({
+      paidSms: async (scope, orderNumber) => {
+        fake.calls.push({ method: 'paidSms', args: [orderNumber], scope });
+        return found && { orderId: 'order-1', orderNumber: 10027, status: found.status, sms: found.sms };
+      },
+    });
+    const orders = createPanelOrders({
+      store: fake.store,
+      storage: null,
+      secret: SECRET,
+      now: () => NOW,
+      log: () => {},
+      ...(transport ? { sms: { transport, outbox: box.port, log: () => {} } } : {}),
+    });
+    return { orders, ...fake, box };
+  }
+
+  const sent: SmsTransport = { name: 'smsir', send: async () => ({ status: 'sent', providerMessageId: '872364912', cost: 1.1 }) };
+
+  it('فقط `orders.money` (مالک و متصدی): بی آن ۴۰۳ پیش از هر خواندن، چاپخانه هم', async () => {
+    const { orders, calls, box } = paidService({ status: 'paid', sms: failedSms }, sent);
+    for (const who of [session(['orders.read', 'orders.status']), session(['orders.read', 'orders.status', 'files.download'], { id: PARTNER_B, name: 'چاپ نور' })]) {
+      expect(await orders.resendPaidSms(who, '10027', ip)).toEqual({ ok: false, status: 403, error: 'forbidden' });
+    }
+    expect(calls).toEqual([]);
+    expect(box.claims).toEqual([]);
+  });
+
+  it('پیامکی که نرفت: همان ردیف با «دوباره بفرست» (`retry`)، و رویداد با نتیجه؛ محدودهٔ همین نشست', async () => {
+    const { orders, calls, events, box } = paidService({ status: 'printing', sms: failedSms }, sent);
+    expect(await orders.resendPaidSms(session(STAFF), '10027', ip)).toEqual({ ok: true, value: { orderNumber: 10027, outcome: 'sent', error: null } });
+    expect(calls).toEqual([{ method: 'paidSms', args: [10027], scope: ALL_ORDERS }]);
+    expect(box.claims).toEqual([{ id: 501, mode: 'retry' }]);
+    expect(box.finished).toEqual([{ id: 501, result: { ok: true, provider: 'smsir', status: 'sent', providerMessageId: '872364912', cost: 1.1 } }]);
+    expect(events).toEqual([
+      expect.objectContaining({ action: 'orders.sms_resend', targetType: 'order', targetId: 'order-1', detail: { orderNumber: 10027, outcome: 'sent' } }),
+    ]);
+  });
+
+  it('باز نرفت: «نرفت» با علتش، در رویداد هم؛ پیامکی که «معلوم نیست» هم دوباره‌فرستادنی است', async () => {
+    const down: SmsTransport = {
+      name: 'smsir',
+      send: async () => {
+        throw new SmsError('unavailable', 'sms.ir: HTTP 500', 500, null);
+      },
+    };
+    const unknown = { ...failedSms, status: 'sending', error: null, attemptedAt: new Date(NOW.getTime() - 6 * MINUTE) };
+    const { orders, events, box } = paidService({ status: 'paid', sms: unknown }, down);
+    expect(await orders.resendPaidSms(session(STAFF), '10027', ip)).toEqual({ ok: true, value: { orderNumber: 10027, outcome: 'failed', error: 'unavailable' } });
+    expect(box.finished).toEqual([{ id: 501, result: { ok: false, provider: 'smsir', error: 'unavailable' } }]);
+    expect(events.map((e) => e.detail)).toEqual([{ orderNumber: 10027, outcome: 'failed', error: 'unavailable' }]);
+  });
+
+  it('رفته، در راه، بی پیامک، یا سفارشی که گذشت: هیچ فرستادن و هیچ رویدادی', async () => {
+    const cases: [{ status: OrderStatus; sms: typeof failedSms | null } | null, unknown][] = [
+      [null, { status: 404, error: 'order_not_found' }],
+      [{ status: 'paid', sms: null }, { status: 409, error: 'paid_sms_not_failed' }],
+      [{ status: 'paid', sms: { ...failedSms, status: 'sent', error: null, sentAt: NOW } }, { status: 409, error: 'paid_sms_not_failed' }],
+      // تازه در صف: هنوز در راه است (کمتر از پنج دقیقه).
+      [{ status: 'paid', sms: { ...failedSms, status: 'pending', error: null, attemptedAt: null } }, { status: 409, error: 'paid_sms_not_failed' }],
+      // پس از «تحویل پست شد» یا لغو، پیامک «پرداخت شد» گمراه‌کننده است.
+      [{ status: 'handed_to_post', sms: failedSms }, { status: 409, error: 'paid_sms_closed' }],
+      [{ status: 'cancelled', sms: failedSms }, { status: 409, error: 'paid_sms_closed' }],
+    ];
+    for (const [found, error] of cases) {
+      const { orders, events, box } = paidService(found, sent);
+      expect(await orders.resendPaidSms(session(STAFF), '10027', ip), JSON.stringify(found)).toMatchObject({ ok: false, ...(error as object) });
+      expect(box.claims).toEqual([]);
+      expect(events).toEqual([]);
+    }
+    // شمارهٔ نادرست به پایگاه داده نمی‌رسد.
+    const bad = paidService({ status: 'paid', sms: failedSms }, sent);
+    expect(await bad.orders.resendPaidSms(session(STAFF), 'abc', ip)).toMatchObject({ status: 404 });
+    expect(bad.calls).toEqual([]);
+  });
+
+  it('کس دیگری همین حالا برداشت (دو کلیک): «نرفت» نیست، بی رویداد؛ بی آداپتور ۵۰۳', async () => {
+    const taken = paidService({ status: 'paid', sms: failedSms }, sent, outbox(false));
+    expect(await taken.orders.resendPaidSms(session(STAFF), '10027', ip)).toMatchObject({ ok: false, status: 409, error: 'paid_sms_not_failed' });
+    expect(taken.box.claims).toHaveLength(1);
+    expect(taken.events).toEqual([]);
+    const none = paidService({ status: 'paid', sms: failedSms }, null);
+    expect(await none.orders.resendPaidSms(session(STAFF), '10027', ip)).toMatchObject({ ok: false, status: 503 });
+    expect(none.events).toEqual([]);
   });
 });
