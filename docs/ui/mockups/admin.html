@@ -18,6 +18,11 @@
   «ثبت» و برگرداندن ورود، صف تأیید با نامزدها، بستهٔ پستی و کد رهگیری در جزئیات سفارش، هشدار «کد رهگیری ندارد»، گزارش
   ارسال (مالک)، فایل پست از چشم چاپخانه، و گام «کد رهگیری پست» در صفحهٔ سفارش مشتری، برای صاحب سفارش و غریبه. جزء تازهٔ
   کیت: jy-barcode (بارکد ۲۴ رقمی در شش گروه، کپی پشت‌سرهم).
+  برش ۷ (docs/UI.md، بخش ۱۰؛ ADR-049 تا ۰۵۲): «تنظیمات» با کارت «مسیر خرید روی سایت» (آمادگی، مخاطب، پیوند پیش‌نمایش، «باز برای
+  همه» با کد تازه، «توقف»)، اعتبار پیامک، سقف روزانهٔ کد، شش کلید با «آزمایش» و سه نتیجه (درست، رد شد، در دسترس نیست) و پیامک
+  آزمایشی قالب؛ کارت «پرداخت‌ها» با شناسهٔ زیبال، کارت پوشیده، کد پیگیری، وضعیت درگاه، «استعلام از درگاه» و پیامک پرداخت با «دوباره
+  بفرست»؛ لغو ← بازپرداخت (از درگاه با کارمزد زیبال، یا ثبت دستی، هر دو با کد تازه) و حالت‌هایش؛ هشدارهای تازهٔ پیشخوان، با «زیبال IP
+  سرور را نپذیرفت»؛ موبایل اعلان چاپخانه (۷٫۶)؛ و رویدادهای تازه با چیپ «پرداخت و بازپرداخت». پنل پیامک sms.ir است، نه کاوه‌نگار.
   به زبان کیت: packages/ui/src/base.css و components.css مستقیم بار می‌شوند و توکن‌ها از docs/brand/jozveyar-colors.css
   می‌آیند؛ اینجا هیچ کد رنگی نیست. اجزای تازهٔ کیت نام jy- دارند (دکمهٔ کار برگشت‌ناپذیر، نشان خنثی، آیکون دانلود)؛
   چیدمان پنل ad- است، و صفحهٔ مشتری همان site- و ck- طرح مسیر خرید.
@@ -515,6 +520,45 @@
     .ad-table--margin td::before { content: attr(data-k); font-size: var(--text-small); color: var(--color-muted); }
   }
 
+  /* ===== برش ۷: پرداخت‌ها و پیامک پرداخت در جزئیات سفارش (ADR-049، ADR-050) ===== */
+  .ad-pay__line { flex-basis: 100%; font-size: var(--text-small); line-height: 1.7; }
+  .ad-pay__act { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px; margin-block-start: 2px; }
+  .ad-pay__act .jy-btn { margin-inline-start: -12px; }
+  .ad-paysms { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin-block-start: 8px; padding-block-start: 12px; border-block-start: 1px solid var(--color-line); font-size: var(--text-small); line-height: 1.8; }
+  .ad-paysms b { font-weight: 600; }
+  .ad-paysms__fail { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--color-error-text); }
+  .ad-paysms__fail .jy-icon, .ad-paysms__ok .jy-icon { width: 16px; height: 16px; }
+  .ad-paysms__ok { display: inline-flex; align-items: center; gap: 6px; }
+  .ad-paysms__ok .jy-icon { color: var(--color-success-text); }
+  .ad-paysms .jy-btn { margin-block: -6px; }
+
+  /* ===== برش ۷: بازپرداخت در ستون کنار سفارش لغوشده (ADR-051) ===== */
+  .ad-refund__sum { margin-block-start: 8px; font-size: var(--text-h4); font-weight: 600; line-height: 1.5; }
+  .ad-refund .ad-changes { margin-block-start: 8px; }
+
+  /* ===== برش ۷: «تنظیمات»؛ مسیر خرید روی سایت (ADR-052)، اعتبار پیامک، و آزمایش کلیدها (ADR-049) ===== */
+  .ad-live__state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-block-start: 8px; }
+  .ad-live__who { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-live__aud { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-block-start: 16px; }
+  .ad-live__aud > li { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--color-green-200); border-radius: var(--radius-md); }
+  .ad-live__aud > li.is-current { padding: 11px 13px; border: 2px solid var(--color-green-600); background: var(--color-green-50); }
+  .ad-live__aud b { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .ad-live__aud span { font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  @media (width <= 860px) { .ad-live__aud { grid-template-columns: minmax(0, 1fr); } }
+  .ad-live .ad-need { margin-block-start: 12px; }
+  .ad-credit { margin-block-start: 8px; font-size: var(--text-h2); font-weight: 600; line-height: 1.3; }
+  .ad-credit small { margin-inline-start: 6px; font-size: var(--text-base); font-weight: 400; color: var(--color-muted); }
+  .ad-usage { margin-block-start: 4px; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-keys__test { display: flex; align-items: flex-start; gap: 6px; margin-block-start: 2px; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+  .ad-keys__test > .jy-icon { width: 16px; height: 16px; margin-block-start: 3px; }
+  .ad-keys__test > span:last-child { flex: 1; min-width: 0; }
+  .ad-keys__test .is-ok { color: var(--color-success-text); }
+  .ad-keys__test .is-bad { color: var(--color-error-text); }
+  .ad-keys__test .is-warn { color: var(--color-warning-text); }
+  .ad-keys__form .jy-note + .ad-form { margin-block-start: 16px; }
+  .ad-keys__tpl { margin-block-start: 4px; padding: 6px 10px; background: var(--color-green-50); border-radius: var(--radius-sm); font-size: var(--text-small); line-height: 1.8; overflow-wrap: anywhere; }
+  .ad-keys__tpl code { direction: ltr; unicode-bidi: isolate; font-family: inherit; font-weight: 600; }
+
   /* ===== ادمین‌ها و پیوند یک‌باره ===== */
   .ad-people > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding-block: 14px; }
   .ad-people > li + li { border-block-start: 1px solid var(--color-green-100); }
@@ -598,7 +642,7 @@
 .scr, .st { display: none; }
 /* سه پوسته: ورود و ثبت، پنل، صفحهٔ مشتری */
 body:has(:is(#m-login, #m-login-error, #m-login-locked, #m-invite, #m-invite-expired):checked) .scr-auth { display: block; }
-body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped):checked) .scr-shell { display: block; }
+body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped, #m-dash-alerts, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open):checked) .scr-shell { display: block; }
 body:has(:is(#m-c-print, #m-c-handed, #m-c-cancelled, #m-c-shipped, #m-c-guest):checked) .scr-site { display: block; }
 
 body:has(#m-login:checked) :is(.st-login, .st-login-any),
@@ -614,7 +658,7 @@ body:has(#m-order-pdf:checked) :is(.st-order-pdf, .st-o27, .st-rcpt, .st-open, .
 body:has(#m-order-print:checked) :is(.st-order-print, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-printed, .st-prt-card),
 body:has(#m-order-handed:checked) :is(.st-order-handed, .st-o27, .st-pdf-ok, .st-rcpt, .st-printed, .st-prt-card),
 body:has(#m-order-cancel:checked) :is(.st-order-cancel, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid, .st-prt-card),
-body:has(#m-order-cancelled:checked) :is(.st-order-cancelled, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
+body:has(#m-order-cancelled:checked) :is(.st-order-cancelled, .st-cx, .st-rf-none, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
 body:has(#m-order-unpaid:checked) .st-order-unpaid,
 body:has(#m-order-assign:checked) :is(.st-order-assign, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid),
 body:has(#m-ticket:checked) .st-ticket,
@@ -626,8 +670,23 @@ body:has(#m-tariff:checked) .st-tariff,
 body:has(#m-tariff-draft:checked) :is(.st-tariff-draft, .st-editor),
 body:has(#m-tariff-invalid:checked) :is(.st-tariff-invalid, .st-editor),
 body:has(#m-tariff-activate:checked) .st-tariff-activate,
-body:has(#m-settings:checked) :is(.st-settings, .st-settings-any),
-body:has(#m-key-edit:checked) :is(.st-key-edit, .st-settings-any),
+body:has(#m-settings:checked) :is(.st-settings, .st-settings-any, .st-live-pre),
+body:has(#m-key-edit:checked) :is(.st-key-edit, .st-settings-any, .st-live-pre),
+/* برش ۷ */
+body:has(#m-key-tpl:checked) :is(.st-key-tpl, .st-settings-any, .st-live-pre),
+body:has(#m-key-rejected:checked) :is(.st-key-rejected, .st-settings-any, .st-live-pre),
+body:has(#m-key-down:checked) :is(.st-key-down, .st-settings-any, .st-live-pre),
+body:has(#m-live-link:checked) :is(.st-live-link, .st-settings-any, .st-live-pre),
+body:has(#m-live-all:checked) :is(.st-live-all, .st-settings-any),
+body:has(#m-live-notready:checked) :is(.st-live-notready, .st-settings-any),
+body:has(#m-live-open:checked) .st-live-open,
+body:has(#m-dash-alerts:checked) .st-dash-alerts,
+body:has(#m-order-second:checked) :is(.st-order-second, .st-order, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid, .st-prt-card),
+body:has(#m-refund:checked) :is(.st-refund, .st-cx, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
+body:has(#m-refund-manual:checked) :is(.st-refund-manual, .st-cx, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
+body:has(#m-refunding:checked) :is(.st-refunding, .st-cx, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
+body:has(#m-refunded:checked) :is(.st-refunded, .st-cx, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
+body:has(#m-refund-failed:checked) :is(.st-refund-failed, .st-cx, .st-o27, .st-pdf-ok, .st-rcpt, .st-prt-card),
 body:has(#m-admins:checked) :is(.st-admins, .st-admins-any),
 body:has(#m-admin-invite:checked) .st-admin-invite,
 body:has(#m-admin-link:checked) .st-admin-link,
@@ -651,24 +710,34 @@ body:has(#m-order-shipped:checked) :is(.st-order-shipped, .st-o27, .st-pdf-ok, .
 body:has(#m-c-shipped:checked) :is(.st-c-shipped, .st-cust),
 body:has(#m-c-guest:checked) .st-c-guest { display: contents; }
 
+/* برش ۷: پیامک پرداخت «رفت» در همهٔ حالت‌های سفارش، جز پرداخت دوم که «نرفت» دارد */
+body:has(#m-order-second:checked) .ad-paysms-std { display: none; }
+body:has(#m-order-second:checked) .ad-pay > li.st-order-second { display: flex; }
+/* پول و پرداخت در رویدادهای سفارش فقط برای مالک و متصدی (orders.money)؛ چاپخانه نه */
+body:has(#r-partner:checked) .ad-log > li.ad-money { display: none !important; }
+
 /* ردیف جدول و ردیف رویدادی که فقط در یک حالت هست: جعبهٔ خودش را نگه می‌دارد، نه contents */
 body:has(#m-tariff-invalid:checked) tr.st-tariff-invalid { display: table-row; }
 body:has(:is(#m-order-print, #m-order-handed):checked) .ad-log > li.st-printed,
-body:has(:is(#m-order, #m-order-edit, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled):checked) .ad-log > li.st-pdf-ok,
+body:has(:is(#m-order, #m-order-edit, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed):checked) .ad-log > li.st-pdf-ok,
 body:has(#m-order-handed:checked) .ad-log > li.st-order-handed,
-body:has(#m-order-cancelled:checked) .ad-log > li.st-order-cancelled,
+body:has(:is(#m-order-cancelled, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed):checked) .ad-log > li.st-cx,
+body:has(:is(#m-refunding, #m-refunded):checked) .ad-log > li.st-rf-asked,
+body:has(#m-refunded:checked) .ad-log > li.st-refunded,
+body:has(#m-refund-failed:checked) .ad-log > li.st-refund-failed,
+body:has(#m-order-second:checked) .ad-log > li.st-order-second,
 body:has(#m-order-shipped:checked) .ad-log > li:is(.st-printed, .st-pdf-ok, .st-order-shipped) { display: grid; }
 
 /* زبانهٔ جاری (در سایت aria-current، اینجا فقط ظاهر) */
-body:has(#m-dash:checked) .ad-nav [data-tab='dash'],
-body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-order-shipped):checked) .ad-nav [data-tab='orders'],
+body:has(:is(#m-dash, #m-dash-alerts):checked) .ad-nav [data-tab='dash'],
+body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-order-shipped, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed):checked) .ad-nav [data-tab='orders'],
 body:has(:is(#m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-nav [data-tab='ship'],
 body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-nav [data-tab='tariff'],
-body:has(:is(#m-settings, #m-key-edit):checked) .ad-nav [data-tab='settings'],
+body:has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open):checked) .ad-nav [data-tab='settings'],
 body:has(:is(#m-partners, #m-partner-edit):checked) .ad-nav [data-tab='partners'],
 body:has(:is(#m-admins, #m-admin-invite, #m-admin-link):checked) .ad-nav [data-tab='admins'],
 body:has(#m-events:checked) .ad-nav [data-tab='events'],
-body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
+body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
 
 /*
  * نقش: متصدی تعرفه را فقط می‌بیند، و تنظیمات، چاپخانه‌ها، ادمین‌ها و رویدادها را ندارد. چاپخانه (برش ۵، ADR-042) فقط پیشخوان و
@@ -683,9 +752,9 @@ body:has(#r-partner:checked) .prt { display: contents; }
 .ad-facts > div.staff { display: grid; }
 body:has(:is(#r-operator, #r-partner):checked) .st-ownpage { display: none !important; }
 body:has(#r-partner:checked) .st-staffpage { display: none !important; }
-body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report):checked) .ad-noaccess { display: block; }
+body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report):checked) .ad-noaccess { display: block; }
 .ad-noaccess-prt, .ad-notfound { display: none; max-width: 32rem; }
-body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-noaccess-prt { display: block; }
+body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-dash-alerts, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-noaccess-prt { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged):checked) .ad-notfound { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged, #m-order-edit, #m-order-cancel, #m-order-assign):checked) :is(.st-o27, .st-order-unpaid, .st-order-vols, .st-order-purged) { display: none; }
 
@@ -736,6 +805,20 @@ body:has(#m-ship-report:checked) .mock [for='m-ship-report'],
 body:has(#m-order-shipped:checked) .mock [for='m-order-shipped'],
 body:has(#m-c-shipped:checked) .mock [for='m-c-shipped'],
 body:has(#m-c-guest:checked) .mock [for='m-c-guest'],
+body:has(#m-dash-alerts:checked) .mock [for='m-dash-alerts'],
+body:has(#m-order-second:checked) .mock [for='m-order-second'],
+body:has(#m-refund:checked) .mock [for='m-refund'],
+body:has(#m-refund-manual:checked) .mock [for='m-refund-manual'],
+body:has(#m-refunding:checked) .mock [for='m-refunding'],
+body:has(#m-refunded:checked) .mock [for='m-refunded'],
+body:has(#m-refund-failed:checked) .mock [for='m-refund-failed'],
+body:has(#m-key-tpl:checked) .mock [for='m-key-tpl'],
+body:has(#m-key-rejected:checked) .mock [for='m-key-rejected'],
+body:has(#m-key-down:checked) .mock [for='m-key-down'],
+body:has(#m-live-all:checked) .mock [for='m-live-all'],
+body:has(#m-live-notready:checked) .mock [for='m-live-notready'],
+body:has(#m-live-link:checked) .mock [for='m-live-link'],
+body:has(#m-live-open:checked) .mock [for='m-live-open'],
 body:has(#r-owner:checked) .mock [for='r-owner'],
 body:has(#r-operator:checked) .mock [for='r-operator'],
 body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-green-700); }
@@ -797,6 +880,20 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
   <input type="radio" name="m" id="m-order-shipped" tabindex="-1">
   <input type="radio" name="m" id="m-c-shipped" tabindex="-1">
   <input type="radio" name="m" id="m-c-guest" tabindex="-1">
+  <input type="radio" name="m" id="m-dash-alerts" tabindex="-1">
+  <input type="radio" name="m" id="m-order-second" tabindex="-1">
+  <input type="radio" name="m" id="m-refund" tabindex="-1">
+  <input type="radio" name="m" id="m-refund-manual" tabindex="-1">
+  <input type="radio" name="m" id="m-refunding" tabindex="-1">
+  <input type="radio" name="m" id="m-refunded" tabindex="-1">
+  <input type="radio" name="m" id="m-refund-failed" tabindex="-1">
+  <input type="radio" name="m" id="m-key-tpl" tabindex="-1">
+  <input type="radio" name="m" id="m-key-rejected" tabindex="-1">
+  <input type="radio" name="m" id="m-key-down" tabindex="-1">
+  <input type="radio" name="m" id="m-live-all" tabindex="-1">
+  <input type="radio" name="m" id="m-live-notready" tabindex="-1">
+  <input type="radio" name="m" id="m-live-link" tabindex="-1">
+  <input type="radio" name="m" id="m-live-open" tabindex="-1">
   <input type="radio" name="r" id="r-owner" checked tabindex="-1">
   <input type="radio" name="r" id="r-operator" tabindex="-1">
   <input type="radio" name="r" id="r-partner" tabindex="-1">
@@ -840,6 +937,26 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     <label for="m-ship-review">صف تأیید</label>
     <label for="m-order-shipped">بستهٔ پستی</label>
     <label for="m-ship-report">گزارش ارسال</label>
+    <hr><p>پرداخت، پیامک و مسیر خرید (برش ۷)</p>
+    <label for="m-dash-alerts">هشدارهای تازه</label>
+    <label for="m-order">پرداخت‌ها</label>
+    <label for="m-order-second">پرداخت دوم</label>
+    <label for="m-order-unpaid">در حال بررسی</label>
+    <label for="m-order-cancelled">لغو، پول برنگشته</label>
+    <label for="m-refund">بازپرداخت از درگاه</label>
+    <label for="m-refund-manual">بازپرداخت دستی</label>
+    <label for="m-refunding">در حال برگشت</label>
+    <label for="m-refunded">برگشت داده شد</label>
+    <label for="m-refund-failed">بازپرداخت رد شد</label>
+    <label for="m-settings">تنظیمات</label>
+    <label for="m-key-edit">کلید API</label>
+    <label for="m-key-tpl">قالب و پیامک آزمایشی</label>
+    <label for="m-key-rejected">کلید رد شد</label>
+    <label for="m-key-down">سرویس جواب نداد</label>
+    <label for="m-live-link">پیوند پیش‌نمایش</label>
+    <label for="m-live-open">باز برای همه</label>
+    <label for="m-live-all">مسیر خرید: همه</label>
+    <label for="m-live-notready">آماده نیست</label>
     <hr><p>تعرفه و تنظیمات</p>
     <label for="m-tariff">تعرفه</label>
     <label for="m-tariff-draft">نسخهٔ تازه</label>
@@ -996,7 +1113,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     <!-- متصدی به بخش‌های مالک نمی‌رسد -->
     <section class="jy-card ad-noaccess" aria-labelledby="t-noaccess">
       <h1 id="t-noaccess" class="jy-card__title">این بخش فقط برای مالک است</h1>
-      <p class="ck-sub">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، برگرداندن ورود فایل پست و گزارش ارسال با مالک پنل است.</p>
+      <p class="ck-sub">تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، مسیر خرید روی سایت، بازپرداخت، چاپخانه‌ها، ادمین‌ها، رویدادها، برگرداندن ورود فایل پست و گزارش ارسال با مالک پنل است.</p>
       <div class="ad-actions"><label for="m-dash" class="jy-btn jy-btn--secondary">پیشخوان</label></div>
     </section>
 
@@ -1036,7 +1153,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
 
       <div class="ad-alerts">
         <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>PDF جزوهٔ <label for="m-order-pdf" class="jy-link">سفارش <span class="num">10031</span></label> ساخته نشد؛ پیش از چاپ دوباره بسازش.</span></p>
-        <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><label for="m-order-unpaid" class="jy-link"><span class="num">2</span> تلاش پرداخت</label> از درگاه برنگشت.</span></p>
+        <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><label for="m-order-unpaid" class="jy-link">یک تلاش پرداخت</label> از درگاه برنگشت و زیبال هم به استعلام جواب نداد؛ هر <span class="num">2</span> دقیقه دوباره می‌پرسیم. از صبح استعلام خودکار <span class="num">3</span> تلاش بی برگشت را بست: <span class="num">2</span> پرداخت‌نشده، <span class="num">1</span> پرداخت‌شده.</span></p>
         <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-ship-review" class="jy-link"><span class="num">5</span> سطر فایل پست</label> منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.</span></p>
         <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>کد رهگیری سفارش <label for="m-orders" class="jy-link"><span class="num">10009</span></label> و <label for="m-orders" class="jy-link"><span class="num">10025</span></label> نرسیده، با اینکه دو روز کاری از تحویل پستشان (چهارشنبه <span class="num">8</span> مهر) گذشته. فایل پست آن روز را <label for="m-ship" class="jy-link">وارد کن</label>.</span></p>
         <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-order-assign" class="jy-link">سفارش <span class="num">10037</span></label> چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.</span></p>
@@ -1081,6 +1198,37 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
             <li><label for="m-order" class="ad-row"><span class="ad-row__id num">10039</span><span class="ad-row__who"><b>کیوان احمدی</b> <span class="ad-row__city">نیشابور</span></span><span class="ad-row__what"><span class="num">96</span> صفحه · رنگی</span><span class="ad-row__state">در صف چاپ</span><span class="ad-row__due"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>فردا</span></span></label></li>
           </ul>
         </section>
+      </div>
+    </div>
+
+    <!--
+      ===================== برش ۷: هشدارهای تازهٔ پیشخوان، همه یک‌جا (در روز واقعی چندتایی با هم نمی‌آیند) =====================
+      ترتیب: اول آنچه پول یا مسیر خرید همه را می‌بندد (خطا)، بعد آنچه کار مالک یا متصدی می‌خواهد (هشدار)، بعد خبر (سؤال ۱۴۰).
+      «زیبال IP سرور را نپذیرفت» مسیر خرید را برای مشتری تازه متوقف می‌کند تا آزمایش درست شود (سؤال ۱۳۹).
+      فقط مالک و متصدی؛ هیچ‌کدام به چاپخانه نمی‌رسد.
+    -->
+    <div class="st st-dash-alerts st-staffpage">
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">پیشخوان</h1>
+          <p class="ad-sub">دوشنبه <span class="num">13</span> مهر، ساعت <span class="num">11:20</span> · همهٔ هشدارهای تازهٔ برش <span class="num">7</span>، برای دیدن متن و ترتیب</p>
+        </div>
+      </div>
+      <div class="ad-alerts">
+        <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span><b>زیبال IP سرور را نپذیرفت</b> (کد <span class="num">115</span>)، امروز <span class="num">11:12</span> هنگام پرداخت <label for="m-order-unpaid" class="jy-link">سفارش <span class="num">10046</span></label>. تا IP همین سرور در پنل زیبال ثبت نشود، پرداخت تازه شروع نمی‌شود و پرداخت‌های در راه تأیید نمی‌شوند (پولشان خودکار برمی‌گردد)؛ برای همین مسیر خرید برای مشتری تازه «موقتاً متوقف» است. بعد از ثبت IP، کد پذیرنده را در <label for="m-key-rejected" class="jy-link">«تنظیمات»</label> بیازما.</span></p>
+        <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span><b>مبلغ ناهمخوان:</b> زیبال برای یک تلاش پرداخت <label for="m-order-unpaid" class="jy-link">سفارش <span class="num">10044</span></label> مبلغ <span class="num">37,475</span> تومان گزارش داد، نه <span class="num">374,750</span>. تأیید نشد و سفارش پرداخت‌نشده ماند؛ پول مشتری خودکار برمی‌گردد. یعنی کسی یا چیزی مبلغ دیگری به درگاه داده؛ جزئیاتش در همان سفارش است.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><b>سقف کد پیامکی کل سایت پر شد:</b> <span class="num">2,000</span> کد در <span class="num">24</span> ساعت گذشته، از <span class="num">10:40</span>. تا حدود <span class="num">13:05</span> به هیچ شماره‌ای کد تازه نمی‌رود. اگر مشتری واقعی است، سقف را در <label for="m-settings" class="jy-link">«تنظیمات»</label> بالا ببر.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><b>اعتبار پیامک کم است:</b> <span class="num">184,200</span> تومان در sms.ir، برای حدود <span class="num">5</span> روز با مصرف هفتهٔ گذشته. شارژ کن؛ بی اعتبار کد تأیید نمی‌رود و کسی نمی‌تواند سفارش بدهد.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>پول <label for="m-order-cancelled" class="jy-link">سفارش لغوشدهٔ <span class="num">10026</span></label> هنوز برنگشته (لغو یکشنبه <span class="num">12</span> مهر، <span class="num">16:20</span>). از صفحهٔ سفارش برش گردان.</span></p>
+        <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><b>پول مشتری برمی‌گردد:</b> پرداخت دوم <label for="m-order-second" class="jy-link">سفارش <span class="num">10047</span></label> (سفارش پیش‌تر پرداخت شده بود) و پرداخت ناهمخوان <span class="num">10044</span> تأیید نشدند؛ زیبال <span class="num">15</span> دقیقه پس از هر پرداخت خودکار برش می‌گرداند. تا استعلام بگوید «برگشت خورد»، اینجا می‌مانند.</span></p>
+        <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><label for="m-order-unpaid" class="jy-link">یک تلاش پرداخت</label> از درگاه برنگشت و زیبال هم به استعلام جواب نداد؛ هر <span class="num">2</span> دقیقه دوباره می‌پرسیم. از صبح استعلام خودکار <span class="num">3</span> تلاش بی برگشت را بست: <span class="num">2</span> پرداخت‌نشده، <span class="num">1</span> پرداخت‌شده.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>پیامک پرداخت <label for="m-order-second" class="jy-link">سفارش <span class="num">10027</span></label> نرفت؛ از کارت «پرداخت‌ها» دوباره بفرست.</span></p>
+      </div>
+      <p class="ad-meta ad-gap">وضعیت مسیر خرید روی سایت، بالای همین هشدارها؛ یکی از این سه، و وقتی برای همه باز است هیچ:</p>
+      <div class="ad-alerts">
+        <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><b>مسیر خرید: پیش‌نمایش مالک.</b> فقط مرورگری که پیوند پیش‌نمایش را باز کرد سفارش می‌دهد؛ بقیه «ثبت سفارش آنلاین به‌زودی» می‌بینند. <label for="m-settings" class="jy-link">باز برای همه</label>.</span></p>
+        <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><b>مسیر خرید متوقف است</b> از امروز <span class="num">11:15</span>، سارا: سفارش تازه نمی‌آید؛ برگشت از درگاه و استعلام کار می‌کنند. <label for="m-live-all" class="jy-link">باز کردن</label>.</span></p>
+        <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span><b>مسیر خرید خاموش است:</b> در <bdi class="ltr">.env</bdi> «live» خواسته شد، ولی «شناسهٔ قالب پیامک رهگیری» خالی است. <label for="m-live-notready" class="jy-link">چه کم است</label>.</span></p>
       </div>
     </div>
 
@@ -1146,7 +1294,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
           <div class="st st-paid"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>در صف چاپ</span></div>
           <div class="st st-order-print"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-printer" aria-hidden="true"></span>در حال چاپ</span></div>
           <div class="st st-order-handed"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>تحویل پست شد</span></div>
-          <div class="st st-order-cancelled"><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>لغو شد</span></div>
+          <div class="st st-order-cancelled st-cx"><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>لغو شد</span></div>
           <div class="st st-order-shipped"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>تحویل پست شد</span></div>
         </div>
       </div>
@@ -1184,7 +1332,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <div class="st st-order-cancel">
                 <div class="ad-step">
                   <p class="ad-step__title">لغو سفارش <span class="num">10027</span></p>
-                  <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>مشتری در صفحهٔ سفارشش «لغو شد» را می‌بیند. پول خودکار برنمی‌گردد: <span class="num">374,750</span> تومان را خودت برگردان و در دلیل بنویس چطور.</span></p>
+                  <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>مشتری در صفحهٔ سفارشش «لغو شد» را می‌بیند. پول خودکار برنمی‌گردد: بعد از لغو، مالک <span class="num">374,750</span> تومان را از همین صفحه برمی‌گرداند، از درگاه زیبال یا با ثبت دستی.</span></p>
                   <div class="ad-form">
                     <div class="jy-field">
                       <label class="jy-label" for="c-why">دلیل لغو</label>
@@ -1220,13 +1368,142 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
             </section>
           </div>
 
-          <div class="st st-order-cancelled">
+          <div class="st st-order-cancelled st-cx">
             <section class="jy-card ad-status" aria-labelledby="t-st3">
               <h2 id="t-st3" class="jy-card__title">لغو شد</h2>
               <p class="ad-meta">دوشنبه <span class="num">13</span> مهر، <span class="num">11:24</span>، سارا</p>
-              <div class="staff"><dl class="ad-facts"><div><dt>دلیل</dt><dd>مشتری خواست. <span class="num">374,750</span> تومان کارت‌به‌کارت برگشت، پیگیری <span class="num">552190</span>.</dd></div></dl></div>
+              <div class="staff"><dl class="ad-facts"><div><dt>دلیل</dt><dd>مشتری خواست؛ هنوز چاپ نشده بود.</dd></div></dl></div>
               <div class="prt"><p class="jy-note ad-gap">این سفارش چاپ نمی‌شود؛ اگر چاپش کرده‌ای، کنار بگذار.</p></div>
             </section>
+          </div>
+
+          <!--
+            برش ۷ (ADR-051): بازپرداخت سفارش لغوشده، کل مبلغ، فقط مالک (orders.refund) با کد تازه؛ متصدی فقط می‌بیند، چاپخانه هیچ.
+            از درگاه: کارمزد زیبال (0.1٪، دست‌کم 1,500 تومان) از کیف پول زیبال جزوه‌یار، و مشتری کل مبلغ را می‌گیرد (سؤال ۱۳۶).
+          -->
+          <div class="st st-rf-none">
+            <div class="staff">
+              <section class="jy-card ad-status ad-refund" aria-labelledby="t-rf0">
+                <h2 id="t-rf0" class="jy-card__title">بازپرداخت</h2>
+                <div class="ad-status__badges"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>پول برنگشته</span></div>
+                <p class="ad-refund__sum"><span class="num">374,750</span> تومان</p>
+                <p class="ad-meta">پرداخت شنبه <span class="num">11</span> مهر با زیبال، کارت <span class="num nw">6037 99•• •••• 1234</span></p>
+                <div class="own">
+                  <div class="ad-status__actions">
+                    <label for="m-refund" class="jy-btn jy-btn--primary jy-btn--block">بازپرداخت از درگاه…</label>
+                    <label for="m-refund-manual" class="jy-btn jy-btn--text jy-btn--block">ثبت بازپرداخت دستی…</label>
+                    <p class="ad-hint">از درگاه: زیبال به همان کارت برمی‌گرداند، معمولاً <span class="num">5</span> تا <span class="num">30</span> دقیقه. دستی: وقتی پول را از راه دیگری برگرداندی.</p>
+                  </div>
+                </div>
+                <div class="opr"><p class="jy-note ad-gap">بازپرداخت با مالک است؛ پیشخوان تا برگشت پول یادآوری می‌کند.</p></div>
+              </section>
+            </div>
+          </div>
+          <div class="st st-refund">
+            <div class="staff">
+              <section class="jy-card ad-refund" aria-labelledby="t-rf1">
+                <h2 id="t-rf1" class="jy-card__title">بازپرداخت از درگاه</h2>
+                <ul class="ad-changes">
+                  <li><span class="ad-changes__k">مبلغ</span><span><span class="num">374,750</span> تومان، کل پرداخت</span></li>
+                  <li><span class="ad-changes__k">به</span><span>کارت <span class="num nw">6037 99•• •••• 1234</span>، همان که پرداخت کرد</span></li>
+                  <li><span class="ad-changes__k">کارمزد زیبال</span><span><span class="num">1,500</span> تومان، از کیف پول زیبال جزوه‌یار</span></li>
+                </ul>
+                <div class="own">
+                  <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>زیبال از کیف پول برمی‌گرداند، پس کیف پول باید دست‌کم <span class="num">376,250</span> تومان داشته باشد؛ وگرنه رد می‌کند و ثبت دستی می‌ماند. پول معمولاً <span class="num">5</span> تا <span class="num">30</span> دقیقه بعد به کارت می‌نشیند.</span></p>
+                  <div class="ad-form">
+                    <div class="jy-field">
+                      <label class="jy-label" for="rf-code">کد برنامهٔ تأیید</label>
+                      <input id="rf-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-describedby="rf-code-hint">
+                      <p id="rf-code-hint" class="jy-hint">پول جابه‌جا می‌شود؛ کد تازه لازم است.</p>
+                    </div>
+                  </div>
+                  <div class="ad-status__actions">
+                    <label for="m-refunding" class="jy-btn jy-btn--primary jy-btn--block"><span><span class="num">374,750</span> تومان را برگردان</span></label>
+                    <label for="m-order-cancelled" class="jy-btn jy-btn--text jy-btn--block">انصراف</label>
+                  </div>
+                </div>
+                <div class="opr"><p class="jy-note ad-gap">بازپرداخت با مالک است.</p></div>
+              </section>
+            </div>
+          </div>
+          <div class="st st-refund-manual">
+            <div class="staff">
+              <section class="jy-card ad-refund" aria-labelledby="t-rf2">
+                <h2 id="t-rf2" class="jy-card__title">ثبت بازپرداخت دستی</h2>
+                <p class="ad-hint">وقتی پول را از راه دیگری برگرداندی، مثل کارت‌به‌کارت یا پایا. این فقط ثبت است و پولی جابه‌جا نمی‌کند؛ مشتری «برگشت داده شد» را با کد پیگیری می‌بیند.</p>
+                <div class="own">
+                  <div class="ad-form">
+                    <dl class="ad-facts"><div><dt>مبلغ</dt><dd><span class="num">374,750</span> تومان، کل پرداخت</dd></div></dl>
+                    <div class="jy-field">
+                      <label class="jy-label" for="rm-day">روز برگشت</label>
+                      <input id="rm-day" class="jy-input jy-input--ltr ad-short" inputmode="numeric" value="1405/07/13">
+                    </div>
+                    <div class="jy-field">
+                      <label class="jy-label" for="rm-ref">کد پیگیری بانک</label>
+                      <input id="rm-ref" class="jy-input jy-input--ltr ad-short" inputmode="numeric" value="552190">
+                    </div>
+                    <div class="jy-field">
+                      <label class="jy-label" for="rm-how">چطور برگشت <span class="jy-optional">(اختیاری)</span></label>
+                      <input id="rm-how" class="jy-input" value="کارت‌به‌کارت به همان کارت" aria-describedby="rm-how-hint">
+                      <p id="rm-how-hint" class="jy-hint">فقط در پنل؛ مشتری نمی‌بیند.</p>
+                    </div>
+                    <div class="jy-field">
+                      <label class="jy-label" for="rm-code">کد برنامهٔ تأیید</label>
+                      <input id="rm-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+                    </div>
+                  </div>
+                  <div class="ad-status__actions">
+                    <label for="m-refunded" class="jy-btn jy-btn--primary jy-btn--block">ثبت بازپرداخت</label>
+                    <label for="m-order-cancelled" class="jy-btn jy-btn--text jy-btn--block">انصراف</label>
+                  </div>
+                </div>
+                <div class="opr"><p class="jy-note ad-gap">بازپرداخت با مالک است.</p></div>
+              </section>
+            </div>
+          </div>
+          <div class="st st-refunding">
+            <div class="staff">
+              <section class="jy-card ad-status ad-refund" aria-labelledby="t-rf3">
+                <h2 id="t-rf3" class="jy-card__title">بازپرداخت</h2>
+                <div class="ad-status__badges"><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>در حال برگشت</span></div>
+                <p class="ad-refund__sum"><span class="num">374,750</span> تومان</p>
+                <p class="ad-meta">از درگاه، امروز <span class="num">11:26</span>، سارا · به کارت <span class="num nw">6037 99•• •••• 1234</span></p>
+                <p class="jy-note ad-gap">زیبال معمولاً <span class="num">5</span> تا <span class="num">30</span> دقیقه؛ استعلام خودکار هر <span class="num">2</span> دقیقه، آخرین <span class="num">11:30</span>. مشتری «در حال برگشت» را می‌بیند.</p>
+                <div class="ad-status__actions"><button type="button" class="jy-btn jy-btn--secondary jy-btn--block">استعلام از درگاه</button></div>
+              </section>
+            </div>
+          </div>
+          <div class="st st-refunded">
+            <div class="staff">
+              <section class="jy-card ad-status ad-refund" aria-labelledby="t-rf4">
+                <h2 id="t-rf4" class="jy-card__title">بازپرداخت</h2>
+                <div class="ad-status__badges"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>برگشت داده شد</span></div>
+                <p class="ad-refund__sum"><span class="num">374,750</span> تومان</p>
+                <dl class="ad-facts">
+                  <div><dt>کی</dt><dd>امروز <span class="num">11:41</span> · درخواست <span class="num">11:26</span>، سارا</dd></div>
+                  <div><dt>راه</dt><dd>از درگاه زیبال، به کارت <span class="num nw">6037 99•• •••• 1234</span> · کارمزد <span class="num">1,500</span> تومان</dd></div>
+                  <div><dt>کد پیگیری</dt><dd><span class="num">552190</span></dd></div>
+                </dl>
+                <p class="ad-hint ad-gap">لغو این سفارش دیگر برنمی‌گردد: پولش برگشته است.</p>
+              </section>
+            </div>
+          </div>
+          <div class="st st-refund-failed">
+            <div class="staff">
+              <section class="jy-card ad-status ad-refund" aria-labelledby="t-rf5">
+                <h2 id="t-rf5" class="jy-card__title">بازپرداخت</h2>
+                <div class="ad-status__badges"><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>برنگشت</span></div>
+                <p class="ad-refund__sum"><span class="num">374,750</span> تومان</p>
+                <p class="jy-note jy-note--error ad-gap"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>زیبال بازپرداخت را نپذیرفت: موجودی کیف پول کافی نیست (امروز <span class="num">11:26</span>). پولی جابه‌جا نشد؛ کیف پول را شارژ کن و دوباره بزن، یا پول را از راه دیگری برگردان و ثبتش کن.</span></p>
+                <div class="own">
+                  <div class="ad-status__actions">
+                    <label for="m-refund" class="jy-btn jy-btn--primary jy-btn--block">دوباره از درگاه…</label>
+                    <label for="m-refund-manual" class="jy-btn jy-btn--text jy-btn--block">ثبت بازپرداخت دستی…</label>
+                  </div>
+                </div>
+                <div class="opr"><p class="jy-note ad-gap">بازپرداخت با مالک است.</p></div>
+              </section>
+            </div>
           </div>
 
           <!-- چاپخانهٔ سفارش (برش ۵): خودکار هنگام پرداخت؛ جابه‌جایی فقط در «در صف چاپ»، با مالک و متصدی -->
@@ -1395,12 +1672,26 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
           </section>
 
           <!-- پرداخت‌ها: هر تلاش -->
+          <!--
+            برش ۷ (ADR-050): هر تلاش با شناسهٔ زیبال (trackId)، کارت پوشیده و کد پیگیری از خود زیبال، و وضعیت درگاه با کدش؛ «استعلام از درگاه»
+            (orders.money) فقط روی تلاشی که هنوز نهایی نیست یا پولش در راه برگشت است. پیامک پرداخت از صف، با «دوباره بفرست» (ADR-049).
+          -->
           <section class="jy-card" aria-labelledby="t-pay">
-            <h2 id="t-pay" class="jy-card__title">پرداخت‌ها</h2>
+            <div class="jy-card__head">
+              <h2 id="t-pay" class="jy-card__title">پرداخت‌ها</h2>
+              <span class="jy-card__meta">زیبال</span>
+            </div>
             <ol class="ad-pay">
-              <li><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>موفق</span><span>شنبه <span class="num">11</span> مهر، <span class="num">14:05</span></span><span class="ad-pay__meta">زیبال · کد پیگیری <span class="num">803114</span> · کارت <span class="num">6037 99•• •••• 1234</span></span></li>
-              <li><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>ناموفق</span><span>شنبه <span class="num">11</span> مهر، <span class="num">13:58</span></span><span class="ad-pay__meta">زیبال · بانک پرداخت را نپذیرفت</span></li>
+              <li><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>موفق</span><span>شنبه <span class="num">11</span> مهر، <span class="num">14:05</span></span><span class="ad-pay__meta">شناسهٔ زیبال <span class="num">3714562809</span> · کارت <span class="num nw">6037 99•• •••• 1234</span> · کد پیگیری <span class="num">803114</span> · درگاه: پرداخت‌شده، تأییدشده</span></li>
+              <li class="st st-order-second"><span class="jy-badge jy-badge--neutral">برگشت خورد</span><span>شنبه <span class="num">11</span> مهر، <span class="num">14:07</span></span><span class="ad-pay__meta">شناسهٔ زیبال <span class="num">3714563311</span> · کارت <span class="num nw">6037 99•• •••• 1234</span> · پرداخت دوم: سفارش پیش‌تر پرداخت شده بود، پس تأیید نشد؛ زیبال <span class="num">14:22</span> پولش را به کارت برگرداند (درگاه: ریورس‌شده) · استعلام خودکار <span class="num">14:24</span></span></li>
+              <li><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>ناموفق</span><span>شنبه <span class="num">11</span> مهر، <span class="num">13:58</span></span><span class="ad-pay__meta">شناسهٔ زیبال <span class="num">3714559120</span> · موجودی کارت کافی نبود</span></li>
             </ol>
+            <div class="ad-paysms-std">
+              <p class="ad-paysms"><b>پیامک پرداخت</b><span class="ad-paysms__ok"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>به <span class="num">0915 234 5678</span> رفت، شنبه <span class="num">14:05</span></span></p>
+            </div>
+            <div class="st st-order-second">
+              <p class="ad-paysms"><b>پیامک پرداخت</b><span class="ad-paysms__fail"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>نرفت: sms.ir جواب نداد، شنبه <span class="num">14:05</span></span><button type="button" class="jy-btn jy-btn--text">دوباره بفرست</button></p>
+            </div>
           </section>
           </div>
 
@@ -1410,12 +1701,18 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
             <ol class="ad-log">
               <li><span class="ad-log__when">شنبه <span class="num">11</span> مهر <span class="num">13:57</span></span><span>سفارش ساخته شد <span class="ad-log__who">· مشتری</span></span></li>
               <li><span class="ad-log__when"><span class="num">14:05</span></span><span>پرداخت شد <span class="ad-log__who">· درگاه</span></span></li>
+              <li class="st st-order-second ad-money"><span class="ad-log__when"><span class="num">14:05</span></span><span>پیامک پرداخت به مشتری نرفت <span class="ad-log__who">· سیستم</span></span></li>
               <li><span class="ad-log__when"><span class="num">14:05</span></span><span>به چاپ نور سپرده شد، هم‌شهر مشتری <span class="ad-log__who">· سیستم</span></span></li>
               <li><span class="ad-log__when"><span class="num">14:06</span></span><span><span class="st st-pdf-ok">PDF جزوه و فایل چاپ ساخته شد </span><span class="st st-order-pdf">ساختن فایل چاپ، سه تلاش ناموفق </span><span class="ad-log__who">· سیستم</span></span></li>
+              <li class="st st-order-second ad-money"><span class="ad-log__when"><span class="num">14:07</span></span><span>پرداخت دوم تأیید نشد: سفارش پیش‌تر پرداخت شده بود <span class="ad-log__who">· درگاه</span></span></li>
+              <li class="st st-order-second ad-money"><span class="ad-log__when"><span class="num">14:24</span></span><span>پرداخت دوم برگشت خورد <span class="ad-log__who">· استعلام خودکار</span></span></li>
               <li class="st st-pdf-ok"><span class="ad-log__when">دوشنبه <span class="num">13</span> مهر <span class="num">09:40</span></span><span>PDF دانلود شد <span class="ad-log__who">· علی</span></span></li>
               <li class="st st-printed"><span class="ad-log__when"><span class="num">10:05</span></span><span>در صف چاپ ← در حال چاپ <span class="ad-log__who">· سارا</span></span></li>
               <li class="st st-order-handed"><span class="ad-log__when"><span class="num">16:40</span></span><span>در حال چاپ ← تحویل پست شد <span class="ad-log__who">· سارا</span></span></li>
-              <li class="st st-order-cancelled"><span class="ad-log__when"><span class="num">11:24</span></span><span>لغو شد <span class="ad-log__who">· سارا</span></span></li>
+              <li class="st st-order-cancelled st-cx"><span class="ad-log__when"><span class="num">11:24</span></span><span>لغو شد <span class="ad-log__who">· سارا</span></span></li>
+              <li class="st st-rf-asked ad-money"><span class="ad-log__when"><span class="num">11:26</span></span><span>بازپرداخت <span class="num">374,750</span> تومان از درگاه درخواست شد <span class="ad-log__who">· سارا</span></span></li>
+              <li class="st st-refunded ad-money"><span class="ad-log__when"><span class="num">11:41</span></span><span>بازپرداخت برگشت داده شد، کد پیگیری <span class="num">552190</span> <span class="ad-log__who">· درگاه، استعلام خودکار</span></span></li>
+              <li class="st st-refund-failed ad-money"><span class="ad-log__when"><span class="num">11:26</span></span><span>بازپرداخت از درگاه رد شد: موجودی کیف پول زیبال کافی نبود <span class="ad-log__who">· سارا</span></span></li>
               <li class="st st-order-shipped"><span class="ad-log__when"><span class="num">18:32</span></span><span>در حال چاپ ← تحویل پست شد <span class="ad-log__who">· حسن، فایل پست</span></span></li>
               <li class="st st-order-shipped"><span class="ad-log__when"><span class="num">18:32</span></span><span>کد رهگیری <span class="jy-barcode"><span>1188</span><span>0000</span><span>0000</span><span>0000</span><span>0000</span><span>0101</span></span> از <bdi>FileName-1984.xls</bdi> <span class="ad-log__who">· حسن</span></span></li>
               <li class="st st-order-shipped"><span class="ad-log__when"><span class="num">18:32</span></span><span>پیامک رهگیری به مشتری رفت <span class="ad-log__who">· سیستم</span></span></li>
@@ -1437,9 +1734,9 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
       <div class="ad-grid">
         <aside class="ad-side" aria-label="وضعیت">
           <section class="jy-card ad-status" aria-labelledby="t-st4">
-            <h2 id="t-st4" class="jy-card__title">هنوز پرداخت نشده</h2>
-            <p class="ad-meta">ساخته شد شنبه <span class="num">11</span> مهر، <span class="num">18:00</span></p>
-            <p class="jy-note ad-gap">مشتری از صفحهٔ سفارشش می‌تواند دوباره پرداخت کند. فایل‌ها تا دوشنبه <span class="num">13</span> مهر <span class="num">18:00</span> روی سرورند؛ بعد از آن سفارش «رهاشده» می‌شود.</p>
+            <h2 id="t-st4" class="jy-card__title">پرداخت در حال بررسی</h2>
+            <p class="ad-meta">ساخته شد امروز <span class="num">11:02</span></p>
+            <p class="jy-note ad-gap">مشتری از درگاه برگشت ولی زیبال هنوز جواب نداده؛ مشتری «پرداختت در حال بررسی است» می‌بیند، بی «دوباره پرداخت کن». فایل‌ها تا چهارشنبه <span class="num">15</span> مهر، <span class="num">10:40</span> روی سرورند؛ بعد از آن، سفارش پرداخت‌نشده «رهاشده» می‌شود.</p>
           </section>
         </aside>
         <div class="ad-main">
@@ -1460,10 +1757,18 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <div><dt>مبلغ</dt><dd><span class="num">336,350</span> تومان، با پست پیشتاز</dd></div>
             </dl>
           </section>
+          <!--
+            برش ۷ (ADR-050، سؤال ۱۲۱): پاسخ گم‌شده «ناموفق» نمی‌شود؛ استعلام خودکار هر ۲ دقیقه، و دکمهٔ «استعلام از درگاه». مهلت هر تلاش زیر
+            ۱۵ دقیقه‌ای که زیبال پول تأییدنشده را خودکار برمی‌گرداند؛ «10 دقیقه» پیشنهاد است و در ۷٫۲ پرسیده می‌شود.
+          -->
           <section class="jy-card" aria-labelledby="t-pay2">
-            <h2 id="t-pay2" class="jy-card__title">پرداخت‌ها</h2>
+            <div class="jy-card__head">
+              <h2 id="t-pay2" class="jy-card__title">پرداخت‌ها</h2>
+              <span class="jy-card__meta">زیبال</span>
+            </div>
             <ol class="ad-pay">
-              <li><span class="jy-badge jy-badge--neutral">بی برگشت</span><span>شنبه <span class="num">11</span> مهر، <span class="num">18:02</span></span><span class="ad-pay__meta">زیبال · مشتری به درگاه رفت و برنگشت. بعد از <span class="num">30</span> دقیقه، برگشت دیرش هم پذیرفته نمی‌شود.</span></li>
+              <li><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>در حال بررسی</span><span>امروز <span class="num">11:14</span></span><span class="ad-pay__meta">شناسهٔ زیبال <span class="num">3715022987</span> · مشتری <span class="num">11:16</span> برگشت ولی زیبال جواب نداد (سقف زمان <span class="num">10</span> ثانیه). استعلام خودکار هر <span class="num">2</span> دقیقه، آخرین <span class="num">11:18</span>؛ برگشتش تا <span class="num">11:24</span> پذیرفته می‌شود.</span><span class="ad-pay__act"><button type="button" class="jy-btn jy-btn--text">استعلام از درگاه</button></span></li>
+              <li><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>ناموفق</span><span>امروز <span class="num">11:03</span></span><span class="ad-pay__meta">شناسهٔ زیبال <span class="num">3715020114</span> · مشتری به درگاه رفت و برنگشت؛ استعلام خودکار <span class="num">11:14</span>: پرداخت نشده (درگاه: در انتظار پرداخت)، و مهلت <span class="num">10</span> دقیقه گذشته بود.</span></li>
             </ol>
           </section>
         </div>
@@ -2191,7 +2496,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
           <li>
             <div>
               <p><span class="ad-partners__name">چاپ نور</span></p>
-              <p class="ad-partners__meta">مشهد · <span class="num">2</span> سفارش باز · کاربر: حسن نوری</p>
+              <p class="ad-partners__meta">مشهد · <span class="num">2</span> سفارش باز · کاربر: حسن نوری · پیامک سفارش تازه به <span class="num">0915 123 4567</span></p>
             </div>
             <div class="ad-people__btns"><button type="button" class="jy-btn jy-btn--text">ویرایش</button><button type="button" class="jy-btn jy-btn--text">پیش‌فرض کن</button></div>
           </li>
@@ -2221,6 +2526,12 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <input id="p-city" class="jy-input" value="مشهد، خراسان رضوی" aria-describedby="p-city-hint">
             </div>
             <p id="p-city-hint" class="jy-hint">همان فهرست شهرهای سایت. سفارش‌های همین شهر، و بعد همین استان، به این چاپخانه می‌روند.</p>
+          </div>
+          <!-- برش ۷٫۶ (سؤال ۱۲۶ و ۱۴۳)، پس از live: یک پیامک از صف برای هر سفارش تازه‌ای که به این چاپخانه برسد؛ نشانی پنل هرگز در پیامک -->
+          <div class="jy-field">
+            <label class="jy-label" for="p-mobile">موبایل اعلان <span class="jy-optional">(اختیاری)</span></label>
+            <input id="p-mobile" class="jy-input jy-input--ltr ad-short" type="tel" inputmode="numeric" value="09151234567" aria-describedby="p-mobile-hint">
+            <p id="p-mobile-hint" class="jy-hint">برای هر سفارش تازه‌ای که به این چاپخانه برسد، هنگام پرداخت یا جابه‌جایی، یک پیامک: «جزوه‌یار: سفارش تازه <span class="num">10027</span>؛ تحویل به پست تا دوشنبه <span class="num">13</span> مهر». خالی یعنی بی پیامک. نشانی پنل در پیامک نمی‌آید.</p>
           </div>
         </div>
         <div class="ad-actions">
@@ -2424,9 +2735,87 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
     </div>
 
     <!-- ===================== تنظیمات و کلیدها ===================== -->
+    <!--
+      برش ۷: کارت «مسیر خرید روی سایت» اول (ADR-052: .env توانایی را می‌گوید، پنل مخاطب را)، اعتبار پیامک و سقف روزانهٔ کد (ADR-049)، و شش
+      کلید، هر کدام با «آزمایش» (مقدار امروز، بی کد) و آزمایش پیش از ذخیرهٔ مقدار تازه؛ سه نتیجه: درست، رد شد، در دسترس نیست (سؤال ۱۳۸).
+    -->
     <div class="st st-settings-any st-ownpage">
       <div class="ad-pagehead"><h1 class="ad-title">تنظیمات</h1></div>
       <div class="ad-stack">
+
+        <section class="jy-card ad-live" aria-labelledby="t-live">
+          <div class="jy-card__head">
+            <h2 id="t-live" class="jy-card__title">مسیر خرید روی سایت</h2>
+            <span class="jy-card__meta"><bdi class="ltr">CHECKOUT_MODE=live</bdi> · زیبال و sms.ir</span>
+          </div>
+
+          <!-- آماده؛ مخاطب «پیش‌نمایش مالک»، پیش‌فرض پس از استقرار ۷٫۵ -->
+          <div class="st st-live-pre">
+            <div class="ad-live__state">
+              <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>آماده</span>
+              <span class="ad-live__who">کد پذیرنده، کلید API، سه قالب و نشانی برگشت سر جایشان‌اند.</span>
+            </div>
+            <ul class="ad-live__aud" aria-label="مخاطب">
+              <li><b>متوقف</b><span>هیچ‌کس سفارش تازه نمی‌دهد؛ برگشت از درگاه و استعلام کار می‌کنند.</span></li>
+              <li class="is-current" aria-current="true"><b>پیش‌نمایش مالک <span class="jy-badge jy-badge--neutral">حالا</span></b><span>فقط مرورگری که پیوند پیش‌نمایش را باز کرد؛ بقیه «ثبت سفارش آنلاین به‌زودی» می‌بینند. از امروز <span class="num">10:40</span>، سارا.</span></li>
+              <li><b>همه</b><span>همهٔ مشتری‌ها، با پول و پیامک واقعی.</span></li>
+            </ul>
+            <div class="ad-actions">
+              <label for="m-live-open" class="jy-btn jy-btn--primary">باز برای همه…</label>
+              <label for="m-live-link" class="jy-btn jy-btn--secondary">پیوند پیش‌نمایش بساز</label>
+              <button type="button" class="jy-btn jy-btn--text">توقف</button>
+            </div>
+            <div class="st st-live-link">
+              <div class="ad-keys__form ad-gap">
+                <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>فقط یک بار و تا ساعت <span class="num">11:35</span> کار می‌کند، و دوباره نشان داده نمی‌شود. در مرورگری بازش کن که با آن آزمایش می‌کنی؛ همان مرورگر تا <span class="num">24</span> ساعت مسیر خرید را می‌بیند، با نوار «پیش‌نمایش مالک».</span></p>
+                <div class="ad-linkbox">
+                  <input class="jy-input" readonly value="https://jozveyar.com/preview/Hk3m-9QaZ-2xVt" aria-label="پیوند پیش‌نمایش">
+                  <button type="button" class="jy-btn jy-btn--secondary">کپی</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- مخاطب «همه»: «توقف» کار اصلی است، بی کد و همان لحظه -->
+          <div class="st st-live-all">
+            <div class="ad-live__state">
+              <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>آماده</span>
+              <span class="ad-live__who">کد پذیرنده، کلید API، سه قالب و نشانی برگشت سر جایشان‌اند.</span>
+            </div>
+            <ul class="ad-live__aud" aria-label="مخاطب">
+              <li><b>متوقف</b><span>هیچ‌کس سفارش تازه نمی‌دهد؛ برگشت از درگاه و استعلام کار می‌کنند.</span></li>
+              <li><b>پیش‌نمایش مالک</b><span>فقط مرورگری که پیوند پیش‌نمایش را باز کرد.</span></li>
+              <li class="is-current" aria-current="true"><b>همه <span class="jy-badge jy-badge--neutral">حالا</span></b><span>همهٔ مشتری‌ها؛ از امروز <span class="num">11:02</span>، سارا، با کد تازه.</span></li>
+            </ul>
+            <div class="ad-actions">
+              <button type="button" class="jy-btn jy-btn--secondary">توقف مسیر خرید</button>
+              <button type="button" class="jy-btn jy-btn--text">برگرداندن به پیش‌نمایش</button>
+            </div>
+            <p class="ad-hint ad-gap">«توقف» همان لحظه و بی کد: مشتری تازه «ثبت سفارش موقتاً متوقف است» می‌بیند؛ پرداخت‌های در راه برمی‌گردند و بررسی می‌شوند. باز کردن دوباره با کد تازه.</p>
+          </div>
+
+          <!-- آماده نیست: نبودِ هر تکه یعنی خاموش، با نام تکه، هرگز مقدار (ADR-052) -->
+          <div class="st st-live-notready">
+            <div class="ad-live__state">
+              <span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>خاموش</span>
+              <span class="ad-live__who">مشتری «ثبت سفارش آنلاین به‌زودی» می‌بیند، هر مخاطبی که اینجا باشد.</span>
+            </div>
+            <ul class="ad-need" aria-label="آمادگی مسیر خرید">
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>درگاه زیبال<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>پیامک sms.ir<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>کد پذیرنده<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>کلید API<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>قالب کد تأیید<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>قالب پرداخت<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-error" aria-hidden="true"></span>قالب رهگیری<span class="sr-only">، خالی</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>نشانی برگشت https<span class="sr-only">، آماده</span></li>
+              <li><span class="jy-icon jy-icon-success" aria-hidden="true"></span>صفحهٔ قوانین<span class="sr-only">، آماده</span></li>
+            </ul>
+            <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>«شناسهٔ قالب پیامک رهگیری» خالی است. پایین‌تر واردش کن و پیامک آزمایشی بگیر؛ مسیر خرید همان لحظه آماده می‌شود، با مخاطب «پیش‌نمایش مالک».</span></p>
+            <p class="ad-hint ad-gap">تا آماده نشده، مخاطب عوض نمی‌شود. درگاه، پیامک و خود live فقط در <bdi class="ltr">.env</bdi> سرور عوض می‌شوند.</p>
+          </div>
+        </section>
+
         <div class="ad-cards">
           <section class="jy-card" aria-labelledby="t-sla">
             <h2 id="t-sla" class="jy-card__title">تحویل به پست</h2>
@@ -2443,13 +2832,19 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
             </div>
             <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
           </section>
+          <!-- برش ۷: سقف روزانهٔ کل سایت (otp.site_daily_limit) کنار سقف ساعتی، و شمار واقعی تا سقف معنا داشته باشد -->
           <section class="jy-card" aria-labelledby="t-otp">
             <h2 id="t-otp" class="jy-card__title">سقف کد پیامکی</h2>
+            <p class="ad-usage">ساعت گذشته <span class="num">18</span> کد · <span class="num">24</span> ساعت گذشته <span class="num">312</span> کد</p>
             <div class="ad-form">
               <div class="jy-field">
                 <label class="jy-label" for="s-otp">کد در ساعت، برای کل سایت</label>
-                <input id="s-otp" class="jy-input jy-input--ltr ad-short" inputmode="numeric" value="300" aria-describedby="s-otp-hint">
-                <p id="s-otp-hint" class="jy-hint">جلوی رباتی که با شماره‌ها و اینترنت‌های زیاد پیامک می‌فرستد. سقف هر شماره (<span class="num">5</span>) و هر اینترنت (<span class="num">20</span>) ثابت است.</p>
+                <input id="s-otp" class="jy-input jy-input--ltr ad-short" inputmode="numeric" value="300">
+              </div>
+              <div class="jy-field">
+                <label class="jy-label" for="s-otp-day">کد در <span class="num">24</span> ساعت، برای کل سایت</label>
+                <input id="s-otp-day" class="jy-input jy-input--ltr ad-short" inputmode="numeric" value="2,000" aria-describedby="s-otp-hint">
+                <p id="s-otp-hint" class="jy-hint">ترمز آخر در برابر ربات؛ پر شدن هر کدام هشدار پیشخوان است. ثابت‌ها: هر مرورگر <span class="num">5</span> در ساعت؛ هر شماره <span class="num">5</span> در ساعت و <span class="num">10</span> در <span class="num">24</span> ساعت؛ هر اینترنت <span class="num">20</span> در ساعت؛ و کد فقط برای مرورگری که جزوهٔ آماده روی سرور دارد.</p>
               </div>
             </div>
             <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
@@ -2466,6 +2861,27 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
                   <button type="button" aria-label="بیشتر"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span></button>
                 </div>
                 <p id="s-keep-hint" class="jy-hint">PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند. فایل پست خام و سطرهایی که سفارش ما نشدند هم همین‌قدر پس از ورودشان.</p>
+              </div>
+            </div>
+            <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
+          </section>
+          <!-- برش ۷ (سؤال ۱۳۷): عدد خود sms.ir، و «برای حدود N روز» از هزینهٔ پیامک‌های هفتهٔ گذشته؛ آستانهٔ هشدار به روز -->
+          <section class="jy-card" aria-labelledby="t-credit">
+            <div class="jy-card__head">
+              <h2 id="t-credit" class="jy-card__title">اعتبار پیامک</h2>
+              <span class="jy-card__meta">sms.ir، ساعت <span class="num">11:20</span></span>
+            </div>
+            <p class="ad-credit"><span class="num">184,200</span><small>تومان</small></p>
+            <p class="ad-usage">برای حدود <span class="num">23</span> روز با مصرف هفتهٔ گذشته: روزی حدود <span class="num">8,000</span> تومان، <span class="num">74</span> پیامک.</p>
+            <div class="ad-form">
+              <div class="jy-field">
+                <label class="jy-label" for="s-credit">هشدار پیشخوان وقتی اعتبار کمتر از این شد (روز مصرف)</label>
+                <div class="jy-stepper">
+                  <button type="button" aria-label="کمتر"><span class="jy-icon jy-icon-minus" aria-hidden="true"></span></button>
+                  <input id="s-credit" type="number" value="7" aria-describedby="s-credit-hint">
+                  <button type="button" aria-label="بیشتر"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span></button>
+                </div>
+                <p id="s-credit-hint" class="jy-hint">اعتبار را از پنل sms.ir شارژ کن. بی اعتبار، کد تأیید نمی‌رود و کسی نمی‌تواند سفارش بدهد.</p>
               </div>
             </div>
             <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">ذخیره</button></div>
@@ -2493,26 +2909,31 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
           </div>
         </section>
 
+        <!--
+          کلیدها (ADR-041؛ برش ۷، ADR-049): دو کلید تازهٔ قالب. هر قالب متن و نام پارامترهایش را از همان یک منبع کد نشان می‌دهد، تا در sms.ir عین همین
+          ساخته شود (#…# شکل پارامتر است به قاعدهٔ sms.ir، منتظر مستند). شناسهٔ قالب راز نیست و کامل دیده می‌شود؛ کلید API و کد پذیرنده فقط ۴ نویسهٔ آخر.
+        -->
         <section class="jy-card" aria-labelledby="t-keys">
           <div class="jy-card__head">
             <h2 id="t-keys" class="jy-card__title">کلیدهای سرویس‌ها</h2>
             <span class="jy-card__meta">فقط مالک</span>
           </div>
-          <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-lock" aria-hidden="true"></span><span>کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود. مقدار پنل بر مقدار <bdi class="ltr">.env</bdi> مقدم است. سایت از این کلیدها با راه افتادن درگاه و پنل پیامک واقعی استفاده می‌کند.</span></p>
+          <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-lock" aria-hidden="true"></span><span>کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود؛ شناسهٔ قالب راز نیست و کامل دیده می‌شود. مقدار پنل بر مقدار <bdi class="ltr">.env</bdi> مقدم است. هر مقدار تازه پیش از ذخیره با خود سرویس آزموده می‌شود، و «آزمایش» مقدار امروز را بی تغییر می‌سنجد.</span></p>
           <ul class="ad-keys ad-gap">
             <li>
               <div>
-                <p class="ad-keys__name">کلید API کاوه‌نگار</p>
+                <p class="ad-keys__name">کلید API sms.ir</p>
                 <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">از <bdi class="ltr">.env</bdi></span><span class="ad-mask">••••••••3f9a</span></p>
+                <p class="ad-keys__test"><span class="jy-icon jy-icon-success is-ok" aria-hidden="true"></span><span>درست · آزمایش امروز <span class="num">10:52</span>: sms.ir پذیرفت، اعتبار <span class="num">184,200</span> تومان.</span></p>
               </div>
-              <div class="ad-keys__btns"><label for="m-key-edit" class="jy-btn jy-btn--text">تغییر</label></div>
+              <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">آزمایش</button><label for="m-key-edit" class="jy-btn jy-btn--text">تغییر</label></div>
               <div class="st st-key-edit">
                 <div class="ad-keys__form">
                   <div class="ad-form">
                     <div class="jy-field">
                       <label class="jy-label" for="k-val">کلید تازه</label>
                       <input id="k-val" class="jy-input jy-input--ltr" type="password" autocomplete="off" aria-describedby="k-val-hint">
-                      <p id="k-val-hint" class="jy-hint">بعد از ذخیره فقط <span class="num">4</span> نویسهٔ آخرش دیده می‌شود. آزمایش کلید با خود پنل پیامک واقعی می‌آید.</p>
+                      <p id="k-val-hint" class="jy-hint">پیش از ذخیره با خود sms.ir آزموده می‌شود: اعتبار حساب، بی پیامک و بی هزینه. «رد شد» ذخیره نمی‌شود. بعد از ذخیره فقط <span class="num">4</span> نویسهٔ آخرش دیده می‌شود.</p>
                     </div>
                     <div class="jy-field">
                       <label class="jy-label" for="k-code">کد برنامهٔ تأیید</label>
@@ -2520,7 +2941,28 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
                     </div>
                   </div>
                   <div class="ad-actions">
-                    <label for="m-settings" class="jy-btn jy-btn--primary">ذخیره</label>
+                    <label for="m-settings" class="jy-btn jy-btn--primary">آزمایش و ذخیره</label>
+                    <label for="m-settings" class="jy-btn jy-btn--text">انصراف</label>
+                  </div>
+                </div>
+              </div>
+              <div class="st st-key-down">
+                <div class="ad-keys__form">
+                  <p class="jy-note jy-note--warning" role="alert"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><b>در دسترس نیست:</b> sms.ir در <span class="num">10</span> ثانیه جواب نداد، پس کلید تازه آزموده و ذخیره نشد. کمی بعد دوباره بیازما، یا بی آزمایش ذخیره کن و بعد با «آزمایش» بسنجش.</span></p>
+                  <div class="ad-form">
+                    <div class="jy-field">
+                      <label class="jy-label" for="k-val2">کلید تازه</label>
+                      <input id="k-val2" class="jy-input jy-input--ltr" type="password" autocomplete="off" aria-describedby="k-val2-hint">
+                      <p id="k-val2-hint" class="jy-hint">کلید پس از هر پاسخ پاک می‌شود و به مرورگر برنمی‌گردد؛ دوباره واردش کن.</p>
+                    </div>
+                    <div class="jy-field">
+                      <label class="jy-label" for="k-code2">کد برنامهٔ تأیید</label>
+                      <input id="k-code2" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+                    </div>
+                  </div>
+                  <div class="ad-actions">
+                    <label for="m-settings" class="jy-btn jy-btn--primary">دوباره آزمایش و ذخیره</label>
+                    <label for="m-settings" class="jy-btn jy-btn--secondary">بی آزمایش ذخیره کن</label>
                     <label for="m-settings" class="jy-btn jy-btn--text">انصراف</label>
                   </div>
                 </div>
@@ -2528,8 +2970,53 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
             </li>
             <li>
               <div>
-                <p class="ad-keys__name">قالب کد پیامکی کاوه‌نگار</p>
-                <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">خالی</span><span>نام قالبی که در پنل کاوه‌نگار تأیید می‌شود</span></p>
+                <p class="ad-keys__name">شناسهٔ قالب کد تأیید</p>
+                <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">از پنل</span><span class="num">482913</span><span>سارا، <span class="num">1405/07/12</span></span></p>
+                <p class="ad-keys__tpl">متن در sms.ir، دو خط: «کد تأیید جزوه‌یار: <code>#CODE#</code><br>این کد را به کسی نده.» · پارامتر: <code>CODE</code></p>
+                <p class="ad-keys__test"><span class="jy-icon jy-icon-success is-ok" aria-hidden="true"></span><span>درست · پیامک آزمایشی امروز <span class="num">10:47</span> به <span class="num">0912 ••• 6789</span> رفت.</span></p>
+              </div>
+              <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">آزمایش</button><button type="button" class="jy-btn jy-btn--text">تغییر</button><button type="button" class="jy-btn jy-btn--text"><span>برگرداندن به <bdi class="ltr">.env</bdi></span></button></div>
+            </li>
+            <li>
+              <div>
+                <p class="ad-keys__name">شناسهٔ قالب پیامک پرداخت</p>
+                <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">خالی</span><span>قالبی که با همین متن در sms.ir تأیید شد</span></p>
+                <p class="ad-keys__tpl">متن در sms.ir: «جزوه‌یار: سفارش <code>#ORDER#</code> پرداخت شد؛ تحویل به پست تا <code>#DAY#</code>» · پارامترها: <code>ORDER</code>، <code>DAY</code></p>
+              </div>
+              <div class="ad-keys__btns"><label for="m-key-tpl" class="jy-btn jy-btn--text">وارد کن</label></div>
+              <div class="st st-key-tpl">
+                <div class="ad-keys__form">
+                  <div class="ad-form">
+                    <div class="jy-field">
+                      <label class="jy-label" for="kt-id">شناسهٔ قالب</label>
+                      <input id="kt-id" class="jy-input jy-input--ltr ad-short" inputmode="numeric" value="731058">
+                    </div>
+                    <div class="jy-field">
+                      <label class="jy-label" for="kt-tel">موبایل برای پیامک آزمایشی</label>
+                      <input id="kt-tel" class="jy-input jy-input--ltr ad-short" type="tel" inputmode="numeric" value="09123456789" aria-describedby="kt-tel-hint">
+                      <p id="kt-tel-hint" class="jy-hint">یک پیامک واقعی با پارامترهای نمونه به همین شماره می‌رود، به هزینهٔ یک پیامک؛ سقف <span class="num">10</span> آزمایش در ساعت.</p>
+                    </div>
+                  </div>
+                  <p class="jy-note jy-note--success ad-gap" role="status"><span class="jy-icon jy-icon-success" aria-hidden="true"></span><span><b>پیامک آزمایشی رفت</b> (sms.ir پذیرفت). روی گوشی ببین همین رسیده: «جزوه‌یار: سفارش <span class="num">10001</span> پرداخت شد؛ تحویل به پست تا دوشنبه <span class="num">6</span> مهر». اگر فرق داشت، قالب را در sms.ir درست کن، نه اینجا.</span></p>
+                  <div class="ad-form">
+                    <div class="jy-field">
+                      <label class="jy-label" for="kt-code">کد برنامهٔ تأیید</label>
+                      <input id="kt-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+                    </div>
+                  </div>
+                  <div class="ad-actions">
+                    <label for="m-settings" class="jy-btn jy-btn--primary">ذخیره</label>
+                    <button type="button" class="jy-btn jy-btn--secondary">دوباره بفرست</button>
+                    <label for="m-settings" class="jy-btn jy-btn--text">انصراف</label>
+                  </div>
+                </div>
+              </div>
+            </li>
+            <li>
+              <div>
+                <p class="ad-keys__name">شناسهٔ قالب پیامک رهگیری</p>
+                <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">خالی</span><span>قالبی که با همین متن در sms.ir تأیید شد</span></p>
+                <p class="ad-keys__tpl">متن در sms.ir: «جزوه‌یار: سفارش <code>#ORDER#</code> به پست رسید. کد رهگیری <code>#BARCODE#</code>» · پارامترها: <code>ORDER</code>، <code>BARCODE</code></p>
               </div>
               <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">وارد کن</button></div>
             </li>
@@ -2537,12 +3024,59 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               <div>
                 <p class="ad-keys__name">کد پذیرندهٔ زیبال</p>
                 <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">از پنل</span><span class="ad-mask">••••c2d8</span><span>سارا، <span class="num">1405/07/12</span></span></p>
+                <p class="ad-keys__test"><span class="jy-icon jy-icon-error is-bad" aria-hidden="true"></span><span>رد شد · آزمایش امروز <span class="num">11:14</span>: زیبال IP سرور را نپذیرفت (کد <span class="num">115</span>).</span></p>
               </div>
-              <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">تغییر</button><button type="button" class="jy-btn jy-btn--text"><span>برگرداندن به <bdi class="ltr">.env</bdi></span></button></div>
+              <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">آزمایش</button><label for="m-key-rejected" class="jy-btn jy-btn--text">تغییر</label><button type="button" class="jy-btn jy-btn--text"><span>برگرداندن به <bdi class="ltr">.env</bdi></span></button></div>
+              <div class="st st-key-rejected">
+                <div class="ad-keys__form">
+                  <p class="jy-note jy-note--error" role="alert"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span><b>رد شد:</b> زیبال IP این سرور را نپذیرفت (کد <span class="num">115</span>)، پس کد پذیرندهٔ تازه ذخیره نشد. IP سرور را در پنل زیبال، تنظیمات درگاه، ثبت کن و دوباره بیازما؛ خود کد پذیرنده ممکن است درست باشد.</span></p>
+                  <div class="ad-form">
+                    <div class="jy-field">
+                      <label class="jy-label" for="km-val">کد پذیرندهٔ تازه</label>
+                      <input id="km-val" class="jy-input jy-input--ltr" type="password" autocomplete="off" aria-describedby="km-val-hint">
+                      <p id="km-val-hint" class="jy-hint">آزمایش یک درخواست پرداخت <span class="num">1,000</span> تومانی است که کسی به صفحه‌اش نمی‌رود: کد پذیرنده، نشانی برگشت و IP سرور را با هم می‌سنجد. کلید پس از هر پاسخ پاک می‌شود؛ دوباره واردش کن.</p>
+                    </div>
+                    <div class="jy-field">
+                      <label class="jy-label" for="km-code">کد برنامهٔ تأیید</label>
+                      <input id="km-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+                    </div>
+                  </div>
+                  <div class="ad-actions">
+                    <label for="m-settings" class="jy-btn jy-btn--primary">آزمایش و ذخیره</label>
+                    <label for="m-settings" class="jy-btn jy-btn--text">انصراف</label>
+                  </div>
+                </div>
+              </div>
             </li>
           </ul>
         </section>
       </div>
+    </div>
+
+    <!-- ===================== برش ۷: باز کردن مسیر خرید برای همه، با کد تازه (ADR-052) ===================== -->
+    <div class="st st-live-open st-ownpage">
+      <label for="m-settings" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>تنظیمات</label>
+      <section class="jy-card" style="max-width: 36rem" aria-labelledby="t-open">
+        <h1 id="t-open" class="jy-card__title">باز کردن مسیر خرید برای همه</h1>
+        <ul class="ad-changes ad-gap">
+          <li><span class="ad-changes__k">مخاطب</span><span>پیش‌نمایش مالک ← همه</span></li>
+          <li><span class="ad-changes__k">صفحهٔ اصلی</span><span>«ثبت سفارش آنلاین به‌زودی» ← «ادامه» و پرداخت با زیبال</span></li>
+          <li><span class="ad-changes__k">پیامک</span><span>کد، پرداخت و رهگیری با sms.ir؛ اعتبار <span class="num">184,200</span> تومان</span></li>
+        </ul>
+        <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>از همین لحظه هر مشتری سفارش می‌دهد و پول واقعی جابه‌جا می‌شود. برای بستن، «توقف» در همین «تنظیمات» بی کد و همان لحظه است.</span></p>
+        <p class="ad-hint ad-gap">پیش از این: یک سفارش واقعی کوچک در پیش‌نمایش تا پیامک رهگیری، و یک سفارش تا لغو و بازپرداخت.</p>
+        <div class="ad-form">
+          <div class="jy-field">
+            <label class="jy-label" for="o-code">کد برنامهٔ تأیید</label>
+            <input id="o-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-describedby="o-code-hint">
+            <p id="o-code-hint" class="jy-hint">برای کار حساس، کد تازه لازم است.</p>
+          </div>
+        </div>
+        <div class="ad-actions">
+          <label for="m-live-all" class="jy-btn jy-btn--primary">باز کن</label>
+          <label for="m-settings" class="jy-btn jy-btn--text">انصراف</label>
+        </div>
+      </section>
     </div>
 
     <!-- ===================== ادمین‌ها ===================== -->
@@ -2626,6 +3160,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
         <a class="ad-chip is-current" href="#" aria-current="page">همه</a>
         <a class="ad-chip" href="#">ورود</a>
         <a class="ad-chip" href="#">سفارش</a>
+        <a class="ad-chip" href="#">پرداخت و بازپرداخت</a>
         <a class="ad-chip" href="#">ارسال</a>
         <a class="ad-chip" href="#">تعرفه</a>
         <a class="ad-chip" href="#">تنظیمات و کلیدها</a>
@@ -2635,13 +3170,23 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
       <section class="jy-card" aria-label="رویدادهای امروز">
         <h2 class="jy-card__title">امروز، دوشنبه <span class="num">13</span> مهر</h2>
         <ol class="ad-log">
+          <li><span class="ad-log__when"><span class="num">11:20</span> · علی</span><span>سفارش <span class="num">10030</span>: استعلام از درگاه؛ زیبال جواب نداد</span></li>
           <li><span class="ad-log__when"><span class="num">11:19</span> · علی</span><span>سفارش <span class="num">10041</span> از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه چاپ نور تا فردا خراب است</span></li>
+          <li><span class="ad-log__when"><span class="num">11:15</span> · سارا</span><span>مسیر خرید روی سایت: همه ← متوقف</span></li>
+          <li><span class="ad-log__when"><span class="num">11:14</span> · سارا</span><span>کلید «کد پذیرندهٔ زیبال» آزمایش شد: رد شد، IP سرور (کد <span class="num">115</span>)</span></li>
+          <li><span class="ad-log__when"><span class="num">11:13</span> · علی</span><span>سفارش <span class="num">10027</span>: پیامک پرداخت دوباره فرستاده شد</span></li>
           <li><span class="ad-log__when"><span class="num">11:18</span> · سارا</span><span>کلید «کد پذیرندهٔ زیبال» عوض شد</span></li>
           <li><span class="ad-log__when"><span class="num">11:07</span> · سارا</span><span>فایل پست <bdi>FileName-1981.xls</bdi> ثبت شد: <span class="num">9</span> کد رهگیری، <span class="num">4</span> سطر در صف تأیید، <span class="num">1</span> پیدا نشد، <span class="num">1</span> تکراری</span></li>
           <li><span class="ad-log__when"><span class="num">11:05</span> · سارا</span><span>فایل پست <bdi>FileName-1981.xls</bdi> بارگذاری شد، <span class="num">15</span> سطر</span></li>
           <li><span class="ad-log__when"><span class="num">10:44</span> · سارا</span><span>پیوند ثبت برای حسن (چاپخانه، چاپ نور) ساخته شد</span></li>
           <li><span class="ad-log__when"><span class="num">10:40</span> · سارا</span><span>چاپخانهٔ «چاپ نور» در مشهد افزوده شد</span></li>
-          <li><span class="ad-log__when"><span class="num">11:02</span> · سارا</span><span>نسخهٔ <span class="num">2</span> تعرفه فعال شد</span></li>
+          <li><span class="ad-log__when"><span class="num">11:02</span> · سارا</span><span>مسیر خرید روی سایت: پیش‌نمایش مالک ← همه، با کد تازه</span></li>
+          <li><span class="ad-log__when"><span class="num">11:01</span> · سارا</span><span>نسخهٔ <span class="num">2</span> تعرفه فعال شد</span></li>
+          <li><span class="ad-log__when"><span class="num">10:58</span> · سارا</span><span>سفارش <span class="num">10033</span>: بازپرداخت دستی <span class="num">462,500</span> تومان ثبت شد، کد پیگیری <span class="num">91822</span></span></li>
+          <li><span class="ad-log__when"><span class="num">10:52</span> · سارا</span><span>کلید «کلید API sms.ir» آزمایش شد: درست</span></li>
+          <li><span class="ad-log__when"><span class="num">10:50</span> · سارا</span><span>کلید «شناسهٔ قالب پیامک پرداخت» پس از پیامک آزمایشی ذخیره شد</span></li>
+          <li><span class="ad-log__when"><span class="num">10:48</span> · سارا</span><span>سقف کد در <span class="num">24</span> ساعت: <span class="num">2,000</span> ← <span class="num">3,000</span></span></li>
+          <li><span class="ad-log__when"><span class="num">10:41</span> · سارا</span><span>پیوند پیش‌نمایش مسیر خرید ساخته شد، تا <span class="num">10:56</span></span></li>
           <li><span class="ad-log__when"><span class="num">10:31</span> · سارا</span><span>پیوند ثبت برای رضا (متصدی) ساخته شد</span></li>
           <li><span class="ad-log__when"><span class="num">10:02</span> · سارا</span><span>ورود</span></li>
           <li><span class="ad-log__when"><span class="num">09:40</span> · علی</span><span>PDF سفارش <span class="num">10027</span> دانلود شد</span></li>
@@ -2709,6 +3254,7 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
               </ol>
             </section>
           </div>
+          <!-- برش ۷: «در حال برگشت» و «برگشت داده شد» این صفحه در طرح مسیر خرید است (checkout.html، m-refunding و m-refunded) -->
           <div class="st st-c-cancelled">
             <section class="jy-card" aria-labelledby="t-c3">
               <span class="jy-icon jy-icon-error ck-done__icon ck-done__icon--error" aria-hidden="true"></span>
