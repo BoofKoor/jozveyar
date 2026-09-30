@@ -105,8 +105,18 @@ async function ownerContext(browser: Browser, o: Seeded, viewport = { width: 128
   const token = randomBytes(32).toString('base64url');
   await sql`INSERT INTO sessions (token_hash, user_id, expires_at)
             VALUES (${createHash('sha256').update(token).digest('hex')}, ${o.userId}, ${new Date(Date.now() + DAY)})`;
-  const context = await browser.newContext({ baseURL: WEB, viewport });
+  const context = await customerContext(browser, viewport);
   await context.addCookies([{ name: 'jy_auth', value: token, url: WEB! }]);
+  return context;
+}
+
+/**
+ * زمینهٔ مرورگر مشتری. نشان اینماد پاورقی از `trustseal.enamad.ir` است و از اجراگر CI گاهی جواب نمی‌دهد، پس `load` صفحه دو دقیقه
+ * می‌ماند؛ جوابش این‌جا خالی است. درخواستش همچنان دیده می‌شود (`external`، رویداد `request` پیش از route).
+ */
+async function customerContext(browser: Browser, viewport = { width: 1280, height: 800 }): Promise<BrowserContext> {
+  const context = await browser.newContext({ baseURL: WEB, viewport });
+  await context.route('https://trustseal.enamad.ir/**', (route) => route.fulfill({ status: 204, body: '' }));
   return context;
 }
 
@@ -274,7 +284,7 @@ test.describe.serial('پیامک رهگیری', () => {
     expect(seen).toEqual([]);
     await mine.close();
 
-    const stranger = await browser.newContext({ baseURL: WEB });
+    const stranger = await customerContext(browser);
     const other = await stranger.newPage();
     const strangerSeen = external(other);
     await other.goto(`/order/${o.A.token}`);
