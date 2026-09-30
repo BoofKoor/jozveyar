@@ -13,12 +13,12 @@ import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutDocument } from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
-import { consoleSms, type SmsProvider } from '@jozveyar/sms';
+import { consoleTransport, deliverQueued, orderPaidText, type SmsTransport } from '@jozveyar/sms';
 
 import type { AuthUser } from './auth';
 import { createCheckoutService } from './checkout';
 import { MOCK_AUTHORITY, mockGateway } from './payments';
-import { memoryOrderStore, memorySmsLog } from './testing';
+import { memoryOrderStore, memoryPaidSmsOutbox } from './testing';
 
 const ME = 'a'.repeat(64);
 const OTHER = 'b'.repeat(64);
@@ -36,15 +36,19 @@ const KARAJ_IN_TEHRAN = { provinceId: 8, cityId: 1094 };
 describe('مسیر خرید روی سرور', () => {
   let clock: Date;
   let orders: ReturnType<typeof memoryOrderStore>;
-  let sms: ReturnType<typeof memorySmsLog>;
   let service: ReturnType<typeof createCheckoutService>;
   const logs: string[] = [];
 
-  function build(provider?: SmsProvider) {
+  /** پیامک پرداخت از صف (۷٫۱): ردیف منتظر تسویه، با همان `deliverQueued` و آداپتور کنسولی یا ساختگی. */
+  function build(transport: SmsTransport = consoleTransport(() => undefined)) {
     service = createCheckoutService({
       orders,
       gateway: mockGateway({ newRefId: () => '803114' }),
-      sms: provider ?? consoleSms(sms, () => undefined),
+      paidSms: (id) =>
+        deliverQueued(
+          { outbox: memoryPaidSmsOutbox(orders), transport, log: (message, error) => logs.push(`${message} ${String(error ?? '')}`) },
+          [id],
+        ),
       callbackUrl: '/pay/callback',
       now: () => clock,
       log: (message) => logs.push(message),
@@ -54,7 +58,6 @@ describe('مسیر خرید روی سرور', () => {
   beforeEach(() => {
     clock = new Date('2026-09-26T08:00:00Z');
     orders = memoryOrderStore({ priceList: SEED_PRICE_LIST, now: () => clock });
-    sms = memorySmsLog();
     logs.length = 0;
     build();
   });
@@ -383,11 +386,31 @@ describe('مسیر خرید روی سرور', () => {
         { kind: 'prepare_order', orderId: row!.id },
         { kind: 'prepare_ticket', orderId: row!.id },
       ]);
-      expect(sms.messages).toEqual([
-        expect.objectContaining({ toMobile: SARA.mobile, purpose: 'order_paid' }),
+      // پیامک پرداخت از صف (۷٫۱): ردیف منتظر در تسویه، و بعد از commit همان یک بار رفت.
+      expect(orders.paidSms).toEqual([
+        expect.objectContaining({
+          toMobile: SARA.mobile,
+          body: orderPaidText(10001, 'دوشنبه 6 مهر'),
+          params: ['10001', 'دوشنبه 6 مهر'],
+          status: 'logged',
+          provider: 'console',
+          attempts: 1,
+        }),
       ]);
-      expect(sms.messages[0]!.body).toContain('10001');
-      expect(sms.messages[0]!.body).toContain('دوشنبه 6 مهر');
+      expect(orders.payments[0]!.smsMessageId).toBe(orders.paidSms[0]!.id);
+    });
+
+    it('پیامکی که نرفت پرداخت را برنمی‌گرداند: ردیف «نرفت» می‌ماند برای «دوباره بفرست» پنل (۷٫۱)', async () => {
+      build({
+        name: 'smsir',
+        send: async () => {
+          throw new Error('panel down');
+        },
+      });
+      const { order, payment } = await placed([doc(120)]);
+      expect(await pay(payment!.redirectUrl, 'success')).toEqual({ ok: true, value: { token: order.token, payment: 'succeeded' } });
+      expect(orders.orders[0]!.status).toBe('paid');
+      expect(orders.paidSms).toEqual([expect.objectContaining({ status: 'failed', provider: 'smsir', error: 'unavailable', attempts: 1 })]);
     });
 
     it('پرداخت چاپخانه را هم انتخاب می‌کند (برش ۵٫۲): هم‌شهر، وگرنه هم‌استان، وگرنه پیش‌فرض؛ کرایه همان', async () => {
@@ -431,7 +454,7 @@ describe('مسیر خرید روی سرور', () => {
       expect(orders.orders[0]).toMatchObject({ status: 'paid', printPartnerId: null });
       expect(orders.assignments).toEqual([]);
       expect(orders.jobs).toHaveLength(2);
-      expect(sms.messages).toHaveLength(1);
+      expect(orders.paidSms).toHaveLength(1);
     });
 
     it('برگشت تکراری (رفرش) همان نتیجه است: پیامک و کار دوم نمی‌سازد', async () => {
@@ -441,7 +464,7 @@ describe('مسیر خرید روی سرور', () => {
       expect(await service.settle(authority, 'OK')).toMatchObject({ ok: true, value: { payment: 'succeeded' } });
       expect(orders.jobs).toHaveLength(2);
       expect(orders.assignments).toHaveLength(1);
-      expect(sms.messages).toHaveLength(1);
+      expect(orders.paidSms).toEqual([expect.objectContaining({ status: 'logged', attempts: 1 })]);
     });
 
     it('`Status=OK` نشانی هیچ‌وقت پرداخت نمی‌سازد: سنجش، تصمیم ثبت‌شدهٔ درگاه را می‌خواند', async () => {
@@ -456,7 +479,7 @@ describe('مسیر خرید روی سرور', () => {
       expect(await service.settle(authority, 'OK')).toMatchObject({ value: { payment: 'failed' } });
       expect(orders.payments.find((p) => p.authority === authority)).toMatchObject({ failureCode: 'cancelled' });
       expect(orders.jobs).toHaveLength(0);
-      expect(sms.messages).toHaveLength(0);
+      expect(orders.paidSms).toHaveLength(0);
     });
 
     it('پرداخت ناموفق: سفارش با همان قیمت می‌ماند و «دوباره پرداخت کن» تلاش تازه است', async () => {
@@ -521,7 +544,9 @@ describe('مسیر خرید روی سرور', () => {
       const { payment } = await placed([doc(10)]);
       expect(await pay(payment!.redirectUrl, 'success')).toMatchObject({ value: { payment: 'succeeded' } });
       expect(orders.orders[0]!.status).toBe('paid');
-      expect(logs.some((line) => line.includes('پیامک پرداخت'))).toBe(true);
+      // از ۷٫۱ از صف: یک خط لاگ با علت، بی متن خطای پنل.
+      expect(logs.some((line) => line.includes('(order_paid) نرفت') && line.includes('unavailable'))).toBe(true);
+      expect(logs.join(' ')).not.toContain('panel down');
     });
 
     it('Authority ناشناس یا بدشکل: ۴۰۴', async () => {

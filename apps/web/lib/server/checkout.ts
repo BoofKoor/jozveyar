@@ -7,7 +7,7 @@
  * `quote()` است با تعرفهٔ فعال پایگاه داده (قاعدهٔ ۱). عددی که مرورگر نشان داده فقط برای سنجیدن است:
  * اگر با عدد سرور نخواند، سفارش ساخته نمی‌شود و عدد تازه برمی‌گردد.
  *
- * هر وابستگی بیرونی از درگاه می‌آید (`OrderStore`، `PaymentGateway`، `SmsProvider`)، پس کل منطق با
+ * هر وابستگی بیرونی از درگاه می‌آید (`OrderStore`، `PaymentGateway`، و فرستادن پیامک پرداخت از صف)، پس کل منطق با
  * پیاده‌سازی حافظه‌ای تست می‌شود؛ درستی تراکنش‌ها و قفل‌ها در تست یکپارچگی `packages/db`.
  */
 
@@ -37,7 +37,7 @@ import {
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { orderPaidText, smsState, type SmsProvider } from '@jozveyar/sms';
+import { smsState } from '@jozveyar/sms';
 import { formatDeadlineDay, formatJalaliWeekday, postHandoffDue } from '@jozveyar/text';
 import { checkRecipient } from '@jozveyar/text/input';
 
@@ -60,7 +60,11 @@ const AUTHORITY = /^[A-Za-z0-9_-]{8,64}$/;
 export interface CheckoutDeps {
   orders: OrderStore;
   gateway: PaymentGateway;
-  sms: SmsProvider;
+  /**
+   * پیامک پرداخت (۷٫۱، ADR-049): ردیف «منتظر» که تسویه در همان تراکنش نوشت، بعد از commit (`deliverQueued`). شکستش پرداخت را
+   * برنمی‌گرداند؛ ردیف «نرفت» می‌ماند و پنل «دوباره بفرست» دارد.
+   */
+  paidSms: (smsMessageId: number) => Promise<unknown>;
   /** نشانی برگشت از درگاه (`/pay/callback`). */
   callbackUrl: string;
   now?: () => Date;
@@ -410,8 +414,9 @@ export function createCheckoutService(deps: CheckoutDeps) {
 
     /**
      * برگشت از درگاه (`/pay/callback`). سنجش سمت سرور، زیر قفل پرداخت و سفارش؛ برگشت تکراری همان نتیجهٔ
-     * قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد و کارهای
-     * `prepare_order` و `prepare_ticket` (برش ۵٫۱)؛ بعد پیامک شمارهٔ سفارش. ناموفق: سفارش `awaiting_payment` با همان قیمت می‌ماند.
+     * قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد، کارهای
+     * `prepare_order` و `prepare_ticket` (برش ۵٫۱) و از ۷٫۱ ردیف منتظر پیامک پرداخت؛ بعد از commit همان پیامک. ناموفق: سفارش
+     * `awaiting_payment` با همان قیمت می‌ماند.
      */
     async settle(
       authority: string,
@@ -445,14 +450,11 @@ export function createCheckoutService(deps: CheckoutDeps) {
       if (!result) return fail(404, 'not_found');
 
       const { payment, order } = result;
-      if (result.settled && payment.status === 'succeeded' && order.postHandoffDueAt) {
-        // بعد از commit، نه در تراکنش: پنل واقعی درخواست HTTP است، و پیامکی که نرسید پرداخت را برنمی‌گرداند.
+      if (result.smsMessageId !== null) {
+        // بعد از commit، نه در تراکنش: پنل واقعی درخواست HTTP است، و پیامکی که نرسید پرداخت را برنمی‌گرداند. پیش از هدایت مشتری،
+        // مثل پیش از ۷٫۱؛ سقف زمانش همان ۱۰ ثانیهٔ آداپتور.
         try {
-          await deps.sms.send({
-            to: order.recipientPhone,
-            purpose: 'order_paid',
-            text: orderPaidText(order.orderNumber, formatDeadlineDay(order.postHandoffDueAt)),
-          });
+          await deps.paidSms(result.smsMessageId);
         } catch (error) {
           log(`✗ پیامک پرداخت سفارش ${order.orderNumber} فرستاده نشد:`, error);
         }

@@ -2,12 +2,13 @@
  * کد پیامکی و نشست (ADR-033) با پایگاه دادهٔ حافظه‌ای و ساعت ساختگی.
  *
  * هر محافظ جدا سنجیده می‌شود: شکل کد، اعتبار ۲ دقیقه، ۳ فرصت، ارسال دوباره پس از ۹۰ ثانیه، سقف هر
- * شماره و هر IP و کل سایت، «فقط همان مرورگر»، و اینکه کد و IP هیچ‌جا خام نمی‌نشینند.
+ * شماره و هر IP و کل سایت، «فقط همان مرورگر»، و اینکه کد و IP هیچ‌جا خام نمی‌نشینند؛ از ۷٫۱ (ADR-049) دروازهٔ جزوه، سقف هر
+ * مرورگر، هر شماره در ۲۴ ساعت و کل سایت در روز تهران، و کد فقط به شکل پارامتر قالب.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { consoleSms, type SmsProvider } from '@jozveyar/sms';
+import { SmsError, consoleSms, otpText, type SmsMessage, type SmsProvider } from '@jozveyar/sms';
 
 import { createAuthService, tokenHash } from './auth';
 import { memoryAuthStore, memorySmsLog } from './testing';
@@ -25,12 +26,16 @@ const HOUR = 60 * 60_000;
 const PER_MOBILE = 5;
 const PER_IP = 20;
 const THIRTY_DAYS = 30 * 24 * HOUR;
+/** لایه‌های ۷٫۱ (سؤال ۱۱۷). */
+const PER_BROWSER = 5;
+const PER_MOBILE_DAY = 10;
 
 describe('کد پیامکی و نشست', () => {
   let clock: Date;
   let store: ReturnType<typeof memoryAuthStore>;
   let sms: ReturnType<typeof memorySmsLog>;
   let siteLimit: number;
+  let siteDaily: number;
   let codes: string[];
   let service: ReturnType<typeof createAuthService>;
   const logs: string[] = [];
@@ -41,8 +46,9 @@ describe('کد پیامکی و نشست', () => {
       sms: provider ?? consoleSms(sms, () => undefined),
       secret: SECRET,
       siteHourlyLimit: async () => siteLimit,
+      siteDailyLimit: async () => siteDaily,
       now: () => clock,
-      log: (message) => logs.push(message),
+      log: (message, error) => logs.push(error === undefined ? message : `${message} ${String(error)}`),
       newCode: () => codes.shift() ?? '11111',
     });
   }
@@ -52,6 +58,7 @@ describe('کد پیامکی و نشست', () => {
     store = memoryAuthStore();
     sms = memorySmsLog();
     siteLimit = 300;
+    siteDaily = 2000;
     codes = [];
     logs.length = 0;
     build();
@@ -86,9 +93,16 @@ describe('کد پیامکی و نشست', () => {
   });
 
   it('کد تصادفی واقعی همیشه ۵ رقم است، با صفر اول هم', async () => {
-    const real = createAuthService({ store, sms: consoleSms(sms, () => undefined), secret: SECRET, siteHourlyLimit: async () => 1e5 });
+    const real = createAuthService({
+      store,
+      sms: consoleSms(sms, () => undefined),
+      secret: SECRET,
+      siteHourlyLimit: async () => 1e5,
+      siteDailyLimit: async () => 1e5,
+    });
     for (let i = 0; i < 40; i += 1) {
-      expect((await real.requestCode(ME, `10.0.0.${i}`, { mobile: `0912000${String(i).padStart(4, '0')}` })).ok).toBe(true);
+      // هر کد از مرورگر خودش: سقف هر مرورگر (۷٫۱) اینجا موضوع نیست.
+      expect((await real.requestCode(`${i}`.padStart(64, 'c'), `10.0.0.${i}`, { mobile: `0912000${String(i).padStart(4, '0')}` })).ok).toBe(true);
     }
     expect(sms.messages).toHaveLength(40);
     for (const message of sms.messages) expect(message.body).toMatch(/: \d{5}\n/);
@@ -113,39 +127,114 @@ describe('کد پیامکی و نشست', () => {
   });
 
   it('سقف ۵ کد در ساعت برای هر شماره', async () => {
+    // هر کد از مرورگری دیگر: سقف هر مرورگر (۷٫۱) جدا سنجیده می‌شود.
     for (let i = 0; i < PER_MOBILE; i += 1) {
-      expect((await sendCode(`1000${i}`)).ok).toBe(true);
+      expect((await sendCode(`1000${i}`, { session: `${i}`.padStart(64, 'c') })).ok).toBe(true);
       later(RESEND);
     }
-    const refused = await sendCode('99999');
+    const refused = await sendCode('99999', { session: OTHER });
     expect(refused).toMatchObject({ status: 429, error: 'too_many_codes', scope: 'mobile' });
     // قدیمی‌ترین کد ۴۵۰ ثانیه پیش بود؛ ساعتش تمام شود، جا باز می‌شود.
     expect(refused).toMatchObject({ retryAfterSeconds: (HOUR - PER_MOBILE * RESEND) / 1000 });
     // شمارهٔ دیگر گیر نمی‌افتد.
     expect((await sendCode('88888', { mobile: '09351234567' })).ok).toBe(true);
     later(HOUR - PER_MOBILE * RESEND);
-    expect((await sendCode('77777')).ok).toBe(true);
+    expect((await sendCode('77777', { session: OTHER })).ok).toBe(true);
   });
 
   it('سقف ۲۰ کد در ساعت برای هر IP، روی شماره‌های مختلف', async () => {
     for (let i = 0; i < PER_IP; i += 1) {
-      expect((await sendCode('12345', { mobile: `091200000${String(i).padStart(2, '0')}` })).ok).toBe(true);
+      expect((await sendCode('12345', { mobile: `091200000${String(i).padStart(2, '0')}`, session: `${i}`.padStart(64, 'c') })).ok).toBe(true);
     }
-    expect(await sendCode('12345', { mobile: '09129999999' })).toMatchObject({ status: 429, error: 'too_many_codes', scope: 'ip' });
-    expect((await sendCode('12345', { mobile: '09129999999', ip: '1.1.1.1' })).ok).toBe(true);
+    expect(await sendCode('12345', { mobile: '09129999999', session: OTHER })).toMatchObject({ status: 429, error: 'too_many_codes', scope: 'ip' });
+    expect((await sendCode('12345', { mobile: '09129999999', session: OTHER, ip: '1.1.1.1' })).ok).toBe(true);
   });
 
   it('سقف ساعتی کل سایت، از تنظیم', async () => {
     siteLimit = 3;
     for (let i = 0; i < 3; i += 1) {
-      expect((await sendCode('12345', { mobile: `0912000000${i}`, ip: `10.0.0.${i}` })).ok).toBe(true);
+      expect((await sendCode('12345', { mobile: `0912000000${i}`, ip: `10.0.0.${i}`, session: `${i}`.padStart(64, 'c') })).ok).toBe(true);
     }
-    expect(await sendCode('12345', { mobile: '09129999999', ip: '10.9.9.9' })).toMatchObject({
+    expect(await sendCode('12345', { mobile: '09129999999', ip: '10.9.9.9', session: OTHER })).toMatchObject({
       status: 429,
       error: 'too_many_codes',
       scope: 'site',
     });
-    expect(logs.some((line) => line.includes('کل سایت'))).toBe(true);
+    expect(logs.some((line) => line.includes('سقف ساعتی کد پیامکی کل سایت'))).toBe(true);
+  });
+
+  it('دروازهٔ جزوه (۷٫۱): مرورگری که سند آماده و زنده روی سرور ندارد، ۴۰۹ و نه کد و نه پیامک', async () => {
+    store.liveDocuments.set(ME, false);
+    expect(await sendCode('48213')).toMatchObject({ status: 409, error: 'no_documents' });
+    expect(store.otps).toHaveLength(0);
+    expect(sms.messages).toHaveLength(0);
+    // همان شماره از مرورگری که جزوه دارد.
+    expect((await sendCode('48213', { session: OTHER })).ok).toBe(true);
+  });
+
+  it('سقف ۵ کد در ساعت برای هر مرورگر (۷٫۱)، روی شماره‌ها و اینترنت‌های مختلف', async () => {
+    for (let i = 0; i < PER_BROWSER; i += 1) {
+      expect((await sendCode('12345', { mobile: `0912000000${i}`, ip: `10.0.1.${i}` })).ok).toBe(true);
+      later(60_000);
+    }
+    const refused = await sendCode('12345', { mobile: '09129999999', ip: '10.9.9.9' });
+    expect(refused).toMatchObject({ status: 429, error: 'too_many_codes', scope: 'browser' });
+    // اولین کد این مرورگر پنج دقیقه پیش بود.
+    expect(refused).toMatchObject({ retryAfterSeconds: (HOUR - PER_BROWSER * 60_000) / 1000 });
+    expect((await sendCode('12345', { mobile: '09129999999', ip: '10.9.9.9', session: OTHER })).ok).toBe(true);
+  });
+
+  it('سقف ۱۰ کد در ۲۴ ساعت برای هر شماره (۷٫۱)', async () => {
+    for (let i = 0; i < PER_MOBILE_DAY; i += 1) {
+      expect((await sendCode(`1000${i % 10}`, { session: `${i}`.padStart(64, 'c'), ip: `10.0.2.${i}` })).ok).toBe(true);
+      // دو کد در هر ساعت و نیم: سقف ساعتی (۵) هرگز پر نمی‌شود.
+      later(90 * 60_000);
+    }
+    const refused = await sendCode('99999', { session: OTHER, ip: '10.9.9.9' });
+    expect(refused).toMatchObject({ status: 429, error: 'too_many_codes', scope: 'mobile_day' });
+    expect(refused).toMatchObject({ retryAfterSeconds: (24 * HOUR - PER_MOBILE_DAY * 90 * 60_000) / 1000 });
+    later(24 * HOUR - PER_MOBILE_DAY * 90 * 60_000);
+    expect((await sendCode('99999', { session: OTHER, ip: '10.9.9.9' })).ok).toBe(true);
+  });
+
+  it('سقف روزانهٔ کل سایت (۷٫۱): روز تقویمی تهران، «دوباره» از نیمه‌شب تهران', async () => {
+    siteDaily = 3;
+    siteLimit = 1000;
+    // ۲۳:۰۰ تهران، ۱۹:۳۰ UTC.
+    clock = new Date('2026-09-26T19:30:00Z');
+    for (let i = 0; i < 3; i += 1) {
+      expect((await sendCode('12345', { mobile: `0912000000${i}`, ip: `10.0.3.${i}`, session: `${i}`.padStart(64, 'c') })).ok).toBe(true);
+    }
+    const refused = await sendCode('12345', { mobile: '09129999999', ip: '10.9.9.9', session: OTHER });
+    expect(refused).toMatchObject({
+      status: 429,
+      error: 'too_many_codes',
+      scope: 'site_day',
+      retryAfterSeconds: 3600,
+      // نیمه‌شب تهران، دقیق.
+      retryAt: '2026-09-26T20:30:00.000Z',
+    });
+    expect(logs.some((line) => line.includes('سقف روزانهٔ کد پیامکی کل سایت'))).toBe(true);
+    // نیمه‌شب تهران روز تازه است، حتی اگر ۲۴ ساعت نگذشته.
+    later(HOUR);
+    expect((await sendCode('12345', { mobile: '09129999999', ip: '10.9.9.9', session: OTHER })).ok).toBe(true);
+  });
+
+  it('پنل واقعی: کد فقط پارامتر قالب است؛ لاگ خطا فقط علت و کد عددی', async () => {
+    const sent: SmsMessage[] = [];
+    build({
+      name: 'smsir',
+      send: async (message) => {
+        sent.push(message);
+      },
+    });
+    await sendCode('48213');
+    expect(sent).toEqual([{ to: MOBILE, purpose: 'otp', text: otpText('48213'), params: ['48213'] }]);
+    build({ name: 'smsir', send: async () => Promise.reject(new SmsError('rejected', 'sms.ir نپذیرفت', 400, 13)) });
+    later(RESEND);
+    expect(await sendCode('77777')).toMatchObject({ status: 503, error: 'sms_unavailable' });
+    expect(logs.at(-1)).toContain('rejected (HTTP 400، کد 13)');
+    expect(logs.join(' ')).not.toContain('77777');
   });
 
   it('کد درست: نشست ۳۰ روزه با توکن تازه؛ فقط هش توکن ذخیره می‌شود', async () => {
@@ -234,6 +323,7 @@ describe('کد پیامکی و نشست', () => {
       sms: consoleSms(sms, () => undefined),
       secret: 'z'.repeat(64),
       siteHourlyLimit: async () => 300,
+      siteDailyLimit: async () => 2000,
       now: () => clock,
     });
     expect(await other.verifyCode(ME, { mobile: MOBILE, code: '48213' })).toMatchObject({ error: 'wrong_code' });

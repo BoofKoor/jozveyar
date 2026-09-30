@@ -8,7 +8,7 @@ import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import { RECIPIENT_LIMITS, checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
-import { formatClock, formatMobile, minutesFrom } from '../../lib/checkout/format';
+import { CLOCK_AFTER_MS, formatClock, formatMobile, minutesFrom, retryClock } from '../../lib/checkout/format';
 import type { Step } from '../../lib/checkout/steps';
 import {
   createCheckoutStore,
@@ -90,25 +90,64 @@ function useFocusOnMount<T extends HTMLElement>() {
 
 /* ───────────────────────────── پیام‌ها ───────────────────────────── */
 
-/** پیام شکستی که به فیلد خاصی نمی‌خورد، با راه جلو. `retry` نام دکمه‌ای است که باید دوباره زد. */
-function failureText(failure: ApiFailure, retry: string): ReactNode {
+/** سقف کل سایت (ترمز آخر، ۷٫۱): «شلوغ است»، با ساعت «دوباره» روی خود دکمه. */
+const SITE_SCOPES: ReadonlySet<unknown> = new Set(['site', 'site_day']);
+
+/** «ساعت 11:40» یا «فردا ساعت 00:20» (سؤال ۱۳۳). */
+function RetryAt({ at, now }: { at: number; now: number }) {
+  const { time, tomorrow } = retryClock(at, now);
+  return (
+    <>
+      {tomorrow ? 'فردا ' : ''}ساعت <span className="num">{time}</span>
+    </>
+  );
+}
+
+/**
+ * چه وقت دوباره: کمتر از ۱۵ دقیقه «حدود N دقیقهٔ دیگر»، بیشتر ساعتش (سؤال ۱۳۳). `retryAt` لحظه‌ای است که پاسخ رسید به‌علاوهٔ
+ * `retryAfterSeconds`، تا ساعت با هر رسم جابه‌جا نشود؛ بی آن، از همین حالا.
+ */
+function whenAgain(failure: ApiFailure, retryAt: number | null): ReactNode {
+  const seconds = Number(failure.body.retryAfterSeconds) || 60;
+  if (seconds * 1000 <= CLOCK_AFTER_MS) {
+    return (
+      <>
+        حدود <span className="num">{formatNumber(minutesFrom(seconds))}</span> دقیقهٔ دیگر
+      </>
+    );
+  }
+  const now = Date.now();
+  return <RetryAt at={retryAt ?? now + seconds * 1000} now={now} />;
+}
+
+/**
+ * پیام شکستی که به فیلد خاصی نمی‌خورد، با راه جلو. `retry` نام دکمه‌ای است که باید دوباره زد؛ `retryAt` لحظهٔ «دوباره» سقف کد، اگر
+ * هست.
+ */
+function failureText(failure: ApiFailure, retry: string, retryAt: number | null = null): ReactNode {
   switch (failure.error) {
     case 'network':
       return `ارتباط برقرار نشد. اینترنت را ببین و دوباره «${retry}» را بزن.`;
     case 'too_many_codes': {
-      const minutes = minutesFrom(Number(failure.body.retryAfterSeconds) || 60);
+      const scope = failure.body.scope;
       const who =
-        failure.body.scope === 'ip'
-          ? 'از این اینترنت در یک ساعت گذشته کد زیادی خواسته شده.'
-          : failure.body.scope === 'site'
-            ? 'الان درخواست کد پیامکی خیلی زیاد است.'
-            : 'برای این شماره در یک ساعت گذشته کد زیادی خواسته شده.';
+        scope === 'browser'
+          ? 'از این مرورگر در یک ساعت گذشته کد زیادی خواسته شده.'
+          : scope === 'ip'
+            ? 'از این اینترنت در یک ساعت گذشته کد زیادی خواسته شده.'
+            : SITE_SCOPES.has(scope)
+              ? 'ارسال کد الان شلوغ است.'
+              : scope === 'mobile_day'
+                ? 'برای این شماره در 24 ساعت گذشته کد زیادی خواسته شده.'
+                : 'برای این شماره در یک ساعت گذشته کد زیادی خواسته شده.';
       return (
         <>
-          {who} حدود <span className="num">{formatNumber(minutes)}</span> دقیقهٔ دیگر دوباره امتحان کن.
+          {who} {whenAgain(failure, retryAt)} دوباره امتحان کن.
         </>
       );
     }
+    case 'no_documents':
+      return 'جزوه‌ات روی این مرورگر نیست؛ جزوه را همین‌جا دوباره بینداز.';
     case 'sms_unavailable':
       return 'پیامک فرستاده نشد. چند دقیقهٔ دیگر دوباره امتحان کن.';
     case 'shipping_unavailable':
@@ -465,15 +504,30 @@ function AddressStep({
 
 /* ───────────────────────────── قدم پرداخت: موبایل ───────────────────────────── */
 
-function MobileStep({ state }: { state: CheckoutState }) {
+/**
+ * حال قدم موبایل پس از رد سرور (۷٫۱، سؤال ۱۳۳): ترمز آخر کل سایت («شلوغ است») تا لحظهٔ «دوباره»، یا مرورگری که جزوه‌ای روی سرور ندارد
+ * (دروازهٔ جزوه). هر دو یادداشت کارت‌اند و کار بعدی همان یک دکمه، نه خطای فیلد.
+ */
+function mobileBlock(state: CheckoutState, now: number): { kind: 'busy'; until: number } | { kind: 'nojozve' } | null {
+  const error = state.mobileError;
+  if (error?.kind !== 'failure') return null;
+  if (error.failure.error === 'no_documents') return { kind: 'nojozve' };
+  if (error.failure.error === 'too_many_codes' && SITE_SCOPES.has(error.failure.body.scope) && error.retryAt !== null && now < error.retryAt) {
+    return { kind: 'busy', until: error.retryAt };
+  }
+  return null;
+}
+
+function MobileStep({ state, now }: { state: CheckoutState; now: number }) {
   const input = useFocusOnMount<HTMLInputElement>();
   const store = checkoutStore();
   const error = state.mobileError;
+  const block = mobileBlock(state, now);
   const fieldError =
     error?.kind === 'invalid'
       ? 'شمارهٔ موبایل درست نیست؛ 11 رقم است و با 09 شروع می‌شود.'
-      : error?.kind === 'failure'
-        ? failureText(error.failure, 'ارسال کد')
+      : error?.kind === 'failure' && !block && !(error.failure.error === 'too_many_codes' && SITE_SCOPES.has(error.failure.body.scope))
+        ? failureText(error.failure, 'ارسال کد', error.retryAt)
         : null;
 
   return (
@@ -486,6 +540,21 @@ function MobileStep({ state }: { state: CheckoutState }) {
         <div className="ck-card-note">
           <Note tone="warning" testId="signed-out">
             تأیید موبایل این گوشی دیگر معتبر نیست. یک بار دیگر کد بگیر؛ سفارشت همین‌جا مانده.
+          </Note>
+        </div>
+      ) : null}
+      {block?.kind === 'busy' ? (
+        <div className="ck-card-note">
+          <Note tone="warning" testId="otp-busy">
+            <b>ارسال کد الان شلوغ است.</b> <RetryAt at={block.until} now={now} /> دوباره «ارسال کد» را بزن؛ جزوه، نشانی و قیمتت
+            همین‌جا می‌ماند.
+          </Note>
+        </div>
+      ) : block?.kind === 'nojozve' ? (
+        <div className="ck-card-note">
+          <Note tone="error" testId="otp-nojozve">
+            <b>جزوه‌ات روی این مرورگر نیست.</b> کد فقط برای مرورگری فرستاده می‌شود که جزوه را رویش انداخته‌ای؛ شاید مرورگر یا زبانهٔ
+            خصوصی عوض شده، یا کوکی‌ها پاک شده‌اند. جزوه را همین‌جا دوباره بینداز.
           </Note>
         </div>
       ) : null}
@@ -651,7 +720,7 @@ function CodeStep({ state, now }: { state: CheckoutState; now: number }) {
       {state.resendError ? (
         <div className="ck-card-note">
           <Note tone="error" testId="resend-error">
-            {failureText(state.resendError, closed ? 'ارسال کد تازه' : 'ارسال دوباره')}
+            {failureText(state.resendError, closed ? 'ارسال کد تازه' : 'ارسال دوباره', state.resendRetryAt)}
           </Note>
         </div>
       ) : null}
@@ -798,7 +867,7 @@ interface NextAction {
   /** متن دکمهٔ خلاصه. */
   label: ReactNode;
   /** متن کوتاه نوار موبایل. */
-  short: string;
+  short: ReactNode;
   /** نام دکمهٔ نوار، وقتی متنش کوتاه‌تر از کار است. */
   name?: string;
   /** دکمه‌ای که فرمِ قدم را می‌فرستد (`<button form>`)، یا کاری بی فرم. */
@@ -806,23 +875,29 @@ interface NextAction {
   onClick?: () => void;
   busy: boolean;
   disabled?: boolean;
+  /**
+   * بسته، ولی متنش وضعیت است و خواندنی (۷٫۱، «ارسال کد از ساعت 11:40»): در ترتیب Tab می‌ماند (`aria-disabled`)، مثل «به‌زودی» خلاصهٔ
+   * صفحهٔ اصلی (`is-status`).
+   */
+  status?: boolean;
 }
 
 function NextButton({ action, short }: { action: NextAction; short: boolean }) {
   return (
     <button
-      type={action.form ? 'submit' : 'button'}
-      form={action.form}
+      type={action.form && !action.status ? 'submit' : 'button'}
+      form={action.status ? undefined : action.form}
       disabled={action.busy || action.disabled}
+      aria-disabled={action.status || undefined}
       aria-busy={action.busy || undefined}
       aria-label={short ? action.name : undefined}
-      onClick={action.onClick}
+      onClick={action.status ? undefined : action.onClick}
       className={`jy-btn jy-btn--primary jy-btn--lg${short ? ' shrink-0' : ' jy-btn--block home-sum__go'}${
-        action.busy ? ' is-loading' : ''
+        action.busy ? ' is-loading' : action.status ? ' is-status' : ''
       }`}
     >
       {short ? action.short : action.label}
-      {action.busy ? null : <span className="jy-icon jy-icon-arrow" aria-hidden="true" />}
+      {action.busy || action.status ? null : <span className="jy-icon jy-icon-arrow" aria-hidden="true" />}
     </button>
   );
 }
@@ -887,7 +962,10 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
   }, [fallback, go]);
 
   const stage = state.stage;
-  const now = useNow(step === 'pay' && stage === 'code' && state.otp !== null);
+  // ساعت دیوار: شمارش معکوس کد، و از ۷٫۱ تا لحظهٔ «دوباره» ترمز کل سایت (دکمه همان لحظه باز می‌شود).
+  const busyUntil = state.mobileError?.kind === 'failure' ? state.mobileError.retryAt : null;
+  const now = useNow(step === 'pay' && ((stage === 'code' && state.otp !== null) || (stage === 'mobile' && busyUntil !== null)));
+  const block = step === 'pay' && stage === 'mobile' ? mobileBlock(state, now) : null;
   const quote = quoteOf(state, withPlace);
   const place = state.place;
   const method = priceList.shippingMethods[DEFAULT_SHIPPING_METHOD_ID]?.nameFa ?? 'پست پیشتاز';
@@ -908,7 +986,29 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
       : step === 'address'
         ? { label: 'ادامه — موبایل و پرداخت', short: 'ادامه', name: 'ادامه — موبایل و پرداخت', form: 'ck-address', busy: false }
         : stage === 'mobile'
-          ? { label: 'ارسال کد', short: 'ارسال کد', form: 'ck-mobile', busy: state.busy === 'code' }
+          ? block?.kind === 'nojozve'
+            ? { label: 'دوباره بینداز', short: 'دوباره بینداز', onClick: onRestart, busy: false }
+            : block?.kind === 'busy'
+              ? (() => {
+                  const { time, tomorrow } = retryClock(block.until, now);
+                  const at = `${tomorrow ? 'فردا ' : ''}ساعت ${time}`;
+                  return {
+                    label: (
+                      <>
+                        ارسال کد از {tomorrow ? 'فردا ' : ''}ساعت <span className="num">{time}</span>
+                      </>
+                    ),
+                    short: (
+                      <>
+                        کد از <span className="num">{time}</span>
+                      </>
+                    ),
+                    name: `ارسال کد از ${at}`,
+                    status: true,
+                    busy: false,
+                  };
+                })()
+              : { label: 'ارسال کد', short: 'ارسال کد', form: 'ck-mobile', busy: state.busy === 'code' }
           : stage === 'code'
             ? otpClosed
               ? {
@@ -975,7 +1075,7 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
     ) : stage === 'code' && state.otp ? (
       <CodeStep state={state} now={now} />
     ) : (
-      <MobileStep state={state} />
+      <MobileStep state={state} now={now} />
     );
 
   const brief =

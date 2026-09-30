@@ -209,6 +209,15 @@ describe('مسیر خرید در مرورگر', () => {
       await store.sendCode();
       expect(store.getState().stage).toBe('mobile');
       expect(store.getState().mobileError).toMatchObject({ kind: 'failure', failure: { error: 'too_many_codes' } });
+      // لحظهٔ «دوباره» از لحظهٔ پاسخ (۷٫۱): رابط ساعت را از همین می‌گوید؛ و `retryAt` دقیق سرور، اگر گفت.
+      expect(store.getState().mobileError).toMatchObject({ retryAt: clock + 1_500_000 });
+      net.replies.requestCode = async () =>
+        fail(429, 'too_many_codes', { scope: 'site_day', retryAfterSeconds: 3601, retryAt: '2026-10-05T20:30:00.000Z' });
+      await store.sendCode();
+      expect(store.getState().mobileError).toMatchObject({ retryAt: Date.parse('2026-10-05T20:30:00.000Z') });
+      net.replies.requestCode = async () => fail(409, 'no_documents');
+      await store.sendCode();
+      expect(store.getState().mobileError).toMatchObject({ kind: 'failure', failure: { error: 'no_documents' }, retryAt: null });
     });
 
     it('کد اشتباه با فرصت باقی؛ فرصت آخر که رفت، کد بسته است', async () => {

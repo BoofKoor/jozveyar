@@ -35,7 +35,8 @@ export interface Otp {
   closed: 'expired' | 'locked' | 'missing' | null;
 }
 
-export type MobileError = { kind: 'invalid' } | { kind: 'signed_out' } | { kind: 'failure'; failure: ApiFailure };
+/** `retryAt`: لحظهٔ «دوباره» سقف کد پیامکی (`retryAfterSeconds` سرور از لحظهٔ پاسخ، ۷٫۱). */
+export type MobileError = { kind: 'invalid' } | { kind: 'signed_out' } | { kind: 'failure'; failure: ApiFailure; retryAt: number | null };
 export type CodeError = { kind: 'format' } | { kind: 'wrong'; attemptsLeft: number } | { kind: 'failure'; failure: ApiFailure };
 export type PayNotice =
   | { kind: 'price_changed'; change: PriceChange; totalRials: number }
@@ -65,6 +66,8 @@ export interface CheckoutState {
   code: string;
   codeError: CodeError | null;
   resendError: ApiFailure | null;
+  /** لحظهٔ «دوباره» شکست ارسال دوباره، اگر سرور گفت (۷٫۱). */
+  resendRetryAt: number | null;
   quoteError: ApiFailure | null;
   payNotice: PayNotice | null;
   busy: Busy;
@@ -104,6 +107,16 @@ const CODE_OUTLIVES_RESEND_S = 120 - 90;
 const itemsKey = (items: readonly CheckoutItem[] | null) => JSON.stringify(items);
 const samePlace = (a: Place | null, b: Place | null) =>
   a === b || (a !== null && b !== null && a.provinceId === b.provinceId && a.cityId === b.cityId);
+/**
+ * لحظهٔ «دوباره» سقف کد (۷٫۱): `retryAt` دقیق سرور اگر هست (نیمه‌شب تهران همان «00:00» می‌ماند)، وگرنه `retryAfterSeconds` از همین
+ * حالا.
+ */
+function retryAtOf(body: Record<string, unknown>, retryAfter: number | null, now: number): number | null {
+  const exact = typeof body.retryAt === 'string' ? Date.parse(body.retryAt) : NaN;
+  if (Number.isFinite(exact)) return exact;
+  return retryAfter === null ? null : now + retryAfter * 1000;
+}
+
 const numberIn = (body: Record<string, unknown>, key: string) =>
   typeof body[key] === 'number' && Number.isFinite(body[key]) ? (body[key] as number) : null;
 const noAnswer: ApiFailure = { ok: false, status: 0, error: 'network', body: {} };
@@ -128,6 +141,7 @@ export function initialCheckout(): CheckoutState {
     code: '',
     codeError: null,
     resendError: null,
+    resendRetryAt: null,
     quoteError: null,
     payNotice: null,
     busy: null,
@@ -229,9 +243,15 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
       return;
     }
     if (from === 'mobile') {
-      set({ busy: null, mobileError: result.error === 'invalid_mobile' ? { kind: 'invalid' } : { kind: 'failure', failure: result } });
+      set({
+        busy: null,
+        mobileError:
+          result.error === 'invalid_mobile'
+            ? { kind: 'invalid' }
+            : { kind: 'failure', failure: result, retryAt: retryAtOf(result.body, retryAfter, deps.now()) },
+      });
     } else {
-      set({ busy: null, resendError: result });
+      set({ busy: null, resendError: result, resendRetryAt: retryAtOf(result.body, retryAfter, deps.now()) });
     }
   }
 

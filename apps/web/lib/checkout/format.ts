@@ -21,6 +21,39 @@ export function minutesFrom(seconds: number): number {
   return Math.max(1, Math.ceil(seconds / 60));
 }
 
+/** بیش از این انتظار، مشتری ساعت را می‌بیند نه شمار دقیقه (سؤال ۱۳۳): ساعت را می‌شود به خاطر سپرد. */
+export const CLOCK_AFTER_MS = 15 * 60_000;
+
+let tehranClock: Intl.DateTimeFormat | undefined;
+
+/**
+ * «11:40» و اینکه فرداست یا نه، به وقت تهران: زمان «دوباره» سقف کد پیامکی (۷٫۱). `Intl` همین‌جا ساخته می‌شود، نه از `@jozveyar/text`،
+ * چون آن ماژول در باندل اولیه است و هر خروجی تازه‌اش آنجا هم می‌نشست (قاعدهٔ باندل، ADR-018).
+ */
+export function retryClock(at: number, now: number): { time: string; tomorrow: boolean } {
+  tehranClock ??= new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const parts = (ms: number) => {
+    const out: Record<string, string> = {};
+    for (const part of tehranClock!.formatToParts(ms)) out[part.type] = part.value;
+    return out;
+  };
+  // دقیقه به بالا: «دوباره» هرگز پیش از زمانی که سرور گفت نیست.
+  const target = parts(Math.ceil(at / 60_000) * 60_000);
+  const today = parts(now);
+  return {
+    time: `${target.hour}:${target.minute}`,
+    tomorrow: `${target.year}${target.month}${target.day}` !== `${today.year}${today.month}${today.day}`,
+  };
+}
+
 /**
  * کلید یکتای «پرداخت» (ADR-034). `randomUUID` فقط در زمینهٔ امن (https یا localhost) هست؛ بیرون از آن،
  * همان UUID نسخهٔ ۴ از `getRandomValues`.

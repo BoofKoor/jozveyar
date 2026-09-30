@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type BrowserContext, type Page, type Response } from '@playwright/test';
 import { randomInt } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import postgres from 'postgres';
 import type { Breakdown } from '@jozveyar/contracts';
@@ -467,6 +468,64 @@ test.describe('قدم‌ها', () => {
     await page.getByLabel('کد پیامک').fill(await codeOf(mobile));
     await page.getByLabel('کد پیامک').press('Enter');
     await expect(page.getByRole('heading', { level: 1, name: 'مرور و پرداخت' })).toBeVisible();
+    await context.close();
+  });
+});
+
+test.describe('سقف کد پیامکی (۷٫۱، ADR-049)', () => {
+  test('دروازهٔ جزوه: مرورگری که جزوه‌اش دیگر روی سرور نیست کد نمی‌گیرد، و «دوباره بینداز»', async ({ browser }) => {
+    const context = await newContext(browser);
+    const page = await context.newPage();
+    const mobile = newMobile();
+    const name = `دروازه-${randomInt(1_000_000)}.pdf`;
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', { name, mimeType: 'application/pdf', buffer: readFileSync(fixture('plain-bw-10.pdf')) });
+    await expect(visibleButton(page, 'ادامه — آدرس و تحویل')).toBeEnabled({ timeout: 90_000 });
+    await toPay(page);
+    // همان «انصراف» مرورگر: فایل از استوریج پاک شد، پس این مرورگر دیگر جزوه‌ای روی سرور ندارد.
+    const [doc] = await sql()`select id from documents where original_name = ${name}`;
+    expect(await page.evaluate((id) => fetch(`/api/uploads/${id}`, { method: 'DELETE' }).then((r) => r.status), doc!.id)).toBe(200);
+
+    await page.getByLabel('شمارهٔ موبایل').fill(mobile);
+    await visibleButton(page, 'ارسال کد').click();
+    await expect(page.getByTestId('otp-nojozve')).toContainText('جزوه‌ات روی این مرورگر نیست.');
+    // نه کد و نه پیامک.
+    expect(await sql()`select id from otp_requests where mobile = ${mobile}`).toHaveLength(0);
+    expect(await sql()`select id from sms_messages where to_mobile = ${mobile}`).toHaveLength(0);
+    await visibleButton(page, 'دوباره بینداز').click();
+    await expect(page.getByText('جزوه‌ات را همین‌جا بینداز')).toBeVisible();
+    await context.close();
+  });
+
+  test('ترمز آخر کل سایت: «ارسال کد الان شلوغ است» با ساعت، و دکمهٔ بسته‌ای که همان را می‌گوید', async ({ browser }) => {
+    const context = await newContext(browser);
+    const page = await context.newPage();
+    const mobile = newMobile();
+    await dropReady(page);
+    await toPay(page);
+    const [setting] = await sql()`select value from settings where key = 'otp.site_daily_limit'`;
+    // امروز تهران همین‌قدر کد رفته؛ سقف روزانه همان، پس کد بعدی نه.
+    const today = sql()`(date_trunc('day', now() at time zone 'Asia/Tehran') at time zone 'Asia/Tehran')`;
+    const [counted] = await sql()`select count(*)::int as n from otp_requests where created_at >= ${today}`;
+    let n = Number(counted!.n);
+    if (n === 0) {
+      await sql()`insert into otp_requests (mobile, code_hash, session_hash, ip_hash, expires_at)
+                  values ('09120000000', ${'f'.repeat(64)}, ${'0'.repeat(64)}, ${'0'.repeat(64)}, now())`;
+      n = 1;
+    }
+    await sql()`update settings set value = ${sql().json(n)} where key = 'otp.site_daily_limit'`;
+    try {
+      await page.getByLabel('شمارهٔ موبایل').fill(mobile);
+      await visibleButton(page, 'ارسال کد').click();
+      // «دوباره» آغاز فردای تهران است.
+      await expect(page.getByTestId('otp-busy')).toContainText('ارسال کد الان شلوغ است. فردا ساعت 00:00 دوباره «ارسال کد» را بزن');
+      const closed = visibleButton(page, 'ارسال کد از فردا ساعت 00:00');
+      await expect(closed).toHaveAttribute('aria-disabled', 'true');
+      await expect(closed).toHaveClass(/is-status/);
+      expect(await sql()`select id from otp_requests where mobile = ${mobile}`).toHaveLength(0);
+    } finally {
+      await sql()`update settings set value = ${sql().json(setting!.value)} where key = 'otp.site_daily_limit'`;
+    }
     await context.close();
   });
 });

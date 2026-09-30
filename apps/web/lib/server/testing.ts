@@ -29,6 +29,8 @@ import {
   type StoredAnalysis,
 } from '@jozveyar/db';
 import type { DocumentAnalysis, PriceList } from '@jozveyar/contracts';
+import { orderPaidParams, orderPaidText, type SmsOutbox } from '@jozveyar/sms';
+import { formatDeadlineDay } from '@jozveyar/text';
 
 export function memoryStore(): DocumentStore & {
   rows: Map<string, DocumentRow>;
@@ -114,8 +116,11 @@ export function memoryAuthStore(): AuthStore & {
   otps: OtpRow[];
   users: Map<string, { id: string; mobile: string }>;
   sessions: Map<string, { id: string; userId: string; expiresAt: Date; revokedAt: Date | null }>;
+  /** مرورگرهایی که سند آماده و زنده روی سرور دارند (دروازهٔ جزوه، ۷٫۱)؛ پیش‌فرض همه، مگر تست `false` بگذارد. */
+  liveDocuments: Map<string, boolean>;
 } {
   const otps: OtpRow[] = [];
+  const liveDocuments = new Map<string, boolean>();
   const users = new Map<string, { id: string; mobile: string }>();
   const sessions = new Map<string, { id: string; userId: string; expiresAt: Date; revokedAt: Date | null }>();
   const oldest = (rows: OtpRow[]) => (rows.length ? new Date(Math.min(...rows.map((r) => r.createdAt.getTime()))) : null);
@@ -125,18 +130,26 @@ export function memoryAuthStore(): AuthStore & {
     otps,
     users,
     sessions,
+    liveDocuments,
     async issueOtp(input, decide) {
       const inWindow = otps.filter((o) => o.createdAt.getTime() > input.since.getTime());
       const byMobile = inWindow.filter((o) => o.mobile === input.mobile);
+      const byMobileDay = otps.filter((o) => o.mobile === input.mobile && o.createdAt.getTime() > input.sinceDay.getTime());
+      const bySession = inWindow.filter((o) => o.sessionHash === input.sessionHash);
       const byIp = inWindow.filter((o) => o.ipHash === input.ipHash);
       const otp = decide({
         mobile: byMobile.length,
         mobileOldest: oldest(byMobile),
         mobileLatest: latest(byMobile),
+        mobileDay: byMobileDay.length,
+        mobileDayOldest: oldest(byMobileDay),
+        session: bySession.length,
+        sessionOldest: oldest(bySession),
         ip: byIp.length,
         ipOldest: oldest(byIp),
         site: inWindow.length,
         siteOldest: oldest(inWindow),
+        siteDay: otps.filter((o) => o.createdAt.getTime() >= input.dayStart.getTime()).length,
       });
       if (!otp) return null;
       const id = randomUUID();
@@ -152,6 +165,9 @@ export function memoryAuthStore(): AuthStore & {
         consumedAt: null,
       });
       return { id };
+    },
+    async hasLiveDocument(sessionHash) {
+      return liveDocuments.get(sessionHash) ?? true;
     },
     async latestOtp(sessionHash, mobile) {
       const mine = otps.filter((o) => o.sessionHash === sessionHash && o.mobile === mobile);
@@ -231,6 +247,48 @@ export const FIRST_MEMORY_PARTNER: MemoryPartner = {
  * صفحه‌ها، یکتایی `checkout_key`، یک پرداخت موفق برای هر سفارش، و «پرداخت برگشت ندارد». از برش ۵٫۲ پرداخت چاپخانه را
  * با همان قاعدهٔ پایگاه داده (`choosePartner`) انتخاب می‌کند.
  */
+/** پیامک پرداخت منتظر، مثل ردیف `sms_messages` هدف `order_paid` (۷٫۱). */
+export interface MemoryPaidSms {
+  id: number;
+  toMobile: string;
+  body: string;
+  params: string[];
+  status: 'pending' | 'sending' | 'logged' | 'sent' | 'failed';
+  provider: string;
+  attempts: number;
+  cost: number | null;
+  error: string | null;
+}
+
+/**
+ * `SmsOutbox` حافظه‌ای پیامک‌های پرداخت، با همان شرط‌های `createSmsOutbox`: منتظر یا نرفته، یک بار، و فقط تا سفارش در صف یا در
+ * حال چاپ است.
+ */
+export function memoryPaidSmsOutbox(store: { paidSms: MemoryPaidSms[]; payments: PaymentRow[]; orders: OrderRow[] }): SmsOutbox {
+  return {
+    async claim(id, _at, mode) {
+      const row = store.paidSms.find((r) => r.id === id);
+      const payment = store.payments.find((p) => p.smsMessageId === id && p.status === 'succeeded');
+      const order = payment ? store.orders.find((o) => o.id === payment.orderId) : undefined;
+      if (!row || !order || !['paid', 'printing'].includes(order.status)) return null;
+      if (mode === 'queued' ? row.status !== 'pending' : row.status !== 'failed') return null;
+      row.status = 'sending';
+      row.attempts += 1;
+      return { id, to: row.toMobile, purpose: 'order_paid', body: row.body, params: row.params };
+    },
+    async finish(id, _at, result) {
+      const row = store.paidSms.find((r) => r.id === id);
+      if (!row || row.status !== 'sending') return;
+      Object.assign(
+        row,
+        result.ok
+          ? { status: result.status, provider: result.provider, cost: result.cost ?? null, error: null }
+          : { status: 'failed', provider: result.provider, error: result.error },
+      );
+    },
+  };
+}
+
 export function memoryOrderStore(options: { priceList: PriceList; now: () => Date }): OrderStore & {
   documentsById: Map<string, CheckoutDocument>;
   settings: Map<string, unknown>;
@@ -246,8 +304,11 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   activate(list: PriceList): void;
   /** کدهای رهگیری زندهٔ هر سفارش با پیامکشان (برش ۶٫۳)؛ پنل می‌نشاندشان، اینجا تست. */
   parcels: Map<string, OrderDetails['parcels']>;
+  /** پیامک‌های پرداخت از صف (۷٫۱)؛ `memoryPaidSmsOutbox` می‌فرستدشان. */
+  paidSms: MemoryPaidSms[];
 } {
   const parcels = new Map<string, OrderDetails['parcels']>();
+  const paidSms: MemoryPaidSms[] = [];
   const documentsById = new Map<string, CheckoutDocument>();
   const settings = new Map<string, unknown>();
   const orders: OrderRow[] = [];
@@ -327,6 +388,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     partners,
     assignments,
     parcels,
+    paidSms,
     activate(list) {
       priceLists.set(list.version, list);
       active = list;
@@ -428,6 +490,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         raw: payment.raw ?? null,
         createdAt: options.now(),
         verifiedAt: null,
+        smsMessageId: null,
       };
       payments.push(row);
       return { ...row };
@@ -449,20 +512,35 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       const payment = payments.find((p) => p.provider === provider && p.authority === authority);
       if (!payment) return null;
       const order = orders.find((o) => o.id === payment.orderId)!;
-      if (payment.status !== 'pending') return { payment: { ...payment }, order: { ...order }, settled: false };
+      if (payment.status !== 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsMessageId: null };
       const outcome = await decide({ payment: { ...payment }, order: { ...order } });
       if (outcome.kind === 'failed') {
         Object.assign(payment, { status: 'failed', failureCode: outcome.code, raw: outcome.raw ?? null });
-        return { payment: { ...payment }, order: { ...order }, settled: true };
+        return { payment: { ...payment }, order: { ...order }, settled: true, smsMessageId: null };
       }
       if (payments.some((p) => p.orderId === order.id && p.status === 'succeeded')) throw new Error('payments_one_success');
       if (order.status !== 'awaiting_payment') throw new Error(`سفارش ${order.orderNumber} در انتظار پرداخت نیست.`);
+      // پیامک پرداخت از صف (۷٫۱)، مثل `queuedPaidSms`: ردیف منتظر در همان تسویه.
+      const day = formatDeadlineDay(outcome.postHandoffDueAt);
+      const smsMessageId = paidSms.length + 1;
+      paidSms.push({
+        id: smsMessageId,
+        toMobile: order.recipientPhone,
+        body: orderPaidText(order.orderNumber, day),
+        params: orderPaidParams(order.orderNumber, day),
+        status: 'pending',
+        provider: 'queued',
+        attempts: 0,
+        cost: null,
+        error: null,
+      });
       Object.assign(payment, {
         status: 'succeeded',
         refId: outcome.refId,
         cardMask: outcome.cardMask,
         raw: outcome.raw ?? null,
         verifiedAt: outcome.paidAt,
+        smsMessageId,
       });
       Object.assign(order, { status: 'paid', paidAt: outcome.paidAt, postHandoffDueAt: outcome.postHandoffDueAt });
       events.push({
@@ -485,7 +563,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       for (const kind of ['prepare_order', 'prepare_ticket']) {
         if (!jobs.some((j) => j.orderId === order.id && j.kind === kind)) jobs.push({ kind, orderId: order.id });
       }
-      return { payment: { ...payment }, order: { ...order }, settled: true };
+      return { payment: { ...payment }, order: { ...order }, settled: true, smsMessageId };
     },
     async expireOrder(orderId, _at) {
       const order = orders.find((o) => o.id === orderId);

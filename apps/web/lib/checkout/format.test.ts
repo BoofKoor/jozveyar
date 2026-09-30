@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Breakdown } from '@jozveyar/contracts';
 
-import { formatClock, formatMobile, minutesFrom, newCheckoutKey, priceChange } from './format';
+import { CLOCK_AFTER_MS, formatClock, formatMobile, minutesFrom, newCheckoutKey, priceChange, retryClock } from './format';
 
 describe('formatMobile', () => {
   it('موبایل نرمال‌شده در سه تکه، مثل طرح؛ هر شکل دیگر همان‌طور', () => {
@@ -20,6 +20,19 @@ describe('formatClock', () => {
     expect(formatClock(0.1)).toBe('0:01');
     expect(formatClock(0)).toBe('0:00');
     expect(formatClock(-3)).toBe('0:00');
+  });
+});
+
+describe('retryClock (۷٫۱)', () => {
+  it('ساعت تهران، دقیقه به بالا؛ و فردا اگر از نیمه‌شب تهران گذشت', () => {
+    // ۱۱:۲۰ تهران = ۰۷:۵۰ UTC.
+    const now = Date.parse('2026-10-05T07:50:00Z');
+    expect(retryClock(now + 20 * 60_000, now)).toEqual({ time: '11:40', tomorrow: false });
+    expect(retryClock(now + 20 * 60_000 + 1, now)).toEqual({ time: '11:41', tomorrow: false });
+    // ۲۳:۵۰ تهران و انتظار نیم ساعته: ۰۰:۲۰ فردا.
+    const late = Date.parse('2026-10-05T20:20:00Z');
+    expect(retryClock(late + 30 * 60_000, late)).toEqual({ time: '00:20', tomorrow: true });
+    expect(CLOCK_AFTER_MS).toBe(15 * 60_000);
   });
 });
 

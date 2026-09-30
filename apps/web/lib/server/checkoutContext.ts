@@ -13,8 +13,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import type { CheckoutMode, OrderView } from '@jozveyar/contracts/checkout';
-import { createAuthStore, createOrderStore, createSmsLog, getDb, type AuthStore, type OrderStore } from '@jozveyar/db';
-import { consoleSms } from '@jozveyar/sms';
+import {
+  createAuthStore,
+  createOrderStore,
+  createSecretStore,
+  createSmsLog,
+  createSmsOutbox,
+  getDb,
+  secretsKeyOf,
+  smsIrKeysOf,
+  type AuthStore,
+  type OrderStore,
+} from '@jozveyar/db';
+import { consoleTransport, deliverQueued, loggedSms, smsIrTransport, type SmsTransport } from '@jozveyar/sms';
 
 import { createAuthService, tokenHash, type AuthService, type AuthUser } from './auth';
 import { createCheckoutService, orderView, type CheckoutService } from './checkout';
@@ -65,21 +76,46 @@ interface Services {
 let services: Services | undefined;
 
 /**
- * سرویس‌های خرید. امروز فقط `mock` به اینجا می‌رسد (`live` تا برش ۷ خاموش است)، پس آداپتورها درگاه
- * نمونه و پیامک کنسولی‌اند. روزی که `live` ساخته شد، انتخاب آداپتور با حالت اینجاست.
+ * پیامک مسیر خرید (سؤال ۱۱۴، ADR-049): `live` فقط sms.ir و `mock` فقط کنسولی (ADR-035)؛ هرگز برگشت بی‌صدا از یکی به دیگری. کلید API و
+ * شناسهٔ قالب sms.ir با هر پیامک از پنل یا `.env` خوانده می‌شوند (`smsIrKeysOf`، ADR-041)، و نشانی پایه از `SMSIR_API_URL` (تست و CI
+ * فقط سرور ساختگی).
+ */
+export function checkoutSmsTransport(mode: CheckoutMode, env: Readonly<Record<string, string | undefined>> = process.env): SmsTransport {
+  if (mode !== 'live') return consoleTransport();
+  // پایگاه داده با اولین پیامک، نه با ساختن آداپتور.
+  let keys: ReturnType<typeof smsIrKeysOf> | undefined;
+  return smsIrTransport({
+    baseUrl: env.SMSIR_API_URL,
+    keys: (purpose) =>
+      (keys ??= smsIrKeysOf(createSecretStore(getDb()), env, secretsKeyOf(env.SECRETS_KEY), (message) => console.error(message)))(purpose),
+  });
+}
+
+/**
+ * سرویس‌های خرید. امروز فقط `mock` به اینجا می‌رسد (`live` تا ۷٫۵ خاموش است، `LIVE_ADAPTERS_READY`)، پس آداپتورها درگاه نمونه و
+ * پیامک کنسولی‌اند؛ پیامک `live` از همین حالا sms.ir است (`checkoutSmsTransport`). پیامک پرداخت از صف است (۷٫۱): ردیف منتظر در
+ * تراکنش تسویه، و فرستادن بعد از commit با همان `deliverQueued` پنل.
  */
 function servicesOf(): Services {
   if (services) return services;
   const { orders, auth } = storesOf();
-  const sms = consoleSms(createSmsLog(getDb()));
+  const transport = checkoutSmsTransport(configuredMode(process.env.CHECKOUT_MODE));
+  const outbox = createSmsOutbox(getDb(), transport.name);
+  const setting = (key: string) => orders.setting(key);
   services = {
     auth: createAuthService({
       store: auth,
-      sms,
+      sms: loggedSms(transport, createSmsLog(getDb())),
       secret: sessionSecret()!,
-      siteHourlyLimit: () => readSetting((key) => orders.setting(key), 'otp.site_hourly_limit'),
+      siteHourlyLimit: () => readSetting(setting, 'otp.site_hourly_limit'),
+      siteDailyLimit: () => readSetting(setting, 'otp.site_daily_limit'),
     }),
-    checkout: createCheckoutService({ orders, gateway: mockGateway(), sms, callbackUrl: '/pay/callback' }),
+    checkout: createCheckoutService({
+      orders,
+      gateway: mockGateway(),
+      paidSms: (id) => deliverQueued({ outbox, transport }, [id]),
+      callbackUrl: '/pay/callback',
+    }),
   };
   return services;
 }
