@@ -13,6 +13,7 @@ import { formatNumber } from '@jozveyar/text';
 
 import { tehranDay } from './format';
 import { ROLE_NAMES } from './messages';
+import { boundsText } from './report';
 import { KEY_INFO } from './settings';
 
 /** نام وضعیت‌های سفارش در رویدادها؛ همان `STATUS_LABELS` صفحهٔ سفارش (`orders.ts` پایگاه داده را با خودش می‌آورد). */
@@ -84,8 +85,18 @@ const ltrOf = (value: unknown): Segment => ({ ltr: typeof value === 'number' || 
 /** نام کلید در صفحه («کد پذیرندهٔ زیبال»)؛ نام ناشناس همان نام خام. */
 const keyName = (value: unknown) => (typeof value === 'string' && value in KEY_INFO ? KEY_INFO[value as keyof typeof KEY_INFO].label : String(value ?? ''));
 
+/**
+ * بازه‌های وزن گزارش ارسال (۶٫۴) در رویداد: «بازه‌های کرایهٔ تعرفه»، یا مرزها («750، 1,500 و 3,000 گرم»)، هر عدد جدا از جملهٔ
+ * فارسی؛ همان `boundsText` صفحهٔ گزارش.
+ */
+function bandsRef(value: unknown): Segment[] {
+  if (!Array.isArray(value) || !value.every((grams) => typeof grams === 'number')) return ['بازه‌های کرایهٔ تعرفه'];
+  return boundsText(value).map((seg) => (typeof seg === 'string' ? seg : { ltr: 'num' in seg ? seg.num : '' }));
+}
+
 function settingUpdate(detail: Detail): Segment[] {
   if (detail.key === 'calendar.official_through') return ['تعطیلی‌های ', ltrOf(detail.to), ' با تقویم رسمی تطبیق داده شد'];
+  if (detail.key === 'report.weight_bands') return ['بازه‌های وزن گزارش ارسال: ', ...bandsRef(detail.from), ' ← ', ...bandsRef(detail.to)];
   const amount = (value: unknown): Segment => ({ ltr: typeof value === 'number' ? formatNumber(value) : String(value ?? '') });
   return [`${SETTING_NAMES[str(detail.key)] ?? str(detail.key)}: `, amount(detail.from), ' ← ', amount(detail.to)];
 }

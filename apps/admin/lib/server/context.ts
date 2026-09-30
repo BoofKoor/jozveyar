@@ -14,6 +14,7 @@ import {
   createSecretStore,
   createSettingsStore,
   createShipmentStore,
+  createShippingReportStore,
   createSmsOutbox,
   createTariffStore,
   getDb,
@@ -28,6 +29,7 @@ import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from '.
 import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
+import { createPanelReport, type PanelReport } from './report';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelShipments, type PanelShipments } from './shipments';
 import { createPanelTariff, type PanelTariff } from './tariff';
@@ -40,6 +42,7 @@ interface Panel {
   settings: PanelSettings;
   partners: PanelPartners;
   shipments: PanelShipments;
+  report: PanelReport;
 }
 
 let cached: Panel | null | undefined;
@@ -80,6 +83,8 @@ function build(config: AdminConfig): Panel {
       sms: { transport: consoleTransport(), outbox: createSmsOutbox(getDb(), 'console') },
       secret: config.secret,
     }),
+    // گزارش ارسال (۶٫۴، ADR-048): فقط خواندن، کوئری زنده؛ بازه‌های وزنش را سرویس تنظیمات عوض می‌کند.
+    report: createPanelReport({ store: createShippingReportStore(getDb()) }),
   };
 }
 

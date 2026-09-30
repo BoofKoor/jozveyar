@@ -76,8 +76,10 @@ import {
   withoutMoney,
   type DayBounds,
   type DueTile,
+  type Seg,
   type StatusAction,
 } from '../orders';
+import { monthKey, monthLabel, monthRange, parseMonthKey } from '../report';
 import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 
@@ -126,6 +128,11 @@ export interface DashboardView {
 
 export interface OrdersListView {
   bounds: DayBounds;
+  /**
+   * فیلتر «بی کد رهگیری» گزارش ارسال (برش ۶٫۴، تصمیم ۱۰۸): ماهش در نشانی (`?untracked=1405-07`) و نامش؛ null یعنی فهرست همیشگی.
+   * با فیلتر، چیپ همان «تحویل پست شد» است و جست‌وجو نیست.
+   */
+  untracked: { key: string; label: Seg[] } | null;
   /** چیپ‌های این نشست، به ترتیب طرح: کاربر چاپخانه «در انتظار» و «رهاشده» ندارد (۵٫۳). */
   buckets: readonly PanelBucket[];
   bucket: PanelBucket;
@@ -262,22 +269,30 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       });
     },
 
-    /** فهرست: چیپ (`status`)، جست‌وجو (`q`) و صفحه (`page`)، همه از نشانی و همه سنجیده. */
-    async list(session: AdminSession, params: { status?: string; q?: string; page?: string }): Promise<Result<OrdersListView>> {
+    /**
+     * فهرست: چیپ (`status`)، جست‌وجو (`q`) و صفحه (`page`)، همه از نشانی و همه سنجیده؛ و از ۶٫۴ «بی کد رهگیری» یک ماه
+     * (`untracked`، تصمیم ۱۰۸): سفارش‌هایی که در آن ماه «تحویل پست شد» و کد رهگیری زنده ندارند، همان که گزارش جدا می‌شمارد.
+     */
+    async list(
+      session: AdminSession,
+      params: { status?: string; q?: string; page?: string; untracked?: string },
+    ): Promise<Result<OrdersListView>> {
       if (!can(session, 'orders.read')) return fail(403, 'forbidden');
       const scope = scopeOf(session);
       const at = now();
       const clock = clockOf(at);
-      const q = (params.q ?? '').slice(0, 100);
-      const search = parseSearch(q);
+      const month = parseMonthKey(params.untracked);
+      const q = month ? '' : (params.q ?? '').slice(0, 100);
+      const search: PanelSearch | null = month ? { kind: 'untracked', ...monthRange(month) } : parseSearch(q);
       const buckets = bucketsOf(scope);
-      const bucket = bucketOf(params.status, search !== null, buckets);
+      const bucket = month ? 'handed' : bucketOf(params.status, search !== null, buckets);
       const counts = await store.counts(scope, { search, clock });
       const pages = Math.max(1, Math.ceil(counts[bucket] / ORDERS_PAGE));
       const page = Math.min(pageOf(params.page), pages);
       const rows = await store.list(scope, { bucket, search, clock, limit: ORDERS_PAGE, offset: (page - 1) * ORDERS_PAGE });
       return ok({
         bounds: dayBounds(at),
+        untracked: month ? { key: monthKey(month), label: monthLabel(month, false) } : null,
         buckets,
         bucket,
         q: search ? q.trim() : '',

@@ -186,7 +186,7 @@ export default async function TariffPage({
             ))}
           </ul>
         </section>
-        <TariffCards list={active.list} />
+        <TariffCards list={active.list} reportHref={can(session, 'reports.read') ? panelPath(gate, '/shipments/report') : undefined} />
       </div>
     </>
   );

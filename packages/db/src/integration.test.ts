@@ -94,6 +94,8 @@ import { READ_POST_FILE_JOB, createShipmentStore } from './shipments.js';
 import { shipmentImportRows, shipmentImports, shipments } from './schema.js';
 import { barcodeOf, parcel, postTable } from './postfile.fixtures.js';
 import type { PanelScope } from './panel.js';
+import { bandsDecision, bandsSeen, createShippingReportStore, currentBands } from './report.js';
+import { readSetting, REPORT_BANDS_SETTING } from './reference.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -1111,8 +1113,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const read = async (role: string) =>
         (await conn.db.select().from(rolePermissions).where(eq(rolePermissions.roleId, role))).map((r) => r.permissionId).sort();
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
+      // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است.
+      expect(await read('owner')).toContain('reports.read');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش) و از ۶٫۲ صف تأیید؛ چاپخانه فقط دیدن،
-      // وضعیت و دانلود (ADR-042) و از ۶٫۲ ورود فایل پست خودش، نه صف. صریح، نه از کد.
+      // وضعیت و دانلود (ADR-042) و از ۶٫۲ ورود فایل پست خودش، نه صف. هیچ‌کدام گزارش ارسال نه. صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'files.download',
         'orders.address',
@@ -4156,8 +4160,15 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     const shipmentsOf = (orderId: string) =>
       conn.db.select().from(shipments).where(eq(shipments.orderId, orderId)).orderBy(shipments.createdAt, shipments.rowNo);
 
-    /** سفارش پرداخت‌شده (شنبه 11 مهر) همان‌طور که سرور می‌سازد؛ چاپخانه با تخصیص پرداخت. `settle: false`: هنوز پرداخت‌نشده (۶٫۲). */
-    async function paidOrder(place: { provinceId: number; cityId: number }, name: string, { settle = true } = {}) {
+    /**
+     * سفارش پرداخت‌شده (شنبه 11 مهر) همان‌طور که سرور می‌سازد؛ چاپخانه با تخصیص پرداخت. `settle: false`: هنوز پرداخت‌نشده (۶٫۲).
+     * `paidAt`: روز دیگری، برای بسته‌ای که پست پیش از 11 مهر گرفت (گزارش ۶٫۴، مرز ماه)؛ مهلتش سه روز بعد.
+     */
+    async function paidOrder(
+      place: { provinceId: number; cityId: number },
+      name: string,
+      { settle = true, paidAt }: { settle?: boolean; paidAt?: Date } = {},
+    ) {
       const zoneId = place.provinceId === 8 ? 'tehran' : 'other';
       const sections = [{ documentId: docId, pageCount: 20 }];
       const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
@@ -4200,8 +4211,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         refId: '803114',
         cardMask: null,
         raw: null,
-        paidAt: tehran('2026-10-03 10:00'),
-        postHandoffDueAt: END_MONDAY,
+        paidAt: paidAt ?? tehran('2026-10-03 10:00'),
+        postHandoffDueAt: paidAt ? new Date(paidAt.getTime() + 3 * DAY) : END_MONDAY,
       }));
       return settled!.order;
     }
@@ -4218,8 +4229,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         event: { adminUserId: owner, action: 'orders.status', targetType: 'order', targetId: order.id, at: NOW },
       });
 
-    async function printingOrder(place: { provinceId: number; cityId: number }, name: string) {
-      const order = await paidOrder(place, name);
+    async function printingOrder(place: { provinceId: number; cityId: number }, name: string, options: { paidAt?: Date } = {}) {
+      const order = await paidOrder(place, name, options);
       expect((await change(order, 'paid', 'printing')).ok).toBe(true);
       return order;
     }
@@ -5843,6 +5854,208 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(await voidOf(code!.id)).toMatchObject({ ok: true });
         expect((await alerts(later)).smsFailed).toEqual([taheri.orderNumber]);
         expect((await panelStore().alerts(ALL_ORDERS, { ...clock, at: later, untrackedSince: NOW })).smsFailed).toEqual([]);
+      });
+    });
+
+    describe('گزارش حاشیهٔ ارسال (برش ۶٫۴)', () => {
+      /** آغاز ماه‌های ۱۴۰۵ به وقت تهران (نیمه‌شب): شهریور، مهر و آبان. مرز را پنل از `Intl` می‌سازد؛ اینجا عدد. */
+      const SHAHRIVAR = new Date('2026-08-22T20:30:00Z');
+      const MEHR = new Date('2026-09-22T20:30:00Z');
+      const ABAN = new Date('2026-10-22T20:30:00Z');
+      const report = () => createShippingReportStore(conn);
+      const mehr = () => report().handedOrders(ALL_ORDERS, { from: MEHR, to: ABAN });
+      const tax = (fare: number) => Math.floor((fare + 5) / 10);
+      /** تغییر وضعیت در لحظهٔ دلخواه (مرز ماه)، مثل `change`. */
+      const changeAt = (order: { id: string }, from: OrderStatus, to: OrderStatus, at: Date, reason: string | null = null) =>
+        panelStore().changeStatus(ALL_ORDERS, {
+          orderId: order.id,
+          from,
+          to,
+          at,
+          adminUserId: owner,
+          note: reason ? { reason } : null,
+          event: { adminUserId: owner, action: 'orders.status', targetType: 'order', targetId: order.id, at },
+        });
+      const voidCode = (shipmentId: string) =>
+        store().voidShipment(ALL_ORDERS, {
+          shipmentId,
+          reason: 'کد مال سفارش دیگری بود.',
+          at: NOW,
+          adminUserId: owner,
+          event: { adminUserId: owner, action: 'shipments.void', at: NOW },
+        });
+      const numbersOf = (rows: { orderNumber: number }[]) => rows.map((r) => r.orderNumber);
+
+      it('هر سفارش «تحویل پست شد» ماه با کرایهٔ منجمد و جمع بسته‌های زنده؛ کنارگذاشته، لغوشده و برگشته از پست نه؛ بی کد با صفر بسته', async () => {
+        // بی چاپخانه (پیش از ۵٫۲، یا بی چاپخانهٔ فعال هنگام پرداخت): اول، تا غیرفعال کردن چاپخانه سفارش بازی نداشته باشد.
+        await conn.db.update(printPartners).set({ isDefault: false, deactivatedAt: NOW });
+        const loose = await printingOrder(TEHRAN, 'کیوان یوسفی');
+        await conn.db.update(printPartners).set({ isDefault: true, deactivatedAt: null }).where(eq(printPartners.id, first));
+        const [noor] = await conn.db
+          .insert(printPartners)
+          .values({ name: 'چاپ نور', provinceId: MASHHAD.provinceId, cityId: MASHHAD.cityId })
+          .returning({ id: printPartners.id });
+        const two = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const voided = await printingOrder(MASHHAD, 'مریم کاظمی');
+        const bare = await handedOrder(TEHRAN, 'علی کریمی');
+        // «تحویل پست شد» دستی، و کدی که بعد نشست و کنار رفت: سفارش در «تحویل پست شد» می‌ماند، بی کد زنده.
+        const dropped = await handedOrder(TEHRAN, 'سارا رضایی');
+        const cancelled = await printingOrder(TEHRAN, 'زهرا محمدی');
+        expect((await change(cancelled, 'printing', 'cancelled', 'مشتری انصراف داد.')).ok).toBe(true);
+        const back = await handedOrder(TEHRAN, 'امین قاسمی');
+        expect((await change(back, 'handed_to_post', 'printing', 'اشتباه زدم.')).ok).toBe(true);
+        expect((await orderOf(loose.id)).printPartnerId).toBeNull();
+        expect((await orderOf(voided.id)).printPartnerId).toBe(noor!.id);
+
+        const id = await readImport([
+          parcel(1, barcodeOf(1), `طاهری ${two.orderNumber}`, 'تهران', 900, 1_295_000),
+          parcel(2, barcodeOf(2), `طاهری ${two.orderNumber}`, 'تهران', 700, 1_500_000),
+          parcel(3, barcodeOf(3), `کاظمی ${voided.orderNumber}`, 'مشهد', 1_100, 1_618_120),
+          parcel(4, barcodeOf(4), `کاظمی ${voided.orderNumber}`, 'مشهد', 1_000, 1_377_500),
+          parcel(5, barcodeOf(5), `یوسفی ${loose.orderNumber}`, 'تهران', 500, 1_295_000),
+          parcel(6, barcodeOf(6), `رضایی ${dropped.orderNumber}`, 'تهران', 800, 1_295_000),
+        ]);
+        expect(await commit(id)).toMatchObject({ ok: true, shipments: 6 });
+        const fourth = (await shipmentsOf(voided.id)).find((s) => s.barcode === barcodeOf(4))!;
+        expect(await voidCode(fourth.id)).toMatchObject({ ok: true });
+        expect(await voidCode((await shipmentsOf(dropped.id))[0]!.id)).toMatchObject({ ok: true });
+        expect((await orderOf(dropped.id)).status).toBe('handed_to_post');
+
+        const rows = await mehr();
+        expect(numbersOf(rows)).toEqual([loose, two, voided, bare, dropped].map((o) => o.orderNumber).sort((a, b) => a - b));
+        const byNumber = new Map(rows.map((r) => [r.orderNumber, r]));
+        const shippingOf = async (o: { id: string }) => BigInt((await orderOf(o.id)).shippingRials);
+        expect(byNumber.get(two.orderNumber)).toEqual({
+          orderNumber: two.orderNumber,
+          zoneId: 'tehran',
+          zoneName: 'استان تهران',
+          partner: { id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران' },
+          shippingRials: await shippingOf(two),
+          estWeightGrams: (await orderOf(two.id)).estWeightGrams,
+          parcels: 2,
+          fareRials: 2_795_000n,
+          taxRials: BigInt(tax(1_295_000) + tax(1_500_000)),
+          weightGrams: 1_600,
+        });
+        // کد کنارگذاشته نه (تصمیم ۱۰۰): فقط بستهٔ زنده.
+        expect(byNumber.get(voided.orderNumber)).toMatchObject({
+          zoneId: 'other',
+          zoneName: 'بقیهٔ کشور',
+          partner: { id: noor!.id, name: 'چاپ نور', cityName: 'مشهد' },
+          parcels: 1,
+          fareRials: 1_618_120n,
+          taxRials: BigInt(tax(1_618_120)),
+          weightGrams: 1_100,
+        });
+        expect(byNumber.get(loose.orderNumber)).toMatchObject({ partner: null, parcels: 1, fareRials: 1_295_000n });
+        // بی کد رهگیری: با صفر بسته، نه با کرایهٔ صفرِ یک مرسوله.
+        expect(byNumber.get(bare.orderNumber)).toMatchObject({ parcels: 0, fareRials: 0n, taxRials: 0n, weightGrams: 0 });
+        expect(byNumber.get(dropped.orderNumber)).toMatchObject({ parcels: 0, fareRials: 0n, taxRials: 0n, weightGrams: 0 });
+        expect(typeof byNumber.get(two.orderNumber)!.shippingRials).toBe('bigint');
+
+        // محدوده (ADR-042): چاپخانه فقط سفارش خودش.
+        expect(numbersOf(await report().handedOrders({ kind: 'partner', partnerId: noor!.id }, { from: MEHR, to: ABAN }))).toEqual([
+          voided.orderNumber,
+        ]);
+        // فهرست «بی کد رهگیری» زبانهٔ «سفارش‌ها» (تصمیم ۱۰۸) همان سفارش‌هایی است که گزارش با صفر بسته می‌شمارد.
+        const clock = { at: NOW, staleBefore: NOW, unreturnedBefore: NOW, untrackedSince: NOW };
+        const untracked = { kind: 'untracked', from: MEHR, to: ABAN } as const;
+        const listed = await panelStore().list(ALL_ORDERS, { bucket: 'all', search: untracked, clock, limit: 50, offset: 0 });
+        // فهرست «همه» تازه‌ترین اول است و گزارش کوچک‌ترین شماره اول.
+        expect(numbersOf(listed).reverse()).toEqual(numbersOf(rows.filter((r) => r.parcels === 0)));
+        expect(numbersOf(listed)).toEqual([dropped.orderNumber, bare.orderNumber]);
+        expect(await panelStore().counts(ALL_ORDERS, { search: untracked, clock })).toMatchObject({ handed: 2, all: 2, open: 0 });
+      });
+
+      it('مرز نیمه‌شب تهران در آخر ماه: ۲۳:۵۹:۵۹ روز ۳۱ شهریور با شهریور، و نیمه‌شب ۱ مهر با مهر؛ ماه‌های داده‌دار با شمارشان', async () => {
+        const paidAt = tehran('2026-09-15 10:00');
+        // بسته‌ای که پست روز ۳۱ شهریور گرفت: «تحویل پست شد» یک ثانیه پیش از نیمه‌شب همان روز (`handedAtOf`).
+        const late = await printingOrder(TEHRAN, 'مهسا طاهری', { paidAt });
+        // تحویل دستی یک میلی‌ثانیه پیش از نیمه‌شب، و درست نیمه‌شب.
+        const edge = await printingOrder(TEHRAN, 'مریم کاظمی', { paidAt });
+        const midnight = await printingOrder(TEHRAN, 'علی کریمی', { paidAt });
+        const bareMidnight = await printingOrder(TEHRAN, 'زهرا محمدی', { paidAt });
+        expect((await changeAt(edge, 'printing', 'handed_to_post', new Date(MEHR.getTime() - 1))).ok).toBe(true);
+        expect((await changeAt(midnight, 'printing', 'handed_to_post', MEHR)).ok).toBe(true);
+        expect((await changeAt(bareMidnight, 'printing', 'handed_to_post', MEHR)).ok).toBe(true);
+        const id = await readImport([
+          parcel(1, barcodeOf(11), `طاهری ${late.orderNumber}`, 'تهران', 900, 1_295_000, { date: '1405/06/31' }),
+          parcel(2, barcodeOf(12), `کریمی ${midnight.orderNumber}`, 'تهران', 900, 1_295_000, { date: '1405/07/01' }),
+        ]);
+        expect(await commit(id)).toMatchObject({ ok: true, shipments: 2 });
+        expect((await orderOf(late.id)).handedToPostAt).toEqual(new Date(MEHR.getTime() - 1000));
+        expect((await orderOf(midnight.id)).handedToPostAt).toEqual(MEHR);
+
+        const shahrivar = await report().handedOrders(ALL_ORDERS, { from: SHAHRIVAR, to: MEHR });
+        expect(numbersOf(shahrivar)).toEqual([late.orderNumber, edge.orderNumber]);
+        expect(shahrivar.map((r) => r.parcels)).toEqual([1, 0]);
+        expect(numbersOf(await mehr())).toEqual([midnight.orderNumber, bareMidnight.orderNumber]);
+        // فیلتر «بی کد رهگیری» سفارش‌ها (تصمیم ۱۰۸) با همان مرز: ۲۳:۵۹:۵۹٫۹۹۹ شهریور، و نیمه‌شب مهر.
+        const clock = { at: NOW, staleBefore: NOW, unreturnedBefore: NOW, untrackedSince: NOW };
+        const untrackedIn = async (from: Date, to: Date) =>
+          numbersOf(await panelStore().list(ALL_ORDERS, { bucket: 'all', search: { kind: 'untracked', from, to }, clock, limit: 50, offset: 0 }));
+        expect(await untrackedIn(SHAHRIVAR, MEHR)).toEqual([edge.orderNumber]);
+        expect(await untrackedIn(MEHR, ABAN)).toEqual([bareMidnight.orderNumber]);
+
+        expect(await report().handedSpan(ALL_ORDERS)).toEqual({ first: new Date(MEHR.getTime() - 1000), last: MEHR });
+        expect(await report().handedPerMonth(ALL_ORDERS, [SHAHRIVAR, MEHR])).toEqual([2, 2]);
+        // ماه آخر تا هر وقت؛ ماه بی سفارش صفر، و سفارشی پیش از ماه اول هیچ‌جا.
+        expect(await report().handedPerMonth(ALL_ORDERS, [MEHR])).toEqual([2]);
+        expect(await report().handedPerMonth(ALL_ORDERS, [new Date('2026-07-22T20:30:00Z'), SHAHRIVAR, MEHR, ABAN])).toEqual([0, 2, 2, 0]);
+        expect(await report().handedPerMonth(ALL_ORDERS, [])).toEqual([]);
+        expect(await report().handedPerMonth({ kind: 'partner', partnerId: randomUUID() }, [SHAHRIVAR, MEHR])).toEqual([0, 0]);
+        expect(await report().handedSpan({ kind: 'partner', partnerId: randomUUID() })).toBeNull();
+      });
+
+      it('بی «تحویل پست شد» هیچ ماهی نیست؛ مرزهای وزن کرایهٔ تعرفهٔ فعال', async () => {
+        await printingOrder(TEHRAN, 'مهسا طاهری');
+        expect(await report().handedSpan(ALL_ORDERS)).toBeNull();
+        expect(await mehr()).toEqual([]);
+        expect(await report().tariffBounds('post')).toEqual({ version: 1, bounds: [1_000, 3_000] });
+        expect(await report().tariffBounds('tipax')).toEqual({ version: 1, bounds: [] });
+      });
+
+      it('بازه‌های وزن: پیش‌فرض «tariff» در دادهٔ پایه، و تغییر زیر قفل با «همان که دیده شد»، یک رویداد، و دو ذخیرهٔ هم‌زمان یکی', async () => {
+        await conn.db.delete(settings).where(eq(settings.key, REPORT_BANDS_SETTING));
+        const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+        expect(seeded.settingsInserted).toEqual([REPORT_BANDS_SETTING]);
+        expect(await report().setting(REPORT_BANDS_SETTING)).toBe('tariff');
+        const settingsStore = createSettingsStore(conn);
+        const actor = { adminUserId: owner, ipHash: null };
+        const save = (next: 'tariff' | number[], seen: string) =>
+          settingsStore.change({ key: REPORT_BANDS_SETTING, action: 'settings.update', decide: bandsDecision(next, seen), at: NOW, actor });
+        const events = () => conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, REPORT_BANDS_SETTING));
+
+        expect(await save([750, 1_500, 3_000], 'tariff')).toEqual({ ok: true, written: true });
+        expect(await report().setting(REPORT_BANDS_SETTING)).toEqual([750, 1_500, 3_000]);
+        expect(await readSetting((key) => report().setting(key), REPORT_BANDS_SETTING)).toEqual([750, 1_500, 3_000]);
+        // همان مقصد دوباره (دو کلیک): موفق، بی رویداد دوم.
+        expect(await save([750, 1_500, 3_000], 'tariff')).toEqual({ ok: true, written: false });
+        // صفحه‌ای که هنوز «tariff» را دید، مقصد دیگری را نمی‌نویسد.
+        expect(await save([2_000], 'tariff')).toEqual({ ok: false, reason: 'changed' });
+        // مرزهای نزولی بیرون از قرارداد: رد، بی نوشتن.
+        expect(await save([3_000, 1_000], '750,1500,3000')).toEqual({ ok: false, reason: 'invalid' });
+        expect(await report().setting(REPORT_BANDS_SETTING)).toEqual([750, 1_500, 3_000]);
+        // دو ذخیرهٔ هم‌زمان از همان صفحه، با دو مقصد: یکی می‌نشیند و دیگری «عوض شد».
+        const both = await Promise.all([save([1_000], '750,1500,3000'), save([2_000], '750,1500,3000')]);
+        expect(both.filter((r) => r.ok && r.written)).toHaveLength(1);
+        expect(both.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'changed' }]);
+        const now = await report().setting(REPORT_BANDS_SETTING);
+        expect(bandsSeen(currentBands(now))).toMatch(/^(1000|2000)$/);
+        // برگرداندن به بازه‌های تعرفه (تصمیم ۱۰۹).
+        expect(await save('tariff', bandsSeen(currentBands(now)))).toEqual({ ok: true, written: true });
+        expect(await report().setting(REPORT_BANDS_SETTING)).toBe('tariff');
+        const log = await events();
+        expect(log).toHaveLength(3);
+        expect(log.map((e) => [e.action, e.targetType, (e.detail as { from: unknown }).from])).toEqual([
+          ['settings.update', SETTING_TARGET, 'tariff'],
+          ['settings.update', SETTING_TARGET, [750, 1_500, 3_000]],
+          ['settings.update', SETTING_TARGET, now],
+        ]);
+        // مقدار خراب در پایگاه داده: پیش‌فرض، نه ترکیدن گزارش.
+        await conn.db.update(settings).set({ value: [0, -5] }).where(eq(settings.key, REPORT_BANDS_SETTING));
+        expect(currentBands(await report().setting(REPORT_BANDS_SETTING))).toBe('tariff');
+        expect(await readSetting((key) => report().setting(key), REPORT_BANDS_SETTING, () => {})).toBe('tariff');
       });
     });
   });

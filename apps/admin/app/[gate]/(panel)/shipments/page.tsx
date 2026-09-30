@@ -23,7 +23,7 @@ const one = (query: Query, key: string) => (typeof query[key] === 'string' ? (qu
 /**
  * ارسال (طرح پنل `m-ship`، برش ۶٫۱، ADR-045): بارگذاری فایل پست و ورودها، تازه‌ترین اول، با وضعیت، کسی که آورد، روز فایل و حال
  * سطرها؛ هر ورود پیوند صفحهٔ خودش (پیش‌نمایش، یا نتیجهٔ «ثبت»). مالک و متصدی (`shipments.import`)، و از ۶٫۲ چاپخانه فقط ورودهای
- * خودش؛ مالک و متصدی شمار صف تأیید را هم با پیوندش می‌بینند.
+ * خودش؛ مالک و متصدی شمار صف تأیید را هم با پیوندش می‌بینند. از ۶٫۴ مالک دکمهٔ «گزارش ارسال» را هم دارد (طرح).
  */
 export default async function ShipmentsPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
@@ -49,6 +49,12 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
               : 'فایل پست کد رهگیری، وزن و کرایهٔ هر بسته را می‌آورد؛ کد به موبایل مشتری پیامک می‌شود. پیش از ثبت، هر سطر را با حکمش می‌بینی.'}
           </p>
         </div>
+        {can(session, 'reports.read') ? (
+          // گزارش حاشیهٔ ارسال (۶٫۴، تصمیم ۱۰۶): فقط مالک؛ متصدی و چاپخانه نه دکمه دارند و نه صفحه.
+          <Link href={panelPath(gate, '/shipments/report')} className="jy-btn jy-btn--secondary">
+            گزارش ارسال
+          </Link>
+        ) : null}
       </div>
       <div className="ad-stack">
         {error ? (

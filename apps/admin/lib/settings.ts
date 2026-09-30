@@ -146,19 +146,22 @@ export function readKeyValue(input: unknown): string | null {
 /** ۴ نویسهٔ آخر، فقط برای کلید دست‌کم ۸ نویسه‌ای؛ کلید کوتاه‌تر هیچ، تا بخش بزرگی از آن دیده نشود. */
 export const keyTail = (value: string): string | null => (value.length >= KEY_TAIL_MIN_LENGTH ? value.slice(-KEY_TAIL) : null);
 
-/** نام و متن‌های هر کلید در صفحه (طرح `m-settings`). `dots` شمار نقطه‌های پیش از ۴ نویسهٔ آخر، مثل طرح. */
+/**
+ * نام و متن‌های هر کلید در صفحه (طرح `m-settings`). `dots` شمار نقطه‌های پیش از ۴ نویسهٔ آخر، مثل طرح. پنل پیامک sms.ir است، نه
+ * کاوه‌نگار (صاحب پروژه، ۱۴۰۵/۰۷/۰۸): از ۶٫۴ برچسب‌ها و راهنماها هم (تصمیم‌های ۱۰۷ و ۱۱۱؛ فقط متن، نام کلیدها همان).
+ */
 export const KEY_INFO: Record<ServiceKeyName, { label: string; field: string; about: string; test: string; dots: number }> = {
   SMS_API_KEY: {
-    label: 'کلید API کاوه‌نگار',
+    label: 'کلید API sms.ir',
     field: 'کلید تازه',
-    about: 'کلیدی که پنل کاوه‌نگار می‌دهد',
+    about: 'کلیدی که پنل sms.ir می‌دهد',
     test: 'آزمایش کلید با خود پنل پیامک واقعی می‌آید.',
     dots: 8,
   },
   SMS_OTP_TEMPLATE: {
-    label: 'قالب کد پیامکی کاوه‌نگار',
+    label: 'قالب کد پیامکی sms.ir',
     field: 'نام قالب',
-    about: 'نام قالبی که در پنل کاوه‌نگار تأیید می‌شود',
+    about: 'نام قالبی که در پنل sms.ir تأیید می‌شود',
     test: 'آزمایش قالب با خود پنل پیامک واقعی می‌آید.',
     dots: 4,
   },

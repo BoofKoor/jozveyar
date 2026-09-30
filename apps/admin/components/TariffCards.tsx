@@ -1,5 +1,7 @@
 import type { PriceList } from '@jozveyar/contracts';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
+import Link from 'next/link';
+
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
 import { rateRows, restRows, weightLabel, ZONES } from '../lib/tariff';
@@ -7,9 +9,10 @@ import { Segments } from './Segments';
 
 /**
  * یک نسخهٔ تعرفه، فقط‌خواندنی (طرح پنل `m-tariff`): چاپ هر رو و کاغذ، صحافی بر حسب برگ، پست پیشتاز (وزن × منطقه)، و بقیه.
- * پول تومان است؛ هر عدد در `.num` خودش.
+ * پول تومان است؛ هر عدد در `.num` خودش. `reportHref`: پیوند «کرایه‌ای که پست واقعاً گرفت» زیر کرایه‌ها، فقط برای مالک (گزارش
+ * ارسال، ۶٫۴، تصمیم ۱۰۶).
  */
-export function TariffCards({ list }: { list: PriceList }) {
+export function TariffCards({ list, reportHref }: { list: PriceList; reportHref?: string }) {
   const paper = list.paperTypes[DEFAULT_PAPER_TYPE_ID];
   const binding = list.bindingTypes[DEFAULT_BINDING_TYPE_ID];
   const post = list.shippingMethods[DEFAULT_SHIPPING_METHOD_ID];
@@ -105,6 +108,13 @@ export function TariffCards({ list }: { list: PriceList }) {
             </tbody>
           </table>
           <p className="ad-hint ad-gap">تومان.{othersOff ? ' روش‌های دیگر ارسال خاموش‌اند.' : ''}</p>
+          {reportHref ? (
+            <p className="ad-hint">
+              <Link className="jy-link" href={reportHref}>
+                کرایه‌ای که پست واقعاً گرفت
+              </Link>
+            </p>
+          ) : null}
         </section>
       ) : null}
 
