@@ -22,25 +22,21 @@ import {
 const BARCODE = '118800000000000000000101';
 
 describe('متن‌ها', () => {
-  it('کد و پرداخت همان متن برش ۳', () => {
+  it('کد همان متن برش ۳؛ پرداخت متن کوتاه قالب ADR-049 (یک تکه)', () => {
     expect(otpText('12345')).toBe('کد تأیید جزوه‌یار: 12345\nاین کد را به کسی نده.');
-    expect(orderPaidText(10001, 'دوشنبه 6 مهر')).toBe(
-      'جزوه‌یار: سفارش 10001 پرداخت شد. تحویل به پست تا دوشنبه 6 مهر؛ کد رهگیری پست را هم پیامک می‌کنیم.',
-    );
+    expect(orderPaidText(10001, 'دوشنبه 6 مهر')).toBe('جزوه‌یار: سفارش 10001 پرداخت شد؛ تحویل به پست تا دوشنبه 6 مهر');
   });
 
-  it('رهگیری عیناً متن ADR-047، فقط از دو پارامتر بی فاصله', () => {
-    expect(trackingText(10027, BARCODE)).toBe(
-      'جزوه‌یار: سفارش 10027 تحویل پست شد. کد رهگیری: 118800000000000000000101 (tracking.post.ir)',
-    );
+  it('رهگیری عیناً متن قالب ADR-049، فقط از دو پارامتر بی فاصله', () => {
+    expect(trackingText(10027, BARCODE)).toBe('جزوه‌یار: سفارش 10027 به پست رسید. کد رهگیری 118800000000000000000101');
     expect(trackingParams(10027, BARCODE)).toEqual(['10027', BARCODE]);
     // متن جز همین دو پارامتر چیز متغیری ندارد: با پارامترهای دیگر فقط همان‌ها عوض می‌شوند.
     expect(trackingText(10028, '118811111111111111111111').replace('10028', '10027').replace('118811111111111111111111', BARCODE)).toBe(
       trackingText(10027, BARCODE),
     );
     for (const param of trackingParams(10027, BARCODE)) expect(param).not.toMatch(/\s/);
-    // حدود ۹۰ نویسه: دو تکهٔ پیامک فارسی (۷۰ نویسه‌ای)، نه سه.
-    expect(trackingText(10027, BARCODE).length).toBeLessThanOrEqual(134);
+    // یک تکهٔ پیامک فارسی (۷۰ نویسه)، نه دو (متن ۶٫۳ نود نویسه بود).
+    expect(trackingText(10027, BARCODE).length).toBeLessThanOrEqual(70);
   });
 
   it('بارکد نه ۲۴ رقم، یا با فاصله، متن نمی‌سازد', () => {
@@ -60,16 +56,18 @@ describe('پیامک کد و پرداخت (`loggedSms`)', () => {
       text: otpText('12345'),
     });
     expect(rows).toEqual([
-      { provider: 'console', toMobile: '09123456789', purpose: 'otp', body: otpText('12345'), status: 'logged', providerMessageId: null },
+      { provider: 'console', toMobile: '09123456789', purpose: 'otp', body: otpText('12345'), status: 'logged', providerMessageId: null, cost: null },
     ]);
     expect(lines).toEqual(['✉ پیامک کنسولی به 09123456789 (otp): کد تأیید جزوه‌یار: 12345 ⏎ این کد را به کسی نده.']);
   });
 
   it('پنل واقعی: متن کد نمی‌ماند؛ شکست ردیف «failed» و پرتاب', async () => {
     const rows: SmsRecord[] = [];
-    const ok: SmsTransport = { name: 'real', send: async () => ({ status: 'sent', providerMessageId: 'm1' }) };
-    await loggedSms(ok, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'otp', text: 'x' });
-    expect(rows[0]).toMatchObject({ body: null, status: 'sent', providerMessageId: 'm1' });
+    const ok: SmsTransport = { name: 'real', send: async () => ({ status: 'sent', providerMessageId: 'm1', cost: 1.05 }) };
+    await loggedSms(ok, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'otp', text: 'x', params: ['80764'] });
+    expect(rows[0]).toMatchObject({ body: null, status: 'sent', providerMessageId: 'm1', cost: 1.05 });
+    // کد در هیچ ستونی نیست، پارامترش هم نه.
+    expect(JSON.stringify(rows[0])).not.toContain('80764');
     const bad: SmsTransport = { name: 'real', send: async () => Promise.reject(new SmsError('rejected')) };
     await expect(loggedSms(bad, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'order_paid', text: 'y' })).rejects.toThrow();
     expect(rows[1]).toMatchObject({ status: 'failed', error: 'rejected', body: 'y' });
