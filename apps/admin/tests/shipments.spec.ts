@@ -195,7 +195,7 @@ test.describe.serial('ارسال در پنل', () => {
 
     await commit.getByRole('button', { name: 'ثبت: 2 کد رهگیری' }).click();
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('ثبت شد');
-    await expect(page.locator('main')).toContainText('ثبت شد: 2 کد رهگیری نشست.');
+    await expect(page.locator('main')).toContainText('ثبت شد: 2 کد رهگیری نشست و 2 پیامک رفت.');
     await expect(page.locator('main')).toContainText('«تحویل پست شد» شدند');
     expect(await statusOf(o.A)).toBe('handed_to_post');
     expect(await statusOf(o.B)).toBe('handed_to_post');
@@ -216,7 +216,7 @@ test.describe.serial('ارسال در پنل', () => {
     await expect(side.getByRole('heading', { name: 'به پست رسید' })).toBeVisible();
     // فایل پست فقط روز را دارد (سؤال ۷۰): روز، بی ساعت.
     await expect(side.locator('.ad-meta').first()).toHaveText(`امروز، ${formatJalaliWeekday(new Date())} · فایل پست، علی محمدی`);
-    await expect(side).toContainText('از فایل پست آمد.');
+    await expect(side).toContainText('به موبایل مشتری پیامک شد.');
     const card = page.locator('section[aria-labelledby="t-parcel"]');
     await expect(card.getByRole('heading', { name: 'بستهٔ پستی' })).toBeVisible();
     const track = card.getByRole('link', { name: 'رهگیری در سایت پست (زبانهٔ تازه)' });

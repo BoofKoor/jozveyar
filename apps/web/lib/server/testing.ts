@@ -17,6 +17,7 @@ import {
   type DocumentStore,
   type NewOrder,
   type NewUploadDocument,
+  type OrderDetails,
   type OrderRow,
   type OrderStore,
   type OtpRow,
@@ -243,7 +244,10 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   partners: MemoryPartner[];
   assignments: { orderId: string; fromPartnerId: string | null; toPartnerId: string; actor: 'system'; rule: AssignmentRule }[];
   activate(list: PriceList): void;
+  /** کدهای رهگیری زندهٔ هر سفارش با پیامکشان (برش ۶٫۳)؛ پنل می‌نشاندشان، اینجا تست. */
+  parcels: Map<string, OrderDetails['parcels']>;
 } {
+  const parcels = new Map<string, OrderDetails['parcels']>();
   const documentsById = new Map<string, CheckoutDocument>();
   const settings = new Map<string, unknown>();
   const orders: OrderRow[] = [];
@@ -307,6 +311,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         .filter((p) => p.orderId === order.id)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
         .map((p) => ({ ...p })),
+      parcels: [...(parcels.get(order.id) ?? [])],
     };
   }
 
@@ -321,6 +326,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     priceLists,
     partners,
     assignments,
+    parcels,
     activate(list) {
       priceLists.set(list.version, list);
       active = list;

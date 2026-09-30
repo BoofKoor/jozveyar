@@ -14,9 +14,11 @@ import {
   createSecretStore,
   createSettingsStore,
   createShipmentStore,
+  createSmsOutbox,
   createTariffStore,
   getDb,
 } from '@jozveyar/db';
+import { consoleTransport } from '@jozveyar/sms';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
@@ -71,8 +73,13 @@ function build(config: AdminConfig): Panel {
     }),
     // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
     partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),
-    // ارسال (۶٫۱): ورود فایل پست؛ خواندن فایل با کارگر است، پس پنل بایت‌ها را فقط در پایگاه داده می‌گذارد (ADR-045).
-    shipments: createPanelShipments({ store: createShipmentStore(getDb()), secret: config.secret }),
+    // ارسال (۶٫۱): ورود فایل پست؛ خواندن فایل با کارگر است، پس پنل بایت‌ها را فقط در پایگاه داده می‌گذارد (ADR-045). پیامک رهگیری
+    // (۶٫۳، ADR-047): تا برش ۷ همیشه کنسولی، هر چه `.env` بگوید؛ نه `SMS_PROVIDER` خوانده می‌شود و نه کلید پنل پیامک (ADR-035).
+    shipments: createPanelShipments({
+      store: createShipmentStore(getDb()),
+      sms: { transport: consoleTransport(), outbox: createSmsOutbox(getDb(), 'console') },
+      secret: config.secret,
+    }),
   };
 }
 

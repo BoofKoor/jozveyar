@@ -31,6 +31,7 @@
  *    نوشتنی نیست.
  */
 
+import { SMS_STUCK_MS } from '@jozveyar/sms';
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
@@ -71,7 +72,9 @@ import {
   shipments,
   shippingMethods,
   shippingZones,
+  smsMessages,
 } from './schema.js';
+import { shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
 
 /** دو کار سفارش پس از پرداخت: PDF جزوه و فایل چاپ، و برگهٔ سفارش. */
 export type OrderJobKind = typeof PREPARE_ORDER_JOB | typeof PREPARE_TICKET_JOB;
@@ -233,6 +236,11 @@ export interface PanelAlerts {
    * روز کاری از تحویل گذشته یا نه را سرویس با تعطیلی‌ها می‌سنجد (`TRACKING_GRACE_WORKDAYS`).
    */
   untracked: { orderNumber: number; handedToPostAt: Date }[];
+  /**
+   * سفارش‌هایی که پیامک رهگیری کد زنده‌شان نرفت، یا معلوم نیست رفت (برش ۶٫۳، ADR-047): همان حال «نرفت» و «معلوم نیست» پنل
+   * (`smsState`، `SMS_STUCK_MS`)، فقط کدهای ثبت‌شده پس از `untrackedSince`؛ کوچک‌ترین شماره اول. پیشخوان فقط با `shipments.review`.
+   */
+  smsFailed: number[];
 }
 
 export interface PanelSection {
@@ -360,6 +368,11 @@ export interface PanelShipment {
   voidedAt: Date | null;
   voidedByName: string | null;
   voidReason: string | null;
+  /**
+   * پیامک رهگیری همین کد (۶٫۳، ADR-047)؛ null برای مرسولهٔ پیش از ۶٫۳. ردیفی که پیش از خود مرسوله ساخته شده همان پیامکی است
+   * که همین کد پیش‌تر برای همین سفارش گرفت (سؤال ۶۷).
+   */
+  sms: ShipmentSms | null;
 }
 
 /** یک تغییر وضعیت، با نام ادمینی که عوضش کرد (از ۴٫۳). */
@@ -706,7 +719,8 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     },
 
     async alerts(scope, clock) {
-      const [failed, unreturned, unassigned, review, untracked] = await Promise.all([
+      const stuck = ts(new Date(clock.at.getTime() - SMS_STUCK_MS));
+      const [failed, unreturned, unassigned, review, untracked, smsFailed] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -753,6 +767,23 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             ),
           )
           .orderBy(asc(orders.handedToPostAt), asc(orders.orderNumber)),
+        // پیامک رهگیری که نرفت (۶٫۳): کد زنده، ثبت‌شده در همان پنجره، و ردیفش «نرفت»، یا «منتظر» و «در حال فرستادن»ی که ماند.
+        db
+          .selectDistinct({ orderNumber: orders.orderNumber })
+          .from(shipments)
+          .innerJoin(orders, eq(orders.id, shipments.orderId))
+          .innerJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
+          .where(
+            and(
+              isNull(shipments.voidedAt),
+              sql`${shipments.createdAt} > ${ts(clock.untrackedSince)}`,
+              sql`(${smsMessages.status} = 'failed'
+                OR (${smsMessages.status} = 'pending' AND ${smsMessages.createdAt} < ${stuck})
+                OR (${smsMessages.status} = 'sending' AND ${smsMessages.attemptedAt} < ${stuck}))`,
+              inScope(scope),
+            ),
+          )
+          .orderBy(asc(orders.orderNumber)),
       ]);
       return {
         failedPdf: failed.map((row) => row.orderNumber),
@@ -760,6 +791,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         unassigned: unassigned.map((row) => row.orderNumber),
         reviewRows: review[0]?.n ?? 0,
         untracked: untracked.flatMap((row) => (row.handedToPostAt ? [{ orderNumber: row.orderNumber, handedToPostAt: row.handedToPostAt }] : [])),
+        smsFailed: smsFailed.map((row) => row.orderNumber),
       };
     },
 
@@ -974,10 +1006,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             voidedAt: shipments.voidedAt,
             voidedByName: sql<string | null>`(SELECT u.display_name FROM admin_users u WHERE u.id = ${shipments.voidedBy})`,
             voidReason: shipments.voidReason,
+            ...shipmentSmsFields,
           })
           .from(shipments)
           .innerJoin(shipmentImports, eq(shipmentImports.id, shipments.importId))
           .leftJoin(adminUsers, eq(adminUsers.id, shipments.adminUserId))
+          .leftJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
           .where(eq(shipments.orderId, order.id))
           .orderBy(asc(shipments.createdAt), asc(shipments.rowNo)),
       ]);
@@ -1033,7 +1067,13 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           actor: row.actor === 'admin' ? ('admin' as const) : ('system' as const),
           rule: (row.rule as AssignmentRule | null) ?? null,
         })),
-        shipments: shipmentRows,
+        shipments: shipmentRows.map((row) => {
+          const { smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt, ...shipment } = row;
+          return {
+            ...shipment,
+            sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+          };
+        }),
       };
     },
 

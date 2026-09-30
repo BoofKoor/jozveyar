@@ -26,6 +26,7 @@ import {
 import type { Breakdown, OrderSpec, PriceList } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
+  IRAN_POST,
   PAYMENT_ATTEMPT_TTL_MS,
   isPaidStatus,
   type CheckoutDocument,
@@ -36,6 +37,7 @@ import {
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
+import { orderPaidText, smsState, type SmsProvider } from '@jozveyar/sms';
 import { formatDeadlineDay, formatJalaliWeekday, postHandoffDue } from '@jozveyar/text';
 import { checkRecipient } from '@jozveyar/text/input';
 
@@ -43,7 +45,6 @@ import type { AuthUser } from './auth';
 import type { PaymentGateway } from './payments';
 import { fail, ok, type Result } from './result';
 import { readSetting } from './settings';
-import { orderPaidText, type SmsProvider } from './sms';
 
 /**
  * حاشیهٔ فایل (یک ساعت) و مهلت هر تلاش پرداخت (نیم ساعت) در `@jozveyar/db`اند، چون پنل ادمین هم با همان‌ها
@@ -140,6 +141,12 @@ export async function orderView(
   const due = order.postHandoffDueAt;
   // فقط و همیشه در «تحویل پست شد» (محدودیت `orders_handed_at`).
   const handed = order.handedToPostAt;
+  // کدهای زنده (کنارگذاشته هرگز) با پیامکشان (برش ۶٫۳، ADR-047)؛ «رفت» همان `smsState` پنل.
+  const parcels = found.parcels.map((parcel) => ({
+    barcode: parcel.barcode,
+    trackingUrl: IRAN_POST.trackingUrl(parcel.barcode),
+    smsSent: parcel.sms !== null && smsState(parcel.sms, at) === 'sent',
+  }));
   const view: OrderView = {
     number: order.orderNumber,
     status: order.status,
@@ -147,6 +154,7 @@ export async function orderView(
     postHandoffDay: due ? formatDeadlineDay(due) : null,
     // مهلت پایان انحصاری روز است: تحویل پیش از آن، در مهلت.
     handedToPost: handed ? { day: formatJalaliWeekday(handed), onTime: due !== null && handed.getTime() < due.getTime() } : null,
+    trackingSent: parcels.some((parcel) => parcel.smsSent),
     slaDays: order.slaDays,
     owner,
     details: null,
@@ -191,6 +199,7 @@ export async function orderView(
       addressText: order.addressText,
       postalCode: order.postalCode,
     },
+    parcels,
   };
   return ok(view);
 }

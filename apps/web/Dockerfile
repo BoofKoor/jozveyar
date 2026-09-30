@@ -87,6 +87,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/geo/package.json packages/geo/
 COPY packages/storage/package.json packages/storage/
 COPY packages/pricing/package.json packages/pricing/
+COPY packages/sms/package.json packages/sms/
 COPY packages/text/package.json packages/text/
 COPY packages/ui/package.json packages/ui/
 

@@ -181,9 +181,24 @@ export interface OrderView {
   postHandoffDay: string | null;
   /** «تحویل پست شد» (برش ۴٫۳): روزش («دوشنبه 13 مهر»)، و اینکه در مهلت بود؛ فقط در همان وضعیت. */
   handedToPost: { day: string; onTime: boolean } | null;
+  /**
+   * کد رهگیری زنده‌ای هست و پیامکش به موبایل گیرنده رفت (برش ۶٫۳، ADR-047). غریبه فقط همین را می‌بیند («کد رهگیری به موبایل گیرنده
+   * پیامک شد.»)، نه خود کد (ADR-033).
+   */
+  trackingSent: boolean;
   slaDays: number;
   owner: boolean;
   details: OrderViewDetails | null;
+}
+
+/** یک بستهٔ پستی سفارش، فقط برای صاحب سفارش (برش ۶٫۳، ADR-047): کد زنده، به ترتیب ثبت؛ کنارگذاشته هرگز. */
+export interface OrderViewParcel {
+  /** ۲۴ رقم. */
+  barcode: string;
+  /** پیوند رهگیری سایت پست (آداپتور «پست ایران»)؛ فقط `<a>`، چیزی از آن بار نمی‌شود. */
+  trackingUrl: string;
+  /** پیامک همین کد به موبایل گیرنده رفت. */
+  smsSent: boolean;
 }
 
 export interface OrderViewDetails {
@@ -206,4 +221,6 @@ export interface OrderViewDetails {
     cityName: string | null;
   };
   recipient: { name: string; phone: string; addressText: string; postalCode: string | null };
+  /** بسته‌های پستی با کد رهگیری (برش ۶٫۳). */
+  parcels: OrderViewParcel[];
 }

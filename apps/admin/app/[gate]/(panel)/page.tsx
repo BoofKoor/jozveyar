@@ -92,7 +92,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
         ) : null}
       </section>
 
-      {alerts.failedPdf.length > 0 || unreturned > 0 || alerts.unassigned.length > 0 || alerts.reviewRows > 0 || untracked.length > 0 ? (
+      {alerts.failedPdf.length > 0 || unreturned > 0 || alerts.unassigned.length > 0 || alerts.reviewRows > 0 || alerts.smsFailed.length > 0 || untracked.length > 0 ? (
         <div className="ad-alerts">
           {alerts.failedPdf.length > 0 ? (
             <p className="jy-note jy-note--error" data-alert="pdf">
@@ -135,14 +135,24 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
             </p>
           ) : null}
           {alerts.reviewRows > 0 ? (
-            // صف تأیید (۶٫۲)، فقط مالک و متصدی؛ بی پیامک تا ۶٫۳.
+            // صف تأیید (۶٫۲)، فقط مالک و متصدی.
             <p className="jy-note jy-note--warning" data-alert="review">
               <span className="jy-icon jy-icon-warning" aria-hidden="true" />
               <span>
                 <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
                   <span className="num">{formatNumber(alerts.reviewRows)}</span> سطر فایل پست
                 </Link>{' '}
-                منتظر تأیید است؛ تا تأیید نشده، کد رهگیری به سفارشش نمی‌نشیند.
+                منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.
+              </span>
+            </p>
+          ) : null}
+          {alerts.smsFailed.length > 0 ? (
+            // پیامک رهگیری که نرفت (۶٫۳؛ در طرح نبود): فقط مالک و متصدی، که «دوباره بفرست» دارند.
+            <p className="jy-note jy-note--warning" data-alert="sms">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                پیامک رهگیری {alerts.smsFailed.length === 1 ? 'سفارش ' : 'سفارش‌های '}
+                <OrderLinks gate={gate} numbers={alerts.smsFailed} /> نرفت؛ از کارت «بستهٔ پستی» دوباره بفرست.
               </span>
             </p>
           ) : null}

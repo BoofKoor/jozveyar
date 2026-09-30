@@ -14,6 +14,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import type { CheckoutMode, OrderView } from '@jozveyar/contracts/checkout';
 import { createAuthStore, createOrderStore, createSmsLog, getDb, type AuthStore, type OrderStore } from '@jozveyar/db';
+import { consoleSms } from '@jozveyar/sms';
 
 import { createAuthService, tokenHash, type AuthService, type AuthUser } from './auth';
 import { createCheckoutService, orderView, type CheckoutService } from './checkout';
@@ -22,7 +23,6 @@ import { noStore, respond } from './context';
 import { mockGateway } from './payments';
 import type { Result } from './result';
 import { readSetting } from './settings';
-import { consoleSms } from './sms';
 
 /** کوکی نشست بعد از کد پیامکی (ADR-033)، جدا از `jy_sid` که مالک فایل‌هاست. */
 export const AUTH_COOKIE = 'jy_auth';

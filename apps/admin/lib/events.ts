@@ -296,6 +296,12 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
           ...(str(detail.reason) ? [`؛ ${str(detail.reason)}`] : []),
         ],
       };
+    case 'shipments.sms_resend':
+      // «دوباره بفرست» (۶٫۳): پیامک رهگیری کدام سفارش دوباره رفت یا باز نرفت.
+      return {
+        badge: null,
+        text: ['پیامک رهگیری سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
+      };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };

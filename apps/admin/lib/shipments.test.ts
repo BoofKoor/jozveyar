@@ -79,7 +79,7 @@ function preview(rows: string[][], orders: ShipmentOrderFacts[], live: ShipmentP
     now: NOW,
     candidateRows: new Set(),
   });
-  return { sheet, judged, orders, live, fingerprint: judgedFingerprint(judged), candidates: {} };
+  return { sheet, judged, orders, live, fingerprint: judgedFingerprint(judged), candidates: {}, smsBefore: [] };
 }
 
 describe('سطرهای فایل با حکم و دلیل', () => {
@@ -177,6 +177,7 @@ function shipment(over: Partial<ImportShipment>): ImportShipment {
     voidedAt: null,
     voidedByName: null,
     voidReason: null,
+    sms: null,
     ...over,
   };
 }
@@ -369,13 +370,13 @@ describe('حال امروز سطرهای ثبت‌شده و ورودها (۶٫۲
     const code = shipment({ id: 'a', rowNo: 1, barcode: barcodeOf(1) });
     // پیش‌نمایش و درست پس از «ثبت»: همان متن طرح.
     expect(texts([matched, ...queued, unmatched], [code], { state: 'preview' })).toEqual([
-      'کد رهگیری، با «ثبت»',
-      'تا تأیید مالک یا متصدی، بی کد',
+      'کد رهگیری و پیامک، با «ثبت»',
+      'تا تأیید مالک یا متصدی، بی کد و بی پیامک',
       'سفارش ما نیست؛ ثبت نمی‌شود',
     ]);
     expect(texts([matched, ...queued, unmatched], [code], { state: 'committed' })).toEqual([
       'کد رهگیری نشست',
-      'تا تأیید مالک یا متصدی، بی کد',
+      'تا تأیید مالک یا متصدی، بی کد و بی پیامک',
       'سفارش ما نیست؛ ثبت نمی‌شود',
     ]);
     // یکی از صف تأیید شد، کد قطعی کنار رفت، و «پیدا نشد» دستی به سفارشی رسید.
@@ -402,7 +403,7 @@ describe('حال امروز سطرهای ثبت‌شده و ورودها (۶٫۲
       'ورود برگشت؛ بی کد',
       'سفارش ما نیست؛ ثبت نمی‌شود',
     ]);
-    expect(texts([unmatched], [], { state: 'reverted' })).toEqual(['کد رهگیری نشست', 'تا تأیید مالک یا متصدی، بی کد', 'سفارش ما نیست؛ ثبت نمی‌شود']);
+    expect(texts([unmatched], [], { state: 'reverted' })).toEqual(['کد رهگیری نشست', 'تا تأیید مالک یا متصدی، بی کد و بی پیامک', 'سفارش ما نیست؛ ثبت نمی‌شود']);
   });
 
   it('دلیل از چشم چاپخانه: نامی که نمی‌خواند، «در صف چاپ»، و شمارهٔ دستی', () => {

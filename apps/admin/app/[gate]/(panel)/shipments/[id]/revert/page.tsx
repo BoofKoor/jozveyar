@@ -10,6 +10,7 @@ import { Segments } from '../../../../../../components/Segments';
 import { panelPath } from '../../../../../../lib/gate';
 import { REASON_MAX } from '../../../../../../lib/orders';
 import { committedRows, numbersText } from '../../../../../../lib/shipments';
+import { smsReached } from '../../../../../../lib/sms';
 import { can } from '../../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../../lib/server/context';
 
@@ -38,6 +39,8 @@ export default async function RevertImportPage({ params }: { params: Promise<{ g
     ...new Set(view.committed.shipments.filter((shipment) => shipment.voidedAt === null && shipment.handedOrder).map((shipment) => shipment.orderNumber)),
   ].sort((a, b) => a - b);
   const queued = rows.filter((row) => row.queued).length;
+  // پیامکی که رفت برنمی‌گردد (طرح `m-ship-revert`، ۶٫۳): سفارش‌هایی که پیامک کد زندهٔ همین ورود را گرفتند.
+  const reached = smsReached(view.committed.shipments, view.now);
 
   return (
     <>
@@ -82,6 +85,24 @@ export default async function RevertImportPage({ params }: { params: Promise<{ g
             <span>برای سابقه می‌ماند و دوباره واردشدنی است</span>
           </li>
         </ul>
+        {reached.length > 0 ? (
+          <p className="jy-note jy-note--warning ad-gap" data-sms-reached="">
+            <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+            <span>
+              پیامکی که رفت برنمی‌گردد. {reached.length > 1 ? 'این ' : ''}
+              {reached.length > 1 ? (
+                <>
+                  <span className="num">{formatNumber(reached.length)}</span> سفارش کد رهگیری را پیامک گرفته‌اند:{' '}
+                </>
+              ) : (
+                'سفارش '
+              )}
+              <Segments segs={numbersText(reached)} />
+              {reached.length > 1 ? '. ' : ' کد رهگیری را پیامک گرفته است. '}
+              اگر کدی اشتباه بود، خودت خبرشان کن. اگر همین کدها دوباره برای همان سفارش‌ها وارد شوند، پیامک دوباره نمی‌رود.
+            </span>
+          </p>
+        ) : null}
         <RevertImportForm gate={gate} id={id} maxLength={REASON_MAX} back={self} />
       </section>
     </>

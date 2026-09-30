@@ -274,7 +274,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('ثبت شد');
     await expect(page.locator('main')).toContainText('ثبت شد: 0 کد رهگیری نشست. 4 سطر در صف تأیید است.');
     // شمار کاشی حکم «ثبت» است و متنش حال امروز؛ درست پس از «ثبت» همان طرح.
-    await expect(page.locator('[data-count="review"] .ad-tile__t')).toHaveText('تا تأیید مالک یا متصدی، بی کد');
+    await expect(page.locator('[data-count="review"] .ad-tile__t')).toHaveText('تا تأیید مالک یا متصدی، بی کد و بی پیامک');
 
     // صف: همین چهار سطر، به ترتیب سطر.
     await page.getByRole('link', { name: '4 سطر در صف تأیید' }).click();
@@ -437,7 +437,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
   test('پیشخوان: صف تأیید برای مالک و متصدی؛ «کد رهگیری ندارد» دو روز کاری پس از تحویل', async () => {
     for (const page of [operatorPage, ownerPage]) {
       await page.goto(at());
-      await expect(page.locator('[data-alert="review"]')).toContainText('2 سطر فایل پست منتظر تأیید است؛ تا تأیید نشده، کد رهگیری به سفارشش نمی‌نشیند.');
+      await expect(page.locator('[data-alert="review"]')).toContainText('2 سطر فایل پست منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.');
       const untracked = page.locator('[data-alert="untracked"]');
       // H ده روز پیش؛ A و C امروز «تحویل پست شد» (دو روز کاری‌شان نگذشته)؛ N3 هم، چون مالک همه را می‌بیند.
       await expect(untracked.filter({ hasText: String(o.H.number) })).toContainText('نرسیده، با اینکه دو روز کاری از تحویل');
@@ -461,7 +461,7 @@ test.describe.serial('صف تأیید و فایل چاپخانه', () => {
     const { page, problems } = partner.hasan;
     await page.goto(at());
     await page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link', { name: 'ارسال' }).click();
-    await expect(page.locator('.ad-sub').first()).toContainText(`فایل پست بسته‌هایت را بده؛ کد رهگیری سفارش‌های ${NOOR} در صفحهٔ هر سفارش می‌نشیند.`);
+    await expect(page.locator('.ad-sub').first()).toContainText(`فایل پست بسته‌هایت را بده؛ کد رهگیری سفارش‌های ${NOOR} ثبت و به مشتری پیامک می‌شود.`);
     const name = `FileName-${RUN}2.xls`;
     partnerFile = await upload(
       page,

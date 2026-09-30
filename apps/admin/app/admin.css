@@ -1482,9 +1482,31 @@
     }
   }
   /* «به سفارشی بده» و «بررسی» زیر دلیل سطر (۶٫۲، طرح `m-ship-done`): دکمهٔ متنی هم‌تراز متن، با همان هدف لمسی */
-  .ad-prow__act .jy-btn {
+  .ad-prow__act .jy-btn,
+  .ad-prow__sms .jy-btn,
+  .ad-sms .jy-btn {
     margin-block: -6px;
     margin-inline-start: -12px;
+  }
+  /* پیامک رهگیری که نرفت (۶٫۳، طرح `m-ship-done`): زیر سطر قطعی، با «دوباره بفرست» در همان سطر */
+  .ad-prow__sms,
+  .ad-sms {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 6px;
+  }
+  .ad-prow__sms {
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-error-text);
+  }
+  .ad-prow__sms .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .ad-inline-form {
+    display: inline-flex;
   }
   /* صف تأیید (۶٫۲، طرح `m-ship-review`) */
   .ad-rv__file {

@@ -248,7 +248,12 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       return ok({
         bounds,
         tiles: dueTiles(summary, bounds),
-        alerts: { ...alerts, reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0 },
+        // صف تأیید و پیامکی که نرفت (۶٫۲، ۶٫۳): فقط مالک و متصدی، که «همین است» و «دوباره بفرست» دارند.
+        alerts: {
+          ...alerts,
+          reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
+          smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
+        },
         untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
         queue: can(session, 'orders.money') ? queue : linesWithoutMoney(queue),

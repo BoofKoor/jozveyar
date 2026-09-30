@@ -16,7 +16,11 @@
  * - **محدوده** (ADR-042): هر فراخوانی ذخیره‌گاه محدودهٔ همین نشست را دارد (`scopeOf`)؛ ورود بیرون از محدوده ۴۰۴ است.
  * - **رویداد:** `shipments.upload`، `shipments.commit`، `shipments.discard` و `shipments.revert` با هدف همان ورود؛ از ۶٫۲
  *   `shipments.dismiss` با هدف ورود، و `shipments.approve`، `shipments.assign` و `shipments.void` با هدف سفارش (تصمیم ۸۷)؛ همه در
- *   همان تراکنش.
+ *   همان تراکنش. از ۶٫۳ `shipments.sms_resend` با هدف سفارش، پس از فرستادن و با نتیجه‌اش.
+ * - **پیامک رهگیری** (۶٫۳، ADR-047): ذخیره‌گاه در همان تراکنش «ثبت»، «همین است» یا دادن دستی برای هر کد تازه ردیف «منتظر» می‌سازد؛
+ *   اینجا بلافاصله بعد از commit، در همان درخواست، همان‌ها فرستاده می‌شوند (`deliverQueued`: هر ردیف یک بار، تا ۴ هم‌زمان). شکست
+ *   پیامک ثبت را برنمی‌گرداند. «دوباره بفرست» (مالک و متصدی، `shipments.review`) فقط برای پیامکی که نرفت یا معلوم نیست رفت، کد
+ *   زنده، و همان ردیف. تا برش ۷ آداپتور همیشه کنسولی است (`context.ts`).
  *
  * بی نکست؛ ذخیره‌گاه از درگاه می‌آید (`ShipmentStore`)، پس با ذخیره‌گاه ساختگی تست می‌شود. تراکنش‌ها و محافظ‌ها روی پستگرس در تست
  * یکپارچگی `packages/db`.
@@ -42,6 +46,7 @@ import {
   type ShipmentStore,
   type VoidKept,
 } from '@jozveyar/db';
+import { deliverQueued, resendable, smsState, type Delivery, type SmsErrorCode, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { toLatinDigits } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
 
@@ -57,6 +62,8 @@ export const REVIEW_PAGE = 20;
 
 export interface PanelShipmentsDeps {
   store: ShipmentStore;
+  /** پیامک رهگیری: آداپتور و درگاه ردیف‌های منتظر (۶٫۳). */
+  sms: { transport: SmsTransport; outbox: SmsOutbox; log?: (message: string, error?: unknown) => void };
   /** `SESSION_SECRET`: کلید HMAC IP، مثل ورود. */
   secret: string;
   now?: () => Date;
@@ -119,7 +126,20 @@ export interface Decided {
   orderNumber: number;
   from: OrderStatus;
   handed: boolean;
+  /** پیامک رهگیری همین کد: رفت، نرفت، یا پیش‌تر برای همین سفارش رفته بود (`earlier`، سؤال ۶۷). */
+  sms: 'sent' | 'failed' | 'earlier';
 }
+
+/** شمار پیامک‌هایی که «ثبت» فرستاد. */
+export interface SmsSummary {
+  sent: number;
+  failed: number;
+}
+
+const summaryOf = (deliveries: readonly Delivery[]): SmsSummary => ({
+  sent: deliveries.filter((d) => d.outcome === 'sent').length,
+  failed: deliveries.filter((d) => d.outcome !== 'sent').length,
+});
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const idOf = (value: unknown) => (typeof value === 'string' && UUID.test(value) ? value : null);
@@ -170,8 +190,7 @@ const BLOCK_ERRORS: Record<Extract<Refused, { reason: 'blocked' }>['block'], Adm
   barcode_elsewhere: 'barcode_elsewhere',
 };
 
-function decided(written: ReviewWrite): Result<Decided> {
-  if (written.ok) return ok({ orderNumber: written.orderNumber, from: written.from, handed: written.handed });
+function refused(written: Exclude<ReviewWrite, { ok: true }>): Result<Decided> {
   if (written.reason === 'blocked') return fail(409, BLOCK_ERRORS[written.block], { block: written.block });
   const [status, error] = DECIDE_ERRORS[written.reason];
   return fail(status, error);
@@ -205,6 +224,16 @@ export function postFileName(name: string): string {
 export function createPanelShipments(deps: PanelShipmentsDeps) {
   const now = deps.now ?? (() => new Date());
   const { store } = deps;
+
+  /** ردیف‌های منتظر پس از commit، در همان درخواست. */
+  const deliver = (ids: readonly number[], mode: 'queued' | 'retry' = 'queued') =>
+    ids.length === 0 ? Promise.resolve([]) : deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log }, ids, { mode });
+
+  async function decided(written: ReviewWrite): Promise<Result<Decided>> {
+    if (!written.ok) return refused(written);
+    const sms: Decided['sms'] = written.sms === null ? 'earlier' : (await deliver([written.sms]))[0]?.outcome === 'sent' ? 'sent' : 'failed';
+    return ok({ orderNumber: written.orderNumber, from: written.from, handed: written.handed, sms });
+  }
 
   const event = (session: AdminSession, action: string, ip: string, at: Date): AdminEventInput => ({
     adminUserId: session.userId,
@@ -397,7 +426,12 @@ export function createPanelShipments(deps: PanelShipmentsDeps) {
     },
 
     /** «ثبت»: فقط اگر حکم‌ها زیر قفل همان است که ادمین دید (`fingerprint`). */
-    async commit(session: AdminSession, idParam: string, form: { fingerprint: unknown }, ip: string): Promise<Result<{ shipments: number; handed: number[] }>> {
+    async commit(
+      session: AdminSession,
+      idParam: string,
+      form: { fingerprint: unknown },
+      ip: string,
+    ): Promise<Result<{ shipments: number; handed: number[]; sms: SmsSummary }>> {
       if (!can(session, 'shipments.import')) return fail(403, 'forbidden');
       const id = idOf(idParam);
       if (!id) return fail(404, 'import_not_found');
@@ -411,9 +445,38 @@ export function createPanelShipments(deps: PanelShipmentsDeps) {
         adminUserId: session.userId,
         event: event(session, 'shipments.commit', ip, at),
       });
-      if (written.ok) return ok({ shipments: written.shipments, handed: written.handed });
+      // بعد از commit (ADR-047): پیامکی که نرفت ثبت را برنمی‌گرداند؛ «نرفت» با «دوباره بفرست» دیده می‌شود.
+      if (written.ok) return ok({ shipments: written.shipments, handed: written.handed, sms: summaryOf(await deliver(written.sms)) });
       if (written.reason === 'status') return fail(409, 'import_closed', { status: written.status });
       return written.reason === 'not_found' ? fail(404, 'import_not_found') : fail(409, 'import_changed');
+    },
+
+    /**
+     * «دوباره بفرست» (۶٫۳، سؤال ۶۹): پیامک رهگیری یک کد زنده که نرفت یا معلوم نیست رفت؛ همان ردیف، یک تلاش بیشتر، و رویداد
+     * `shipments.sms_resend` با نتیجه. مالک و متصدی؛ چاپخانه نه (حال پیامک را می‌بیند).
+     */
+    async resendSms(
+      session: AdminSession,
+      form: { shipment: unknown },
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: 'sent' | 'failed'; error: SmsErrorCode | null }>> {
+      if (!can(session, 'shipments.review')) return fail(403, 'forbidden');
+      const shipmentId = idOf(form.shipment);
+      const found = shipmentId ? await store.shipmentSms(scopeOf(session), shipmentId) : null;
+      if (!found) return fail(404, 'shipment_not_found');
+      if (found.voided) return fail(409, 'shipment_voided');
+      const at = now();
+      if (!found.sms || !resendable(smsState(found.sms, at))) return fail(409, 'sms_not_failed');
+      const [delivery] = await deliver([found.sms.id], 'retry');
+      // برداشته نشد: کس دیگری همین حالا فرستاد، یا کد همین حالا کنار رفت.
+      if (!delivery || delivery.outcome === 'skipped') return fail(409, 'sms_not_failed');
+      const outcome = delivery.outcome;
+      await store.recordSmsResend({
+        orderId: found.orderId,
+        event: event(session, 'shipments.sms_resend', ip, now()),
+        detail: { orderNumber: found.orderNumber, barcode: found.barcode, outcome, ...(delivery.error ? { error: delivery.error } : {}) },
+      });
+      return ok({ orderNumber: found.orderNumber, outcome, error: delivery.error ?? null });
     },
 
     /** «دور بینداز»: فقط پیش از «ثبت»؛ بایت خام و جدول‌ها همان‌جا پاک می‌شوند. */

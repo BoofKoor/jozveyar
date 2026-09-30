@@ -56,7 +56,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
 import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
-import { createSmsLog } from './sms.js';
+import { createSmsLog, createSmsOutbox } from './sms.js';
+import { consoleTransport, deliverQueued, SMS_STUCK_MS, trackingText } from '@jozveyar/sms';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
 import {
   ALL_ORDERS,
@@ -1646,6 +1647,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         unassigned: [],
         reviewRows: 0,
         untracked: [],
+        smsFailed: [],
       });
       // نیم ساعت بعد، تلاش ۱۰ دقیقه‌ای هم بی برگشت است (شاهد مهلت تلاش).
       expect(
@@ -3407,7 +3409,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           unassigned: [bare.orderNumber],
           unreturned: [{ orderNumber: waiting.orderNumber, attempts: 1 }],
         });
-        expect(await panel.alerts(NOOR, clock)).toEqual({ failedPdf: [], unreturned: [], unassigned: [], reviewRows: 0, untracked: [] });
+        expect(await panel.alerts(NOOR, clock)).toEqual({ failedPdf: [], unreturned: [], unassigned: [], reviewRows: 0, untracked: [], smsFailed: [] });
         expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toMatchObject({ open: 1, awaiting: 1, all: 2 });
         expect(await panel.counts(NOOR, { search: null, clock })).toEqual({ open: 0, handed: 0, cancelled: 0, awaiting: 0, abandoned: 0, all: 0 });
         for (const bucket of ['open', 'awaiting', 'all'] as const) {
@@ -4133,6 +4135,15 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     let owner = '';
     let operator = '';
     let docId = '';
+    /** ردیف «منتظر» پیامک رهگیری به موبایل یک سفارش (۶٫۳): مرسولهٔ بی ذخیره‌گاه هم پیامک می‌خواهد (`shipments_sms`، 0026). */
+    const pendingSms = async (orderId: string) => {
+      const [order] = await conn.db.select({ phone: orders.recipientPhone }).from(orders).where(eq(orders.id, orderId));
+      const [row] = await conn.db
+        .insert(smsMessages)
+        .values({ provider: 'queued', toMobile: order!.phone, purpose: 'tracking', body: 'ساختگی', status: 'pending' })
+        .returning({ id: smsMessages.id });
+      return row!.id;
+    };
     let first = '';
     let files = 0;
 
@@ -4409,6 +4420,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         counts: { matched: 2, review: 2, unmatched: 3, invalid: 1, inactive: 1 },
         shipments: 2,
         handed: [taheri.orderNumber],
+        sms: [expect.any(Number), expect.any(Number)],
       });
       expect(await importOf(id)).toMatchObject({ status: 'committed', committedBy: operator, committedAt: NOW });
       const stored = await conn.db.select().from(shipmentImportRows).where(eq(shipmentImportRows.importId, id)).orderBy(shipmentImportRows.rowNo);
@@ -4679,9 +4691,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await setShipment({ weightGrams: 900 })).toBe('shipments_frozen');
       expect(await rejectedConstraint(conn.db.delete(shipments).where(eq(shipments.id, made!.id)))).toBe('shipments_frozen');
       // مرسوله از سطر همان ورود، با همان اعداد؛ قطعی فقط برای سفارش حکم.
-      const insertShipment = (values: Partial<typeof shipments.$inferInsert>) =>
+      const insertShipment = async (values: Partial<typeof shipments.$inferInsert>) =>
         rejectedConstraint(
           conn.db.insert(shipments).values({
+            smsMessageId: await pendingSms(values.orderId ?? taheri.id),
             orderId: taheri.id,
             barcode: barcodeOf(2),
             importId: id,
@@ -4904,7 +4917,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         // ادمین «در صف چاپ» دید و همان لحظه «شروع چاپ» خورد: «عوض شد»، هر چند شمار کد همان است.
         expect(await decide(id, 1, taheri.id, { seen: { status: 'paid', liveShipments: 0 } })).toEqual({ ok: false, reason: 'changed' });
 
-        expect(await decide(id, 1, taheri.id)).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'printing', handed: true });
+        expect(await decide(id, 1, taheri.id)).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'printing', handed: true, sms: expect.any(Number) });
         expect(await orderOf(taheri.id)).toMatchObject({ status: 'handed_to_post', handedToPostAt: END_SUNDAY });
         const moved = (await statusRows(taheri.id)).at(-1)!;
         expect(moved).toMatchObject({ fromStatus: 'printing', toStatus: 'handed_to_post', actor: 'admin', adminUserId: operator, at: NOW });
@@ -4958,7 +4971,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         await printFiles(queued.id);
         expect((await blockOfRow(1)).candidates.map((c) => [c.blocked, c.strong])).toEqual([[null, true]]);
         expect((await blockOfRow(1)).preselected).toBe(queued.id);
-        expect(await decide(id, 1, queued.id)).toEqual({ ok: true, orderNumber: queued.orderNumber, from: 'paid', handed: true });
+        expect(await decide(id, 1, queued.id)).toEqual({ ok: true, orderNumber: queued.orderNumber, from: 'paid', handed: true, sms: expect.any(Number) });
         const events = await statusRows(queued.id);
         expect(events.slice(-2).map((e) => [e.fromStatus, e.toStatus, e.adminUserId, e.at.getTime(), (e.note as { via?: string }).via])).toEqual([
           ['paid', 'printing', operator, NOW.getTime(), 'review'],
@@ -5018,6 +5031,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(
           await rejectedConstraint(
             conn.db.insert(shipments).values({
+              smsMessageId: await pendingSms(cancelled.id),
               orderId: cancelled.id,
               barcode: barcodeOf(1),
               importId: id,
@@ -5087,7 +5101,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           adminUserId: owner,
         };
         expect(await rejectedConstraint(conn.db.insert(shipments).values({ ...values, matchedBy: 'review' }))).toBe('shipments_row');
-        expect(await decide(id, 1, taheri.id, { via: 'manual' })).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'printing', handed: true });
+        expect(await decide(id, 1, taheri.id, { via: 'manual' })).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'printing', handed: true, sms: expect.any(Number) });
         expect(await liveOf(taheri.id)).toMatchObject([{ matchedBy: 'manual', rowNo: 1 }]);
         expect((await eventsOf('shipments.assign'))[0]).toMatchObject({ targetType: 'order', targetId: taheri.id });
         expect(await lineOf()).toEqual({ queued: 1, dismissed: 0, unmatched: 0, live: 2 });
@@ -5106,7 +5120,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect((await queueOf()).total).toBe(0);
         const unmatchedNow = async () => (await store().listImports(ALL_ORDERS, { limit: 10, offset: 0 }))[0]!.unmatchedRows;
         expect(await unmatchedNow()).toBe(2);
-        expect(await decide(id, 1, taheri.id, { via: 'manual' })).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'printing', handed: true });
+        expect(await decide(id, 1, taheri.id, { via: 'manual' })).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'printing', handed: true, sms: expect.any(Number) });
         // پایگاه داده: «پیدا نشد»ی که هرگز کد نگرفت در صف نیست، پس «هیچ‌کدام» ندارد و کد «همین است» هم نه؛ غیرفعال حتی دستی نه.
         expect(
           await rejectedConstraint(
@@ -5160,7 +5174,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         // بستهٔ دوم همان سفارش: آنچه ادمین دید کهنه است، وضعیتش یا شمار کدش، «عوض شد».
         expect(await decide(id, 2, taheri.id, { via: 'manual', seen: { status: 'printing', liveShipments: 0 } })).toEqual({ ok: false, reason: 'changed' });
         expect(await decide(id, 2, taheri.id, { via: 'manual', seen: { status: 'handed_to_post', liveShipments: 0 } })).toEqual({ ok: false, reason: 'changed' });
-        expect(await decide(id, 2, taheri.id, { via: 'manual' })).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'handed_to_post', handed: false });
+        expect(await decide(id, 2, taheri.id, { via: 'manual' })).toEqual({ ok: true, orderNumber: taheri.orderNumber, from: 'handed_to_post', handed: false, sms: expect.any(Number) });
         expect((await liveOf(taheri.id)).map((s) => [s.rowNo, s.handedOrder, s.matchedBy])).toEqual([
           [1, true, 'manual'],
           [2, false, 'manual'],
@@ -5419,7 +5433,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         const [code] = await liveOf(taheri.id);
         expect(await voidOf(code!.id)).toMatchObject({ ok: true, reopened: true });
         expect((await store().reviewRow(ALL_ORDERS, id, 1))!.elsewhere).toBeNull();
-        expect(await decide(id, 1, kazemi.id)).toEqual({ ok: true, orderNumber: kazemi.orderNumber, from: 'printing', handed: true });
+        expect(await decide(id, 1, kazemi.id)).toEqual({ ok: true, orderNumber: kazemi.orderNumber, from: 'printing', handed: true, sms: expect.any(Number) });
       });
 
       it('هشدار «کد رهگیری ندارد»: «تحویل پست شد» بی کد زنده در پنجره؛ کددار، بیرون از پنجره، و سفارش چاپخانهٔ دیگر نه', async () => {
@@ -5472,6 +5486,363 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(await purge(3)).toBe('shipment_import_rows_frozen');
         expect(await purge(4)).toBeUndefined();
         expect(await rowOf(id, 1)).toMatchObject({ cells: null, nameG: null, destination: null, dismissedBy: operator });
+      });
+    });
+
+    /**
+     * پیامک رهگیری (برش ۶٫۳، ADR-047): یک ردیف «منتظر» برای هر مرسوله در همان تراکنش، فرستادن پس از commit فقط یک بار، سؤال ۶۷، و
+     * محافظ‌های `0026`.
+     */
+    describe('پیامک رهگیری (برش ۶٫۳)', () => {
+      const trackingRows = () => conn.db.select().from(smsMessages).where(eq(smsMessages.purpose, 'tracking')).orderBy(smsMessages.id);
+      const smsOf = async (id: number) => (await conn.db.select().from(smsMessages).where(eq(smsMessages.id, id)))[0]!;
+      const outbox = () => createSmsOutbox(conn, 'console');
+      const deliver = (ids: readonly number[], mode: 'queued' | 'retry' = 'queued', at = NOW) =>
+        deliverQueued({ outbox: outbox(), transport: consoleTransport(() => {}), now: () => at, log: () => {} }, ids, { mode });
+      const liveOf = async (orderId: string) => (await shipmentsOf(orderId)).filter((s) => s.voidedAt === null);
+      const decide = async (importId: string, rowNo: number, orderId: string, via: 'review' | 'manual' = 'review') => {
+        const order = await orderOf(orderId);
+        return store().decide(ALL_ORDERS, {
+          importId,
+          rowNo,
+          orderId,
+          via,
+          seen: { status: order.status, liveShipments: (await liveOf(orderId)).length },
+          at: NOW,
+          adminUserId: operator,
+          event: { adminUserId: operator, action: via === 'review' ? 'shipments.approve' : 'shipments.assign', at: NOW },
+        });
+      };
+      const voidOf = (shipmentId: string) =>
+        store().voidShipment(ALL_ORDERS, {
+          shipmentId,
+          reason: 'کد مال سفارش دیگری بود.',
+          at: NOW,
+          adminUserId: owner,
+          event: { adminUserId: owner, action: 'shipments.void', at: NOW },
+        });
+      const near = async (n: number, barcode: string, nameG: string, orderId: string) =>
+        parcel(n, barcode, nameG, 'تهران', (await orderOf(orderId)).estWeightGrams, 1_295_000);
+
+      it('«ثبت»: یک پیامک منتظر برای هر کد قطعی، با متن و دو پارامتر و موبایل سفارش؛ صف و «پیدا نشد» هیچ؛ فرستادن یک بار', async () => {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const kazemi = await handedOrder(TEHRAN, 'مریم کاظمی');
+        const karimi = await printingOrder(TEHRAN, 'علی کریمی');
+        const id = await readImport([
+          row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`),
+          row(2, barcodeOf(2), `کاظمی ${kazemi.orderNumber}`),
+          row(3, barcodeOf(3), `کاظمی ${kazemi.orderNumber}`),
+          await near(4, barcodeOf(4), `رضایی ${karimi.orderNumber}`, karimi.id),
+          row(5, barcodeOf(5), 'طهماسبی 6103'),
+        ]);
+        const written = await commit(id);
+        expect(written).toMatchObject({ ok: true, shipments: 3, counts: { matched: 3, review: 1, unmatched: 1 } });
+        if (!written.ok) return;
+        const rows = await trackingRows();
+        expect(rows).toHaveLength(3);
+        expect(written.sms.sort()).toEqual(rows.map((r) => r.id).sort());
+        expect(rows.map((r) => [r.status, r.toMobile, r.body, r.params, r.attempts])).toEqual([
+          ['pending', '09152345678', trackingText(taheri.orderNumber, barcodeOf(1)), [String(taheri.orderNumber), barcodeOf(1)], 0],
+          ['pending', '09152345678', trackingText(kazemi.orderNumber, barcodeOf(2)), [String(kazemi.orderNumber), barcodeOf(2)], 0],
+          ['pending', '09152345678', trackingText(kazemi.orderNumber, barcodeOf(3)), [String(kazemi.orderNumber), barcodeOf(3)], 0],
+        ]);
+        // هر مرسوله پیامک خودش؛ بستهٔ دوم همان سفارش هم.
+        const made = [...(await shipmentsOf(taheri.id)), ...(await shipmentsOf(kazemi.id))];
+        expect(new Set(made.map((s) => s.smsMessageId)).size).toBe(3);
+        expect(await shipmentsOf(karimi.id)).toEqual([]);
+
+        // دو فرستنده هم‌زمان (دو نود): هر ردیف یک بار.
+        const [a, b] = await Promise.all([deliver(written.sms), deliver(written.sms)]);
+        expect([...a!, ...b!].filter((d) => d.outcome === 'sent')).toHaveLength(3);
+        expect([...a!, ...b!].filter((d) => d.outcome === 'skipped')).toHaveLength(3);
+        const sent = await trackingRows();
+        expect(sent.map((r) => [r.status, r.provider, r.attempts, r.sentAt?.getTime()])).toEqual(
+          sent.map(() => ['logged', 'console', 1, NOW.getTime()]),
+        );
+        // «رفت» پایان است: دوباره نه، و منجمد.
+        expect((await deliver(written.sms, 'retry')).map((d) => d.outcome)).toEqual(['skipped', 'skipped', 'skipped']);
+        expect(await rejectedConstraint(conn.db.update(smsMessages).set({ status: 'failed' }).where(eq(smsMessages.id, sent[0]!.id)))).toBe(
+          'sms_messages_flow',
+        );
+        expect(await rejectedConstraint(conn.db.update(smsMessages).set({ body: 'دیگر' }).where(eq(smsMessages.id, sent[0]!.id)))).toBe(
+          'sms_messages_frozen',
+        );
+        // نتیجهٔ فرستنده‌ای که دیر رسید (ردیف دیگر «در حال فرستادن» نیست) هیچ نمی‌نویسد.
+        await outbox().finish(sent[0]!.id, NOW, { ok: false, provider: 'console', error: 'unavailable' });
+        expect((await smsOf(sent[0]!.id)).status).toBe('logged');
+
+        // صفحهٔ سفارش و پنل: کدهای زنده با پیامکشان.
+        const details = await createOrderStore(conn).details(kazemi.publicToken);
+        expect(details!.parcels.map((p) => [p.barcode, p.sms?.status])).toEqual([
+          [barcodeOf(2), 'logged'],
+          [barcodeOf(3), 'logged'],
+        ]);
+        const panel = await panelStore().details(ALL_ORDERS, kazemi.orderNumber);
+        expect(panel!.shipments.map((s) => [s.barcode, s.sms?.toMobile, s.sms?.status])).toEqual([
+          [barcodeOf(2), '09152345678', 'logged'],
+          [barcodeOf(3), '09152345678', 'logged'],
+        ]);
+      });
+
+      it('«همین است» و دادن دستی هر کدام یک پیامک؛ «هیچ‌کدام» هیچ؛ کد کنارگذاشته نه خودکار و نه «دوباره بفرست»', async () => {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const kazemi = await printingOrder(TEHRAN, 'مریم کاظمی');
+        const id = await readImport([
+          await near(1, barcodeOf(1), `رضایی ${taheri.orderNumber}`, taheri.id),
+          await near(2, barcodeOf(2), `رضایی ${kazemi.orderNumber}`, kazemi.id),
+          row(3, barcodeOf(3), 'طهماسبی 6103'),
+        ]);
+        expect(await commit(id)).toMatchObject({ ok: true, shipments: 0, sms: [] });
+        expect(await trackingRows()).toEqual([]);
+        const approved = await decide(id, 1, taheri.id);
+        expect(approved).toMatchObject({ ok: true, sms: expect.any(Number) });
+        const dismissed = await store().dismiss(ALL_ORDERS, {
+          importId: id,
+          rowNo: 2,
+          at: NOW,
+          adminUserId: operator,
+          event: { adminUserId: operator, action: 'shipments.dismiss', at: NOW },
+        });
+        expect(dismissed).toEqual({ ok: true });
+        const assigned = await decide(id, 3, kazemi.id, 'manual');
+        expect(assigned).toMatchObject({ ok: true, sms: expect.any(Number) });
+        expect((await trackingRows()).map((r) => r.body)).toEqual([
+          trackingText(taheri.orderNumber, barcodeOf(1)),
+          trackingText(kazemi.orderNumber, barcodeOf(3)),
+        ]);
+        // کدی که پیش از فرستادن کنار رفت: پیامکش هرگز برداشته نمی‌شود، پایگاه داده هم.
+        const [code] = await liveOf(kazemi.id);
+        expect(await voidOf(code!.id)).toMatchObject({ ok: true });
+        const kazemiSms = code!.smsMessageId!;
+        expect(await deliver([kazemiSms])).toEqual([{ id: kazemiSms, outcome: 'skipped' }]);
+        expect(await deliver([kazemiSms], 'retry', new Date(NOW.getTime() + SMS_STUCK_MS + 1))).toEqual([{ id: kazemiSms, outcome: 'skipped' }]);
+        expect(
+          await rejectedConstraint(
+            conn.db
+              .update(smsMessages)
+              .set({ status: 'sending', attempts: 1, attemptedAt: NOW })
+              .where(eq(smsMessages.id, kazemiSms)),
+          ),
+        ).toBe('sms_messages_live');
+        expect((await smsOf(kazemiSms)).status).toBe('pending');
+        // مشتری کد کنارگذاشته را دیگر نمی‌بیند.
+        expect((await createOrderStore(conn).details(kazemi.publicToken))!.parcels).toEqual([]);
+        expect((await createOrderStore(conn).details(taheri.publicToken))!.parcels.map((p) => p.barcode)).toEqual([barcodeOf(1)]);
+      });
+
+      it('«دوباره بفرست» فقط برای نرفته، منتظرِ مانده و در حال فرستادنِ مانده؛ دو کلیک هم‌زمان یک پیامک', async () => {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const id = await readImport([row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`)]);
+        const written = await commit(id);
+        if (!written.ok) throw new Error('commit');
+        const [smsId] = written.sms;
+        // منتظری که تازه است «دوباره» برداشته نمی‌شود (فرستنده‌اش هنوز در راه است)؛ منتظرِ مانده می‌شود.
+        expect(await deliver([smsId!], 'retry')).toEqual([{ id: smsId, outcome: 'skipped' }]);
+        const later = new Date(NOW.getTime() + SMS_STUCK_MS + 1);
+        // پنل پیامک نپذیرفت: «نرفت»، با علت.
+        const failing = createSmsOutbox(conn, 'console');
+        const [failed] = await deliverQueued(
+          { outbox: failing, transport: { name: 'console', send: () => Promise.reject(new Error('down')) }, now: () => later, log: () => {} },
+          [smsId!],
+          { mode: 'retry' },
+        );
+        expect(failed).toEqual({ id: smsId, outcome: 'failed', error: 'unavailable' });
+        expect(await smsOf(smsId!)).toMatchObject({ status: 'failed', error: 'unavailable', attempts: 1, sentAt: null });
+        // دو «دوباره بفرست» هم‌زمان: یکی.
+        const [a, b] = await Promise.all([deliver([smsId!], 'retry', later), deliver([smsId!], 'retry', later)]);
+        expect([a![0]!.outcome, b![0]!.outcome].sort()).toEqual(['sent', 'skipped']);
+        expect(await smsOf(smsId!)).toMatchObject({ status: 'logged', attempts: 2, error: null });
+        // در حال فرستادنی که ماند (فرستنده افتاد): پس از ۵ دقیقه دوباره برداشتنی، نه زودتر.
+        const id2 = await readImport([row(1, barcodeOf(2), `طاهری ${taheri.orderNumber}`)]);
+        const second = await commit(id2);
+        if (!second.ok) throw new Error('commit');
+        const stuck = second.sms[0]!;
+        expect(await outbox().claim(stuck, NOW, 'queued')).toMatchObject({ id: stuck, to: '09152345678' });
+        expect(await deliver([stuck], 'retry', new Date(NOW.getTime() + SMS_STUCK_MS))).toEqual([{ id: stuck, outcome: 'skipped' }]);
+        expect(await deliver([stuck], 'retry', later)).toEqual([{ id: stuck, outcome: 'sent' }]);
+        expect((await smsOf(stuck)).attempts).toBe(2);
+      });
+
+      it('سؤال ۶۷: همان کد برای همان سفارش پس از برگرداندن یا کنار گذاشتن پیامک دوباره نمی‌گیرد؛ نرفته، سفارش دیگر یا کد دیگر می‌گیرد', async () => {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const kazemi = await printingOrder(TEHRAN, 'مریم کاظمی');
+        const rows = [row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`), row(2, barcodeOf(2), `کاظمی ${kazemi.orderNumber}`)];
+        const raw = Buffer.from('<table><tr><td>67</td></tr></table>');
+        const id = await readImport(rows, { raw });
+        const first = await commit(id);
+        if (!first.ok) throw new Error('commit');
+        // فقط پیامک طاهری رفت؛ کاظمی «نرفت».
+        const [taheriSms, kazemiSms] = [(await shipmentsOf(taheri.id))[0]!.smsMessageId!, (await shipmentsOf(kazemi.id))[0]!.smsMessageId!];
+        await deliver([taheriSms]);
+        await deliverQueued(
+          { outbox: outbox(), transport: { name: 'console', send: () => Promise.reject(new Error('down')) }, log: () => {} },
+          [kazemiSms],
+        );
+        expect(await revert(id)).toMatchObject({ ok: true, voided: 2 });
+        // همان فایل دوباره: پیش‌نمایش می‌گوید کدام پیامک دوباره نمی‌رود.
+        const again = await readImport(rows, { raw });
+        expect((await previewOf(again)).smsBefore).toEqual([1]);
+        const second = await commit(again);
+        expect(second).toMatchObject({ ok: true, shipments: 2 });
+        if (!second.ok) return;
+        expect(second.sms).toHaveLength(1);
+        const [taheriNow] = await liveOf(taheri.id);
+        const [kazemiNow] = await liveOf(kazemi.id);
+        expect(taheriNow!.smsMessageId).toBe(taheriSms);
+        expect(kazemiNow!.smsMessageId).not.toBe(kazemiSms);
+        expect(second.sms).toEqual([kazemiNow!.smsMessageId]);
+        expect(await trackingRows()).toHaveLength(3);
+
+        // کنار گذاشتن و دادن دستی همان کد به همان سفارش: همان پیامک. به سفارش دیگر: پیامک تازه.
+        expect(await voidOf(taheriNow!.id)).toMatchObject({ ok: true, reopened: true });
+        expect((await change(taheri, 'printing', 'handed_to_post')).ok).toBe(true);
+        expect(await decide(again, 1, taheri.id, 'manual')).toMatchObject({ ok: true, sms: null });
+        expect((await liveOf(taheri.id))[0]!.smsMessageId).toBe(taheriSms);
+        const [back] = await liveOf(taheri.id);
+        expect(await voidOf(back!.id)).toMatchObject({ ok: true });
+        const other = await handedOrder(TEHRAN, 'زهرا محمدی');
+        const moved = await decide(again, 1, other.id, 'manual');
+        expect(moved).toMatchObject({ ok: true, sms: expect.any(Number) });
+        expect(await trackingRows()).toHaveLength(4);
+
+        // پایگاه داده هم: پیامک تازه برای کدی که همین سفارش پیش‌تر گرفت نه، و پیامک مرسولهٔ دیگر نه.
+        const [otherCode] = await liveOf(other.id);
+        expect(await voidOf(otherCode!.id)).toMatchObject({ ok: true });
+        const source = (await conn.db.select().from(shipmentImportRows).where(and(eq(shipmentImportRows.importId, again), eq(shipmentImportRows.rowNo, 1))))[0]!;
+        const insert = (smsMessageId: number | null) =>
+          rejectedConstraint(
+            conn.db.insert(shipments).values({
+              orderId: taheri.id,
+              barcode: barcodeOf(1),
+              importId: again,
+              rowNo: 1,
+              weightGrams: source.weightGrams!,
+              fareRials: source.fareRials!,
+              taxRials: source.taxRials!,
+              postDay: source.postDay!,
+              matchedBy: 'manual',
+              adminUserId: owner,
+              smsMessageId,
+            }),
+          );
+        expect(await insert(null)).toBe('shipments_sms');
+        expect(await insert(await pendingSms(taheri.id))).toBe('shipments_sms_once');
+        expect(await insert(kazemiNow!.smsMessageId)).toBe('shipments_sms_once');
+        expect(await insert(taheriSms)).toBeUndefined();
+      });
+
+      it('پایگاه داده: پیامک مرسوله تازه، رهگیری و به موبایل همان سفارش؛ پیامک مرسولهٔ زنده‌ای دیگر نه؛ پیامک مرسوله منجمد', async () => {
+        const taheri = await handedOrder(TEHRAN, 'مهسا طاهری');
+        const id = await readImport([row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`), row(2, barcodeOf(2), `طاهری ${taheri.orderNumber}`)]);
+        expect(await commit(id)).toMatchObject({ ok: true, shipments: 2 });
+        const [made] = await shipmentsOf(taheri.id);
+        const source = (await conn.db.select().from(shipmentImportRows).where(and(eq(shipmentImportRows.importId, id), eq(shipmentImportRows.rowNo, 2))))[0]!;
+        const second = (await shipmentsOf(taheri.id))[1]!;
+        expect(await voidOf(second.id)).toMatchObject({ ok: true });
+        const insert = (smsMessageId: number) =>
+          rejectedConstraint(
+            conn.db.insert(shipments).values({
+              orderId: taheri.id,
+              barcode: barcodeOf(2),
+              importId: id,
+              rowNo: 2,
+              weightGrams: source.weightGrams!,
+              fareRials: source.fareRials!,
+              taxRials: source.taxRials!,
+              postDay: source.postDay!,
+              matchedBy: 'review',
+              adminUserId: owner,
+              smsMessageId,
+            }),
+          );
+        // پیامک مرسولهٔ زندهٔ دیگر.
+        expect(await insert(made!.smsMessageId!)).toBe('shipments_sms');
+        // پیامک کد یا پرداخت، یا به موبایل دیگر.
+        const [otp] = await conn.db
+          .insert(smsMessages)
+          .values({ provider: 'console', toMobile: '09152345678', purpose: 'otp', body: 'x', status: 'logged' })
+          .returning();
+        expect(await insert(otp!.id)).toBe('shipments_sms');
+        const [elsewhere] = await conn.db
+          .insert(smsMessages)
+          .values({ provider: 'queued', toMobile: '09120000000', purpose: 'tracking', body: 'x', status: 'pending' })
+          .returning();
+        expect(await insert(elsewhere!.id)).toBe('shipments_sms');
+        // پیامک رهگیری همین موبایل ولی نه تازه (پیش‌تر رفته، و مال هیچ مرسوله‌ای نیست).
+        const [stale] = await conn.db
+          .insert(smsMessages)
+          .values({ provider: 'console', toMobile: '09152345678', purpose: 'tracking', body: 'x', status: 'logged', sentAt: NOW })
+          .returning();
+        expect(await insert(stale!.id)).toBe('shipments_sms');
+        // پیامکی که پیش‌تر برداشته شد تازه نیست.
+        const used = await pendingSms(taheri.id);
+        await conn.db.update(smsMessages).set({ status: 'sending', attempts: 1, attemptedAt: NOW }).where(eq(smsMessages.id, made!.smsMessageId!));
+        expect(await insert(used)).toBeUndefined();
+        expect(await rejectedConstraint(conn.db.update(shipments).set({ smsMessageId: used }).where(eq(shipments.id, made!.id)))).toBe(
+          'shipments_frozen',
+        );
+        // هم‌زمان با کنار گذاشتن هم نه.
+        expect(
+          await rejectedConstraint(
+            conn.db
+              .update(shipments)
+              .set({ voidedAt: NOW, voidedBy: owner, voidReason: 'ساختگی', smsMessageId: used })
+              .where(eq(shipments.id, made!.id)),
+          ),
+        ).toBe('shipments_frozen');
+        // پیامک کد و پرداخت پس از درج عوض نمی‌شود.
+        expect(await rejectedConstraint(conn.db.update(smsMessages).set({ status: 'failed' }).where(eq(smsMessages.id, otp!.id)))).toBe(
+          'sms_messages_frozen',
+        );
+      });
+
+      it('دو «ثبت» هم‌زمان یک ورود و دو تأیید هم‌زمان یک سطر: یک مرسوله، یک پیامک', async () => {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const kazemi = await printingOrder(TEHRAN, 'مریم کاظمی');
+        const id = await readImport([row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`)]);
+        const seen = await previewOf(id);
+        const both = await Promise.all([commit(id, { fingerprint: seen.fingerprint }), commit(id, { fingerprint: seen.fingerprint })]);
+        expect(both.filter((w) => w.ok)).toHaveLength(1);
+        expect(await trackingRows()).toHaveLength(1);
+        const id2 = await readImport([await near(1, barcodeOf(2), `رضایی ${kazemi.orderNumber}`, kazemi.id)]);
+        expect(await commit(id2)).toMatchObject({ ok: true, shipments: 0 });
+        const decisions = await Promise.all([decide(id2, 1, kazemi.id), decide(id2, 1, kazemi.id)]);
+        expect(decisions.filter((d) => d.ok)).toHaveLength(1);
+        expect(await trackingRows()).toHaveLength(2);
+      });
+
+      it('پیشخوان: پیامک نرفته، منتظرِ مانده و معلوم‌نبوده؛ رفته، تازه، کنارگذاشته و بیرون از محدوده نه', async () => {
+        const taheri = await printingOrder(TEHRAN, 'مهسا طاهری');
+        const kazemi = await printingOrder(TEHRAN, 'مریم کاظمی');
+        const karimi = await printingOrder(TEHRAN, 'علی کریمی');
+        const id = await readImport([
+          row(1, barcodeOf(1), `طاهری ${taheri.orderNumber}`),
+          row(2, barcodeOf(2), `کاظمی ${kazemi.orderNumber}`),
+          row(3, barcodeOf(3), `کریمی ${karimi.orderNumber}`),
+        ]);
+        const written = await commit(id);
+        if (!written.ok) throw new Error('commit');
+        const smsOfOrder = async (orderId: string) => (await shipmentsOf(orderId))[0]!.smsMessageId!;
+        await deliver([await smsOfOrder(kazemi.id)]);
+        await deliverQueued(
+          { outbox: outbox(), transport: { name: 'console', send: () => Promise.reject(new Error('down')) }, now: () => NOW, log: () => {} },
+          [await smsOfOrder(karimi.id)],
+        );
+        const clock = {
+          at: NOW,
+          staleBefore: NOW,
+          unreturnedBefore: NOW,
+          untrackedSince: new Date(NOW.getTime() - 45 * DAY),
+        };
+        const alerts = (at: Date, scope: PanelScope = ALL_ORDERS) => panelStore().alerts(scope, { ...clock, at });
+        expect((await alerts(NOW)).smsFailed).toEqual([karimi.orderNumber]);
+        const later = new Date(NOW.getTime() + SMS_STUCK_MS + 1);
+        expect((await alerts(later)).smsFailed).toEqual([taheri.orderNumber, karimi.orderNumber].sort((a, b) => a - b));
+        expect((await alerts(later, { kind: 'partner', partnerId: randomUUID() })).smsFailed).toEqual([]);
+        const [code] = await liveOf(karimi.id);
+        expect(await voidOf(code!.id)).toMatchObject({ ok: true });
+        expect((await alerts(later)).smsFailed).toEqual([taheri.orderNumber]);
+        expect((await panelStore().alerts(ALL_ORDERS, { ...clock, at: later, untrackedSince: NOW })).smsFailed).toEqual([]);
       });
     });
   });

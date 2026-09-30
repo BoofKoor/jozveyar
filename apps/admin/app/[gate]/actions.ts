@@ -651,3 +651,24 @@ export async function voidShipmentAction(_state: ReasonState, form: FormData): P
   if (result.error === 'reason_required' || result.error === 'reason_too_long') return { error: result.error, reason: reason.slice(0, 2000) };
   redirect(`${back}?e=${result.error}`);
 }
+
+/**
+ * «دوباره بفرست» پیامک رهگیری (۶٫۳، سؤال ۶۹؛ مالک و متصدی): از کارت «بستهٔ پستی» سفارش یا سطر همان کد در صفحهٔ ورود؛ برگشت به
+ * همان‌جا با نتیجه (`done=sms_resend&sent=1|0`) یا پیامش. کد تازه نمی‌خواهد: فقط پیامکی را دوباره می‌فرستد که نرفت.
+ */
+export async function resendSmsAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { shipments } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await shipments.resendSms(session, { shipment: field(form, 'shipment') }, await requestIp());
+  const importId = field(form, 'import');
+  const back =
+    field(form, 'from') === 'import' && /^[0-9a-f-]{36}$/.test(importId)
+      ? panelPath(gate, `/shipments/${importId}`)
+      : panelPath(gate, `/orders/${encodeURIComponent(result.ok ? String(result.value.orderNumber) : field(form, 'number'))}`);
+  redirect(
+    result.ok
+      ? withQuery(back, `done=sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
+      : withQuery(back, `e=${result.error}&${doneMark()}`),
+  );
+}

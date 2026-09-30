@@ -96,6 +96,8 @@ export type AdminErrorCode =
   | 'barcode_elsewhere'
   | 'shipment_not_found'
   | 'shipment_voided'
+  /** «دوباره بفرست» پیامک رهگیری (۶٫۳). */
+  | 'sms_not_failed'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

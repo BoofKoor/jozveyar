@@ -69,7 +69,9 @@ import {
   shipmentImportRows,
   shipmentImports,
   shipments,
+  smsMessages,
 } from './schema.js';
+import { queuedTrackingSms, shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
 
 /** کار خواندن فایل پست در صف کارگر (ADR-045): بایت ← جدول رشته‌ها. */
 export const READ_POST_FILE_JOB = 'read_post_file';
@@ -171,6 +173,10 @@ export interface ShipmentPreview {
   fingerprint: string;
   /** نامزدهای هر سطر صف تأیید (شمارهٔ سطر ← فهرست)؛ خالی اگر خواسته نشد (چاپخانه نامزدها را نمی‌بیند). */
   candidates: Record<number, ReviewCandidates>;
+  /**
+   * سطرهای قطعی‌ای که همین کد پیش‌تر برای همین سفارش پیامک شد و رفت (۶٫۳، سؤال ۶۷): با «ثبت» کد می‌نشیند ولی پیامک دوباره نمی‌رود.
+   */
+  smsBefore: number[];
 }
 
 export type StoredImportRow = typeof shipmentImportRows.$inferSelect;
@@ -195,6 +201,8 @@ export interface ImportShipment {
   voidedAt: Date | null;
   voidedByName: string | null;
   voidReason: string | null;
+  /** پیامک رهگیری همین کد (۶٫۳)؛ null برای مرسولهٔ پیش از ۶٫۳. */
+  sms: ShipmentSms | null;
 }
 
 /** ورود ثبت‌شده یا برگشته: سطرها با حکم‌هایشان، سفارش‌ها و مرسوله‌ها. */
@@ -239,7 +247,14 @@ export interface ShipmentCommit {
 }
 
 export type ShipmentCommitWrite =
-  | { ok: true; counts: Partial<Record<Verdict, number>>; shipments: number; handed: number[] }
+  | {
+      ok: true;
+      counts: Partial<Record<Verdict, number>>;
+      shipments: number;
+      handed: number[];
+      /** ردیف‌های «منتظر» پیامک رهگیری که همین «ثبت» ساخت؛ بعد از commit فرستاده می‌شوند (۶٫۳). */
+      sms: number[];
+    }
   | { ok: false; reason: 'not_found' | 'changed' }
   | { ok: false; reason: 'status'; status: ShipmentImportStatus };
 
@@ -318,7 +333,14 @@ export interface ReviewDecision {
 export type ReviewBlock = CandidateBlock | 'barcode_elsewhere';
 
 export type ReviewWrite =
-  | { ok: true; orderNumber: number; from: OrderFacts['status']; handed: boolean }
+  | {
+      ok: true;
+      orderNumber: number;
+      from: OrderFacts['status'];
+      handed: boolean;
+      /** ردیف «منتظر» پیامک رهگیری؛ null اگر همین کد پیش‌تر برای همین سفارش پیامک شد (سؤال ۶۷). */
+      sms: number | null;
+    }
   /** ورود یا سطر (در محدوده) نیست. */
   | { ok: false; reason: 'not_found' }
   /** سطر دیگر در صف نیست (یا برای دادن دستی باز نیست): «هیچ‌کدام» خورد، کد گرفت، یا ورود برگشت. */
@@ -392,6 +414,72 @@ export interface ShipmentStore {
   dismiss(scope: PanelScope, input: { importId: string; rowNo: number; at: Date; adminUserId: string; event: AdminEventInput }): Promise<DismissWrite>;
   /** کنار گذاشتن یک کد رهگیری (مالک، با دلیل): سطرش به صف برمی‌گردد، و سفارشی که همین کد «تحویل پست شد» کرده بود به «در حال چاپ». */
   voidShipment(scope: PanelScope, input: ShipmentVoid): Promise<VoidWrite>;
+  /** یک مرسوله و پیامک رهگیری‌اش، برای «دوباره بفرست» (۶٫۳)؛ null بیرون از محدوده. */
+  shipmentSms(scope: PanelScope, shipmentId: string): Promise<ShipmentSmsRef | null>;
+  /** رویداد «دوباره بفرست» (`shipments.sms_resend`) با هدف سفارش و نتیجه‌اش. */
+  recordSmsResend(input: { orderId: string; event: AdminEventInput; detail: Record<string, unknown> }): Promise<void>;
+}
+
+/** مرسوله‌ای که «دوباره بفرست» رویش زده شد. */
+export interface ShipmentSmsRef {
+  shipmentId: string;
+  orderId: string;
+  orderNumber: number;
+  barcode: string;
+  voided: boolean;
+  sms: ShipmentSms | null;
+}
+
+/**
+ * پیامک رهگیری مرسوله‌های تازه، در همان تراکنش (۶٫۳، ADR-047): برای هر (سفارش، بارکد) یا همان ردیفی که همین کد پیش‌تر برای همین
+ * سفارش گرفت و «رفت» (سؤال ۶۷: پیامک دوباره نه)، یا ردیف تازهٔ «منتظر» به موبایل همان سفارش. همان قاعدهٔ تریگر `shipments_sms`
+ * (0026). سفارش‌ها پیش‌تر در همین تراکنش زیر قفل‌اند.
+ */
+async function trackingSmsFor(
+  tx: Pick<Db, 'select' | 'insert'>,
+  list: readonly { orderId: string; orderNumber: number; barcode: string }[],
+  at: Date,
+): Promise<{ ids: number[]; fresh: number[] }> {
+  if (list.length === 0) return { ids: [], fresh: [] };
+  const orderIds = [...new Set(list.map((s) => s.orderId))];
+  const [phones, earlier] = await Promise.all([
+    tx.select({ id: orders.id, phone: orders.recipientPhone }).from(orders).where(inArray(orders.id, orderIds)),
+    tx
+      .select({ orderId: shipments.orderId, barcode: shipments.barcode, smsId: shipments.smsMessageId })
+      .from(shipments)
+      .innerJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
+      .where(and(inArray(shipments.orderId, orderIds), inArray(smsMessages.status, ['logged', 'sent'])))
+      .orderBy(desc(shipments.createdAt)),
+  ]);
+  const phoneOf = new Map(phones.map((row) => [row.id, row.phone]));
+  const sent = new Map<string, number>();
+  for (const row of earlier) if (row.smsId !== null && !sent.has(`${row.orderId}/${row.barcode}`)) sent.set(`${row.orderId}/${row.barcode}`, row.smsId);
+  const ids: number[] = [];
+  const fresh: number[] = [];
+  for (const item of list) {
+    const reused = sent.get(`${item.orderId}/${item.barcode}`);
+    if (reused !== undefined) {
+      ids.push(reused);
+      continue;
+    }
+    const id = await queuedTrackingSms(tx, { toMobile: phoneOf.get(item.orderId)!, orderNumber: item.orderNumber, barcode: item.barcode, at });
+    ids.push(id);
+    fresh.push(id);
+  }
+  return { ids, fresh };
+}
+
+/** سطرهای قطعی که همین کد پیش‌تر برای همین سفارش پیامک شد و رفت (سؤال ۶۷)؛ برای پیش‌نمایش. */
+async function smsBeforeOf(q: Reader, rows: readonly PostRow[], judged: readonly Judged[]): Promise<number[]> {
+  const matched = rows.flatMap((row, i) => (judged[i]!.verdict === 'matched' && row.barcode ? [{ rowNo: row.rowNo, orderId: judged[i]!.orderId!, barcode: row.barcode }] : []));
+  if (matched.length === 0) return [];
+  const found = await q
+    .select({ orderId: shipments.orderId, barcode: shipments.barcode })
+    .from(shipments)
+    .innerJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
+    .where(and(inArray(shipments.barcode, matched.map((m) => m.barcode)), inArray(smsMessages.status, ['logged', 'sent'])));
+  const sent = new Set(found.map((row) => `${row.orderId}/${row.barcode}`));
+  return matched.filter((m) => sent.has(`${m.orderId}/${m.barcode}`)).map((m) => m.rowNo);
 }
 
 type PgError = { code?: string; constraint_name?: string; cause?: PgError };
@@ -672,11 +760,22 @@ function importShipmentsQuery(q: Reader, importIds: string[]) {
       voidedAt: shipments.voidedAt,
       voidedByName: adminName(shipments.voidedBy),
       voidReason: shipments.voidReason,
+      ...shipmentSmsFields,
     })
     .from(shipments)
     .innerJoin(orders, eq(orders.id, shipments.orderId))
+    .leftJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
     .where(inArray(shipments.importId, importIds))
     .orderBy(asc(shipments.rowNo), asc(shipments.createdAt), asc(shipments.id));
+}
+
+/** مرسوله‌های چند ورود با پیامک رهگیری هر کدام (۶٫۳). */
+async function importShipmentsOf(q: Reader, importIds: string[]): Promise<(ImportShipment & { importId: string })[]> {
+  const rows = await importShipmentsQuery(q, importIds);
+  return rows.map(({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt, ...shipment }) => ({
+    ...shipment,
+    sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+  }));
 }
 
 /** شماره‌های سفارش‌های سایت و بارکدهای درست یک فایل. */
@@ -733,7 +832,7 @@ async function reviewRowsOf(
 ): Promise<ReviewRow[]> {
   if (found.length === 0) return [];
   const importIds = [...new Set(found.map((f) => f.import.id))];
-  const made = (await importShipmentsQuery(q, importIds)) as (ImportShipment & { importId: string })[];
+  const made = await importShipmentsOf(q, importIds);
   const byScope = new Map<string, typeof found>();
   for (const f of found) {
     const key = f.import.partner?.id ?? '';
@@ -802,9 +901,10 @@ const importRefOf = (r: {
 export function createShipmentStore({ db }: Database): ShipmentStore {
   async function preview(tables: string[][][], scope: PanelScope, now: Date, withCandidates: boolean): Promise<ShipmentPreview> {
     const sheet = readPostSheet(tables);
-    if (!sheet.ok) return { sheet, judged: [], orders: [], live: [], fingerprint: judgedFingerprint([]), candidates: {} };
+    if (!sheet.ok) return { sheet, judged: [], orders: [], live: [], fingerprint: judgedFingerprint([]), candidates: {}, smsBefore: [] };
     const { facts, live, judged, candidates } = await judge(db, scope, sheet.rows, now, false);
-    return { sheet, judged, orders: facts, live, fingerprint: judgedFingerprint(judged), candidates: withCandidates ? candidates : {} };
+    const smsBefore = await smsBeforeOf(db, sheet.rows, judged);
+    return { sheet, judged, orders: facts, live, fingerprint: judgedFingerprint(judged), candidates: withCandidates ? candidates : {}, smsBefore };
   }
 
   async function committed(view: ShipmentImportView, scope: PanelScope, withCandidates: boolean): Promise<CommittedImport> {
@@ -815,7 +915,7 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
       .orderBy(asc(shipmentImportRows.rowNo));
     const duplicates = [...new Set(found.flatMap(({ row }) => (row.verdict === 'duplicate' && row.barcode ? [row.barcode] : [])))];
     const [made, elsewhere] = await Promise.all([
-      importShipmentsQuery(db, [view.id]),
+      importShipmentsOf(db, [view.id]),
       duplicates.length === 0 ? Promise.resolve([]) : elsewhereQuery(db, scope, duplicates, ne(shipments.importId, view.id)),
     ]);
     // سفارش حکم هر سطر، و سفارش هر کد (کد «همین است» و دستی می‌تواند مال سفارش دیگری باشد، ۶٫۲).
@@ -1040,7 +1140,13 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
               note: { source: 'post_file', importId: imp.id, filename: imp.filename, postDay: postDay.toISOString() },
             });
           }
-          const made = matched.map(({ row, judged: j }) => ({
+          // پیامک رهگیری هر کد، در همین تراکنش (۶٫۳): «منتظر»، یا همان پیامک قبلی همین کد برای همین سفارش (سؤال ۶۷).
+          const sms = await trackingSmsFor(
+            tx,
+            matched.map(({ row, judged: j }) => ({ orderId: j.orderId!, orderNumber: numberOf.get(j.orderId!)!, barcode: row.barcode! })),
+            input.at,
+          );
+          const made = matched.map(({ row, judged: j }, i) => ({
             orderId: j.orderId!,
             barcode: row.barcode!,
             importId: imp.id,
@@ -1053,6 +1159,7 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
             handedOrder: handOver.has(j.orderId!),
             adminUserId: input.adminUserId,
             createdAt: input.at,
+            smsMessageId: sms.ids[i]!,
           }));
           for (let i = 0; i < made.length; i += BATCH) await tx.insert(shipments).values(made.slice(i, i + BATCH));
 
@@ -1069,10 +1176,11 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
                 counts,
                 shipments: made.length,
                 handed,
+                sms: sms.fresh.length,
               },
             }),
           );
-          return { ok: true, counts, shipments: made.length, handed };
+          return { ok: true, counts, shipments: made.length, handed, sms: sms.fresh };
         });
       } catch (error) {
         // بارکدی که همین حالا با ورود دیگری برای سفارش دیگری نشست: حکمش دیگر «قطعی» نیست.
@@ -1325,6 +1433,7 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
           if (from === 'paid') await step('paid', 'printing');
           if (from === 'paid' || from === 'printing') await step('printing', 'handed_to_post');
           const handed = from !== 'handed_to_post';
+          const sms = await trackingSmsFor(tx, [{ orderId: order.id, orderNumber: order.orderNumber, barcode: row.barcode! }], input.at);
           await tx.insert(shipments).values({
             orderId: order.id,
             barcode: row.barcode!,
@@ -1338,6 +1447,7 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
             handedOrder: handed,
             adminUserId: input.adminUserId,
             createdAt: input.at,
+            smsMessageId: sms.ids[0]!,
           });
           const criteria = criteriaOf(candidateRow, order);
           await tx.insert(adminEvents).values(
@@ -1360,7 +1470,7 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
               },
             }),
           );
-          return { ok: true, orderNumber: order.orderNumber, from, handed };
+          return { ok: true, orderNumber: order.orderNumber, from, handed, sms: sms.fresh[0] ?? null };
         });
       } catch (error) {
         // همین بارکد همین حالا جای دیگری زنده شد (ورود دیگری ثبت شد).
@@ -1486,6 +1596,44 @@ export function createShipmentStore({ db }: Database): ShipmentStore {
         );
         return { ok: true, orderNumber: order.orderNumber, reopened, kept };
       });
+    },
+
+    async shipmentSms(scope, shipmentId) {
+      const [row] = await db
+        .select({
+          shipmentId: shipments.id,
+          orderId: shipments.orderId,
+          orderNumber: orders.orderNumber,
+          barcode: shipments.barcode,
+          voidedAt: shipments.voidedAt,
+          ...shipmentSmsFields,
+        })
+        .from(shipments)
+        .innerJoin(orders, eq(orders.id, shipments.orderId))
+        .leftJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
+        .where(and(eq(shipments.id, shipmentId), ordersInScope(scope)))
+        .limit(1);
+      if (!row) return null;
+      const { smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt } = row;
+      return {
+        shipmentId: row.shipmentId,
+        orderId: row.orderId,
+        orderNumber: row.orderNumber,
+        barcode: row.barcode,
+        voided: row.voidedAt !== null,
+        sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+      };
+    },
+
+    async recordSmsResend(input) {
+      await db.insert(adminEvents).values(
+        adminEventRow({
+          ...input.event,
+          targetType: 'order',
+          targetId: input.orderId,
+          detail: { ...(input.event.detail as Record<string, unknown> | undefined), ...input.detail },
+        }),
+      );
     },
   };
 }

@@ -176,6 +176,20 @@
       "when": 1790684810486,
       "tag": "0024_review_queue_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790721679175,
+      "tag": "0025_tracking_sms",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790721691353,
+      "tag": "0026_tracking_sms_guards",
+      "breakpoints": true
     }
   ]
 }

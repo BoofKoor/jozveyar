@@ -237,11 +237,18 @@ def test_row_text_goes_for_dismissed_and_never_shipped_rows_only(conn, admin):
         )
     conn.execute("UPDATE shipment_import_rows SET dismissed_at = now(), dismissed_by = %s WHERE import_id = %s AND row_no = 1", (admin, imp))
     order_id = handed_order(conn)
+    # از ۶٫۳ هر مرسوله پیامک رهگیری منتظرش را دارد (تریگر `shipments_sms`، 0026).
+    (sms_id,) = conn.execute(
+        """INSERT INTO sms_messages (provider, to_mobile, purpose, body, status)
+           SELECT 'queued', recipient_phone, 'tracking', 'ساختگی', 'pending' FROM orders WHERE id = %s RETURNING id""",
+        (order_id,),
+    ).fetchone()
     conn.execute(
-        """INSERT INTO shipments (order_id, barcode, import_id, row_no, weight_grams, fare_rials, tax_rials, post_day, matched_by, admin_user_id)
-           SELECT %s, barcode, import_id, row_no, weight_grams, fare_rials, tax_rials, post_day, 'manual', %s
+        """INSERT INTO shipments (order_id, barcode, import_id, row_no, weight_grams, fare_rials, tax_rials, post_day, matched_by, admin_user_id,
+                                  sms_message_id)
+           SELECT %s, barcode, import_id, row_no, weight_grams, fare_rials, tax_rials, post_day, 'manual', %s, %s
              FROM shipment_import_rows WHERE import_id = %s AND row_no = 3""",
-        (order_id, admin, imp),
+        (order_id, admin, sms_id, imp),
     )
     conn.commit()
 

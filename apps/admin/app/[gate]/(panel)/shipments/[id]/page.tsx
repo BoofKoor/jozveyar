@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { trackingText } from '@jozveyar/sms';
 import { formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
@@ -34,6 +35,7 @@ import {
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
 import type { ImportPageView } from '../../../../../lib/server/shipments';
+import { smsCounts, smsCountsText } from '../../../../../lib/sms';
 import { commitImportAction, discardImportAction } from '../../../actions';
 
 export const metadata: Metadata = { title: 'فایل پست' };
@@ -42,7 +44,7 @@ type Query = Record<string, string | string[] | undefined>;
 const one = (query: Query, key: string) => (typeof query[key] === 'string' ? (query[key] as string) : undefined);
 
 /** خطاهایی که کارهای همین صفحه با برگشت به آن می‌گویند (`?e=`). */
-const PAGE_ERRORS = new Set(['import_changed', 'import_closed', 'import_not_committed', 'import_not_found', 'forbidden']);
+const PAGE_ERRORS = new Set(['import_changed', 'import_closed', 'import_not_committed', 'import_not_found', 'forbidden', 'sms_not_failed', 'shipment_voided', 'shipment_not_found']);
 
 /** «سارا، امروز 11:05»؛ ورود چاپخانه «حسن، چاپ نور، …». */
 const whoWhen = (view: ImportPageView) =>
@@ -146,23 +148,65 @@ function CountTiles({ counts, rows, state, partner }: { counts: RowCounts; rows:
   );
 }
 
+/**
+ * پیامک‌های کدهای زندهٔ همین ورود در یادداشت «ثبت شد» (۶٫۳، طرح `m-ship-done`): « و 8 پیامک رفت؛ پیامک سفارش 10018 نرفت.»؛ حال امروز.
+ */
+function SmsDone({ rows, now }: { rows: readonly ImportRowView[]; now: Date }) {
+  const live = rows.flatMap((row) => (row.shipment ? [row.shipment] : []));
+  const counts = smsCounts(live, now);
+  const failed = [...new Set(live.filter((s) => s.voidedAt === null && s.sms && smsCounts([s], now).failed > 0).map((s) => s.orderNumber))].sort((a, b) => a - b);
+  return (
+    <>
+      {counts.sent > 0 ? (
+        <>
+          {' '}
+          و <span className="num">{formatNumber(counts.sent)}</span> پیامک رفت
+        </>
+      ) : null}
+      {failed.length > 0 ? (
+        <>
+          ؛ پیامک سفارش <Segments segs={numbersText(failed)} /> نرفت
+        </>
+      ) : null}
+      .
+    </>
+  );
+}
+
 /** سفارش‌هایی که «ثبت» یا همین ورود «تحویل پست شد» کرد؛ به ترتیب شماره. */
 const handedNumbers = (rows: readonly ImportRowView[]) =>
   [...new Set(rows.filter((row) => row.verdict === 'matched' && row.handOver && row.order).map((row) => row.order!.orderNumber))].sort(
     (a, b) => a - b,
   );
 
-/** زیرعنوان هر گروه، با حال ورود و از چشم چاپخانه (۶٫۲). */
-function groupSub(group: (typeof ROW_GROUPS)[number], view: ImportPageView, partner: string | null): string {
+/**
+ * زیرعنوان هر گروه، با حال ورود و از چشم چاپخانه (۶٫۲). قطعی (۶٫۳، طرح `m-ship-preview` و `m-ship-done`): پیش از «ثبت» نمونهٔ متن
+ * پیامک سطر اول؛ پس از آن شمار پیامک‌های امروز.
+ */
+function groupSub(group: (typeof ROW_GROUPS)[number], view: ImportPageView, partner: string | null, rows: readonly ImportRowView[]): React.ReactNode {
   const committed = view.kind === 'committed';
   const reverted = view.import.status === 'reverted';
   switch (group.verdict) {
-    case 'matched':
-      return reverted
-        ? 'این ورود برگشت و کدهایش کنار رفت.'
-        : committed
-          ? 'کد رهگیری هر بسته در صفحهٔ سفارشش نشست.'
-          : 'با «ثبت»، کد رهگیری هر بسته در صفحهٔ سفارشش می‌نشیند.';
+    case 'matched': {
+      if (reverted) return 'این ورود برگشت و کدهایش کنار رفت.';
+      if (committed) {
+        const live = rows.flatMap((row) => (row.shipment ? [row.shipment] : []));
+        const counts = smsCountsText(smsCounts(live, view.now));
+        return (
+          <>
+            کد رهگیری هر بسته در صفحهٔ سفارشش نشست.{counts.length > 0 ? ' ' : ''}
+            <Segments segs={counts} />
+          </>
+        );
+      }
+      const sample = rows.find((row) => row.verdict === 'matched' && row.order && row.barcode);
+      if (partner || !sample) return 'هر بسته کد رهگیری و یک پیامک به مشتری می‌گیرد.';
+      return (
+        <>
+          هر بسته کد رهگیری و یک پیامک می‌گیرد: «<span data-sms-sample="">{trackingText(sample.order!.orderNumber, sample.barcode!)}</span>»
+        </>
+      );
+    }
     case 'review':
       return partner ? `به سفارشی از ${partner} نشست، ولی قطعی نیست؛ جزوه‌یار تأیید یا کنار می‌گذارد.` : group.sub;
     case 'unmatched':
@@ -191,7 +235,7 @@ function Groups({ gate, rows, view, partner }: { gate: string; rows: ImportRowVi
           importId={view.import.id}
           id={group.id}
           title={group.verdict === 'review' && partner ? 'در انتظار بررسی جزوه‌یار' : group.title}
-          sub={groupSub(group, view, partner)}
+          sub={groupSub(group, view, partner, rows.filter((row) => row.verdict === group.verdict))}
           head={group.verdict === 'review' ? queue : undefined}
           rows={rows.filter((row) => row.verdict === group.verdict)}
           committed={committed}
@@ -199,6 +243,7 @@ function Groups({ gate, rows, view, partner }: { gate: string; rows: ImportRowVi
           canReview={view.canReview}
           partner={partner !== null}
           now={view.now}
+          smsBefore={view.kind === 'preview' ? new Set(view.preview.smsBefore) : undefined}
         />
       ))}
     </>
@@ -240,6 +285,12 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
           </Link>{' '}
           نشست{one(query, 'h') === '1' ? ' و سفارش «تحویل پست شد»' : ''}.
         </Alert>
+      ) : one(query, 'done') === 'sms_resend' ? (
+        one(query, 'sent') === '1' ? (
+          <Alert tone="success">پیامک رهگیری دوباره فرستاده شد و رفت.</Alert>
+        ) : (
+          <Alert tone="error">پیامک رهگیری باز نرفت؛ پنل پیامک جواب نداد. کمی بعد دوباره بفرست، یا کد را خودت به مشتری بگو.</Alert>
+        )
       ) : one(query, 'done') === 'dismiss' ? (
         <Alert tone="success">سطر کنار گذاشته شد («هیچ‌کدام»). اگر اشتباه بود، از همین صفحه به سفارش درستش بده.</Alert>
       ) : null}
@@ -400,7 +451,14 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
             {counts.matched > 0 ? (
               <>
                 با «ثبت»، <span className="num">{formatNumber(counts.matched)}</span> کد رهگیری به {partner ? `سفارش‌های ${partner}` : 'سفارش‌ها'}{' '}
-                می‌نشیند
+                می‌نشیند و برای هر کدام یک پیامک می‌رود
+                {view.preview.smsBefore.length > 0 ? (
+                  <>
+                    {' '}
+                    (جز <span className="num">{formatNumber(view.preview.smsBefore.length)}</span> کد که پیش‌تر برای همان سفارش پیامک شده؛
+                    دوباره نه)
+                  </>
+                ) : null}
                 {handed.length > 0 ? (
                   <>
                     ؛ سفارش <Segments segs={numbersText(handed)} /> هم از «در حال چاپ» «تحویل پست شد» {handed.length > 1 ? 'می‌شوند' : 'می‌شود'}، با روز
@@ -429,7 +487,8 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
           <Alert tone="success">
             {imp.committedAt ? whenText(imp.committedAt, view.now) : ''}
             {imp.committedByName ? ` با ${imp.committedByName}` : ''} ثبت شد: <span className="num">{formatNumber(counts.matched)}</span> کد
-            رهگیری نشست.
+            رهگیری نشست
+            <SmsDone rows={rows} now={view.now} />
             {handed.length > 0 ? (
               <>
                 {' '}
