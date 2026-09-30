@@ -3,7 +3,9 @@ import Link from 'next/link';
 import { whenText } from '../lib/format';
 import { panelPath } from '../lib/gate';
 import { candidatesText, fareText, orderLine, weightSegs, whyText, type ImportRowView } from '../lib/shipments';
+import { smsRowNote } from '../lib/sms';
 import { Barcode } from './Barcode';
+import { ResendSmsForm } from './ResendSmsForm';
 import { Segments } from './Segments';
 
 /** «با تأیید، علی محمدی» یا «دستی، علی محمدی» کنار کدی که پس از «ثبت» نشست (۶٫۲)؛ چاپخانه نام ادمین جزوه‌یار را نمی‌بیند. */
@@ -35,12 +37,13 @@ export function ImportRows({
   canReview,
   partner,
   now,
+  smsBefore,
 }: {
   gate: string;
   importId: string;
   id: string;
   title: string;
-  sub: string;
+  sub: React.ReactNode;
   /** دکمهٔ سر کارت گروه (طرح: «صف تأیید»). */
   head?: React.ReactNode;
   rows: readonly ImportRowView[];
@@ -49,6 +52,8 @@ export function ImportRows({
   canReview: boolean;
   partner: boolean;
   now: Date;
+  /** پیش‌نمایش (۶٫۳، سؤال ۶۷): سطرهایی که همین کد پیش‌تر برای همین سفارش پیامک شد؛ با «ثبت» پیامک دوباره نمی‌رود. */
+  smsBefore?: ReadonlySet<number>;
 }) {
   if (rows.length === 0) return null;
   const rowPage = (rowNo: number) => panelPath(gate, `/shipments/${importId}/rows/${rowNo}?from=import`);
@@ -142,6 +147,30 @@ export function ImportRows({
                   </p>
                 ) : null}
                 {committed && row.queued && partner ? <p className="ad-prow__why">در انتظار بررسی جزوه‌یار.</p> : null}
+                {live && committed
+                  ? (() => {
+                      // پیامک رهگیری همین کد (۶٫۳): نرفته با «دوباره بفرست» (مالک و متصدی؛ چاپخانه «جزوه‌یار دوباره می‌فرستد»).
+                      const note = smsRowNote(live.sms, live.createdAt, now);
+                      if (!note) return null;
+                      return (
+                        <p className={note.failed ? 'ad-prow__sms' : 'ad-prow__why'} data-sms-note="">
+                          {note.failed ? <span className="jy-icon jy-icon-error" aria-hidden="true" /> : null}
+                          <span>
+                            {note.text}
+                            {note.resendable && partner ? ' جزوه‌یار دوباره می‌فرستد.' : ''}
+                          </span>
+                          {note.resendable && canReview ? (
+                            <ResendSmsForm gate={gate} shipmentId={live.id} orderNumber={live.orderNumber} importId={importId} />
+                          ) : null}
+                        </p>
+                      );
+                    })()
+                  : null}
+                {!committed && smsBefore?.has(row.rowNo) ? (
+                  <p className="ad-prow__why" data-sms-before="">
+                    همین کد پیش‌تر برای همین سفارش پیامک شد؛ با «ثبت» پیامک دوباره نمی‌رود.
+                  </p>
+                ) : null}
                 {row.costMismatch ? (
                   <p className="ad-prow__why">کرایه و مالیات با «هزینه کل» این سطر نمی‌خوانند؛ کرایه و مالیات ثبت می‌شوند.</p>
                 ) : null}

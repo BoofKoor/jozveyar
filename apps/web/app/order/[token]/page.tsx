@@ -19,6 +19,9 @@ export const metadata: Metadata = {
   title: 'سفارش',
   robots: { index: false, follow: false },
   alternates: { canonical: null },
+  // دیوار دوم (برش ۶٫۳، ADR-047): نشانی صفحه توکن سفارش است و به هیچ سایت دیگری نمی‌رود، حتی اگر پیوندی `noreferrer` نداشت. نشان
+  // اینماد پاورقی `referrerpolicy="origin"` خودش را دارد (ADR-032).
+  referrer: 'no-referrer',
 };
 
 /**
@@ -31,7 +34,9 @@ export const metadata: Metadata = {
  * - **در انتظار پرداخت:** اگر آخرین تلاش ناموفق بود «پرداخت انجام نشد»؛ همان مرور، با همان قیمت منجمد، و
  *   «دوباره پرداخت کن». سفارش ساخته شده، پس مرور پیوند ویرایش ندارد.
  * - **منقضی:** پیام روشن و «دوباره بینداز».
- * - **غریبه** (نه صاحب سفارش، ADR-033): فقط شماره، وضعیت و روز تحویل به پست.
+ * - **غریبه** (نه صاحب سفارش، ADR-033): فقط شماره، وضعیت و روز تحویل به پست؛ از ۶٫۳ اینکه کد رهگیری پیامک شد، بی خود کد.
+ * - **کد رهگیری** (برش ۶٫۳، ADR-047، طرح `m-c-shipped`): صاحب سفارش گام «کد رهگیری پست» را انجام‌شده می‌بیند، با کد هر بستهٔ زنده و
+ *   «رهگیری در سایت پست» (فقط `<a>` در زبانهٔ تازه با `noopener noreferrer`؛ چیزی از سایت پست بار نمی‌شود، قاعدهٔ ۸).
  *
  * پشت حالت مسیر خرید نیست: سفارش پرداخت‌شده با خاموش شدن خرید گم نمی‌شود.
  */
@@ -101,6 +106,11 @@ function Stranger({ view }: { view: OrderView }) {
             <Inline text={view.handedToPost.day} /> تحویل پست شد.
           </p>
         ) : null}
+        {view.trackingSent ? (
+          <p className="ck-sub" data-testid="tracking-sent">
+            کد رهگیری به موبایل گیرنده پیامک شد.
+          </p>
+        ) : null}
         <p className="ck-sub">جزئیات این سفارش فقط با همان گوشی و مرورگری دیده می‌شود که با آن سفارش داده شد.</p>
       </section>
     </main>
@@ -138,6 +148,59 @@ function Step({ state, title, text, testId }: { state: 'done' | 'now' | 'next'; 
       <span className="ck-steps__dot">{state === 'done' ? <span className="jy-icon jy-icon-check" aria-hidden="true" /> : null}</span>
       <b data-testid={testId}>{title}</b>
       <span className="ck-steps__t">{text}</span>
+    </li>
+  );
+}
+
+/**
+ * کد رهگیری پست ۲۴ رقمی (کیت `jy-barcode`، طرح برش ۶): شش گروه چهارتایی برای خواندن؛ فاصله در CSS است، پس کپی همان ۲۴ رقم است و
+ * یک کلیک همه را انتخاب می‌کند؛ چپ‌به‌راست جدا از جملهٔ فارسی.
+ */
+function Barcode({ code }: { code: string }) {
+  return (
+    <span className="jy-barcode jy-barcode--lg" data-barcode={code}>
+      {(code.match(/.{1,4}/g) ?? [code]).map((group, i) => (
+        <span key={i}>{group}</span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * گام «کد رهگیری پست» انجام‌شده (برش ۶٫۳، طرح `m-c-shipped`): هر بستهٔ زنده کد خودش و پیوند سایت پست را دارد، به ترتیب ثبت. «هم
+ * پیامک شد» فقط وقتی پیامکی واقعاً رفت؛ قول پیامکی را که نرفته نمی‌دهیم.
+ */
+function TrackingStep({ parcels, phone }: { parcels: OrderViewDetails['parcels']; phone: string }) {
+  const sent = parcels.some((parcel) => parcel.smsSent);
+  return (
+    <li className="is-done" data-testid="tracking">
+      <span className="ck-steps__dot">
+        <span className="jy-icon jy-icon-check" aria-hidden="true" />
+      </span>
+      <b>کد رهگیری پست</b>
+      <span className="ck-steps__t">
+        {parcels.length > 1 ? (
+          <>
+            <span className="num">{formatNumber(parcels.length)}</span> بسته؛ هر کدام کد خودش را دارد.{' '}
+          </>
+        ) : null}
+        {sent ? (
+          <>
+            به <span className="num">{formatMobile(phone)}</span> هم پیامک شد.
+          </>
+        ) : (
+          'مسیر بسته را با این کد در سایت پست ببین.'
+        )}
+      </span>
+      {parcels.map((parcel) => (
+        <div key={parcel.barcode} className="ck-track">
+          <Barcode code={parcel.barcode} />
+          {/* فقط پیوند؛ چیزی از سایت پست بار نمی‌شود (قاعدهٔ ۸)، و نشانی این صفحه به آنجا نمی‌رود. */}
+          <a className="jy-btn jy-btn--secondary" href={parcel.trackingUrl} target="_blank" rel="noopener noreferrer">
+            رهگیری در سایت پست<span className="sr-only"> (زبانهٔ تازه)</span>
+          </a>
+        </div>
+      ))}
     </li>
   );
 }
@@ -202,6 +265,7 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
   }
   if (view.status === 'handed_to_post') {
     const handed = view.handedToPost;
+    const parcels = details.parcels;
     return (
       <section className="jy-card" aria-labelledby="order-title" data-testid="order-handed">
         <span className="jy-icon jy-icon-truck ck-done__icon" aria-hidden="true" />
@@ -210,6 +274,7 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
         </h1>
         <p className="ck-sub">
           سفارش <span className="num">{view.number}</span> {handed ? <Inline text={handed.day} /> : null} تحویل پست شد.
+          {parcels.length > 0 ? ' مسیر بسته را با کد رهگیری در سایت پست ببین.' : null}
         </p>
         <ol className="ck-steps">
           {payment}
@@ -219,15 +284,19 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
             title="تحویل به پست"
             text={handed ? <>{<Inline text={handed.day} />}{handed.onTime ? '، در مهلت.' : '.'}</> : null}
           />
-          <Step
-            state="now"
-            title="کد رهگیری پست"
-            text={
-              <>
-                به‌زودی به <span className="num">{formatMobile(details.recipient.phone)}</span> پیامک می‌شود.
-              </>
-            }
-          />
+          {parcels.length > 0 ? (
+            <TrackingStep parcels={parcels} phone={details.recipient.phone} />
+          ) : (
+            <Step
+              state="now"
+              title="کد رهگیری پست"
+              text={
+                <>
+                  به‌زودی به <span className="num">{formatMobile(details.recipient.phone)}</span> پیامک می‌شود.
+                </>
+              }
+            />
+          )}
         </ol>
       </section>
     );

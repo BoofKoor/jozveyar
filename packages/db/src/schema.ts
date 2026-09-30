@@ -1016,15 +1016,35 @@ export const smsMessages = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     provider: text('provider').notNull(),
     toMobile: text('to_mobile').notNull(),
-    /** `otp` یا `order_paid`. */
+    /** `otp`، `order_paid` یا از ۶٫۳ `tracking` (کد رهگیری هر مرسوله، ADR-047). */
     purpose: text('purpose').notNull(),
     body: text('body'),
-    /** `logged` (کنسولی)، `sent` یا `failed`. */
+    /**
+     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری `pending` (در همان تراکنش مرسوله نوشته شد و هنوز فرستاده نشده) و
+     * `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard` (0026).
+     */
     status: text('status').notNull(),
     providerMessageId: text('provider_message_id'),
     error: text('error'),
+    /** پارامترهای قالب پنل پیامک (برش ۷)؛ رهگیری: شمارهٔ سفارش و بارکد. */
+    params: jsonb('params'),
+    /** شمار تلاش‌های فرستادن رهگیری («دوباره بفرست» یکی بالا می‌برد)؛ کد و پرداخت ۰، چون یک بار و بی ردیف منتظرند. */
+    attempts: integer('attempts').notNull().default(0),
+    /** آخرین «در حال فرستادن»؛ «معلوم نیست رفت» از همین حساب می‌شود. */
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }),
+    /** وقتی «رفت» (کنسولی یا پنل واقعی)؛ پنل «رفت، 18:32» را از همین می‌گوید. */
+    sentAt: timestamp('sent_at', { withTimezone: true }),
   },
-  (t) => [index('sms_messages_to').on(t.toMobile, t.createdAt)],
+  (t) => [
+    index('sms_messages_to').on(t.toMobile, t.createdAt),
+    check('sms_messages_purpose', sql`${t.purpose} IN ('otp', 'order_paid', 'tracking')`),
+    check('sms_messages_status', sql`${t.status} IN ('logged', 'sent', 'failed', 'pending', 'sending')`),
+    check(
+      'sms_messages_queued',
+      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} = 'tracking' AND ${t.body} IS NOT NULL)`,
+    ),
+    check('sms_messages_sent_at', sql`(${t.sentAt} IS NULL) OR ${t.status} IN ('logged', 'sent')`),
+  ],
 );
 
 /* ──────────────────────────── پنل ادمین (برش ۴، ADR-037 و ADR-038) ──────────────────────────── */
@@ -1426,9 +1446,15 @@ export const shipments = pgTable(
     voidedAt: timestamp('voided_at', { withTimezone: true }),
     voidedBy: uuid('voided_by').references(() => adminUsers.id),
     voidReason: text('void_reason'),
+    /**
+     * پیامک رهگیری همین کد (۶٫۳، ADR-047): ردیف «منتظر» در همان تراکنش؛ یا اگر همین کد پیش‌تر برای همین سفارش پیامک شده بود،
+     * همان ردیف قبلی (سؤال ۶۷). از ۶٫۳ هرگز خالی (تریگر `shipments_sms`، 0026)؛ خالی یعنی مرسولهٔ پیش از ۶٫۳.
+     */
+    smsMessageId: bigint('sms_message_id', { mode: 'number' }).references(() => smsMessages.id),
   },
   (t) => [
     index('shipments_order').on(t.orderId),
+    index('shipments_sms').on(t.smsMessageId),
     uniqueIndex('shipments_live_barcode')
       .on(t.barcode)
       .where(sql`${t.voidedAt} IS NULL`),

@@ -7,8 +7,9 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { consoleSms, type SmsProvider } from '@jozveyar/sms';
+
 import { createAuthService, tokenHash } from './auth';
-import { consoleSms, type SmsProvider } from './sms';
 import { memoryAuthStore, memorySmsLog } from './testing';
 
 const SECRET = 'k'.repeat(64);

@@ -16,6 +16,8 @@ export async function register() {
   // بی استوریج، پنل بالا می‌آید و فقط دانلود PDF جزوه (۴٫۲) بسته است؛ بلند، تا بعد از استقرار دیده شود.
   const { storageFromEnv } = await import('@jozveyar/storage');
   if (!storageFromEnv(process.env)) console.log('⚠ پنل ادمین: استوریج (S3_*) پیکربندی نشده؛ دانلود PDF جزوه بسته است.');
+  // پیامک رهگیری (۶٫۳، ADR-047): تا برش ۷ فقط کنسولی، هر چه `.env` بگوید.
+  console.log('✓ پنل ادمین: پیامک رهگیری کنسولی (در sms_messages)، تا برش ۷');
 
   const { createDb } = await import('@jozveyar/db');
   const conn = createDb(config.databaseUrl, { max: 1 });

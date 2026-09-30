@@ -12,7 +12,7 @@
  *    تراکنش انتخاب می‌شود (`assignAtPayment`، ADR-042).
  */
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
 
 import { assignAtPayment } from './assignment.js';
@@ -28,8 +28,11 @@ import {
   payments,
   printRules,
   settings,
+  shipments,
+  smsMessages,
 } from './schema.js';
 import { loadActivePriceList, loadPriceList } from './seed.js';
+import { shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
 
 /**
  * کار کارگر اسناد بعد از پرداخت: PDF جزوه زیر `orders/` (ADR-030)، و از برش ۵٫۱ فایل چاپ هر جلد از روی همان (ADR-043).
@@ -138,6 +141,10 @@ export interface OrderDetails {
   items: (OrderItemRow & { sections: OrderSectionDetails[]; rules: PrintRuleRow[] })[];
   /** همهٔ تلاش‌های پرداخت، تازه‌ترین اول. */
   payments: PaymentRow[];
+  /**
+   * کدهای رهگیری زندهٔ سفارش، به ترتیب ثبت، با پیامک هر کدام (برش ۶٫۳، ADR-047). کد کنارگذاشته نه: مشتری دیگر نمی‌بیندش.
+   */
+  parcels: { barcode: string; createdAt: Date; sms: ShipmentSms | null }[];
 }
 
 /** نتیجهٔ سنجش درگاه، که `settlePayment` در همان تراکنش اعمال می‌کند. */
@@ -324,7 +331,7 @@ export function createOrderStore({ db }: Database): OrderStore {
       if (!order) return null;
       const itemRows = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id)).orderBy(orderItems.seq);
       const itemIds = itemRows.map((item) => item.id);
-      const [sectionRows, ruleRows, paymentRows] = await Promise.all([
+      const [sectionRows, ruleRows, paymentRows, parcelRows] = await Promise.all([
         itemIds.length === 0
           ? []
           : db
@@ -349,6 +356,12 @@ export function createOrderStore({ db }: Database): OrderStore {
               .where(inArray(printRules.orderItemId, itemIds))
               .orderBy(printRules.orderItemId, printRules.seq),
         db.select().from(payments).where(eq(payments.orderId, order.id)).orderBy(desc(payments.createdAt)),
+        db
+          .select({ barcode: shipments.barcode, createdAt: shipments.createdAt, ...shipmentSmsFields })
+          .from(shipments)
+          .leftJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
+          .where(and(eq(shipments.orderId, order.id), isNull(shipments.voidedAt)))
+          .orderBy(asc(shipments.createdAt), asc(shipments.rowNo)),
       ]);
       return {
         order,
@@ -360,6 +373,7 @@ export function createOrderStore({ db }: Database): OrderStore {
           rules: ruleRows.filter((r) => r.orderItemId === item.id),
         })),
         payments: paymentRows,
+        parcels: parcelRows.map(({ barcode, createdAt, ...sms }) => ({ barcode, createdAt, sms: shipmentSmsOf(sms) })),
       };
     },
 

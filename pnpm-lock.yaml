@@ -35,6 +35,9 @@ importers:
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing
+      '@jozveyar/sms':
+        specifier: workspace:*
+        version: link:../../packages/sms
       '@jozveyar/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -105,6 +108,9 @@ importers:
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing
+      '@jozveyar/sms':
+        specifier: workspace:*
+        version: link:../../packages/sms
       '@jozveyar/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -169,6 +175,9 @@ importers:
       '@jozveyar/geo':
         specifier: workspace:*
         version: link:../geo
+      '@jozveyar/sms':
+        specifier: workspace:*
+        version: link:../sms
       '@jozveyar/text':
         specifier: workspace:*
         version: link:../text
@@ -207,6 +216,12 @@ importers:
       '@jozveyar/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/sms:
+    devDependencies:
+      '@types/node':
+        specifier: 22.13.1
+        version: 22.13.1
 
   packages/storage:
     devDependencies:

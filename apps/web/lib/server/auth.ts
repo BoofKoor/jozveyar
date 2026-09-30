@@ -20,11 +20,11 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 
 import { otpRequestSchema, otpVerifySchema } from '@jozveyar/contracts/checkout';
 import type { AuthStore, OtpCounts, OtpRow } from '@jozveyar/db';
+import { otpText, type SmsProvider } from '@jozveyar/sms';
 import { toLatinDigits } from '@jozveyar/text';
 import { normalizeIranMobile } from '@jozveyar/text/input';
 
 import { fail, ok, type Failure, type Result } from './result';
-import { otpText, type SmsProvider } from './sms';
 
 export const OTP_DIGITS = 5;
 export const OTP_TTL_MS = 2 * 60_000;

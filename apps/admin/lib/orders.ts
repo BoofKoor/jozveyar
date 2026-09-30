@@ -856,6 +856,15 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
       text: ['کد رهگیری ', { barcode: shipment.barcode }, ' از ', { ltr: shipment.filename }, via],
       who: shipment.adminName ?? 'ادمین',
     });
+    // پیامک رهگیری همین کد (۶٫۳، طرح `m-order-shipped`: «پیامک رهگیری به مشتری رفت · سیستم»). پیامکی که همین کد پیش‌تر برای همین
+    // سفارش گرفت (سؤال ۶۷) سطر تازه ندارد. «دوباره بفرست» رویداد ادمین خودش را دارد؛ پس از آن فقط اینکه بار اول نرفت.
+    const sms = shipment.sms;
+    if (sms && sms.createdAt.getTime() >= shipment.createdAt.getTime()) {
+      const code: Seg = { barcode: shipment.barcode };
+      if (sms.attempts > 1) entries.push({ at: shipment.createdAt, text: ['پیامک رهگیری ', code, ' به مشتری نرفت'], who: 'سیستم' });
+      else if (sms.sentAt) entries.push({ at: sms.sentAt, text: ['پیامک رهگیری ', code, ' به مشتری رفت'], who: 'سیستم' });
+      else if (sms.status === 'failed') entries.push({ at: sms.attemptedAt ?? sms.createdAt, text: ['پیامک رهگیری ', code, ' به مشتری نرفت'], who: 'سیستم' });
+    }
     if (shipment.voidedAt) {
       entries.push({
         at: shipment.voidedAt,
@@ -901,6 +910,11 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     } else if (event.action === 'orders.ticket_download') entries.push({ at: event.at, text: ['برگهٔ سفارش دانلود شد'], who });
     else if (event.action === 'orders.pdf_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ فایل چاپ'], who });
     else if (event.action === 'orders.ticket_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ برگهٔ سفارش'], who });
+    else if (event.action === 'shipments.sms_resend') {
+      const resent = detail as { barcode?: unknown; outcome?: unknown };
+      const code: Seg[] = typeof resent.barcode === 'string' ? [{ barcode: resent.barcode }, ' '] : [];
+      entries.push({ at: event.at, text: ['پیامک رهگیری ', ...code, resent.outcome === 'sent' ? 'دوباره رفت' : 'دوباره نرفت'], who });
+    }
     else if (event.action === 'orders.recipient') {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT_FIELDS[String(field)] ?? String(field)) : [];
       entries.push({ at: event.at, text: [`ویرایش گیرنده${changed.length ? `: ${changed.join('، ')}` : ''}`], who });
@@ -935,7 +949,7 @@ export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
 export const linesWithoutMoney = (lines: readonly PanelOrderLine[]): PanelOrderLine[] => lines.map(zeroRials);
 
 /** جزئیات رویدادهای ادمین که رویدادهای سفارش لازم دارد؛ بقیه (مقدار پیشین گیرنده، دلیل‌ها) از چشم چاپخانه نه. */
-const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed'];
+const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed', 'barcode', 'outcome'];
 
 /**
  * جزئیات از چشم چاپخانه (برش ۵٫۳، ADR-042): یادداشت‌های درونی نه (دلیل لغو، که برگشت پول را می‌گوید، و دلیل برگرداندن و

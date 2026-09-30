@@ -373,6 +373,18 @@
     line-height: 1.7;
     color: var(--color-muted);
   }
+  /* کد رهگیری پست (برش ۶٫۳، طرح `m-c-shipped`): هر بسته کد درشت و «رهگیری در سایت پست»، زیر همان گام */
+  .ck-track {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-block-start: 10px;
+    padding: 12px 16px;
+    background: var(--color-green-50);
+    border-radius: var(--radius-md);
+  }
   /* سفارش منقضی و نگاه غریبه: یک کارت، بی ستون خلاصه */
   .ck-solo {
     max-width: calc(640px + 2 * var(--jy-gutter));

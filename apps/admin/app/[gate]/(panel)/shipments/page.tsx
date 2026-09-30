@@ -45,8 +45,8 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
           <h1 className="ad-title">ارسال</h1>
           <p className="ad-sub">
             {partner
-              ? `فایل پست بسته‌هایت را بده؛ کد رهگیری سفارش‌های ${partner.name} در صفحهٔ هر سفارش می‌نشیند. پیش از ثبت، هر سطر را با حکمش می‌بینی.`
-              : 'فایل پست کد رهگیری، وزن و کرایهٔ هر بسته را می‌آورد؛ پیش از ثبت، هر سطر را با حکمش می‌بینی.'}
+              ? `فایل پست بسته‌هایت را بده؛ کد رهگیری سفارش‌های ${partner.name} ثبت و به مشتری پیامک می‌شود. پیش از ثبت، هر سطر را با حکمش می‌بینی.`
+              : 'فایل پست کد رهگیری، وزن و کرایهٔ هر بسته را می‌آورد؛ کد به موبایل مشتری پیامک می‌شود. پیش از ثبت، هر سطر را با حکمش می‌بینی.'}
           </p>
         </div>
       </div>
@@ -65,7 +65,7 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
               <Link className="jy-link" href={panelPath(gate, '/shipments/review')}>
                 <span className="num">{formatNumber(queued)}</span> سطر
               </Link>{' '}
-              از فایل‌های پست منتظر تأیید است؛ تا تأیید نشده، کد رهگیری به سفارشش نمی‌نشیند.
+              از فایل‌های پست منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.
             </span>
           </p>
         ) : null}

@@ -20,12 +20,14 @@ import {
   type ShipmentImportView,
   type ShipmentOrderFacts,
   type ShipmentRevert,
+  type ShipmentSmsRef,
   type ShipmentStore,
   type ShipmentVoid,
   type VoidWrite,
 } from '@jozveyar/db';
 import { barcodeOf, parcel, postTable } from '@jozveyar/db/postfile.fixtures';
 import { readPostSheet } from '@jozveyar/db';
+import type { SmsOutbox, SmsTransport } from '@jozveyar/sms';
 
 import { choiceText, seenText } from '../shipments';
 import { ipHashOf, type AdminSession } from './auth';
@@ -143,6 +145,7 @@ function fake(
     row?: ReviewRow | null;
     order?: ShipmentOrderFacts | null;
     queueTotal?: number;
+    shipmentSms?: ShipmentSmsRef | null;
   } = {},
 ) {
   const calls: { method: string; scope: PanelScope; input?: unknown }[] = [];
@@ -172,7 +175,7 @@ function fake(
     },
     async commit(scope, input) {
       calls.push({ method: 'commit', scope, input });
-      return answers.commit ?? { ok: true, counts: { matched: 2 }, shipments: 2, handed: [10013] };
+      return answers.commit ?? { ok: true, counts: { matched: 2 }, shipments: 2, handed: [10013], sms: [] };
     },
     async discard(scope, input) {
       calls.push({ method: 'discard', scope, input });
@@ -198,7 +201,7 @@ function fake(
     },
     async decide(scope, input) {
       calls.push({ method: 'decide', scope, input });
-      return answers.decide ?? { ok: true, orderNumber: 10014, from: 'printing', handed: true };
+      return answers.decide ?? { ok: true, orderNumber: 10014, from: 'printing', handed: true, sms: null };
     },
     async dismiss(scope, input) {
       calls.push({ method: 'dismiss', scope, input });
@@ -208,8 +211,41 @@ function fake(
       calls.push({ method: 'voidShipment', scope, input });
       return answers.void ?? { ok: true, orderNumber: 10014, reopened: true, kept: null };
     },
+    async shipmentSms(scope, shipmentId) {
+      calls.push({ method: 'shipmentSms', scope, input: shipmentId });
+      return answers.shipmentSms === undefined ? null : answers.shipmentSms;
+    },
+    async recordSmsResend(input) {
+      calls.push({ method: 'recordSmsResend', scope: { kind: 'all' }, input });
+    },
   };
-  return { store, calls, service: createPanelShipments({ store, secret: SECRET, now: () => NOW }) };
+  // درگاه پیامک حافظه‌ای: «منتظر» یک بار برداشته می‌شود، «نرفت» با `retry`؛ آداپتور شکست را از `fail` می‌گیرد.
+  const sms = { status: new Map<number, string>(), sent: [] as number[], fail: false };
+  const outbox: SmsOutbox = {
+    async claim(id, _at, mode) {
+      const status = sms.status.get(id) ?? 'pending';
+      if (mode === 'queued' ? status !== 'pending' : status !== 'failed') return null;
+      sms.status.set(id, 'sending');
+      return { id, to: '09152345678', purpose: 'tracking', body: `پیامک ${id}`, params: null };
+    },
+    async finish(id, _at, result) {
+      sms.status.set(id, result.ok ? result.status : 'failed');
+      if (result.ok) sms.sent.push(id);
+    },
+  };
+  const transport: SmsTransport = {
+    name: 'console',
+    send: async () => {
+      if (sms.fail) throw new Error('down');
+      return { status: 'logged', providerMessageId: null };
+    },
+  };
+  return {
+    store,
+    calls,
+    sms,
+    service: createPanelShipments({ store, sms: { transport, outbox, log: () => {} }, secret: SECRET, now: () => NOW }),
+  };
 }
 
 const bytes = (n: number) => Buffer.alloc(n, 0x3c);
@@ -282,7 +318,7 @@ describe('«ثبت»، «دور بینداز» و برگرداندن', () => {
     expect(await service.commit(OPERATOR, ID, { fingerprint: 'x' }, 'ip')).toMatchObject({ ok: false, status: 409, error: 'import_changed' });
     expect(await service.commit(OPERATOR, 'not-a-uuid', { fingerprint: FINGERPRINT }, 'ip')).toMatchObject({ status: 404, error: 'import_not_found' });
     expect(calls).toEqual([]);
-    expect(await service.commit(OPERATOR, ID, { fingerprint: FINGERPRINT }, 'ip')).toEqual({ ok: true, value: { shipments: 2, handed: [10013] } });
+    expect(await service.commit(OPERATOR, ID, { fingerprint: FINGERPRINT }, 'ip')).toEqual({ ok: true, value: { shipments: 2, handed: [10013], sms: { sent: 0, failed: 0 } } });
     expect(calls[0]!.input as ShipmentCommit).toMatchObject({ id: ID, fingerprint: FINGERPRINT, at: NOW, adminUserId: 'admin-1', event: { action: 'shipments.commit' } });
 
     const answers: [ShipmentCommitWrite, string][] = [
@@ -351,7 +387,7 @@ describe('صف تأیید، دادن دستی و کنار گذاشتن یک کد
     expect(calls).toEqual([]);
     expect(await service.approve(OPERATOR, { importId: ID, rowNo: '6', choice }, IP)).toEqual({
       ok: true,
-      value: { orderNumber: 10014, from: 'printing', handed: true },
+      value: { orderNumber: 10014, from: 'printing', handed: true, sms: 'earlier' },
     });
     const input = calls[0]!.input as ReviewDecision;
     expect(input).toEqual({
@@ -431,7 +467,7 @@ describe('صف تأیید، دادن دستی و کنار گذاشتن یک کد
     expect(await fake({ order: facts({ status: 'cancelled' }) }).service.row(OPERATOR, ID, '6', { order: '10014' })).toMatchObject({
       value: { manual: { kind: 'order', block: 'cancelled' } },
     });
-    const voided = review({ shipments: [{ id: 's', rowNo: 6, orderId: ORDER_ID, orderNumber: 10014, barcode: barcodeOf(6), handedOrder: true, matchedBy: 'review', adminName: 'علی', createdAt: NOW, voidedAt: NOW, voidedByName: 'سارا', voidReason: 'x' }] });
+    const voided = review({ shipments: [{ id: 's', rowNo: 6, orderId: ORDER_ID, orderNumber: 10014, barcode: barcodeOf(6), handedOrder: true, matchedBy: 'review', adminName: 'علی', createdAt: NOW, voidedAt: NOW, voidedByName: 'سارا', voidReason: 'x', sms: null }] });
     expect(await fake({ row: voided }).service.row(OPERATOR, ID, '6', { order: '10014' })).toMatchObject({ value: { manual: { voidedHere: true } } });
     // سطری که دادنی نیست (کد زنده دارد) شماره را نمی‌خواند؛ سطری که نیست همان ۴۰۴.
     const closed = fake({ row: review({ assignable: false, queued: false }) });
@@ -459,7 +495,7 @@ describe('صف تأیید، دادن دستی و کنار گذاشتن یک کد
     const page: ShipmentImportPage = {
       kind: 'preview',
       import: view({ status: 'read', partner: { id: PARTNER_ID, name: 'چاپ نور' } }),
-      preview: { sheet, judged: [], orders: [], live: [], fingerprint: FINGERPRINT, candidates: {} },
+      preview: { sheet, judged: [], orders: [], live: [], fingerprint: FINGERPRINT, candidates: {}, smsBefore: [] },
     };
     const { service, calls } = fake({ page });
     const seen = await service.page(PARTNER, ID);
@@ -477,5 +513,87 @@ describe('صف تأیید، دادن دستی و کنار گذاشتن یک کد
     expect(card.ok && card.value.rows.map((r) => [r.row.fareRials, r.row.taxRials, r.row.cells])).toEqual([[null, null, null]]);
     const one = await fake().service.row(reviewer, ID, '6', {});
     expect(one.ok && [one.value.review.row.fareRials, one.value.money]).toEqual([null, false]);
+  });
+
+  describe('پیامک رهگیری (۶٫۳)', () => {
+    const smsRef = (over: Partial<ShipmentSmsRef> = {}): ShipmentSmsRef => ({
+      shipmentId: ORDER_ID,
+      orderId: ORDER_ID,
+      orderNumber: 10018,
+      barcode: barcodeOf(11),
+      voided: false,
+      sms: { id: 7, toMobile: '09152345678', status: 'failed', error: 'unavailable', attempts: 1, createdAt: NOW, attemptedAt: NOW, sentAt: null },
+      ...over,
+    });
+
+    it('«ثبت» ردیف‌های منتظر همین ثبت را بعد از commit می‌فرستد و شمار رفته و نرفته را می‌گوید؛ نرفتن ثبت را برنمی‌گرداند', async () => {
+      const ok = fake({ commit: { ok: true, counts: { matched: 3 }, shipments: 3, handed: [], sms: [1, 2] } });
+      expect(await ok.service.commit(OPERATOR, ID, { fingerprint: FINGERPRINT }, 'ip')).toEqual({
+        ok: true,
+        value: { shipments: 3, handed: [], sms: { sent: 2, failed: 0 } },
+      });
+      expect(ok.sms.sent).toEqual([1, 2]);
+      const down = fake({ commit: { ok: true, counts: { matched: 1 }, shipments: 1, handed: [], sms: [3] } });
+      down.sms.fail = true;
+      expect(await down.service.commit(OPERATOR, ID, { fingerprint: FINGERPRINT }, 'ip')).toMatchObject({ ok: true, value: { sms: { sent: 0, failed: 1 } } });
+      expect(down.sms.status.get(3)).toBe('failed');
+      // «ثبت»ی که نشد پیامکی ندارد.
+      const changed = fake({ commit: { ok: false, reason: 'changed' } });
+      expect(await changed.service.commit(OPERATOR, ID, { fingerprint: FINGERPRINT }, 'ip')).toMatchObject({ ok: false, error: 'import_changed' });
+      expect(changed.sms.sent).toEqual([]);
+    });
+
+    it('«همین است» و دادن دستی: رفت، نرفت، یا همین کد پیش‌تر برای همین سفارش رفته بود (۶۷)', async () => {
+      const choice = choiceText({ id: ORDER_ID, status: 'printing', liveShipments: 0 });
+      const sent = fake({ decide: { ok: true, orderNumber: 10014, from: 'printing', handed: true, sms: 9 } });
+      expect(await sent.service.approve(OPERATOR, { importId: ID, rowNo: '6', choice }, 'ip')).toMatchObject({ value: { sms: 'sent' } });
+      const down = fake({ decide: { ok: true, orderNumber: 10014, from: 'printing', handed: true, sms: 9 } });
+      down.sms.fail = true;
+      expect(await down.service.approve(OPERATOR, { importId: ID, rowNo: '6', choice }, 'ip')).toMatchObject({ value: { sms: 'failed' } });
+      const earlier = fake({ decide: { ok: true, orderNumber: 10014, from: 'handed_to_post', handed: false, sms: null } });
+      expect(
+        await earlier.service.assign(OPERATOR, { importId: ID, rowNo: '6', order: ORDER_ID, seen: seenText({ status: 'handed_to_post', liveShipments: 0 }) }, 'ip'),
+      ).toMatchObject({ value: { sms: 'earlier' } });
+      expect(earlier.sms.sent).toEqual([]);
+    });
+
+    it('«دوباره بفرست»: مالک و متصدی؛ فقط نرفته و کد زنده؛ رویداد با نتیجه', async () => {
+      const { service, calls, sms } = fake({ shipmentSms: smsRef() });
+      sms.status.set(7, 'failed');
+      expect(await service.resendSms(PARTNER, { shipment: ORDER_ID }, 'ip')).toMatchObject({ ok: false, status: 403 });
+      expect(calls).toEqual([]);
+      expect(await service.resendSms(OPERATOR, { shipment: ORDER_ID }, 'ip')).toEqual({ ok: true, value: { orderNumber: 10018, outcome: 'sent', error: null } });
+      expect(calls.at(-1)).toMatchObject({
+        method: 'recordSmsResend',
+        input: { orderId: ORDER_ID, event: { action: 'shipments.sms_resend', adminUserId: OPERATOR.userId }, detail: { orderNumber: 10018, outcome: 'sent' } },
+      });
+      // دوباره: دیگر «نرفت» نیست (درگاه برنمی‌دارد).
+      expect(await service.resendSms(OWNER, { shipment: ORDER_ID }, 'ip')).toMatchObject({ ok: false, status: 409, error: 'sms_not_failed' });
+      // رفته، در راه، کنارگذاشته، بی پیامک و ناپیدا.
+      // سرویس پیش از هر فرستادن می‌سنجد، نه فقط درگاه: حتی اگر درگاه برمی‌داشت، رفته و در راه دوباره نمی‌روند.
+      for (const sms of [
+        { ...smsRef().sms!, status: 'logged', sentAt: NOW, error: null },
+        { ...smsRef().sms!, status: 'pending', attemptedAt: null, error: null },
+      ]) {
+        const refused = fake({ shipmentSms: smsRef({ sms }) });
+        refused.sms.status.set(7, 'failed');
+        expect(await refused.service.resendSms(OWNER, { shipment: ORDER_ID }, 'ip')).toMatchObject({ error: 'sms_not_failed' });
+        expect(refused.sms.sent).toEqual([]);
+      }
+      expect(await fake({ shipmentSms: smsRef({ voided: true }) }).service.resendSms(OWNER, { shipment: ORDER_ID }, 'ip')).toMatchObject({
+        error: 'shipment_voided',
+      });
+      expect(await fake({ shipmentSms: smsRef({ sms: null }) }).service.resendSms(OWNER, { shipment: ORDER_ID }, 'ip')).toMatchObject({
+        error: 'sms_not_failed',
+      });
+      expect(await fake({ shipmentSms: null }).service.resendSms(OWNER, { shipment: ORDER_ID }, 'ip')).toMatchObject({ status: 404 });
+      expect(await service.resendSms(OWNER, { shipment: 'x' }, 'ip')).toMatchObject({ status: 404 });
+      // پنل پیامک باز جواب نداد: «نرفت» با علت، و رویداد هم.
+      const down = fake({ shipmentSms: smsRef() });
+      down.sms.status.set(7, 'failed');
+      down.sms.fail = true;
+      expect(await down.service.resendSms(OWNER, { shipment: ORDER_ID }, 'ip')).toEqual({ ok: true, value: { orderNumber: 10018, outcome: 'failed', error: 'unavailable' } });
+      expect(down.calls.at(-1)).toMatchObject({ method: 'recordSmsResend', input: { detail: { outcome: 'failed', error: 'unavailable' } } });
+    });
   });
 });

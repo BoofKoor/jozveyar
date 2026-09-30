@@ -14,6 +14,7 @@ import { NoAccess } from '../../../../../components/NoAccess';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
+import { ResendSmsForm } from '../../../../../components/ResendSmsForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
 import { VoidShipmentForm } from '../../../../../components/VoidShipmentForm';
@@ -22,6 +23,7 @@ import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
+import { smsView } from '../../../../../lib/sms';
 import {
   REASON_MAX,
   STATUS_LABELS,
@@ -84,6 +86,7 @@ const PAGE_ERRORS = new Set([
   'order_has_shipment',
   'shipment_not_found',
   'shipment_voided',
+  'sms_not_failed',
   'reason_required',
 ]);
 
@@ -508,7 +511,10 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
                   <Barcode code={shipment.barcode} />
                 </Fragment>
               ))}{' '}
-              از فایل پست آمد.
+              {/* طرح `m-order-shipped`: وقتی همهٔ پیامک‌ها رفت؛ وگرنه کارت «بستهٔ پستی» می‌گوید کدام نرفت (۶٫۳). */}
+              {live.every((shipment) => shipment.sms && smsView(shipment.sms, shipment.createdAt, now).state === 'sent')
+                ? 'به موبایل مشتری پیامک شد.'
+                : 'از فایل پست آمد؛ پیامکش را کارت «بستهٔ پستی» می‌گوید.'}
             </span>
           </p>
         ) : (
@@ -629,6 +635,40 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
 }
 
 /**
+ * ردیف «پیامک» کارت «بستهٔ پستی» (۶٫۳، طرح `m-order-shipped`): به کدام موبایل، کی، رفت یا نرفت؛ «دوباره بفرست» برای مالک و متصدی
+ * وقتی نرفت. چاپخانه حال را می‌بیند و کار بعدی‌اش را: «جزوه‌یار دوباره می‌فرستد».
+ */
+function SmsFact({
+  gate,
+  shipment,
+  orderNumber,
+  now,
+  canResend,
+  partner,
+}: {
+  gate: string;
+  shipment: PanelOrderDetails['shipments'][number];
+  orderNumber: number;
+  now: Date;
+  canResend: boolean;
+  partner: boolean;
+}) {
+  const sms = smsView(shipment.sms, shipment.createdAt, now);
+  return (
+    <div data-sms={sms.state}>
+      <dt>پیامک</dt>
+      <dd className="ad-sms">
+        <span>
+          <Segments segs={sms.text} />
+          {sms.resendable && partner ? ' جزوه‌یار دوباره می‌فرستد.' : null}
+        </span>
+        {sms.resendable && canResend ? <ResendSmsForm gate={gate} shipmentId={shipment.id} orderNumber={orderNumber} /> : null}
+      </dd>
+    </div>
+  );
+}
+
+/**
  * بستهٔ پستی سفارش (طرح پنل `m-order-shipped`، برش ۶٫۱، ADR-047): کد رهگیری هر بسته با پیوند سایت پست (فقط `<a>`، قاعدهٔ ۸)، وزن
  * واقعی در برابر برآورد، کرایه و مالیات پست فقط با `orders.money`، و ورود فایل پستی که آورد؛ کد کنارگذاشته با دلیلش. سفارش بی کد
  * این کارت را ندارد.
@@ -638,6 +678,7 @@ function ParcelCard({
   view,
   canImports,
   canVoid,
+  canResend,
   voiding,
 }: {
   gate: string;
@@ -645,6 +686,8 @@ function ParcelCard({
   canImports: boolean;
   /** «کنار گذاشتن این کد…» (۶٫۲، فقط مالک، `shipments.revert`). */
   canVoid: boolean;
+  /** «دوباره بفرست» پیامکی که نرفت (۶٫۳، مالک و متصدی، `shipments.review`). */
+  canResend: boolean;
   /** کدی که فرم کنار گذاشتنش باز است (`?do=void&code=`). */
   voiding: string | null;
 }) {
@@ -711,6 +754,7 @@ function ParcelCard({
                 {` · ${shipment.matchedBy === 'review' ? 'با تأیید، ' : shipment.matchedBy === 'manual' ? 'دستی، ' : ''}${shipment.adminName ? `${shipment.adminName}، ` : ''}${whenText(shipment.createdAt, now)}`}
               </dd>
             </div>
+            <SmsFact gate={gate} shipment={shipment} orderNumber={details.order.orderNumber} now={now} canResend={canResend} partner={view.partnerView} />
           </dl>
           {canVoid && voiding === shipment.id ? (
             <section className="ad-step ad-gap" aria-labelledby={`t-void-${shipment.id}`} data-void={shipment.id}>
@@ -733,6 +777,15 @@ function ParcelCard({
                   </span>
                 </li>
               </ul>
+              {shipment.sms && smsView(shipment.sms, shipment.createdAt, now).state === 'sent' ? (
+                <p className="jy-note jy-note--warning ad-gap" data-sms-warning="">
+                  <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+                  <span>
+                    این کد به <span className="num">{phoneText(shipment.sms.toMobile)}</span> پیامک شده؛ پیامکی که رفت برنمی‌گردد. اگر اشتباه بود،
+                    خودت خبرش کن.
+                  </span>
+                </p>
+              ) : null}
               <VoidShipmentForm gate={gate} orderNumber={details.order.orderNumber} shipmentId={shipment.id} maxLength={REASON_MAX} back={self} />
             </section>
           ) : canVoid ? (
@@ -818,6 +871,13 @@ export default async function OrderPage({
         </div>
       </div>
       {error ? <Alert tone="error">{messageOf(error)}</Alert> : null}
+      {query.done === 'sms_resend' ? (
+        query.sent === '1' ? (
+          <Alert tone="success">پیامک رهگیری دوباره فرستاده شد و رفت.</Alert>
+        ) : (
+          <Alert tone="error">پیامک رهگیری باز نرفت؛ پنل پیامک جواب نداد. کمی بعد دوباره بفرست، یا کد را خودت به مشتری بگو.</Alert>
+        )
+      ) : null}
       {query.done === 'void' ? (
         <Alert tone="success">
           کد رهگیری کنار رفت و سطرش به صف تأیید برگشت
@@ -968,7 +1028,14 @@ export default async function OrderPage({
             </section>
           )}
 
-          <ParcelCard gate={gate} view={view} canImports={can(session, 'shipments.import')} canVoid={canVoid} voiding={voiding} />
+          <ParcelCard
+            gate={gate}
+            view={view}
+            canImports={can(session, 'shipments.import')}
+            canVoid={canVoid}
+            canResend={can(session, 'shipments.review')}
+            voiding={voiding}
+          />
 
           {view.canMoney ? (
             <>

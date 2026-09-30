@@ -87,6 +87,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       unassigned: [10037],
       reviewRows: 5,
       untracked: UNTRACKED,
+      smsFailed: [10018],
     }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),

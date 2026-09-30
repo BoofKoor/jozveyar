@@ -13,11 +13,11 @@ import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutDocument } from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
+import { consoleSms, type SmsProvider } from '@jozveyar/sms';
 
 import type { AuthUser } from './auth';
 import { createCheckoutService } from './checkout';
 import { MOCK_AUTHORITY, mockGateway } from './payments';
-import { consoleSms, type SmsProvider } from './sms';
 import { memoryOrderStore, memorySmsLog } from './testing';
 
 const ME = 'a'.repeat(64);
@@ -590,6 +590,7 @@ describe('مسیر خرید روی سرور', () => {
           postHandoffDueAt: '2026-09-28T20:30:00.000Z',
           postHandoffDay: 'دوشنبه 6 مهر',
           handedToPost: null,
+          trackingSent: false,
           slaDays: 2,
           owner: false,
           details: null,
@@ -656,6 +657,42 @@ describe('مسیر خرید روی سرور', () => {
       const cancelled = await view();
       expect(cancelled).toMatchObject({ status: 'cancelled', handedToPost: null, details: { totalRials: order.totalRials, canPay: false } });
       expect(JSON.stringify(cancelled)).not.toContain('کارت‌به‌کارت');
+    });
+
+    it('کد رهگیری (۶٫۳): صاحب سفارش هر کد زنده را با پیوند پست می‌بیند؛ غریبه فقط «پیامک شد»، و فقط اگر رفت', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      const row = orders.orders[0]!;
+      Object.assign(row, { status: 'handed_to_post', handedToPostAt: new Date('2026-09-28T10:00:00.000Z') });
+      const sms = (status: string) => ({
+        id: 1,
+        toMobile: SARA.mobile,
+        status,
+        error: null,
+        attempts: 1,
+        createdAt: clock,
+        attemptedAt: clock,
+        sentAt: status === 'logged' ? clock : null,
+      });
+      const first = '118800000000000000000101';
+      const second = '118800000000000000000102';
+      orders.parcels.set(row.id, [
+        { barcode: first, createdAt: clock, sms: sms('failed') },
+        { barcode: second, createdAt: clock, sms: null },
+      ]);
+      // پیامکی نرفته: غریبه هیچ نمی‌بیند؛ صاحب کدها را، به ترتیب ثبت.
+      expect(await service.orderView(order.token, REZA)).toMatchObject({ value: { trackingSent: false, details: null } });
+      const mine = await service.orderView(order.token, SARA);
+      expect(mine.ok && mine.value.details!.parcels).toEqual([
+        { barcode: first, trackingUrl: `https://tracking.post.ir/search.aspx?id=${first}`, smsSent: false },
+        { barcode: second, trackingUrl: `https://tracking.post.ir/search.aspx?id=${second}`, smsSent: false },
+      ]);
+      orders.parcels.set(row.id, [{ barcode: first, createdAt: clock, sms: sms('logged') }]);
+      const stranger = await service.orderView(order.token, REZA);
+      expect(stranger).toMatchObject({ value: { trackingSent: true, details: null } });
+      // غریبه کد را هیچ‌جا نمی‌گیرد.
+      expect(JSON.stringify(stranger)).not.toContain(first);
+      expect(await service.orderView(order.token, SARA)).toMatchObject({ value: { trackingSent: true, details: { parcels: [{ smsSent: true }] } } });
     });
 
     it('پرداخت‌شده در هر وضعیت پنل: «دوباره پرداخت کن» و همان کلید «پرداخت» درگاه باز نمی‌کنند', async () => {

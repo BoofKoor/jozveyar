@@ -419,9 +419,9 @@ export function tileTexts(
   const waiting = of('review', (row) => row.queued);
   const lost = of('matched', (row) => row.shipment === null);
   const given = of('unmatched', (row) => row.shipment !== null);
-  const reviewText = partner ? 'جزوه‌یار تأیید یا کنار می‌گذارد' : 'تا تأیید مالک یا متصدی، بی کد';
+  const reviewText = partner ? 'جزوه‌یار تأیید یا کنار می‌گذارد' : 'تا تأیید مالک یا متصدی، بی کد و بی پیامک';
   const nfText = partner ? 'سفارش جزوه‌یار نیست؛ ثبت نمی‌شود' : 'سفارش ما نیست؛ ثبت نمی‌شود';
-  if (state === 'preview') return { ok: ['کد رهگیری، با «ثبت»'], review: [reviewText], nf: [nfText] };
+  if (state === 'preview') return { ok: ['کد رهگیری و پیامک، با «ثبت»'], review: [reviewText], nf: [nfText] };
   if (state === 'reverted') {
     return { ok: [of('matched') > 0 ? 'با برگرداندن کنار رفت' : 'کد رهگیری نشست'], review: [review > 0 ? 'ورود برگشت؛ بی کد' : reviewText], nf: [nfText] };
   }
