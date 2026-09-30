@@ -914,6 +914,10 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
       const resent = detail as { barcode?: unknown; outcome?: unknown };
       const code: Seg[] = typeof resent.barcode === 'string' ? [{ barcode: resent.barcode }, ' '] : [];
       entries.push({ at: event.at, text: ['پیامک رهگیری ', ...code, resent.outcome === 'sent' ? 'دوباره رفت' : 'دوباره نرفت'], who });
+    } else if (event.action === 'payments.sms_resend') {
+      // «دوباره بفرست» پیامک پرداخت (۷٫۱)؛ از چشم چاپخانه نه (`withoutMoney`).
+      const resent = detail as { outcome?: unknown };
+      entries.push({ at: event.at, text: [resent.outcome === 'sent' ? 'پیامک پرداخت دوباره رفت' : 'پیامک پرداخت دوباره نرفت'], who });
     }
     else if (event.action === 'orders.recipient') {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT_FIELDS[String(field)] ?? String(field)) : [];
@@ -941,8 +945,14 @@ function zeroRials<T>(value: T): T {
  * ندارد.
  */
 export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
-  // کرایه و مالیات پست هر بسته هم (۶٫۲، تصمیم ۸۱).
-  return { ...details, order: zeroRials(details.order), payments: [], shipments: zeroRials(details.shipments) };
+  // کرایه و مالیات پست هر بسته هم (۶٫۲، تصمیم ۸۱)؛ و رویدادهای پرداخت (۷٫۱: «دوباره بفرست» پیامک پرداخت).
+  return {
+    ...details,
+    order: zeroRials(details.order),
+    payments: [],
+    shipments: zeroRials(details.shipments),
+    events: details.events.filter((event) => !event.action.startsWith('payments.')),
+  };
 }
 
 /** ردیف‌های فهرست و صف پیشخوان بی مبلغ؛ همان `withoutMoney`. */

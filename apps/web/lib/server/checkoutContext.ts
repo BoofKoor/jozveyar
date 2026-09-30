@@ -13,8 +13,20 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import type { CheckoutMode, OrderView } from '@jozveyar/contracts/checkout';
-import { createAuthStore, createOrderStore, createSmsLog, getDb, type AuthStore, type OrderStore } from '@jozveyar/db';
-import { consoleSms } from '@jozveyar/sms';
+import {
+  createAuthStore,
+  createOrderStore,
+  createSecretStore,
+  createSmsLog,
+  createSmsOutbox,
+  getDb,
+  secretsKeyOf,
+  serviceKeyReader,
+  type AuthStore,
+  type OrderStore,
+} from '@jozveyar/db';
+import { consoleTransport, loggedSms, type SmsTransport } from '@jozveyar/sms';
+import { smsIrTransport } from '@jozveyar/sms/smsir';
 
 import { createAuthService, tokenHash, type AuthService, type AuthUser } from './auth';
 import { createCheckoutService, orderView, type CheckoutService } from './checkout';
@@ -65,21 +77,40 @@ interface Services {
 let services: Services | undefined;
 
 /**
- * سرویس‌های خرید. امروز فقط `mock` به اینجا می‌رسد (`live` تا برش ۷ خاموش است)، پس آداپتورها درگاه
- * نمونه و پیامک کنسولی‌اند. روزی که `live` ساخته شد، انتخاب آداپتور با حالت اینجاست.
+ * آداپتور پیامک وب (برش ۷٫۱، ADR-049، سؤال ۱۱۴): در `live` فقط sms.ir، با کلید و شناسهٔ قالب‌ها از «تنظیمات» یا `.env` با هر پیامک
+ * (`readServiceKey`)؛ در `mock` فقط کنسولی (ADR-035). هرگز برگشت بی‌صدا از یکی به دیگری: کلید خالی یعنی همان پیامک نمی‌رود.
+ */
+export function webSmsTransport(env: Readonly<Record<string, string | undefined>> = process.env): SmsTransport {
+  if (configuredMode(env.CHECKOUT_MODE) !== 'live') return consoleTransport();
+  return smsIrTransport({
+    keys: serviceKeyReader(createSecretStore(getDb()), env, secretsKeyOf(env.SECRETS_KEY)),
+    baseUrl: env.SMSIR_API_URL,
+  });
+}
+
+/**
+ * سرویس‌های خرید. امروز فقط `mock` به اینجا می‌رسد (`live` تا ۷٫۵ خاموش است، `LIVE_ADAPTERS_READY`)، پس آداپتورها درگاه نمونه و
+ * پیامک کنسولی‌اند. پیامک با حالت از ۷٫۱ اینجا انتخاب می‌شود (`webSmsTransport`)؛ درگاه واقعی ۷٫۲.
  */
 function servicesOf(): Services {
   if (services) return services;
   const { orders, auth } = storesOf();
-  const sms = consoleSms(createSmsLog(getDb()));
+  const transport = webSmsTransport();
+  const setting = (key: string) => orders.setting(key);
   services = {
     auth: createAuthService({
       store: auth,
-      sms,
+      sms: loggedSms(transport, createSmsLog(getDb())),
       secret: sessionSecret()!,
-      siteHourlyLimit: () => readSetting((key) => orders.setting(key), 'otp.site_hourly_limit'),
+      siteHourlyLimit: () => readSetting(setting, 'otp.site_hourly_limit'),
+      siteDailyLimit: () => readSetting(setting, 'otp.site_daily_limit'),
     }),
-    checkout: createCheckoutService({ orders, gateway: mockGateway(), sms, callbackUrl: '/pay/callback' }),
+    checkout: createCheckoutService({
+      orders,
+      gateway: mockGateway(),
+      sms: { transport, outbox: createSmsOutbox(getDb(), transport.name) },
+      callbackUrl: '/pay/callback',
+    }),
   };
   return services;
 }

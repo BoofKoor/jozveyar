@@ -13,6 +13,7 @@ import type {
   PanelOrderDetails,
   PanelOrderItem,
   PanelOrderLine,
+  PanelPayment,
   PanelPdfJob,
   PanelPrintVolume,
   PanelStatusEvent,
@@ -670,6 +671,7 @@ describe('جزئیات سفارش', () => {
       raw: null,
       createdAt: NOW,
       verifiedAt: null,
+      smsMessageId: null,
       ...over,
     });
     const view = (p: PaymentRow) => {
@@ -958,7 +960,7 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
     [...JSON.stringify(value).matchAll(/"(\w*Rials)":(-?\d+)/g)].filter(([, , amount]) => amount !== '0').map(([, key]) => key!);
 
   it('بی مبلغ: هر مبلغ سفارش و ریز قیمت منجمدش صفر، پرداخت‌ها هیچ؛ مشخصات چاپ و تاریخ‌ها همان', () => {
-    const paid = details({ rest: { payments: [{ id: 'pay', amountRials: BREAKDOWN.totalRials } as PaymentRow] } });
+    const paid = details({ rest: { payments: [{ id: 'pay', amountRials: BREAKDOWN.totalRials, sms: null } as PanelPayment] } });
     expect(money(paid).length).toBeGreaterThan(5);
     const hidden = withoutMoney(paid);
     expect(money(hidden)).toEqual([]);
@@ -977,6 +979,19 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
     expect(paid.order.totalRials).toBe(BREAKDOWN.totalRials);
     const line = { orderNumber: 10027, totalRials: 3_747_500, pageCount: 120 } as PanelOrderLine;
     expect(linesWithoutMoney([line])).toEqual([{ orderNumber: 10027, totalRials: 0, pageCount: 120 }]);
+  });
+
+  it('بی مبلغ: رویدادهای پرداخت هم نه («دوباره بفرست» پیامک پرداخت، ۷٫۱)؛ بقیهٔ رویدادها همان', () => {
+    const d = details({
+      rest: {
+        events: [
+          { id: 8, at: tehran('2026-10-04 10:00'), action: 'orders.pdf_download', detail: { orderNumber: 10027, item: 1 }, adminName: 'حسن' },
+          { id: 9, at: tehran('2026-10-04 10:05'), action: 'payments.sms_resend', detail: { orderNumber: 10027, outcome: 'sent' }, adminName: 'سارا' },
+        ],
+      },
+    });
+    expect(withoutMoney(d).events.map((e) => e.action)).toEqual(['orders.pdf_download']);
+    expect(d.events.map((e) => e.action)).toEqual(['orders.pdf_download', 'payments.sms_resend']);
   });
 
   it('از چشم چاپخانه: بی دلیل، بی چاپخانهٔ دیگر، و رویدادهای سفارش فقط با آنچه سطرشان می‌گوید', () => {

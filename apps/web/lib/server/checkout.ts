@@ -37,7 +37,7 @@ import {
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { orderPaidText, smsState, type SmsProvider } from '@jozveyar/sms';
+import { deliverQueued, smsState, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay, formatJalaliWeekday, postHandoffDue } from '@jozveyar/text';
 import { checkRecipient } from '@jozveyar/text/input';
 
@@ -60,7 +60,8 @@ const AUTHORITY = /^[A-Za-z0-9_-]{8,64}$/;
 export interface CheckoutDeps {
   orders: OrderStore;
   gateway: PaymentGateway;
-  sms: SmsProvider;
+  /** پیامک پرداخت از صف (برش ۷٫۱، ADR-049): ردیف منتظر را `settlePayment` در همان تراکنش نوشته؛ اینجا بعد از commit فرستاده می‌شود. */
+  sms: { transport: SmsTransport; outbox: SmsOutbox };
   /** نشانی برگشت از درگاه (`/pay/callback`). */
   callbackUrl: string;
   now?: () => Date;
@@ -410,8 +411,9 @@ export function createCheckoutService(deps: CheckoutDeps) {
 
     /**
      * برگشت از درگاه (`/pay/callback`). سنجش سمت سرور، زیر قفل پرداخت و سفارش؛ برگشت تکراری همان نتیجهٔ
-     * قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد و کارهای
-     * `prepare_order` و `prepare_ticket` (برش ۵٫۱)؛ بعد پیامک شمارهٔ سفارش. ناموفق: سفارش `awaiting_payment` با همان قیمت می‌ماند.
+     * قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد، کارهای
+     * `prepare_order` و `prepare_ticket` (برش ۵٫۱) و ردیف «منتظر» پیامک پرداخت (برش ۷٫۱)؛ بعد از commit همان پیامک فرستاده می‌شود.
+     * ناموفق: سفارش `awaiting_payment` با همان قیمت می‌ماند.
      */
     async settle(
       authority: string,
@@ -445,14 +447,11 @@ export function createCheckoutService(deps: CheckoutDeps) {
       if (!result) return fail(404, 'not_found');
 
       const { payment, order } = result;
-      if (result.settled && payment.status === 'succeeded' && order.postHandoffDueAt) {
-        // بعد از commit، نه در تراکنش: پنل واقعی درخواست HTTP است، و پیامکی که نرسید پرداخت را برنمی‌گرداند.
+      if (result.smsId !== null) {
+        // بعد از commit، نه در تراکنش: پنل واقعی درخواست HTTP است، و پیامکی که نرسید پرداخت را برنمی‌گرداند؛ ردیفش «نرفت» می‌ماند و
+        // پنل «دوباره بفرست» دارد (هشدار پیشخوان). شکست ثبت نتیجه فقط لاگ است (`deliverQueued`).
         try {
-          await deps.sms.send({
-            to: order.recipientPhone,
-            purpose: 'order_paid',
-            text: orderPaidText(order.orderNumber, formatDeadlineDay(order.postHandoffDueAt)),
-          });
+          await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log }, [result.smsId]);
         } catch (error) {
           log(`✗ پیامک پرداخت سفارش ${order.orderNumber} فرستاده نشد:`, error);
         }

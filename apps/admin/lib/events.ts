@@ -76,8 +76,28 @@ const versionRef = (value: unknown): Segment[] => [{ ltr: typeof value === 'numb
 const SETTING_NAMES: Record<string, string> = {
   'order.sla_days': 'روز کاری تحویل به پست',
   'otp.site_hourly_limit': 'سقف ساعتی کد پیامکی کل سایت',
+  'otp.site_daily_limit': 'سقف کد پیامکی کل سایت در 24 ساعت',
   'order.files_retention_days': 'روزهای نگهداری فایل‌های سفارش',
+  'sms.credit_alert_days': 'هشدار اعتبار پیامک (روز مصرف)',
 };
+
+/**
+ * نتیجهٔ «آزمایش» یک کلید (۷٫۱): «درست»، «رد شد (کد 401)»، «در دسترس نیست»، یا «کلید API خالی است»؛ فقط کد و عدد پاسخ، هرگز
+ * مقدار.
+ */
+function testOutcome(detail: Detail): Segment[] {
+  const number = typeof detail.status === 'number' ? detail.status : typeof detail.http === 'number' ? detail.http : null;
+  switch (detail.outcome) {
+    case 'ok':
+      return ['درست'];
+    case 'rejected':
+      return number === null ? ['رد شد'] : ['رد شد (کد ', { ltr: String(number) }, ')'];
+    case 'unconfigured':
+      return ['کلید API sms.ir خالی است'];
+    default:
+      return ['sms.ir جواب نداد'];
+  }
+}
 
 /** عدد یا تاریخ، جدا از جملهٔ فارسی. */
 const ltrOf = (value: unknown): Segment => ({ ltr: typeof value === 'number' || typeof value === 'string' ? String(value) : '' });
@@ -203,8 +223,21 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: ['تعطیلی ', ltrOf(detail.date), ` افزوده شد: ${str(detail.title)}`] };
     case 'settings.holiday_remove':
       return { badge: null, text: ['تعطیلی ', ltrOf(detail.date), ` حذف شد: ${str(detail.title)}`] };
-    case 'settings.key_set':
-      return { badge: null, text: [`کلید «${keyName(detail.name)}» ${detail.from === 'empty' ? 'وارد شد' : 'عوض شد'}`] };
+    case 'settings.key_set': {
+      // از ۷٫۱ با نتیجهٔ آزمایش پیش از ذخیره (سؤال ۱۳۸): قالب «پس از پیامک آزمایشی»، و «بی آزمایش» پس از «در دسترس نیست».
+      const how = detail.tested === 'ok' ? (str(detail.name).endsWith('_TEMPLATE') ? ' پس از پیامک آزمایشی' : '، آزموده') : detail.tested === 'skipped' ? '، بی آزمایش' : '';
+      return { badge: null, text: [`کلید «${keyName(detail.name)}»${how} ${detail.from === 'empty' ? 'وارد شد' : 'عوض شد'}`] };
+    }
+    case 'settings.key_test':
+      return {
+        badge: null,
+        text: [
+          `کلید «${keyName(detail.name)}»${detail.subject === 'new' ? ' (مقدار تازه)' : ''} آزمایش شد`,
+          ...(str(detail.mobile) ? [' با پیامک به ', { ltr: str(detail.mobile) }] : []),
+          ': ',
+          ...testOutcome(detail),
+        ],
+      };
     case 'settings.key_revert':
       return { badge: null, text: [`کلید «${keyName(detail.name)}» به `, { ltr: '.env' }, ' برگشت'] };
     case 'orders.assign': {
@@ -313,6 +346,12 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         badge: null,
         text: ['پیامک رهگیری سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
       };
+    case 'payments.sms_resend':
+      // «دوباره بفرست» پیامک پرداخت (۷٫۱)، زیر چیپ «پرداخت و بازپرداخت» (سؤال ۱۴۱).
+      return {
+        badge: null,
+        text: ['پیامک پرداخت سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
+      };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -362,13 +401,15 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
 
 /**
  * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲،
- * ارسال ۶٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک
- * کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷).
+ * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش»؛ کارهای صف
+ * تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و
+ * بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها».
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
   { kind: 'auth', label: 'ورود' },
   { kind: 'orders', label: 'سفارش' },
+  { kind: 'payments', label: 'پرداخت و بازپرداخت' },
   { kind: 'shipments', label: 'ارسال' },
   { kind: 'tariff', label: 'تعرفه' },
   { kind: 'settings', label: 'تنظیمات و کلیدها' },

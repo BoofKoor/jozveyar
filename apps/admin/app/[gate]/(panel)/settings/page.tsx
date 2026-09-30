@@ -2,20 +2,38 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { SETTING_SCHEMAS, type Holiday } from '@jozveyar/contracts';
+import { OTP_FIXED_LIMITS } from '@jozveyar/db';
+import { templateText } from '@jozveyar/sms';
 import { formatJalaliNumeric, formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../components/Alert';
 import { HolidayAddForm } from '../../../../components/HolidayAddForm';
 import { KeyForm } from '../../../../components/KeyForm';
+import { KeyTestButton, TemplateTestForm } from '../../../../components/KeyTestForm';
 import { NoAccess } from '../../../../components/NoAccess';
 import { NumberSettingForm } from '../../../../components/NumberSettingForm';
+import { OtpLimitsForm } from '../../../../components/OtpLimitsForm';
+import { Segments } from '../../../../components/Segments';
 import { StatusButton } from '../../../../components/StatusButton';
+import { TemplateKeyForm } from '../../../../components/TemplateKeyForm';
 import { panelPath } from '../../../../lib/gate';
 import { messageOf } from '../../../../lib/messages';
 import { can } from '../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../lib/server/context';
 import type { KeyView } from '../../../../lib/server/settings';
-import { HOLIDAYS_SHOWN, KEY_INFO, holidaysView, maskText } from '../../../../lib/settings';
+import {
+  HOLIDAYS_SHOWN,
+  KEY_INFO,
+  KEY_TESTS_PER_HOUR,
+  TEMPLATE_SAMPLES,
+  creditCard,
+  holidaysView,
+  keyCheckView,
+  maskText,
+  otpUsageSegs,
+  templateView,
+  type KeyCheckView,
+} from '../../../../lib/settings';
 import { confirmHolidaysAction, removeHolidayAction } from '../../actions';
 
 export const metadata: Metadata = { title: 'تنظیمات' };
@@ -25,7 +43,40 @@ const one = (query: Query, key: string) => (typeof query[key] === 'string' ? (qu
 
 const SLA = SETTING_SCHEMAS['order.sla_days'];
 const OTP = SETTING_SCHEMAS['otp.site_hourly_limit'];
+const OTP_DAY = SETTING_SCHEMAS['otp.site_daily_limit'];
 const KEEP = SETTING_SCHEMAS['order.files_retention_days'];
+const CREDIT = SETTING_SCHEMAS['sms.credit_alert_days'];
+
+/** رنگ خط آزمایش (کلاس کامل و ثابت، برای آیکون‌های کیت). */
+const CHECK_ICONS: Record<KeyCheckView['tone'], string> = {
+  ok: 'jy-icon jy-icon-success is-ok',
+  bad: 'jy-icon jy-icon-error is-bad',
+  warn: 'jy-icon jy-icon-warning is-warn',
+};
+const CHECK_TONES = { ok: 'success', bad: 'error', warn: 'warning' } as const;
+
+/** متن قالب در sms.ir (طرح `ad-keys__tpl`): سطرها، جای پارامترها، و نامشان؛ از همان یک منبع پیامک. */
+function TemplateText({ purpose }: { purpose: keyof typeof TEMPLATE_SAMPLES }) {
+  const { lines, params } = templateView(purpose);
+  return (
+    <p className="ad-keys__tpl" data-template={purpose}>
+      متن در sms.ir{lines.length > 1 ? `، ${lines.length === 2 ? 'دو' : lines.length} خط` : ''}: «
+      {lines.map((line, i) => (
+        <span key={i}>
+          {i > 0 ? <br /> : null}
+          {line.map((part, j) => (typeof part === 'string' ? <span key={j}>{part}</span> : <code key={j}>{part.mark}</code>))}
+        </span>
+      ))}
+      » · {params.length === 1 ? 'پارامتر' : 'پارامترها'}:{' '}
+      {params.map((param, i) => (
+        <span key={param}>
+          {i > 0 ? '، ' : ''}
+          <code>{param}</code>
+        </span>
+      ))}
+    </p>
+  );
+}
 
 /** یک روز تعطیل با «حذف»، بی پرسش: برگشت‌پذیر است و مهلت سفارش‌های ثبت‌شده عوض نمی‌شود. */
 function Day({ gate, day }: { gate: string; day: Holiday }) {
@@ -68,9 +119,10 @@ function SourceBadge({ source }: { source: KeyView['source'] }) {
 }
 
 /**
- * تنظیمات (طرح پنل `m-settings` و `m-key-edit`، ADR-041): روز کاری تحویل به پست، سقف ساعتی کد پیامکی، تعطیلی‌ها، و کلیدهای
- * سرویس‌ها. فقط مالک، و سرور هر کار را خودش می‌سنجد. کلید با «تغییر» همین‌جا باز می‌شود (`?key=`)، و «برگرداندن به .env» با
- * `?revert=`، هر دو با کد تازه و بی JS.
+ * تنظیمات (طرح پنل `m-settings` و `m-key-edit`، ADR-041): روز کاری تحویل به پست، سقف کد پیامکی، تعطیلی‌ها، و کلیدهای سرویس‌ها. فقط
+ * مالک، و سرور هر کار را خودش می‌سنجد. کلید با «تغییر» همین‌جا باز می‌شود (`?key=`)، و «برگرداندن به .env» با `?revert=`، هر دو با
+ * کد تازه و بی JS. از ۷٫۱ (ADR-049، طرح برش ۷): سقف ۲۴ ساعتهٔ کد کنار ساعتی با شمار واقعی، کارت «اعتبار پیامک»، و برای کلیدهای sms.ir
+ * متن قالب، خط آخرین آزمایش و «آزمایش» (کلید API یک دکمه، قالب با موبایل پیامک آزمایشی، `?test=`).
  */
 export default async function SettingsPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
@@ -80,7 +132,8 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await settings.overview(session);
   if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
-  const { now, values, keys } = result.value;
+  const { now, values, keys, otpUsage, credit } = result.value;
+  const card = credit ? creditCard(credit, now) : null;
 
   const home = panelPath(gate, '/settings');
   const done = one(query, 'done');
@@ -96,13 +149,18 @@ export default async function SettingsPage({ params, searchParams }: { params: P
         روز کاری تحویل به پست ذخیره شد: <span className="num">{v}</span>. سفارش‌های تازه با همین حساب می‌شوند و صفحهٔ اصلی سایت تا
         یک دقیقه عدد تازه را نشان می‌دهد.
       </Alert>
-    ) : values && done === 'otp.site_hourly_limit' && v === values.otpLimit ? (
+    ) : values && done === 'otp_limits' && Number(one(query, 'h')) === values.otpLimit && Number(one(query, 'd')) === values.otpDailyLimit ? (
       <Alert tone="success">
-        سقف ساعتی کد پیامکی کل سایت ذخیره شد: <span className="num">{formatNumber(v)}</span> کد در ساعت.
+        سقف کد پیامکی کل سایت ذخیره شد: <span className="num">{formatNumber(values.otpLimit)}</span> کد در ساعت و{' '}
+        <span className="num">{formatNumber(values.otpDailyLimit)}</span> کد در <span className="num">24</span> ساعت.
       </Alert>
     ) : values && done === 'order.files_retention_days' && v === values.retentionDays ? (
       <Alert tone="success">
         روزهای نگهداری فایل‌های سفارش ذخیره شد: <span className="num">{v}</span> روز. کارگر در دور بعدش با همین پاک می‌کند.
+      </Alert>
+    ) : values && done === 'sms.credit_alert_days' && v === values.creditAlertDays ? (
+      <Alert tone="success">
+        آستانهٔ هشدار اعتبار پیامک ذخیره شد: <span className="num">{v}</span> روز مصرف.
       </Alert>
     ) : null;
 
@@ -132,9 +190,16 @@ export default async function SettingsPage({ params, searchParams }: { params: P
 
   const keyDone = one(query, 'k');
   const doneKey = keys.find((key) => key.name === keyDone);
+  const doneCheck = done === 'key_test' && doneKey ? keyCheckView(doneKey.name, doneKey.check, now) : null;
   const keyNote =
-    error === 'key_changed' || error === 'key_not_found' || error === 'forbidden' ? (
+    error === 'key_changed' || error === 'key_not_found' || error === 'forbidden' || error === 'key_empty' || error === 'key_not_testable' ? (
       <Alert tone="error">{messageOf(error)}</Alert>
+    ) : error === 'key_test_limited' ? (
+      <Alert tone="warning">{messageOf(error)}</Alert>
+    ) : doneCheck && doneKey ? (
+      <Alert tone={CHECK_TONES[doneCheck.tone]}>
+        «{KEY_INFO[doneKey.name].label}»: <Segments segs={doneCheck.text} />
+      </Alert>
     ) : done === 'key_set' && doneKey?.source === 'panel' ? (
       <Alert tone="success">«{KEY_INFO[doneKey.name].label}» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.</Alert>
     ) : done === 'key_revert' && doneKey && doneKey.source !== 'panel' ? (
@@ -145,6 +210,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
     ) : null;
   const editing = one(query, 'key');
   const reverting = one(query, 'revert');
+  const testing = one(query, 'test');
 
   return (
     <>
@@ -175,22 +241,20 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                   </>
                 }
               />
-              <NumberSettingForm
-                key={`otp:${values.otpLimit}:${mark}`}
+              <OtpLimitsForm
+                key={`otp:${values.otpLimit}:${values.otpDailyLimit}:${mark}`}
                 gate={gate}
-                settingKey="otp.site_hourly_limit"
-                id="otp"
-                title="سقف کد پیامکی"
-                label="کد در ساعت، برای کل سایت"
-                value={values.otpLimit}
-                min={OTP.minValue ?? 1}
-                max={OTP.maxValue ?? 100_000}
-                stepper={false}
-                rangeError={`سقف عدد صحیح ${formatNumber(OTP.minValue ?? 1)} تا ${formatNumber(OTP.maxValue ?? 100_000)} باشد.`}
+                hour={values.otpLimit}
+                day={values.otpDailyLimit}
+                hourError={`سقف ساعتی عدد صحیح ${formatNumber(OTP.minValue ?? 1)} تا ${formatNumber(OTP.maxValue ?? 100_000)} باشد.`}
+                dayError={`سقف 24 ساعته عدد صحیح ${formatNumber(OTP_DAY.minValue ?? 1)} تا ${formatNumber(OTP_DAY.maxValue ?? 1_000_000)} باشد.`}
+                usage={otpUsage ? <Segments segs={otpUsageSegs(otpUsage)} /> : null}
                 hint={
                   <>
-                    جلوی رباتی که با شماره‌ها و اینترنت‌های زیاد پیامک می‌فرستد. سقف هر شماره (<span className="num">5</span>) و هر اینترنت
-                    (<span className="num">20</span>) ثابت است.
+                    ترمز آخر در برابر ربات؛ پر شدن هر کدام هشدار پیشخوان است. ثابت‌ها: هر مرورگر{' '}
+                    <span className="num">{OTP_FIXED_LIMITS.browserHour}</span> در ساعت؛ هر شماره <span className="num">{OTP_FIXED_LIMITS.mobileHour}</span> در
+                    ساعت و <span className="num">{OTP_FIXED_LIMITS.mobileDay}</span> در <span className="num">24</span> ساعت؛ هر اینترنت{' '}
+                    <span className="num">{OTP_FIXED_LIMITS.ipHour}</span> در ساعت؛ و کد فقط برای مرورگری که جزوهٔ آماده روی سرور دارد.
                   </>
                 }
               />
@@ -207,6 +271,43 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                 stepper
                 rangeError={`روز نگهداری عدد صحیح ${KEEP.minValue} تا ${KEEP.maxValue} باشد.`}
                 hint="PDF جزوه، فایل چاپ و برگه بعد از این پاک می‌شوند تا دیسک پر نشود؛ تا آن موقع اگر بسته گم شد، دوباره چاپ می‌شود. سفارش باز هرگز. مشخصات و رویدادها می‌مانند."
+              />
+              <NumberSettingForm
+                key={`credit:${values.creditAlertDays}:${mark}`}
+                gate={gate}
+                settingKey="sms.credit_alert_days"
+                id="credit"
+                title="اعتبار پیامک"
+                meta={card?.meta ?? undefined}
+                lead={
+                  card ? (
+                    <>
+                      {card.amount !== null ? (
+                        <p className="ad-credit" data-credit="">
+                          <span className="num">{card.amount}</span>
+                          <small>اعتبار sms.ir</small>
+                        </p>
+                      ) : null}
+                      {card.usage ? (
+                        <p className="ad-usage">
+                          <Segments segs={card.usage} />
+                        </p>
+                      ) : null}
+                      {card.note ? (
+                        <Alert tone={card.note.tone}>
+                          <Segments segs={card.note.text} />
+                        </Alert>
+                      ) : null}
+                    </>
+                  ) : null
+                }
+                label="هشدار پیشخوان وقتی اعتبار کمتر از این شد (روز مصرف)"
+                value={values.creditAlertDays}
+                min={CREDIT.minValue ?? 1}
+                max={CREDIT.maxValue ?? 90}
+                stepper
+                rangeError={`روز مصرف عدد صحیح ${CREDIT.minValue} تا ${CREDIT.maxValue} باشد.`}
+                hint="اعتبار را از پنل sms.ir شارژ کن. بی اعتبار، کد تأیید نمی‌رود و کسی نمی‌تواند سفارش بدهد."
               />
             </div>
 
@@ -306,22 +407,35 @@ export default async function SettingsPage({ params, searchParams }: { params: P
             <p className="jy-note jy-note--info ad-gap">
               <span className="jy-icon jy-icon-lock" aria-hidden="true" />
               <span>
-                کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود. مقدار پنل بر مقدار <bdi className="ad-ltr">.env</bdi>{' '}
-                مقدم است. سایت از این کلیدها با راه افتادن درگاه و پنل پیامک واقعی استفاده می‌کند.
+                کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود؛ شناسهٔ قالب راز نیست و کامل دیده می‌شود. مقدار پنل بر
+                مقدار <bdi className="ad-ltr">.env</bdi> مقدم است. هر مقدار تازهٔ sms.ir پیش از ذخیره با خود sms.ir آزموده می‌شود، و «آزمایش»
+                مقدار امروز را بی تغییر می‌سنجد.
               </span>
             </p>
             <ul className="ad-keys ad-gap">
               {keys.map((key) => {
                 const info = KEY_INFO[key.name];
+                const template = info.kind === 'template';
                 const panelValue = key.source === 'panel' || key.source === 'unreadable';
-                const open = editing === key.name ? 'set' : reverting === key.name && panelValue ? 'revert' : null;
+                const hasValue = key.source === 'panel' || key.source === 'env';
+                const check = hasValue ? keyCheckView(key.name, key.check, now) : null;
+                const open =
+                  editing === key.name
+                    ? 'set'
+                    : reverting === key.name && panelValue
+                      ? 'revert'
+                      : testing === key.name && template && info.testable && hasValue
+                        ? 'test'
+                        : null;
+                const back = `${home}#key-${key.name}`;
                 return (
                   <li key={key.name} id={`key-${key.name}`} data-key={key.name} data-source={key.source}>
                     <div>
                       <p className="ad-keys__name">{info.label}</p>
                       <p className="ad-keys__meta">
                         <SourceBadge source={key.source} />
-                        {key.source === 'panel' || key.source === 'env' ? <span className="ad-mask">{maskText(info.dots, key.tail)}</span> : null}
+                        {hasValue && template && key.value ? <span className="num">{key.value}</span> : null}
+                        {hasValue && !template ? <span className="ad-mask">{maskText(info.dots, key.tail)}</span> : null}
                         {key.source === 'empty' ? <span>{info.about}</span> : null}
                         {key.source === 'unreadable' ? (
                           <span>
@@ -336,8 +450,30 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                           </span>
                         ) : null}
                       </p>
+                      {template && info.purpose ? <TemplateText purpose={info.purpose} /> : null}
+                      {check ? (
+                        <p className="ad-keys__test" data-check={check.tone}>
+                          <span className={CHECK_ICONS[check.tone]} aria-hidden="true" />
+                          <span>
+                            <Segments segs={check.text} />
+                          </span>
+                        </p>
+                      ) : null}
                     </div>
                     <div className="ad-keys__btns">
+                      {info.testable && hasValue ? (
+                        template ? (
+                          <Link
+                            href={`${home}?test=${key.name}#key-${key.name}`}
+                            className="jy-btn jy-btn--text"
+                            aria-current={open === 'test' ? 'true' : undefined}
+                          >
+                            آزمایش
+                          </Link>
+                        ) : (
+                          <KeyTestButton gate={gate} name={key.name} />
+                        )
+                      ) : null}
                       <Link href={`${home}?key=${key.name}#key-${key.name}`} className="jy-btn jy-btn--text" aria-current={open === 'set' ? 'true' : undefined}>
                         {key.source === 'empty' ? 'وارد کن' : 'تغییر'}
                       </Link>
@@ -351,16 +487,31 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                     </div>
                     {open ? (
                       <div className="ad-keys__form">
-                        <KeyForm
-                          gate={gate}
-                          name={key.name}
-                          mode={open}
-                          field={info.field}
-                          test={info.test}
-                          envMask={key.envSet ? maskText(info.dots, key.envTail) : null}
-                          seen={key.seen}
-                          back={`${home}#key-${key.name}`}
-                        />
+                        {open === 'test' ? (
+                          <TemplateTestForm gate={gate} name={key.name} perHour={KEY_TESTS_PER_HOUR} back={back} />
+                        ) : open === 'set' && template && info.purpose ? (
+                          <TemplateKeyForm
+                            gate={gate}
+                            name={key.name}
+                            current={key.value}
+                            sample={templateText(info.purpose, TEMPLATE_SAMPLES[info.purpose])}
+                            perHour={KEY_TESTS_PER_HOUR}
+                            seen={key.seen}
+                            back={back}
+                          />
+                        ) : (
+                          <KeyForm
+                            gate={gate}
+                            name={key.name}
+                            mode={open === 'revert' ? 'revert' : 'set'}
+                            field={info.field}
+                            test={info.test}
+                            tested={info.testable}
+                            envMask={key.envSet ? maskText(info.dots, key.envTail) : null}
+                            seen={key.seen}
+                            back={back}
+                          />
+                        )}
                       </div>
                     ) : null}
                   </li>

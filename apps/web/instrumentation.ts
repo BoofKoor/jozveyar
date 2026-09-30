@@ -18,8 +18,12 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   // حالت مسیر خرید (ADR-035)، یک خط: صاحب پروژه بعد از استقرار «مسیر خرید: off» را می‌بیند.
-  const { configuredMode, describeMode, sessionSecretOf } = await import('./lib/server/checkoutMode');
-  console.log(describeMode(configuredMode(process.env.CHECKOUT_MODE), sessionSecretOf(process.env.SESSION_SECRET) !== null));
+  const { configuredMode, describeMode, describeSms, sessionSecretOf } = await import('./lib/server/checkoutMode');
+  const mode = configuredMode(process.env.CHECKOUT_MODE);
+  console.log(describeMode(mode, sessionSecretOf(process.env.SESSION_SECRET) !== null));
+  // پیامک وب (برش ۷٫۱): کنسولی یا sms.ir، بی مقدار کلید.
+  const sms = describeSms(mode);
+  if (sms) console.log(sms);
 
   const url = process.env.DATABASE_URL;
   if (!url) return;

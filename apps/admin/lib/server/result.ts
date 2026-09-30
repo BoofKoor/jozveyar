@@ -74,6 +74,19 @@ export type AdminErrorCode =
   | 'key_not_found'
   | 'invalid_key_value'
   | 'key_changed'
+  /** آزمایش کلیدهای sms.ir (۷٫۱، ADR-049). */
+  | 'invalid_api_key'
+  | 'invalid_template_id'
+  | 'invalid_test_mobile'
+  | 'key_not_testable'
+  | 'key_empty'
+  | 'key_test_limited'
+  | 'key_rejected'
+  | 'key_unavailable'
+  | 'key_untested'
+  /** «دوباره بفرست» پیامک پرداخت (۷٫۱). */
+  | 'payment_not_found'
+  | 'paid_sms_closed'
   /** ارسال: ورود فایل پست (۶٫۱). */
   | 'post_file_required'
   | 'post_file_too_large'

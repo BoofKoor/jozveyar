@@ -5,17 +5,25 @@
  */
 
 import type { ShipmentSms } from '@jozveyar/db';
-import { resendable, smsState, type SmsState } from '@jozveyar/sms';
+import { parseSmsErrorTag, resendable, smsState, type SmsErrorCode, type SmsState } from '@jozveyar/sms';
 
 import { whenText } from './format';
 import { phoneText, type Seg } from './orders';
 
-/** علت «نرفت» به زبان ادمین؛ کد ناشناس همان «جواب نداد». */
-const SMS_ERRORS: Record<string, string> = {
-  unavailable: 'پنل پیامک جواب نداد.',
-  rejected: 'پنل پیامک نپذیرفت.',
-  interrupted: 'فرستادنش نیمه‌کاره ماند.',
+/** علت «نرفت» به زبان ادمین؛ کد ناشناس همان «جواب نداد». از ۷٫۱ با عدد پاسخ sms.ir (`rejected:401`) و «کلید خالی». */
+const SMS_ERRORS: Record<SmsErrorCode, string> = {
+  unavailable: 'پنل پیامک جواب نداد',
+  rejected: 'پنل پیامک نپذیرفت',
+  interrupted: 'فرستادنش نیمه‌کاره ماند',
+  unconfigured: 'کلید API یا شناسهٔ قالب sms.ir خالی است یا خوانده نشد',
 };
+
+/** علت «نرفت» یک ردیف: «پنل پیامک نپذیرفت (کد 401).»؛ منتظرِ مانده «نیمه‌کاره ماند». */
+function whyNot(sms: ShipmentSms): string {
+  if (sms.status === 'pending') return `${SMS_ERRORS.interrupted}.`;
+  const { code, number } = parseSmsErrorTag(sms.error);
+  return number === null ? `${SMS_ERRORS[code]}.` : `${SMS_ERRORS[code]} (کد ${number}).`;
+}
 
 export interface SmsView {
   /** `none`: مرسولهٔ پیش از ۶٫۳، بی پیامک. */
@@ -39,7 +47,7 @@ export function smsView(sms: ShipmentSms | null, shipmentCreatedAt: Date, now: D
         ? ['در حال فرستادن به ', to, '…']
         : state === 'unknown'
           ? ['معلوم نیست به ', to, ' رفت یا نه: فرستادنش نیمه‌کاره ماند. شاید رفته باشد.']
-          : ['به ', to, ` نرفت: ${sms.status === 'pending' ? SMS_ERRORS.interrupted : (SMS_ERRORS[sms.error ?? ''] ?? SMS_ERRORS.unavailable)}`];
+          : ['به ', to, ` نرفت: ${whyNot(sms)}`];
   return { state, text, resendable: resendable(state), earlier };
 }
 
@@ -80,6 +88,25 @@ export function smsRowNote(sms: ShipmentSms | null, shipmentCreatedAt: Date, now
   if (view.state === 'sent') return view.earlier ? { text: 'پیامک همین کد پیش‌تر برای همین سفارش رفته بود؛ دوباره نرفت.', failed: false, resendable: false } : null;
   if (view.state === 'sending') return { text: 'پیامک در راه است…', failed: false, resendable: false };
   if (view.state === 'unknown') return { text: 'معلوم نیست پیامک رفت یا نه: فرستادنش نیمه‌کاره ماند.', failed: true, resendable: true };
-  const why = sms.status === 'pending' ? SMS_ERRORS.interrupted : (SMS_ERRORS[sms.error ?? ''] ?? SMS_ERRORS.unavailable);
-  return { text: `پیامک نرفت: ${why}`, failed: true, resendable: true };
+  return { text: `پیامک نرفت: ${whyNot(sms)}`, failed: true, resendable: true };
+}
+
+/**
+ * ردیف «پیامک پرداخت» کارت «پرداخت‌ها» (برش ۷٫۱، طرح `ad-paysms`): «به 0915 234 5678 رفت، شنبه 14:05»، یا «نرفت: …» با «دوباره بفرست»
+ * (مالک و متصدی) وقتی سفارش هنوز در صف چاپ یا در حال چاپ است. پرداخت پیش از ۷٫۱ پیامکش را بی ردیف منتظر فرستاده بود: هیچ.
+ */
+export function paymentSmsView(sms: ShipmentSms | null, orderOpen: boolean, now: Date): { state: SmsState; text: Seg[]; resendable: boolean } | null {
+  if (!sms) return null;
+  const state = smsState(sms, now);
+  const to: Seg = { num: phoneText(sms.toMobile) };
+  const at = whenText(sms.attemptedAt ?? sms.createdAt, now);
+  const text: Seg[] =
+    state === 'sent'
+      ? ['به ', to, ` رفت، ${whenText(sms.sentAt ?? sms.createdAt, now)}`]
+      : state === 'sending'
+        ? ['در حال فرستادن به ', to, '…']
+        : state === 'unknown'
+          ? ['معلوم نیست به ', to, ` رفت یا نه: فرستادنش نیمه‌کاره ماند، ${at}.`]
+          : [`نرفت: ${whyNot(sms).replace(/\.$/, '')}، ${at}`];
+  return { state, text, resendable: orderOpen && resendable(state) };
 }

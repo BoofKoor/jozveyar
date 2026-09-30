@@ -1,7 +1,7 @@
 /**
  * ابزارهای مشترک تست‌های سرتاسری پنل (`admin.spec.ts`، `orders.spec.ts`، `status.spec.ts`، …): دستور سرور، کد برنامهٔ تأیید مثل
- * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، تخصیص چاپخانه در پرداخت (۵٫۲)، و فایل پست و
- * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`). طرز اجرا بالای `admin.spec.ts`.
+ * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، تخصیص چاپخانه در پرداخت (۵٫۲)، فایل پست و
+ * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`)، و فرمان سرور ساختگی sms.ir (۷٫۱). طرز اجرا بالای `admin.spec.ts`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -169,3 +169,43 @@ export async function uploadPostFile(page: Page, name: string, body: Buffer): Pr
   await page.waitForURL(/\/shipments\/[0-9a-f-]{36}/);
   return /\/shipments\/([0-9a-f-]{36})/.exec(page.url())![1]!;
 }
+
+/**
+ * سرور ساختگی sms.ir که پنل با `SMSIR_API_URL` به آن وصل است (برش ۷٫۱، `packages/sms/mock/smsir.mjs`): پیکربندی (کلیدها، قالب‌ها،
+ * اعتبار، شکست و بریدن اتصال) و فهرست پیامک‌ها، با فرمان تست همان نشانی (`/__mock/…`). هیچ درخواستی به sms.ir واقعی نمی‌رود.
+ */
+export const SMSIR = process.env.SMSIR_API_URL?.trim().replace(/\/+$/, '') || null;
+
+export interface MockSms {
+  id: number;
+  mobile: string;
+  templateId: number;
+  parameters: { name: string; value: string }[];
+  cost: number;
+}
+
+async function mockCall(path: string, body?: unknown) {
+  if (!SMSIR) throw new Error('SMSIR_API_URL نیست');
+  const response = await fetch(`${SMSIR}${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!response.ok) throw new Error(`sms.ir ساختگی: ${response.status}`);
+  return response.json() as Promise<unknown>;
+}
+
+export const smsirMock = {
+  configure: (config: {
+    keys?: string[];
+    templates?: Record<string, string[]>;
+    credit?: number;
+    cost?: number;
+    fail?: { http: number; status?: number; times?: number } | null;
+    drop?: number;
+    delayMs?: number;
+  }) => mockCall('/__mock/config', config),
+  /** پیامک‌ها و شکست و بریدن در راه پاک؛ کلیدها و قالب‌ها و اعتبار همان. */
+  reset: () => mockCall('/__mock/reset', {}),
+  messages: async () => (await mockCall('/__mock/messages')) as { messages: MockSms[]; credit: number },
+};

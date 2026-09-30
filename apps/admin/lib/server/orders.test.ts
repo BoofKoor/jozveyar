@@ -22,11 +22,15 @@ import {
   type PanelStatusEvent,
   type PanelTicketFile,
   type PanelVolumeFile,
+  type PaymentSmsRef,
+  type ShipmentSms,
 } from '@jozveyar/db';
+import { SmsError, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { MemoryDriver } from '@jozveyar/storage';
 
 import type { AdminSession } from './auth';
 import { createPanelOrders } from './orders';
+import { ok } from './result';
 
 /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -88,6 +92,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       reviewRows: 5,
       untracked: UNTRACKED,
       smsFailed: [10018],
+      paidSmsFailed: [10027],
     }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
@@ -96,6 +101,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     jozveFile: record('jozveFile', null),
     printVolume: record('printVolume', null),
     ticketFile: record('ticketFile', null),
+    paymentSms: record('paymentSms', null),
     requeue: async (scope, orderId, kind, event) => {
       calls.push({ method: 'requeue', args: [orderId, kind, event], scope });
       events.push(event);
@@ -249,6 +255,15 @@ describe('پیشخوان', () => {
     expect(staff.ok && staff.value.alerts.reviewRows).toBe(5);
     const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
     expect(noor.ok && [noor.value.alerts.reviewRows, days(noor.value.untracked)]).toEqual([0, [['2026-09-29T20:30:00.000Z', [10009, 10025]]]]);
+  });
+
+  it('«پیامک پرداخت نرفت» (۷٫۱) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {
+    const staff = await service().orders.dashboard(session(['orders.read', 'orders.money']));
+    expect(staff.ok && staff.value.alerts.paidSmsFailed).toEqual([10027]);
+    const reader = await service().orders.dashboard(session(['orders.read']));
+    expect(reader.ok && reader.value.alerts.paidSmsFailed).toEqual([]);
+    const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
+    expect(noor.ok && noor.value.alerts.paidSmsFailed).toEqual([]);
   });
 
   it('روز کاری تعهد: تنظیم خراب یا نبودنش یعنی پیش‌فرض ۲، و بلند در لاگ', async () => {
@@ -1181,5 +1196,82 @@ describe('نقش چاپخانه و محدوده', () => {
       ok: true,
       value: { bucket: 'awaiting', buckets: ['open', 'handed', 'cancelled', 'awaiting', 'abandoned', 'all'] },
     });
+  });
+});
+
+describe('«دوباره بفرست» پیامک پرداخت (۷٫۱، ADR-049)', () => {
+  const PAYMENT = '33333333-3333-4333-8333-333333333333';
+  const smsRow = (status: string, over: Partial<ShipmentSms> = {}): ShipmentSms => ({
+    id: 41,
+    toMobile: '09152345678',
+    status,
+    error: status === 'failed' ? 'unavailable' : null,
+    attempts: 1,
+    createdAt: new Date(NOW.getTime() - 60_000),
+    attemptedAt: new Date(NOW.getTime() - 60_000),
+    sentAt: null,
+    ...over,
+  });
+  /** درگاه ردیف پیامک حافظه‌ای: «در حال فرستادن» فقط یک بار، مثل پایگاه داده. */
+  function outboxOf(status: string) {
+    const row = { status, claims: 0 };
+    const outbox: SmsOutbox = {
+      async claim(id) {
+        row.claims += 1;
+        if (row.status !== 'failed') return null;
+        row.status = 'sending';
+        return { id, to: '09152345678', purpose: 'order_paid', body: 'x', params: ['10027', 'دوشنبه 6 مهر'] };
+      },
+      async finish(_id, _at, result) {
+        row.status = result.ok ? result.status : 'failed';
+      },
+    };
+    return { outbox, row };
+  }
+  function build(ref: PaymentSmsRef | null, transport: SmsTransport = { name: 'smsir', send: async () => ({ status: 'sent', providerMessageId: '1' }) }) {
+    const fake = fakeStore({ paymentSms: async (scope, id) => (fake.calls.push({ method: 'paymentSms', args: [id], scope }), ref) });
+    const { outbox, row } = outboxOf(ref?.sms?.status ?? 'failed');
+    const orders = createPanelOrders({ store: fake.store, storage: null, secret: SECRET, now: () => NOW, log: () => {}, sms: { transport, outbox, log: () => {} } });
+    return { orders, row, ...fake };
+  }
+  const ref = (status = 'failed', orderStatus: PaymentSmsRef['orderStatus'] = 'paid'): PaymentSmsRef => ({
+    paymentId: PAYMENT,
+    orderId: 'order-1',
+    orderNumber: 10027,
+    orderStatus,
+    sms: smsRow(status),
+  });
+
+  it('مالک و متصدی: پیامکی که نرفت دوباره، یک تلاش بیشتر، رویداد `payments.sms_resend` با نتیجه؛ چاپخانه و بی مبلغ هیچ', async () => {
+    const { orders, events, row, calls } = build(ref());
+    expect(await orders.resendPaymentSms(session(OPERATOR), { payment: PAYMENT }, '1.2.3.4')).toEqual(ok({ orderNumber: 10027, outcome: 'sent', error: null }));
+    expect(row.status).toBe('sent');
+    expect(events).toEqual([
+      { adminUserId: 'admin-1', action: 'payments.sms_resend', targetType: 'order', targetId: 'order-1', ipHash, at: NOW, detail: { orderNumber: 10027, outcome: 'sent' } },
+    ]);
+    expect(calls.find((c) => c.method === 'paymentSms')?.scope).toEqual({ kind: 'all' });
+    const reader = build(ref());
+    expect(await reader.orders.resendPaymentSms(session(['orders.read']), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+    expect(reader.calls.some((c) => c.method === 'paymentSms')).toBe(false);
+  });
+
+  it('باز نرفت: «نرفت» با علت در رویداد؛ رفته، در راه، سفارش بسته و پرداخت ناشناس نه', async () => {
+    const failing = build(ref(), { name: 'smsir', send: () => Promise.reject(new SmsError('rejected', { http: 400 })) });
+    expect(await failing.orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toEqual(ok({ orderNumber: 10027, outcome: 'failed', error: 'rejected' }));
+    expect(failing.events[0]).toMatchObject({ detail: { outcome: 'failed', error: 'rejected:400' } });
+    // رفته و در راه: پیش از هر برداشتن، نه فقط با پاسخ درگاه ردیف (شاهد: «نرفت» یک بار برداشته شد).
+    expect(failing.row.claims).toBe(1);
+    const sent = build(ref('sent'));
+    expect(await sent.orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 409, error: 'sms_not_failed' });
+    const sending = build({ ...ref(), sms: smsRow('sending', { attemptedAt: NOW }) });
+    expect(await sending.orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ error: 'sms_not_failed' });
+    expect([sent.row.claims, sending.row.claims]).toEqual([0, 0]);
+    expect(await build(ref('failed', 'handed_to_post')).orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({
+      status: 409,
+      error: 'paid_sms_closed',
+    });
+    expect(await build(ref('failed', 'cancelled')).orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ error: 'paid_sms_closed' });
+    expect(await build(null).orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 404, error: 'payment_not_found' });
+    expect(await build(ref()).orders.resendPaymentSms(session(OWNER), { payment: '../x' }, 'ip')).toMatchObject({ status: 404, error: 'payment_not_found' });
   });
 });

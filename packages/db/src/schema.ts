@@ -29,6 +29,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgSequence,
   pgTable,
@@ -551,6 +552,8 @@ export const otpRequests = pgTable(
   (t) => [
     index('otp_requests_mobile').on(t.mobile, t.createdAt),
     index('otp_requests_ip').on(t.ipHash, t.createdAt),
+    /** سقف هر مرورگر (برش ۷، ADR-049): ۵ کد در ساعت برای هر `jy_sid`. */
+    index('otp_requests_session').on(t.sessionHash, t.createdAt),
     index('otp_requests_created').on(t.createdAt),
     check('otp_requests_mobile_normalized', sql`${t.mobile} ~ '^09[0-9]{9}$'`),
     check('otp_requests_attempts', sql`${t.attempts} >= 0`),
@@ -989,10 +992,18 @@ export const payments = pgTable(
     raw: jsonb('raw'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    /**
+     * پیامک پرداخت (برش ۷، ADR-049): ردیف «منتظر» `sms_messages` که در همان تراکنش «موفق» نوشته شد و بعد از commit فرستاده می‌شود؛
+     * فقط در همان گذار گذاشته می‌شود و دیگر عوض نمی‌شود (تریگر `payments_sms`، 0028). پرداخت پیش از برش ۷ پیامکش را بی ردیف منتظر
+     * فرستاده بود (null).
+     */
+    smsMessageId: bigint('sms_message_id', { mode: 'number' }).references(() => smsMessages.id),
   },
   (t) => [
     uniqueIndex('payments_provider_authority').on(t.provider, t.authority),
     index('payments_order').on(t.orderId),
+    /** یک پیامک برای هر پرداخت (سطر پیامک به پرداخت دیگری وصل نمی‌شود). */
+    uniqueIndex('payments_sms').on(t.smsMessageId),
     /** یک سفارش، حداکثر یک پرداخت موفق: پول دوباره گرفته نمی‌شود، حتی اگر بانک دو بار برگرداند. */
     uniqueIndex('payments_one_success').on(t.orderId).where(sql`${t.status} = 'succeeded'`),
     check('payments_amount_positive', sql`${t.amountRials} > 0`),
@@ -1006,8 +1017,8 @@ export const payments = pgTable(
 /* ──────────────────────────── پیامک (ADR-008) ──────────────────────────── */
 
 /**
- * هر پیامک. پیامک کنسولی (توسعه و CI، تا برش ۷) فقط همین ردیف است، با متن کامل، تا کد پیامکی بی
- * پنل پیامک هم آزمودنی باشد. پنل واقعی متن کد را اینجا نگه نمی‌دارد (ADR-033).
+ * هر پیامک. پیامک کنسولی (توسعه و CI) فقط همین ردیف است، با متن کامل، تا کد پیامکی بی پنل پیامک هم آزمودنی باشد. پنل واقعی
+ * (sms.ir، برش ۷) متن و پارامتر کد را اینجا نگه نمی‌دارد (ADR-033؛ CHECK `sms_messages_otp_secret`).
  */
 export const smsMessages = pgTable(
   'sms_messages',
@@ -1020,20 +1031,25 @@ export const smsMessages = pgTable(
     purpose: text('purpose').notNull(),
     body: text('body'),
     /**
-     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری `pending` (در همان تراکنش مرسوله نوشته شد و هنوز فرستاده نشده) و
-     * `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard` (0026).
+     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری و از برش ۷ پرداخت `pending` (در همان تراکنش مرسوله یا پرداخت نوشته شد و
+     * هنوز فرستاده نشده) و `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard` (0026، بازنویسی 0028).
      */
     status: text('status').notNull(),
     providerMessageId: text('provider_message_id'),
     error: text('error'),
     /** پارامترهای قالب پنل پیامک (برش ۷)؛ رهگیری: شمارهٔ سفارش و بارکد. */
     params: jsonb('params'),
-    /** شمار تلاش‌های فرستادن رهگیری («دوباره بفرست» یکی بالا می‌برد)؛ کد و پرداخت ۰، چون یک بار و بی ردیف منتظرند. */
+    /** شمار تلاش‌های فرستادن پرداخت و رهگیری («دوباره بفرست» یکی بالا می‌برد)؛ کد ۰، چون یک بار و بی ردیف منتظر است. */
     attempts: integer('attempts').notNull().default(0),
     /** آخرین «در حال فرستادن»؛ «معلوم نیست رفت» از همین حساب می‌شود. */
     attemptedAt: timestamp('attempted_at', { withTimezone: true }),
     /** وقتی «رفت» (کنسولی یا پنل واقعی)؛ پنل «رفت، 18:32» را از همین می‌گوید. */
     sentAt: timestamp('sent_at', { withTimezone: true }),
+    /**
+     * هزینه‌ای که sms.ir در پاسخ ارسال گفت (برش ۷، ADR-049، سؤال ۱۱۶)، به واحد خود sms.ir: واحدش هنوز در مستندی دیده نشده، پس
+     * `…Rials` نیست و با پول سفارش جمع نمی‌شود؛ فقط «برای حدود N روز» کارت «اعتبار پیامک» از آن حساب می‌شود.
+     */
+    cost: numeric('cost'),
   },
   (t) => [
     index('sms_messages_to').on(t.toMobile, t.createdAt),
@@ -1041,9 +1057,12 @@ export const smsMessages = pgTable(
     check('sms_messages_status', sql`${t.status} IN ('logged', 'sent', 'failed', 'pending', 'sending')`),
     check(
       'sms_messages_queued',
-      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} = 'tracking' AND ${t.body} IS NOT NULL)`,
+      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} IN ('tracking', 'order_paid') AND ${t.body} IS NOT NULL)`,
     ),
     check('sms_messages_sent_at', sql`(${t.sentAt} IS NULL) OR ${t.status} IN ('logged', 'sent')`),
+    /** کد تأیید زنده با پنل واقعی هرگز در پایگاه داده (ADR-033، ADR-049): نه متن و نه پارامترش؛ کنسولی متن را دارد تا تست بخواندش. */
+    check('sms_messages_otp_secret', sql`${t.purpose} <> 'otp' OR ${t.provider} = 'console' OR (${t.body} IS NULL AND ${t.params} IS NULL)`),
+    check('sms_messages_cost', sql`${t.cost} IS NULL OR ${t.cost} >= 0`),
   ],
 );
 
@@ -1225,14 +1244,14 @@ export const adminEvents = pgTable(
 /* ──────────────────────────── کلیدهای سرویس‌ها (برش ۴٫۶، ADR-041) ──────────────────────────── */
 
 /**
- * کلید سرویس بیرونی که مالک از پنل گذاشته: کلید API پنل پیامک (sms.ir)، قالب کد پیامکی، کد پذیرندهٔ زیبال. مقدار پنل بر همان نام در
- * `.env` مقدم است؛ ردیف نبودن یعنی `.env` («برگرداندن به .env» ردیف را پاک می‌کند).
+ * کلید سرویس بیرونی که مالک از پنل گذاشته: کلید API پنل پیامک (sms.ir)، شناسهٔ سه قالب پیامک (کد، و از برش ۷ پرداخت و رهگیری)، کد
+ * پذیرندهٔ زیبال. مقدار پنل بر همان نام در `.env` مقدم است؛ ردیف نبودن یعنی `.env` («برگرداندن به .env» ردیف را پاک می‌کند).
  *
  * - `sealed` مهروموم AES-256-GCM با `SECRETS_KEY` است (`sealed.ts`)، بسته به نام همین ردیف (AAD `service_secrets:<نام>`):
  *   نشت پایگاه داده یا پشتیبانش بی `.env` کلیدی لو نمی‌دهد، و مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود. CHECK
  *   `service_secrets_sealed` فقط شکل مهروموم را می‌پذیرد، پس مقدار خام اینجا نمی‌نشیند، حتی با کد اشتباه.
- * - نام فقط همین سه (CHECK `service_secrets_name`): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و `PAYMENT_PROVIDER`، نه رمزهای خود
- *   سرور. کلید تازه (برش ۷) مهاجرت تازهٔ همین CHECK را می‌خواهد.
+ * - نام فقط همین پنج (CHECK `service_secrets_name`؛ دو قالب تازه با 0027، برش ۷): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
+ *   `PAYMENT_PROVIDER`، نه رمزهای خود سرور. کلید تازه مهاجرت تازهٔ همین CHECK را می‌خواهد.
  * - `updated_by` بی کلید خارجی، مثل `price_lists.created_by`: ادمین پاک‌نشدنی است (`admin_users_no_delete`).
  */
 export const serviceSecrets = pgTable(
@@ -1244,7 +1263,10 @@ export const serviceSecrets = pgTable(
     updatedBy: uuid('updated_by'),
   },
   (t) => [
-    check('service_secrets_name', sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'PAYMENT_MERCHANT_ID')`),
+    check(
+      'service_secrets_name',
+      sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID')`,
+    ),
     check('service_secrets_sealed', sql`${t.sealed} ~ '^v1[.][A-Za-z0-9_-]{16}[.][A-Za-z0-9_-]{22,}$'`),
   ],
 );

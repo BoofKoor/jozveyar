@@ -246,6 +246,23 @@ export interface PanelAlerts {
    * (`smsState`، `SMS_STUCK_MS`)، فقط کدهای ثبت‌شده پس از `untrackedSince`؛ کوچک‌ترین شماره اول. پیشخوان فقط با `shipments.review`.
    */
   smsFailed: number[];
+  /**
+   * سفارش‌های «در صف چاپ» و «در حال چاپ» که پیامک پرداختشان نرفت، یا معلوم نیست رفت (برش ۷٫۱، ADR-049): همان حال «نرفت» و «معلوم
+   * نیست»، فقط پرداخت‌های پس از `untrackedSince`؛ کوچک‌ترین شماره اول. پیشخوان فقط با «دوباره بفرست» (`orders.money`).
+   */
+  paidSmsFailed: number[];
+}
+
+/** یک تلاش پرداخت در جزئیات سفارش، با پیامک پرداختش (برش ۷٫۱)؛ پرداخت پیش از ۷٫۱ و ناموفق پیامک ندارد. */
+export type PanelPayment = PaymentRow & { sms: ShipmentSms | null };
+
+/** پرداختی که «دوباره بفرست» پیامکش زده شد. */
+export interface PaymentSmsRef {
+  paymentId: string;
+  orderId: string;
+  orderNumber: number;
+  orderStatus: OrderRow['status'];
+  sms: ShipmentSms | null;
 }
 
 export interface PanelSection {
@@ -400,8 +417,8 @@ export interface PanelOrderDetails {
   /** نام روش ارسال در همان نسخهٔ تعرفهٔ سفارش. */
   shippingMethodName: string | null;
   items: PanelOrderItem[];
-  /** همهٔ تلاش‌های پرداخت، تازه‌ترین اول. */
-  payments: PaymentRow[];
+  /** همهٔ تلاش‌های پرداخت، تازه‌ترین اول، هر کدام با پیامک پرداختش. */
+  payments: PanelPayment[];
   /** تغییرهای وضعیت، به ترتیب زمان. */
   statusEvents: PanelStatusEvent[];
   /** کار `prepare_order`: PDF جزوه و فایل‌های چاپ. */
@@ -561,6 +578,8 @@ export interface PanelOrderStore {
    * چاپخانه و دلیل. دو کلیک هم‌زمان یک بار؛ دومی `changed` با چاپخانهٔ تازه.
    */
   assignPartner(scope: PanelScope, input: PanelAssign): Promise<PanelAssignWrite>;
+  /** پیامک پرداخت یک تلاش پرداخت در محدوده (برش ۷٫۱)؛ null یعنی چنین پرداختی (در این محدوده) نیست. */
+  paymentSms(scope: PanelScope, paymentId: string): Promise<PaymentSmsRef | null>;
   logEvent(event: AdminEventInput): Promise<void>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
@@ -729,7 +748,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
     async alerts(scope, clock) {
       const stuck = ts(new Date(clock.at.getTime() - SMS_STUCK_MS));
-      const [failed, unreturned, unassigned, review, untracked, smsFailed] = await Promise.all([
+      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -793,6 +812,24 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             ),
           )
           .orderBy(asc(orders.orderNumber)),
+        // پیامک پرداخت که نرفت (۷٫۱): پرداخت موفق همان پنجره، سفارش هنوز در صف چاپ یا در حال چاپ.
+        db
+          .selectDistinct({ orderNumber: orders.orderNumber })
+          .from(payments)
+          .innerJoin(orders, eq(orders.id, payments.orderId))
+          .innerJoin(smsMessages, eq(smsMessages.id, payments.smsMessageId))
+          .where(
+            and(
+              eq(payments.status, 'succeeded'),
+              inArray(orders.status, ['paid', 'printing']),
+              sql`${payments.verifiedAt} > ${ts(clock.untrackedSince)}`,
+              sql`(${smsMessages.status} = 'failed'
+                OR (${smsMessages.status} = 'pending' AND ${smsMessages.createdAt} < ${stuck})
+                OR (${smsMessages.status} = 'sending' AND ${smsMessages.attemptedAt} < ${stuck}))`,
+              inScope(scope),
+            ),
+          )
+          .orderBy(asc(orders.orderNumber)),
       ]);
       return {
         failedPdf: failed.map((row) => row.orderNumber),
@@ -801,6 +838,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         reviewRows: review[0]?.n ?? 0,
         untracked: untracked.flatMap((row) => (row.handedToPostAt ? [{ orderNumber: row.orderNumber, handedToPostAt: row.handedToPostAt }] : [])),
         smsFailed: smsFailed.map((row) => row.orderNumber),
+        paidSmsFailed: paidSmsFailed.map((row) => row.orderNumber),
       };
     },
 
@@ -923,7 +961,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
               )
               .where(inArray(printRules.orderItemId, itemIds))
               .orderBy(printRules.orderItemId, printRules.seq),
-        db.select().from(payments).where(eq(payments.orderId, order.id)).orderBy(desc(payments.createdAt)),
+        db
+          .select({ payment: payments, ...shipmentSmsFields })
+          .from(payments)
+          .leftJoin(smsMessages, eq(smsMessages.id, payments.smsMessageId))
+          .where(eq(payments.orderId, order.id))
+          .orderBy(desc(payments.createdAt)),
         db
           .select({ event: orderStatusEvents, adminName: adminUsers.displayName })
           .from(orderStatusEvents)
@@ -1064,7 +1107,10 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             .filter((row) => row.orderItemId === item.id)
             .map(({ orderItemId: _item, sha256: _sha, changes, ...file }) => ({ ...file, changes: changes as PrintChanges | null })),
         })),
-        payments: paymentRows,
+        payments: paymentRows.map(({ payment, smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }) => ({
+          ...payment,
+          sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+        })),
         statusEvents: statusRows.map(({ event, adminName }) => ({ ...event, adminName })),
         pdfJob: jobOf(PREPARE_ORDER_JOB),
         ticketJob: jobOf(PREPARE_TICKET_JOB),
@@ -1350,6 +1396,31 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         );
         return { ok: true, order };
       });
+    },
+
+    async paymentSms(scope, paymentId) {
+      const [row] = await db
+        .select({
+          paymentId: payments.id,
+          orderId: orders.id,
+          orderNumber: orders.orderNumber,
+          orderStatus: orders.status,
+          ...shipmentSmsFields,
+        })
+        .from(payments)
+        .innerJoin(orders, eq(orders.id, payments.orderId))
+        .leftJoin(smsMessages, eq(smsMessages.id, payments.smsMessageId))
+        .where(and(eq(payments.id, paymentId), inScope(scope)))
+        .limit(1);
+      if (!row) return null;
+      const { smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt } = row;
+      return {
+        paymentId: row.paymentId,
+        orderId: row.orderId,
+        orderNumber: row.orderNumber,
+        orderStatus: row.orderStatus,
+        sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+      };
     },
 
     async logEvent(event) {

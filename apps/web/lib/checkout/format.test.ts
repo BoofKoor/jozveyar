@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Breakdown } from '@jozveyar/contracts';
 
-import { formatClock, formatMobile, minutesFrom, newCheckoutKey, priceChange } from './format';
+import { formatClock, formatMobile, minutesFrom, newCheckoutKey, priceChange, retryWhen } from './format';
 
 describe('formatMobile', () => {
   it('موبایل نرمال‌شده در سه تکه، مثل طرح؛ هر شکل دیگر همان‌طور', () => {
@@ -20,6 +20,18 @@ describe('formatClock', () => {
     expect(formatClock(0.1)).toBe('0:01');
     expect(formatClock(0)).toBe('0:00');
     expect(formatClock(-3)).toBe('0:00');
+  });
+});
+
+describe('retryWhen (برش ۷، سؤال ۱۳۳)', () => {
+  it('تا یک ساعت «حدود N دقیقه»، بیشتر «از ساعت …» از همین حالا؛ ورودی خراب یک دقیقه', () => {
+    const now = Date.UTC(2026, 9, 5, 7, 20);
+    expect(retryWhen(720, now)).toEqual({ kind: 'minutes', minutes: 12 });
+    expect(retryWhen(3600, now)).toEqual({ kind: 'minutes', minutes: 60 });
+    expect(retryWhen(3601, now)).toEqual({ kind: 'clock', at: new Date(now + 3601_000) });
+    expect(retryWhen(6 * 3600, now)).toEqual({ kind: 'clock', at: new Date(now + 6 * 3600_000) });
+    expect(retryWhen(Number.NaN, now)).toEqual({ kind: 'minutes', minutes: 1 });
+    expect(retryWhen(-5, now)).toEqual({ kind: 'minutes', minutes: 1 });
   });
 });
 

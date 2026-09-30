@@ -4,7 +4,7 @@ import type { ShipmentSms } from '@jozveyar/db';
 import { SMS_STUCK_MS } from '@jozveyar/sms';
 
 import type { Seg } from './orders';
-import { smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
+import { paymentSmsView, smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
 
 /** «حالا»ی طرح: دوشنبه 13 مهر 1405، 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -66,5 +66,27 @@ describe('پیامک رهگیری در پنل (۶٫۳)', () => {
     expect(text(smsCountsText(smsCounts(items, NOW)))).toBe('پیامک: 2 رفت، 1 نرفت.');
     expect(smsCountsText({ sent: 0, failed: 0, sending: 0 })).toEqual([]);
     expect(smsReached(items, NOW)).toEqual([10005, 10006]);
+  });
+});
+
+describe('پیامک sms.ir در پنل (۷٫۱)', () => {
+  it('علت «نرفت» با عدد پاسخ sms.ir و «کلید خالی»؛ هرگز متن پاسخ', () => {
+    const failed = (error: string) => text(smsView(sms({ status: 'failed', sentAt: null, error }), AT, NOW).text);
+    expect(failed('rejected:401')).toBe('به 0915 234 5678 نرفت: پنل پیامک نپذیرفت (کد 401).');
+    expect(failed('unavailable:500')).toBe('به 0915 234 5678 نرفت: پنل پیامک جواب نداد (کد 500).');
+    expect(failed('unconfigured')).toBe('به 0915 234 5678 نرفت: کلید API یا شناسهٔ قالب sms.ir خالی است یا خوانده نشد.');
+    expect(failed('چیز ناشناس')).toBe('به 0915 234 5678 نرفت: پنل پیامک جواب نداد.');
+    expect(smsRowNote(sms({ status: 'failed', sentAt: null, error: 'rejected:17' }), AT, NOW)).toMatchObject({ text: 'پیامک نرفت: پنل پیامک نپذیرفت (کد 17).' });
+  });
+
+  it('ردیف «پیامک پرداخت» کارت «پرداخت‌ها»: رفت، نرفت با «دوباره بفرست» فقط برای سفارش باز، و پرداخت پیش از ۷٫۱ هیچ', () => {
+    expect(text(paymentSmsView(sms(), true, NOW)!.text)).toBe('به 0915 234 5678 رفت، امروز 11:10');
+    expect(paymentSmsView(sms(), true, NOW)!.resendable).toBe(false);
+    const failed = paymentSmsView(sms({ status: 'failed', sentAt: null, error: 'unavailable' }), true, NOW)!;
+    expect([failed.state, failed.resendable, text(failed.text)]).toEqual(['failed', true, 'نرفت: پنل پیامک جواب نداد، امروز 11:10']);
+    expect(paymentSmsView(sms({ status: 'failed', sentAt: null, error: 'unavailable' }), false, NOW)!.resendable).toBe(false);
+    const stuck = new Date(AT.getTime() + SMS_STUCK_MS + 1);
+    expect(paymentSmsView(sms({ status: 'sending', sentAt: null }), true, stuck)).toMatchObject({ state: 'unknown', resendable: true });
+    expect(paymentSmsView(null, true, NOW)).toBeNull();
   });
 });

@@ -14,6 +14,7 @@
 
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
+import { formatDeadlineDay } from '@jozveyar/text';
 
 import { assignAtPayment } from './assignment.js';
 import type { DocumentRow } from './documents.js';
@@ -32,7 +33,7 @@ import {
   smsMessages,
 } from './schema.js';
 import { loadActivePriceList, loadPriceList } from './seed.js';
-import { shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
+import { queuedPaidSms, shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
 
 /**
  * کار کارگر اسناد بعد از پرداخت: PDF جزوه زیر `orders/` (ADR-030)، و از برش ۵٫۱ فایل چاپ هر جلد از روی همان (ADR-043).
@@ -164,6 +165,8 @@ export interface SettledPayment {
   order: OrderRow;
   /** false یعنی پرداخت از قبل نهایی بود (برگشت تکراری) و چیزی عوض نشد. */
   settled: boolean;
+  /** ردیف «منتظر» پیامک پرداختی که همین تراکنش نوشت (برش ۷٫۱)؛ بعد از commit فرستاده می‌شود. */
+  smsId: number | null;
 }
 
 export interface OrderStore {
@@ -427,7 +430,7 @@ export function createOrderStore({ db }: Database): OrderStore {
           .for('update');
         if (!payment) return null;
         const [order] = await tx.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1).for('update');
-        if (payment.status !== 'pending') return { payment, order: order!, settled: false };
+        if (payment.status !== 'pending') return { payment, order: order!, settled: false, smsId: null };
 
         const outcome = await decide({ payment, order: order! });
         if (outcome.kind === 'failed') {
@@ -436,9 +439,17 @@ export function createOrderStore({ db }: Database): OrderStore {
             .set({ status: 'failed', failureCode: outcome.code, raw: outcome.raw ?? null })
             .where(eq(payments.id, payment.id))
             .returning();
-          return { payment: failed!, order: order!, settled: true };
+          return { payment: failed!, order: order!, settled: true, smsId: null };
         }
 
+        // پیامک پرداخت (برش ۷٫۱، ADR-049): ردیف «منتظر» در همین تراکنش، و پرداخت موفق به آن وصل (تریگر `payments_sms`)؛ فرستادنش بعد از
+        // commit با `deliverQueued`، تا پیامکی که نرفت پرداخت را برنگرداند و در پنل «دوباره بفرست» داشته باشد.
+        const smsId = await queuedPaidSms(tx, {
+          toMobile: order!.recipientPhone,
+          orderNumber: order!.orderNumber,
+          handoffDay: formatDeadlineDay(outcome.postHandoffDueAt),
+          at: outcome.paidAt,
+        });
         const [succeeded] = await tx
           .update(payments)
           .set({
@@ -447,6 +458,7 @@ export function createOrderStore({ db }: Database): OrderStore {
             cardMask: outcome.cardMask,
             raw: outcome.raw ?? null,
             verifiedAt: outcome.paidAt,
+            smsMessageId: smsId,
           })
           .where(eq(payments.id, payment.id))
           .returning();
@@ -475,7 +487,7 @@ export function createOrderStore({ db }: Database): OrderStore {
             { kind: PREPARE_TICKET_JOB, orderId: order!.id },
           ])
           .onConflictDoNothing();
-        return { payment: succeeded!, order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid, settled: true };
+        return { payment: succeeded!, order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid, settled: true, smsId };
       });
     },
 

@@ -14,6 +14,7 @@ import { NoAccess } from '../../../../../components/NoAccess';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
+import { ResendPaymentSmsForm } from '../../../../../components/ResendPaymentSmsForm';
 import { ResendSmsForm } from '../../../../../components/ResendSmsForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
@@ -23,7 +24,7 @@ import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
-import { smsView } from '../../../../../lib/sms';
+import { paymentSmsView, smsView } from '../../../../../lib/sms';
 import {
   REASON_MAX,
   STATUS_LABELS,
@@ -88,6 +89,9 @@ const PAGE_ERRORS = new Set([
   'shipment_voided',
   'sms_not_failed',
   'reason_required',
+  'payment_not_found',
+  'paid_sms_closed',
+  'unavailable',
 ]);
 
 /**
@@ -815,6 +819,54 @@ function ParcelCard({
  * مبلغ منجمد؛ پرداخت‌ها؛ و رویدادها. لغو، برگرداندن و ویرایش در همین صفحه باز می‌شوند (`?do=`)؛ هر کار از وضعیتی که صفحه
  * نشان داد.
  */
+/**
+ * ردیف «پیامک پرداخت» زیر پرداخت‌ها (۷٫۱، طرح `ad-paysms`): رفت، در راه، نرفت با علت، یا معلوم نیست؛ «دوباره بفرست» (مالک و متصدی) فقط
+ * وقتی سفارش در صف چاپ یا در حال چاپ است. پرداخت پیش از ۷٫۱ ردیف ندارد.
+ */
+function PaymentSmsRow({
+  gate,
+  payment,
+  orderNumber,
+  open,
+  canResend,
+  now,
+}: {
+  gate: string;
+  payment: PanelOrderDetails['payments'][number];
+  orderNumber: number;
+  open: boolean;
+  canResend: boolean;
+  now: Date;
+}) {
+  const view = paymentSmsView(payment.sms, open, now);
+  if (!view) return null;
+  return (
+    <div className="ad-paysms" data-paysms={view.state}>
+      <b>پیامک پرداخت</b>
+      {view.state === 'sent' ? (
+        <span className="ad-paysms__ok">
+          <span className="jy-icon jy-icon-success" aria-hidden="true" />
+          <span>
+            <Segments segs={view.text} />
+          </span>
+        </span>
+      ) : view.state === 'sending' ? (
+        <span>
+          <Segments segs={view.text} />
+        </span>
+      ) : (
+        <span className="ad-paysms__fail">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            <Segments segs={view.text} />
+          </span>
+        </span>
+      )}
+      {view.resendable && canResend ? <ResendPaymentSmsForm gate={gate} paymentId={payment.id} orderNumber={orderNumber} /> : null}
+    </div>
+  );
+}
+
 export default async function OrderPage({
   params,
   searchParams,
@@ -876,6 +928,13 @@ export default async function OrderPage({
           <Alert tone="success">پیامک رهگیری دوباره فرستاده شد و رفت.</Alert>
         ) : (
           <Alert tone="error">پیامک رهگیری باز نرفت؛ پنل پیامک جواب نداد. کمی بعد دوباره بفرست، یا کد را خودت به مشتری بگو.</Alert>
+        )
+      ) : null}
+      {query.done === 'paid_sms_resend' ? (
+        query.sent === '1' ? (
+          <Alert tone="success">پیامک پرداخت دوباره فرستاده شد و رفت.</Alert>
+        ) : (
+          <Alert tone="error">پیامک پرداخت باز نرفت؛ علتش در کارت «پرداخت‌ها» است. کمی بعد دوباره بفرست، یا روز تحویل را خودت به مشتری بگو.</Alert>
         )
       ) : null}
       {query.done === 'void' ? (
@@ -1089,6 +1148,17 @@ export default async function OrderPage({
                     })}
                   </ol>
                 )}
+                {details.payments.map((payment) => (
+                  <PaymentSmsRow
+                    key={payment.id}
+                    gate={gate}
+                    payment={payment}
+                    orderNumber={order.orderNumber}
+                    open={order.status === 'paid' || order.status === 'printing'}
+                    canResend={can(session, 'orders.money')}
+                    now={now}
+                  />
+                ))}
               </section>
             </>
           ) : null}

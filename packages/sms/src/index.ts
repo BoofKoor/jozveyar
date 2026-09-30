@@ -1,19 +1,37 @@
 /**
- * پیامک، پشت آداپتور (ADR-008؛ مشترک وب و پنل از برش ۶٫۳، ADR-047).
+ * پیامک، پشت آداپتور (ADR-008؛ مشترک وب و پنل از برش ۶٫۳، ADR-047؛ پنل واقعی sms.ir از برش ۷، ADR-049).
  *
- * - **آداپتور** (`SmsTransport`): فقط فرستادن. امروز فقط پیامک کنسولی هست (توسعه، CI، و تا برش ۷ همه‌جا): یک خط لاگ، و ردیف
- *   `sms_messages` با متن کامل، تا پیامک بی پنل پیامک آزمودنی باشد. آداپتور پنل واقعی (sms.ir، برش ۷) همین اینترفیس را پیاده
- *   می‌کند و متن را از پارامترها و قالب می‌سازد (`params`)، نه از متن آزاد.
- * - **پیامک کد و پرداخت** (`loggedSms`): فرستادن، بعد ردیف `sms_messages`، همان رفتار برش ۳.
- * - **پیامک رهگیری** (`deliverQueued`): ردیف «منتظر» در همان تراکنش مرسوله نوشته شده (`@jozveyar/db`)؛ اینجا بعد از commit
- *   فرستاده می‌شود: اول «در حال فرستادن» (فقط یک فرستنده برنده است)، بعد «رفت» یا «نرفت». هیچ پیامکی خودکار دوباره نمی‌رود.
+ * - **آداپتور** (`SmsTransport`): فقط فرستادن. پیامک کنسولی (توسعه، CI، و پنل تا `SMS_PROVIDER=smsir`): یک خط لاگ، و ردیف
+ *   `sms_messages` با متن کامل، تا پیامک بی پنل پیامک آزمودنی باشد. آداپتور sms.ir (`@jozveyar/sms/smsir`) قالب تأییدشده را با
+ *   پارامترها می‌فرستد (`params`)، نه متن آزاد؛ متن هر سه قالب یک منبع دارد (`templates.ts`).
+ * - **پیامک کد** (`loggedSms`): فرستادن، بعد ردیف `sms_messages`، همان رفتار برش ۳.
+ * - **پیامک پرداخت و رهگیری** (`deliverQueued`): ردیف «منتظر» در همان تراکنش پرداخت یا مرسوله نوشته شده (`@jozveyar/db`)؛ اینجا بعد
+ *   از commit فرستاده می‌شود: اول «در حال فرستادن» (فقط یک فرستنده برنده است)، بعد «رفت» یا «نرفت». هیچ پیامکی خودکار دوباره نمی‌رود.
  *
  * بی وابستگی: نوشتن و خواندن جدول مال `@jozveyar/db` است و اینجا فقط درگاهش (`SmsLog`، `SmsOutbox`).
  */
 
+export {
+  SMS_PARAM_MAX,
+  SMS_TEMPLATES,
+  isParamValue,
+  orderPaidText,
+  otpParams,
+  otpText,
+  paidParams,
+  paramMark,
+  smsSegments,
+  templateSource,
+  templateText,
+  trackingParams,
+  trackingText,
+  type SmsTemplate,
+  type SmsTemplateKey,
+} from './templates';
+
 export type SmsPurpose = 'otp' | 'order_paid' | 'tracking';
 
-/** `logged` (کنسولی)، `sent` (پنل واقعی)، `failed`؛ و فقط برای رهگیری `pending` (منتظر) و `sending` (در حال فرستادن). */
+/** `logged` (کنسولی)، `sent` (پنل واقعی)، `failed`؛ و فقط برای پرداخت و رهگیری `pending` (منتظر) و `sending` (در حال فرستادن). */
 export type SmsStatus = 'logged' | 'sent' | 'failed' | 'pending' | 'sending';
 
 export interface SmsRecord {
@@ -24,7 +42,10 @@ export interface SmsRecord {
   body: string | null;
   status: 'logged' | 'sent' | 'failed';
   providerMessageId?: string | null;
+  /** علت «نرفت» (`smsErrorTag`)، بی متن پاسخ. */
   error?: string | null;
+  /** هزینه‌ای که پنل واقعی گفت، به واحد خودش (ADR-049). */
+  cost?: number | null;
 }
 
 export interface SmsLog {
@@ -36,14 +57,15 @@ export interface SmsMessage {
   purpose: SmsPurpose;
   /** متن کامل؛ همان که پیامک کنسولی نگه می‌دارد. */
   text: string;
-  /** پارامترهای قالب پنل واقعی (برش ۷)؛ متن رهگیری فقط از همین‌ها ساخته می‌شود. */
+  /** پارامترهای قالب، به ترتیب `SMS_TEMPLATES`؛ پنل واقعی فقط همین‌ها را می‌فرستد و متن را خودش از قالب می‌سازد. */
   params?: readonly string[];
 }
 
-/** نتیجهٔ فرستادن: کنسولی `logged`، پنل واقعی `sent` با شناسهٔ پیامکش. شکست پرتاب می‌شود (`SmsError`). */
+/** نتیجهٔ فرستادن: کنسولی `logged`، پنل واقعی `sent` با شناسهٔ پیامک و هزینه‌اش. شکست پرتاب می‌شود (`SmsError`). */
 export interface SmsSent {
   status: 'logged' | 'sent';
   providerMessageId: string | null;
+  cost?: number | null;
 }
 
 export interface SmsTransport {
@@ -59,19 +81,43 @@ export interface SmsProvider {
   send(message: SmsMessage): Promise<void>;
 }
 
-/** علت «نرفت»، کوتاه و بی مقدار کلید: `unavailable` (پنل پیامک جواب نداد)، `rejected` (نپذیرفت)، `interrupted` (نیمه‌کاره ماند). */
-export type SmsErrorCode = 'unavailable' | 'rejected' | 'interrupted';
+/**
+ * علت «نرفت»، کوتاه و بی مقدار کلید: `unavailable` (پنل پیامک جواب نداد: شبکه، سقف زمان، ۴۲۹ یا ۵xx)، `rejected` (نپذیرفت)،
+ * `interrupted` (نیمه‌کاره ماند)، `unconfigured` (کلید API یا شناسهٔ قالب خالی است یا خوانده نشد؛ برش ۷).
+ */
+export type SmsErrorCode = 'unavailable' | 'rejected' | 'interrupted' | 'unconfigured';
+
+/** فقط عدد پاسخ پنل پیامک: کد HTTP و `status` بدنه؛ هرگز متن. */
+export interface SmsErrorDetail {
+  http?: number;
+  status?: number;
+}
 
 export class SmsError extends Error {
   constructor(
     readonly code: SmsErrorCode,
-    message?: string,
+    readonly detail: SmsErrorDetail = {},
   ) {
-    super(message ?? code);
+    super(code);
+    this.name = 'SmsError';
   }
 }
 
 export const smsErrorCode = (error: unknown): SmsErrorCode => (error instanceof SmsError ? error.code : 'unavailable');
+
+/** علت «نرفت» برای ستون `sms_messages.error`: کد، و عدد پاسخ پنل پیامک اگر بود (`rejected:401`)؛ `status` بدنه بر کد HTTP مقدم. */
+export function smsErrorTag(error: unknown): string {
+  const code = smsErrorCode(error);
+  const number = error instanceof SmsError ? (error.detail.status ?? error.detail.http) : undefined;
+  return number === undefined ? code : `${code}:${number}`;
+}
+
+/** برعکس `smsErrorTag`؛ برچسب ناشناس همان «جواب نداد». */
+export function parseSmsErrorTag(tag: string | null | undefined): { code: SmsErrorCode; number: number | null } {
+  const match = /^(unavailable|rejected|interrupted|unconfigured)(?::(-?\d{1,9}))?$/.exec(tag ?? '');
+  if (!match) return { code: 'unavailable', number: null };
+  return { code: match[1] as SmsErrorCode, number: match[2] === undefined ? null : Number(match[2]) };
+}
 
 /** پیامک کنسولی: فقط یک خط لاگ؛ ردیفش را فرستنده می‌نویسد. */
 export function consoleTransport(print: (line: string) => void = console.info): SmsTransport {
@@ -85,10 +131,11 @@ export function consoleTransport(print: (line: string) => void = console.info): 
 }
 
 /**
- * فرستادن و بعد ردیف `sms_messages` (کد پیامکی و پرداخت، برش ۳). پنل واقعی متن کد را نگه نمی‌دارد (ADR-033)؛ شکست پنل واقعی
- * ردیف `failed` می‌گذارد و پرتاب می‌شود.
+ * فرستادن و بعد ردیف `sms_messages` (کد پیامکی، برش ۳). پنل واقعی متن و پارامتر کد را نگه نمی‌دارد (ADR-033؛ CHECK
+ * `sms_messages_otp_secret`)؛ شکست پنل واقعی ردیف `failed` می‌گذارد و پرتاب می‌شود.
  */
 export function loggedSms(transport: SmsTransport, log: SmsLog): SmsProvider {
+  const secret = (message: SmsMessage) => message.purpose === 'otp' && transport.name !== 'console';
   return {
     name: transport.name,
     async send(message) {
@@ -101,9 +148,9 @@ export function loggedSms(transport: SmsTransport, log: SmsLog): SmsProvider {
             provider: transport.name,
             toMobile: message.to,
             purpose: message.purpose,
-            body: message.purpose === 'otp' ? null : message.text,
+            body: secret(message) ? null : message.text,
             status: 'failed',
-            error: smsErrorCode(error),
+            error: smsErrorTag(error),
           });
         }
         throw error;
@@ -112,9 +159,10 @@ export function loggedSms(transport: SmsTransport, log: SmsLog): SmsProvider {
         provider: transport.name,
         toMobile: message.to,
         purpose: message.purpose,
-        body: message.purpose === 'otp' && sent.status === 'sent' ? null : message.text,
+        body: secret(message) ? null : message.text,
         status: sent.status,
         providerMessageId: sent.providerMessageId,
+        cost: sent.cost ?? null,
       });
     },
   };
@@ -125,38 +173,12 @@ export function consoleSms(log: SmsLog, print: (line: string) => void = console.
   return loggedSms(consoleTransport(print), log);
 }
 
-/* ───────────────────────── متن‌ها ───────────────────────── */
-
-/** متن کد پیامکی. کد اول می‌آید تا در اعلان گوشی دیده شود. */
-export function otpText(code: string): string {
-  return `کد تأیید جزوه‌یار: ${code}\nاین کد را به کسی نده.`;
-}
-
-/** متن پیامک بعد از پرداخت: شمارهٔ سفارش، و روز تحویل به پست (ADR-013). */
-export function orderPaidText(orderNumber: number, handoffDay: string): string {
-  return `جزوه‌یار: سفارش ${orderNumber} پرداخت شد. تحویل به پست تا ${handoffDay}؛ کد رهگیری پست را هم پیامک می‌کنیم.`;
-}
-
-/** دو پارامتر قالب رهگیری، هر دو بی فاصله (قالب پنل پیامک پارامتر با فاصله نمی‌گیرد): شمارهٔ سفارش و بارکد ۲۴ رقمی. */
-export function trackingParams(orderNumber: number, barcode: string): [string, string] {
-  const number = String(orderNumber);
-  if (!/^\d{1,9}$/.test(number)) throw new Error('شمارهٔ سفارش پیامک رهگیری درست نیست');
-  if (!/^\d{24}$/.test(barcode)) throw new Error('کد رهگیری پیامک ۲۴ رقم نیست');
-  return [number, barcode];
-}
-
-/** متن پیامک رهگیری (ADR-047)، فقط از دو پارامتر، تا در برش ۷ همان قالب پنل پیامک شود. */
-export function trackingText(orderNumber: number, barcode: string): string {
-  const [number, code] = trackingParams(orderNumber, barcode);
-  return `جزوه‌یار: سفارش ${number} تحویل پست شد. کد رهگیری: ${code} (tracking.post.ir)`;
-}
-
-/* ───────────────────────── پیامک رهگیری: حال و فرستادن ───────────────────────── */
+/* ───────────────────────── پیامک از صف (پرداخت و رهگیری): حال و فرستادن ───────────────────────── */
 
 /** ردیفی که بیش از این «منتظر» یا «در حال فرستادن» ماند، دیگر در راه نیست: پنل پیش از پایان افتاد (ADR-047، «اجرا در ۶٫۳»). */
 export const SMS_STUCK_MS = 5 * 60_000;
 
-/** حال پیامک رهگیری برای پنل و صفحهٔ مشتری: رفت، در راه، نرفت، یا معلوم نیست رفت یا نه. */
+/** حال پیامک پرداخت یا رهگیری برای پنل و صفحهٔ مشتری: رفت، در راه، نرفت، یا معلوم نیست رفت یا نه. */
 export type SmsState = 'sent' | 'sending' | 'failed' | 'unknown';
 
 export function smsState(row: { status: string; createdAt: Date; attemptedAt: Date | null }, now: Date): SmsState {
@@ -188,14 +210,16 @@ export interface QueuedSms {
 }
 
 export type SmsResult =
-  | { ok: true; provider: string; status: 'logged' | 'sent'; providerMessageId: string | null }
-  | { ok: false; provider: string; error: SmsErrorCode };
+  | { ok: true; provider: string; status: 'logged' | 'sent'; providerMessageId: string | null; cost: number | null }
+  /** `tag`: همان `smsErrorTag`، برای ستون `error`. */
+  | { ok: false; provider: string; error: SmsErrorCode; tag: string };
 
-/** درگاه ردیف‌های رهگیری (`@jozveyar/db`). */
+/** درگاه ردیف‌های منتظر پرداخت و رهگیری (`@jozveyar/db`). */
 export interface SmsOutbox {
   /**
-   * «در حال فرستادن»، فقط یک بار: `queued` فقط ردیف منتظر؛ `retry` («دوباره بفرست») فقط نرفته یا معلوم‌نبوده. هر دو فقط اگر کد
-   * رهگیری‌اش هنوز زنده است. null یعنی برداشتنی نیست (کس دیگری برداشت، رفته، یا کدش کنار رفت).
+   * «در حال فرستادن»، فقط یک بار: `queued` فقط ردیف منتظر؛ `retry` («دوباره بفرست») فقط نرفته یا معلوم‌نبوده. هر دو فقط اگر ردیف
+   * هنوز زنده است: کد رهگیری‌اش کنار نرفته، و پیامک پرداخت به پرداخت موفقش وصل است. null یعنی برداشتنی نیست (کس دیگری برداشت،
+   * رفته، یا کدش کنار رفت).
    */
   claim(id: number, at: Date, mode: 'queued' | 'retry'): Promise<QueuedSms | null>;
   finish(id: number, at: Date, result: SmsResult): Promise<void>;
@@ -206,6 +230,8 @@ export interface Delivery {
   /** `skipped`: برداشته نشد. */
   outcome: 'sent' | 'failed' | 'skipped';
   error?: SmsErrorCode;
+  /** همان `smsErrorTag` شکست. */
+  tag?: string;
 }
 
 /**
@@ -240,17 +266,17 @@ export async function deliverQueued(
         text: queued.body,
         ...(queued.params ? { params: queued.params } : {}),
       });
-      result = { ok: true, provider: deps.transport.name, status: sent.status, providerMessageId: sent.providerMessageId };
+      result = { ok: true, provider: deps.transport.name, status: sent.status, providerMessageId: sent.providerMessageId, cost: sent.cost ?? null };
     } catch (error) {
-      result = { ok: false, provider: deps.transport.name, error: smsErrorCode(error) };
-      log(`✗ پیامک ${id} (${queued.purpose}) نرفت:`, smsErrorCode(error));
+      result = { ok: false, provider: deps.transport.name, error: smsErrorCode(error), tag: smsErrorTag(error) };
+      log(`✗ پیامک ${id} (${queued.purpose}) نرفت:`, smsErrorTag(error));
     }
     try {
       await deps.outbox.finish(id, now(), result);
     } catch (error) {
       log(`✗ نتیجهٔ پیامک ${id} ثبت نشد:`, error);
     }
-    return result.ok ? { id, outcome: 'sent' } : { id, outcome: 'failed', error: result.error };
+    return result.ok ? { id, outcome: 'sent' } : { id, outcome: 'failed', error: result.error, tag: result.tag };
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(options.concurrency ?? 4, ids.length)) }, worker));
   return results;
