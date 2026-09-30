@@ -1,12 +1,13 @@
 /**
- * کلیدهای سرویس‌های بیرونی (برش ۴٫۶، ADR-041): کلید API پنل پیامک (sms.ir)، قالب کد پیامکی و کد پذیرندهٔ زیبال. امروز در `.env`
- * سرورند؛ مالک از پنل هم می‌گذاردشان، مهروموم‌شده با `SECRETS_KEY`، و مقدار پنل بر `.env` مقدم است.
+ * کلیدهای سرویس‌های بیرونی (برش ۴٫۶، ADR-041): کلید API پنل پیامک (sms.ir)، شناسهٔ سه قالب پیامک (کد، و از ۷٫۱ پرداخت و رهگیری،
+ * ADR-049) و کد پذیرندهٔ زیبال. امروز در `.env` سرورند؛ مالک از پنل هم می‌گذاردشان، مهروموم‌شده با `SECRETS_KEY`، و مقدار پنل بر `.env`
+ * مقدم است.
  *
- *  - **فقط این سه نام** (`SERVICE_KEYS`؛ همان CHECK `service_secrets_name`): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
+ *  - **فقط این پنج نام** (`SERVICE_KEYS`؛ همان CHECK `service_secrets_name`، 0027): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
  *    `PAYMENT_PROVIDER`، نه رمزهای خود سرور.
  *  - **مهروموم به جای ردیف** (AAD `service_secrets:<نام>`): مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود.
  *  - **خواندن با هر استفاده** (`readServiceKey`)، بی کش در حافظه: کلیدی که از پنل عوض شد بی ری‌استارت و روی هر نود همان
- *    است. آداپتورهای پیامک و درگاه واقعی (برش ۷) همین را می‌خوانند؛ امروز فقط پنل، برای نشان دادن منبع و ۴ نویسهٔ آخر.
+ *    است. آداپتور sms.ir (۷٫۱، `smsIrKeysOf` در `sms.ts`) و درگاه واقعی (۷٫۲) همین را می‌خوانند؛ پنل هم، برای منبع و ۴ نویسهٔ آخر.
  *  - **«خوانده نشد»، نه خالی بی‌صدا:** مقدار پنلی که با `SECRETS_KEY` امروز باز نمی‌شود نه به `.env` برمی‌گردد و نه خالی
  *    می‌شود؛ بلند در لاگ (فقط نام کلید، هرگز مقدار).
  *
@@ -14,7 +15,7 @@
  * زیر قفل، با `verify` («همان که دیده شد») و رویداد در همان تراکنش؛ رویداد نام کلید را دارد، نه مقدارش.
  */
 
-import { eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, sql } from 'drizzle-orm';
 
 import { adminEventRow } from './admin.js';
 import type { Database } from './index.js';
@@ -25,7 +26,7 @@ import { unseal } from './sealed.js';
 const SECRETS_LOCK = 0x6b657973;
 
 /** کلیدهایی که پنل نگه می‌دارد، به ترتیب صفحهٔ تنظیمات؛ همان نام‌های `.env`. */
-export const SERVICE_KEYS = ['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'PAYMENT_MERCHANT_ID'] as const;
+export const SERVICE_KEYS = ['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID'] as const;
 export type ServiceKeyName = (typeof SERVICE_KEYS)[number];
 
 export const isServiceKeyName = (value: unknown): value is ServiceKeyName =>
@@ -75,7 +76,22 @@ export interface SecretStore {
     actor: SecretActor;
     detail: Record<string, unknown>;
   }): Promise<'ok' | 'changed'>;
+  /**
+   * «آزمایش» یک کلید (۷٫۱، ADR-049): فقط اگر در ساعت گذشته کمتر از `limit` آزمایش شده، `run` (درخواست به خود سرویس) اجرا می‌شود و
+   * رویداد `settings.key_test` با نام و نتیجه‌اش (`detail`، هرگز مقدار و هرگز شمارهٔ پیامک آزمایشی) نوشته. همه در یک تراکنش زیر قفل
+   * کلیدها، پس دو آزمایش هم‌زمان از سقف نمی‌گذرند؛ رویداد فقط افزودنی است (`admin_events_append_only`)، پس پس از نتیجه. `null` یعنی
+   * سقف پر است و `run` اجرا نشد.
+   */
+  runTest<T>(
+    input: { name: ServiceKeyName; at: Date; actor: SecretActor; limit: number },
+    run: () => Promise<{ value: T; detail: Record<string, unknown> }>,
+  ): Promise<T | null>;
+  /** آخرین آزمایش هر کلید، برای «آزموده: …» زیر هر کلید. */
+  lastTests(): Promise<Map<ServiceKeyName, { at: Date; detail: Record<string, unknown> }>>;
 }
+
+/** رویداد «آزمایش» کلید (۷٫۱). */
+export const KEY_TEST_ACTION = 'settings.key_test';
 
 export function createSecretStore({ db }: Database): SecretStore {
   type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -152,6 +168,34 @@ export function createSecretStore({ db }: Database): SecretStore {
         await tx.insert(adminEvents).values(event('settings.key_revert', input.name, input.at, input.actor, input.detail));
         return 'ok' as const;
       });
+    },
+
+    async runTest(input, run) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${SECRETS_LOCK})`);
+        const since = new Date(input.at.getTime() - 60 * 60_000);
+        const [row] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(adminEvents)
+          .where(and(eq(adminEvents.action, KEY_TEST_ACTION), gt(adminEvents.at, since)));
+        if ((row?.n ?? 0) >= input.limit) return null;
+        const { value, detail } = await run();
+        await tx.insert(adminEvents).values(event(KEY_TEST_ACTION, input.name, input.at, input.actor, detail));
+        return value;
+      });
+    },
+
+    async lastTests() {
+      const rows = await db
+        .selectDistinctOn([adminEvents.targetId], { name: adminEvents.targetId, at: adminEvents.at, detail: adminEvents.detail })
+        .from(adminEvents)
+        .where(and(eq(adminEvents.action, KEY_TEST_ACTION), eq(adminEvents.targetType, SERVICE_KEY_TARGET)))
+        .orderBy(adminEvents.targetId, desc(adminEvents.at), desc(adminEvents.id));
+      const out = new Map<ServiceKeyName, { at: Date; detail: Record<string, unknown> }>();
+      for (const row of rows) {
+        if (isServiceKeyName(row.name)) out.set(row.name, { at: row.at, detail: (row.detail ?? {}) as Record<string, unknown> });
+      }
+      return out;
     },
   };
 }

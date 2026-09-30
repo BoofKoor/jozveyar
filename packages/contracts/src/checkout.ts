@@ -127,12 +127,19 @@ export interface PlacedOrder {
 }
 
 /** کد شکست‌هایی که رابط برایشان پیام فارسی و راه جلو دارد. */
+/**
+ * کدام سقف کد پیامکی پر شد (`too_many_codes`، ADR-033؛ لایه‌ها از ۷٫۱، ADR-049): همین مرورگر در ساعت، همین شماره در ساعت یا ۲۴
+ * ساعت، همین اینترنت در ساعت، یا ترمز آخر کل سایت در ساعت یا امروز تهران.
+ */
+export type OtpLimitScope = 'browser' | 'mobile' | 'mobile_day' | 'ip' | 'site' | 'site_day';
+
 export type CheckoutErrorCode =
   | 'invalid_request'
   | 'not_found'
   | 'invalid_mobile'
   | 'resend_too_soon'
   | 'too_many_codes'
+  | 'no_documents'
   | 'sms_unavailable'
   | 'invalid_code'
   | 'no_code'

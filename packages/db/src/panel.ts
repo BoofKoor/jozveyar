@@ -74,7 +74,7 @@ import {
   shippingZones,
   smsMessages,
 } from './schema.js';
-import { shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
+import { shipmentSmsFields, shipmentSmsOf, smsRows, type ShipmentSms } from './sms.js';
 
 /** دو کار سفارش پس از پرداخت: PDF جزوه و فایل چاپ، و برگهٔ سفارش. */
 export type OrderJobKind = typeof PREPARE_ORDER_JOB | typeof PREPARE_TICKET_JOB;
@@ -246,6 +246,19 @@ export interface PanelAlerts {
    * (`smsState`، `SMS_STUCK_MS`)، فقط کدهای ثبت‌شده پس از `untrackedSince`؛ کوچک‌ترین شماره اول. پیشخوان فقط با `shipments.review`.
    */
   smsFailed: number[];
+  /**
+   * سفارش‌های باز (در صف چاپ یا در حال چاپ) که پیامک پرداختشان نرفت یا معلوم نیست رفت (۷٫۱، ADR-049)، پرداخت‌شده پس از
+   * `untrackedSince`؛ کوچک‌ترین شماره اول. پیشخوان فقط با `orders.money`، که «دوباره بفرست» کارت پرداخت را دارد.
+   */
+  paidSmsFailed: number[];
+}
+
+/** پیامک پرداخت یک سفارش، برای «دوباره بفرست» (۷٫۱). */
+export interface PanelPaidSms {
+  orderId: string;
+  orderNumber: number;
+  status: OrderRow['status'];
+  sms: ShipmentSms | null;
 }
 
 export interface PanelSection {
@@ -402,6 +415,8 @@ export interface PanelOrderDetails {
   items: PanelOrderItem[];
   /** همهٔ تلاش‌های پرداخت، تازه‌ترین اول. */
   payments: PaymentRow[];
+  /** پیامک پرداخت تلاش موفق (۷٫۱، ADR-049)؛ پرداخت‌نشده یا موفق پیش از ۷٫۱ null. */
+  paidSms: ShipmentSms | null;
   /** تغییرهای وضعیت، به ترتیب زمان. */
   statusEvents: PanelStatusEvent[];
   /** کار `prepare_order`: PDF جزوه و فایل‌های چاپ. */
@@ -562,6 +577,8 @@ export interface PanelOrderStore {
    */
   assignPartner(scope: PanelScope, input: PanelAssign): Promise<PanelAssignWrite>;
   logEvent(event: AdminEventInput): Promise<void>;
+  /** پیامک پرداخت سفارش (۷٫۱)؛ null یعنی چنین سفارشی (در این محدوده) نیست. */
+  paidSms(scope: PanelScope, orderNumber: number): Promise<PanelPaidSms | null>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
 }
@@ -729,7 +746,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
     async alerts(scope, clock) {
       const stuck = ts(new Date(clock.at.getTime() - SMS_STUCK_MS));
-      const [failed, unreturned, unassigned, review, untracked, smsFailed] = await Promise.all([
+      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -793,6 +810,24 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             ),
           )
           .orderBy(asc(orders.orderNumber)),
+        // پیامک پرداخت که نرفت (۷٫۱): سفارش باز، پرداخت موفق در همان پنجره، و ردیفش «نرفت» یا «منتظر» و «در حال فرستادن»ی که ماند.
+        db
+          .selectDistinct({ orderNumber: orders.orderNumber })
+          .from(payments)
+          .innerJoin(orders, eq(orders.id, payments.orderId))
+          .innerJoin(smsMessages, eq(smsMessages.id, payments.smsMessageId))
+          .where(
+            and(
+              eq(payments.status, 'succeeded'),
+              inArray(orders.status, ['paid', 'printing']),
+              sql`${payments.verifiedAt} > ${ts(clock.untrackedSince)}`,
+              sql`(${smsMessages.status} = 'failed'
+                OR (${smsMessages.status} = 'pending' AND ${smsMessages.createdAt} < ${stuck})
+                OR (${smsMessages.status} = 'sending' AND ${smsMessages.attemptedAt} < ${stuck}))`,
+              inScope(scope),
+            ),
+          )
+          .orderBy(asc(orders.orderNumber)),
       ]);
       return {
         failedPdf: failed.map((row) => row.orderNumber),
@@ -801,6 +836,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         reviewRows: review[0]?.n ?? 0,
         untracked: untracked.flatMap((row) => (row.handedToPostAt ? [{ orderNumber: row.orderNumber, handedToPostAt: row.handedToPostAt }] : [])),
         smsFailed: smsFailed.map((row) => row.orderNumber),
+        paidSmsFailed: paidSmsFailed.map((row) => row.orderNumber),
       };
     },
 
@@ -1025,6 +1061,9 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .orderBy(asc(shipments.createdAt), asc(shipments.rowNo)),
       ]);
 
+      const paidSmsId = paymentRows.find((p) => p.status === 'succeeded')?.smsMessageId ?? null;
+      const [paidSmsRow] = paidSmsId === null ? [] : await smsRows(db, [paidSmsId]);
+
       const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
         const job = jobRows.find((row) => row.kind === kind);
         return job
@@ -1065,6 +1104,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             .map(({ orderItemId: _item, sha256: _sha, changes, ...file }) => ({ ...file, changes: changes as PrintChanges | null })),
         })),
         payments: paymentRows,
+        paidSms: paidSmsRow ?? null,
         statusEvents: statusRows.map(({ event, adminName }) => ({ ...event, adminName })),
         pdfJob: jobOf(PREPARE_ORDER_JOB),
         ticketJob: jobOf(PREPARE_TICKET_JOB),
@@ -1354,6 +1394,18 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
     async logEvent(event) {
       await db.insert(adminEvents).values(adminEventRow(event));
+    },
+
+    async paidSms(scope, orderNumber) {
+      const [row] = await db
+        .select({ orderId: orders.id, orderNumber: orders.orderNumber, status: orders.status, smsMessageId: payments.smsMessageId })
+        .from(orders)
+        .leftJoin(payments, and(eq(payments.orderId, orders.id), eq(payments.status, 'succeeded')))
+        .where(and(eq(orders.orderNumber, orderNumber), inScope(scope)))
+        .limit(1);
+      if (!row) return null;
+      const [sms] = row.smsMessageId === null ? [] : await smsRows(db, [row.smsMessageId]);
+      return { orderId: row.orderId, orderNumber: row.orderNumber, status: row.status, sms: sms ?? null };
     },
 
     async setting(key) {

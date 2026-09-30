@@ -6,25 +6,36 @@
  * پستگرس معلوم می‌شود: شمردن و درج زیر یک قفل، و گرفتن فرصت کد به‌صورت اتمی.
  */
 
-import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull, lt, sql } from 'drizzle-orm';
 
 import type { Database } from './index.js';
-import { otpRequests, sessions, users } from './schema.js';
+import { documents, otpRequests, sessions, users } from './schema.js';
 
 /** کلید قفل مشورتی صدور کد پیامکی: «otp» به عدد. */
 const OTP_LOCK = 0x6f7470;
 
 export type OtpRow = typeof otpRequests.$inferSelect;
 
-/** شمارش کدهای یک پنجرهٔ زمانی؛ `…Oldest` برای «چند ثانیهٔ دیگر». */
+/**
+ * شمارش کدها در پنجره‌های زمانی؛ `…Oldest` برای «کی دوباره». ساعتی: هر مرورگر، هر شماره، هر IP و کل سایت؛ از ۷٫۱ (ADR-049) هر شماره
+ * در ۲۴ ساعت و کل سایت از آغاز امروز تهران هم.
+ */
 export interface OtpCounts {
   mobile: number;
   mobileOldest: Date | null;
   mobileLatest: Date | null;
+  /** همین شماره در ۲۴ ساعت. */
+  mobileDay: number;
+  mobileDayOldest: Date | null;
+  /** همین مرورگر (`jy_sid`) در ساعت. */
+  session: number;
+  sessionOldest: Date | null;
   ip: number;
   ipOldest: Date | null;
   site: number;
   siteOldest: Date | null;
+  /** کل سایت از آغاز امروز تهران. */
+  siteDay: number;
 }
 
 export interface NewOtp {
@@ -48,9 +59,24 @@ export interface AuthStore {
    * `decide` با شمارش‌ها صدا زده می‌شود و کد تازه را برمی‌گرداند، یا null اگر سقفی پر است.
    */
   issueOtp(
-    input: { mobile: string; ipHash: string; sessionHash: string; since: Date },
+    input: {
+      mobile: string;
+      ipHash: string;
+      sessionHash: string;
+      /** آغاز پنجرهٔ ساعتی. */
+      since: Date;
+      /** آغاز پنجرهٔ ۲۴ ساعتهٔ هر شماره. */
+      sinceDay: Date;
+      /** آغاز امروز تهران، برای سقف روزانهٔ کل سایت. */
+      dayStart: Date;
+    },
     decide: (counts: OtpCounts) => NewOtp | null,
   ): Promise<{ id: string } | null>;
+  /**
+   * دروازهٔ جزوه (۷٫۱، ADR-049): این مرورگر دست‌کم یک سند آماده و زنده روی سرور دارد؟ همان سندی که «ادامه» می‌خواهد: تحلیل‌شده با
+   * شمار صفحه، و فایلش هنوز پاک نشده.
+   */
+  hasLiveDocument(sessionHash: string, at: Date): Promise<boolean>;
   /** آخرین کد این شماره در همین مرورگر؛ کد تازه کد قبلی را کنار می‌گذارد. */
   latestOtp(sessionHash: string, mobile: string): Promise<OtpRow | null>;
   /**
@@ -81,26 +107,45 @@ export function createAuthStore({ db }: Database): AuthStore {
     async issueOtp(input, decide) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${OTP_LOCK})`);
+        // یک پیمایش از قدیمی‌ترین آغاز پنجره‌ها؛ هر شمار با شرط پنجرهٔ خودش. سقف روزانهٔ کل سایت (۲٬۰۰۰) ردیف‌ها را کم نگه می‌دارد.
+        // شرط‌ها با عملگرهای drizzle، تا زمان با نگاشت همان ستون برود.
+        const hour = gt(otpRequests.createdAt, input.since);
+        const mobile = and(eq(otpRequests.mobile, input.mobile), hour);
+        const mobileDay = and(eq(otpRequests.mobile, input.mobile), gt(otpRequests.createdAt, input.sinceDay));
+        const session = and(eq(otpRequests.sessionHash, input.sessionHash), hour);
+        const ip = and(eq(otpRequests.ipHash, input.ipHash), hour);
+        const today = gte(otpRequests.createdAt, input.dayStart);
+        const from = new Date(Math.min(input.since.getTime(), input.sinceDay.getTime(), input.dayStart.getTime()));
         const [row] = await tx
           .select({
-            mobile: sql<number>`count(*) FILTER (WHERE ${otpRequests.mobile} = ${input.mobile})::int`,
-            mobileOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${otpRequests.mobile} = ${input.mobile})`,
-            mobileLatest: sql<Date | null>`max(${otpRequests.createdAt}) FILTER (WHERE ${otpRequests.mobile} = ${input.mobile})`,
-            ip: sql<number>`count(*) FILTER (WHERE ${otpRequests.ipHash} = ${input.ipHash})::int`,
-            ipOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${otpRequests.ipHash} = ${input.ipHash})`,
-            site: sql<number>`count(*)::int`,
-            siteOldest: sql<Date | null>`min(${otpRequests.createdAt})`,
+            mobile: sql<number>`count(*) FILTER (WHERE ${mobile})::int`,
+            mobileOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${mobile})`,
+            mobileLatest: sql<Date | null>`max(${otpRequests.createdAt}) FILTER (WHERE ${mobile})`,
+            mobileDay: sql<number>`count(*) FILTER (WHERE ${mobileDay})::int`,
+            mobileDayOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${mobileDay})`,
+            session: sql<number>`count(*) FILTER (WHERE ${session})::int`,
+            sessionOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${session})`,
+            ip: sql<number>`count(*) FILTER (WHERE ${ip})::int`,
+            ipOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${ip})`,
+            site: sql<number>`count(*) FILTER (WHERE ${hour})::int`,
+            siteOldest: sql<Date | null>`min(${otpRequests.createdAt}) FILTER (WHERE ${hour})`,
+            siteDay: sql<number>`count(*) FILTER (WHERE ${today})::int`,
           })
           .from(otpRequests)
-          .where(gt(otpRequests.createdAt, input.since));
+          .where(gte(otpRequests.createdAt, from));
         const counts: OtpCounts = {
           mobile: row?.mobile ?? 0,
           mobileOldest: asDate(row?.mobileOldest),
           mobileLatest: asDate(row?.mobileLatest),
+          mobileDay: row?.mobileDay ?? 0,
+          mobileDayOldest: asDate(row?.mobileDayOldest),
+          session: row?.session ?? 0,
+          sessionOldest: asDate(row?.sessionOldest),
           ip: row?.ip ?? 0,
           ipOldest: asDate(row?.ipOldest),
           site: row?.site ?? 0,
           siteOldest: asDate(row?.siteOldest),
+          siteDay: row?.siteDay ?? 0,
         };
         const otp = decide(counts);
         if (!otp) return null;
@@ -117,6 +162,23 @@ export function createAuthStore({ db }: Database): AuthStore {
           .returning({ id: otpRequests.id });
         return { id: inserted!.id };
       });
+    },
+
+    async hasLiveDocument(sessionHash, at) {
+      const [row] = await db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            eq(documents.sessionHash, sessionHash),
+            eq(documents.status, 'ready'),
+            gt(documents.pageCount, 0),
+            isNull(documents.fileDeletedAt),
+            gt(documents.fileExpiresAt, at),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
     },
 
     async latestOtp(sessionHash, mobile) {

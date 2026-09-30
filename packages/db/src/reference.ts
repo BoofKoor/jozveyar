@@ -36,6 +36,10 @@ export const SLA_DAYS_SETTING = 'order.sla_days';
 export const HOLIDAYS_SETTING = 'calendar.holidays';
 /** سقف کد پیامکی کل سایت در ساعت (ADR-033). */
 export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
+/** سقف کد پیامکی کل سایت در روز تهران (برش ۷٫۱، ADR-049). */
+export const OTP_SITE_DAILY_SETTING = 'otp.site_daily_limit';
+/** آستانهٔ هشدار اعتبار sms.ir (برش ۷٫۱، ADR-049). */
+export const SMS_CREDIT_ALERT_SETTING = 'sms.credit_alert';
 /** سالی که تعطیلی‌ها تا پایانش با تقویم رسمی منتشرشده تطبیق داده شده‌اند (برش ۴٫۶). */
 export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
 /** فایل‌های سفارش چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (برش ۵٫۱، ADR-044). */
@@ -58,12 +62,18 @@ export const REPORT_BANDS_SETTING = 'report.weight_bands';
  *
  * بازه‌های وزن گزارش ارسال همان بازه‌های کرایهٔ تعرفهٔ فعال‌اند (تصمیم ۱۰۱)، تا مالک از گزارش عوضشان کند؛ پیش‌فرض عدد نیست،
  * `'tariff'` است، تا گزارش با هر نسخهٔ تازهٔ تعرفه همراه شود.
+ *
+ * سقف روزانهٔ کد پیامکی کل سایت ۲٬۰۰۰ است (برش ۷٫۱، سؤال ۱۱۷): بیش از بیست برابر اوج خوش‌بینانهٔ سفارش روزانه، و بدترین هزینهٔ
+ * «پیامک‌سازی» یک روز را به ۲٬۰۰۰ پیامک می‌بندد. هشدار اعتبار sms.ir زیر ۱٬۰۰۰ (همان واحد sms.ir؛ هزینهٔ نمونهٔ مستند هر پیامک ۱ است):
+ * دست‌کم چند روز کار عادی، پیش از آنکه اعتبار تمام‌شده همه را پشت در بگذارد.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
   [HOLIDAYS_SETTING]: OFFICIAL_HOLIDAYS,
   [OFFICIAL_THROUGH_SETTING]: 1405,
   [OTP_SITE_LIMIT_SETTING]: 300,
+  [OTP_SITE_DAILY_SETTING]: 2000,
+  [SMS_CREDIT_ALERT_SETTING]: 1000,
   [FILES_RETENTION_SETTING]: 30,
   [REPORT_BANDS_SETTING]: 'tariff',
 };

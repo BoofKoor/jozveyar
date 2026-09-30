@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { SMS_TEMPLATES } from '@jozveyar/sms';
 
 import { seal } from './sealed.js';
 import {
@@ -29,8 +30,10 @@ const rowOf = (name: ServiceKeyName, value = VALUE, context = serviceKeyContext(
 });
 
 describe('کلیدهای سرویس‌ها', () => {
-  it('فقط سه نام، به ترتیب صفحه؛ نه حالت خرید، نه آداپتورها، نه رمزهای خود سرور', () => {
-    expect(SERVICE_KEYS).toEqual(['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'PAYMENT_MERCHANT_ID']);
+  it('فقط پنج نام، به ترتیب صفحه؛ نه حالت خرید، نه آداپتورها، نه رمزهای خود سرور', () => {
+    expect(SERVICE_KEYS).toEqual(['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID']);
+    // شناسهٔ قالب هر هدف پیامک همان کلیدی است که پنل نگه می‌دارد (ADR-049).
+    for (const template of Object.values(SMS_TEMPLATES)) expect(isServiceKeyName(template.key)).toBe(true);
     for (const name of SERVICE_KEYS) expect(isServiceKeyName(name)).toBe(true);
     for (const other of ['CHECKOUT_MODE', 'SMS_PROVIDER', 'PAYMENT_PROVIDER', 'SECRETS_KEY', 'SESSION_SECRET', 'sms_api_key', '', null, 1]) {
       expect(isServiceKeyName(other)).toBe(false);
