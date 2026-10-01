@@ -50,6 +50,7 @@ import { normalizeIranMobile, tidyInputFa } from '@jozveyar/text/input';
 
 import { tehranDay } from './format';
 import { assignmentText } from './partners';
+import { REFUND_VIA, rejectionPast, rejectionResult } from './refunds';
 
 /** تکهٔ متن: رشته، عدد (`.num`)، نام لاتین (`bdi`)، یا کد رهگیری پست (`jy-barcode`، برش ۶٫۱). */
 export type Seg = string | { num: string } | { ltr: string } | { barcode: string };
@@ -515,6 +516,16 @@ const INQUIRY_TEXT: Record<string, string> = {
   held: 'پول هنوز نزد درگاه است',
   returned: 'پول به کارت برگشت',
   verified: 'تأییدشده، و پولش خودکار برنمی‌گردد',
+};
+
+/** نتیجهٔ «استعلام از درگاه» یک بازپرداخت (برش ۷٫۳)، همان `RefundInquiryOutcome` سرویس. */
+export const REFUND_INQUIRY_TEXT: Record<string, string> = {
+  succeeded: 'برگشت داده شد',
+  failed: 'برنگشت',
+  pending: 'هنوز در حال برگشت',
+  unanswered: 'درگاه جواب روشن نداد',
+  closed: 'همان لحظه جای دیگری بسته شده بود',
+  busy: 'استعلام دیگری همان لحظه در کار بود',
 };
 
 /** کسی که تلاش را بست (`payments.settled_via`، برش ۷٫۲). */
@@ -1072,13 +1083,44 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
   if (details.order.filesDeletedAt) {
     entries.push({ at: details.order.filesDeletedAt, text: ['فایل‌های سفارش پاک شد'], who: 'سیستم' });
   }
+  // بازپرداخت (۷٫۳، طرح `m-refunding` تا `m-refund-failed`): ثبت دستی، یا درخواست از درگاه و نتیجه‌اش؛ رویداد `orders.refund` همین را
+  // دارد و جدا نمی‌آید. از چشم بی مبلغ هیچ (`withoutMoney`).
+  for (const refund of details.refunds) {
+    const who = refund.adminName ?? 'ادمین';
+    const amount: Seg = { num: formatTomans(refund.amountRials, false) };
+    if (refund.method === 'manual') {
+      entries.push({
+        at: refund.createdAt,
+        text: ['بازپرداخت دستی ', amount, ' تومان ثبت شد، کد پیگیری ', { num: refund.reference ?? '' }],
+        who,
+      });
+      continue;
+    }
+    entries.push({ at: refund.createdAt, text: ['بازپرداخت ', amount, ' تومان از درگاه درخواست شد'], who });
+    if (!refund.finishedAt) continue;
+    const by = refund.settledVia === 'request' ? who : (REFUND_VIA[refund.settledVia ?? ''] ?? 'درگاه');
+    const provider = details.payments.find((payment) => payment.id === refund.paymentId)?.provider ?? '';
+    if (refund.status === 'succeeded') {
+      entries.push({
+        at: refund.finishedAt,
+        text: ['بازپرداخت برگشت داده شد', ...(refund.reference ? ['، کد پیگیری ', { num: refund.reference }] : [])],
+        who: by,
+      });
+    } else {
+      entries.push({
+        at: refund.finishedAt,
+        text: [`بازپرداخت از درگاه رد شد: ${rejectionPast(refund.failureReason, provider, rejectionResult(refund.gatewayError))}`],
+        who: by,
+      });
+    }
+  }
   for (const event of details.events) {
     const detail = (event.detail ?? {}) as { item?: unknown; volume?: unknown; volumes?: unknown; changed?: unknown };
     const seq = typeof detail.item === 'number' ? detail.item : 1;
     const volume = typeof detail.volume === 'number' && typeof detail.volumes === 'number' && detail.volumes > 1 ? detail.volume : null;
     const who = event.adminName ?? 'ادمین';
     // همان رویداد وضعیت و تخصیص بالا؛ و کارهای صف تأیید و کنار گذاشتن یک کد، که سطر کد رهگیری بالا می‌گویدشان (۶٫۲).
-    if (event.action === 'orders.status' || event.action === 'orders.assign' || SHIPMENT_EVENTS.has(event.action)) continue;
+    if (event.action === 'orders.status' || event.action === 'orders.assign' || event.action === 'orders.refund' || SHIPMENT_EVENTS.has(event.action)) continue;
     if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF اصلی ', ...jozve(seq), ' دانلود شد'], who });
     else if (event.action === 'orders.print_download') {
       entries.push({ at: event.at, text: ['فایل چاپ', ...ofJozve(seq), ...(volume ? [' جلد ', num(volume)] : []), ' دانلود شد'], who });
@@ -1097,6 +1139,12 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
       // «استعلام از درگاه» (۷٫۲)، با نتیجه؛ از چشم چاپخانه نه.
       const outcome = String((detail as { outcome?: unknown }).outcome ?? '');
       entries.push({ at: event.at, text: [`استعلام از درگاه: ${INQUIRY_TEXT[outcome] ?? outcome}`], who });
+    } else if (event.action === 'orders.refund_inquiry') {
+      // «استعلام از درگاه» بازپرداخت (۷٫۳)؛ اگر بستش، سطر نتیجهٔ بازپرداخت بالا همان را می‌گوید.
+      const outcome = String((detail as { outcome?: unknown }).outcome ?? '');
+      if (outcome === 'pending' || outcome === 'unanswered') {
+        entries.push({ at: event.at, text: [`استعلام بازپرداخت از درگاه: ${REFUND_INQUIRY_TEXT[outcome]}`], who });
+      }
     } else if (event.action === 'payments.gateway_rejected') {
       // رویداد سیستم (۷٫۲): درگاه شروع پرداخت را رد کرد.
       const rejected = detail as { result?: unknown };
@@ -1135,7 +1183,9 @@ export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
     order: zeroRials(details.order),
     payments: [],
     shipments: zeroRials(details.shipments),
-    events: details.events.filter((event) => !event.action.startsWith('payments.')),
+    // بازپرداخت (۷٫۳) همه مبلغ است.
+    refunds: [],
+    events: details.events.filter((event) => !event.action.startsWith('payments.') && !event.action.startsWith('orders.refund')),
   };
 }
 

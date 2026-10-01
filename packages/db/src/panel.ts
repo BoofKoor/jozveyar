@@ -69,6 +69,7 @@ import {
   printPartners,
   printRules,
   provinces,
+  refunds,
   settings,
   shipmentImportRows,
   shipmentImports,
@@ -77,6 +78,7 @@ import {
   shippingZones,
   smsMessages,
 } from './schema.js';
+import type { PanelRefund } from './refunds.js';
 import { shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
 
 /** دو کار سفارش پس از پرداخت: PDF جزوه و فایل چاپ، و برگهٔ سفارش. */
@@ -276,6 +278,16 @@ export interface PanelAlerts {
   verifiedUnused: { orderNumber: number; failureCode: string }[];
   /** تلاش‌های امروز (`todayStart`) که استعلام خودکار بست، به نتیجه. */
   autoClosed: { failed: number; succeeded: number };
+  /**
+   * «لغوشده، پول برنگشته» (برش ۷٫۳، سؤال ۱۵۸): سفارش «لغو شد» با پرداخت موفق و بی بازپرداخت زنده (در جریان یا برگشت‌داده‌شده)، از لحظهٔ لغو
+   * تا بازپرداخت موفق؛ زمان آخرین لغو، قدیمی‌ترین اول.
+   */
+  unrefunded: { orderNumber: number; cancelledAt: Date | null }[];
+  /**
+   * بازپرداخت‌های در جریان (برش ۷٫۳): زمان درخواست، و «معلوم نیست» (درخواست رفت و درگاه جواب روشن نداد، `refundUnknown`)؛ قدیمی‌ترین اول.
+   * پیشخوان «معلوم نیست» را همان لحظه و «هنوز در حال برگشت» را پس از `REFUND_LATE_MS` نشان می‌دهد.
+   */
+  refunding: { orderNumber: number; createdAt: Date; unknown: boolean }[];
 }
 
 /** یک تلاش پرداخت در جزئیات سفارش، با پیامک پرداختش (برش ۷٫۱)؛ پرداخت پیش از ۷٫۱ و ناموفق پیامک ندارد. */
@@ -459,6 +471,8 @@ export interface PanelOrderDetails {
   assignments: PanelAssignment[];
   /** بسته‌های پستی (برش ۶٫۱)، به ترتیب ثبت. */
   shipments: PanelShipment[];
+  /** بازپرداخت‌ها (برش ۷٫۳)، تازه‌ترین اول، با نام ادمین. */
+  refunds: PanelRefund[];
 }
 
 /** سفارشِ یک فایل: برای مجوز وضعیت و «پاک شد». */
@@ -520,7 +534,7 @@ export interface PanelStatusChange {
  */
 export type PanelWrite =
   | { ok: true; order: OrderRow }
-  | { ok: false; current: OrderStatus | null; filesDeleted?: boolean; partnerChanged?: boolean; hasShipment?: boolean };
+  | { ok: false; current: OrderStatus | null; filesDeleted?: boolean; partnerChanged?: boolean; hasShipment?: boolean; refunded?: boolean };
 
 /** جابه‌جایی چاپخانهٔ سفارش (برش ۵٫۲): از چاپخانه‌ای که ادمین دید (`from`؛ null یعنی سفارش بی چاپخانه بود)، با دلیل. */
 export interface PanelAssign {
@@ -895,7 +909,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
     async alerts(scope, clock) {
       const stuck = ts(new Date(clock.at.getTime() - SMS_STUCK_MS));
-      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed, money] = await Promise.all([
+      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed, money, unrefunded, refunding] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -978,9 +992,39 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           )
           .orderBy(asc(orders.orderNumber)),
         paymentAlerts(scope, clock),
+        // «لغوشده، پول برنگشته» (۷٫۳): پرداخت موفق، و نه بازپرداخت در جریان و نه برگشت‌داده‌شده.
+        db
+          .select({
+            orderNumber: orders.orderNumber,
+            cancelledAt: sql<Date | null>`(SELECT max(e.at) FROM order_status_events e WHERE e.order_id = "orders"."id" AND e.to_status = 'cancelled')`.mapWith(
+              orderStatusEvents.at,
+            ),
+          })
+          .from(orders)
+          .where(
+            and(
+              eq(orders.status, 'cancelled'),
+              sql`EXISTS (SELECT 1 FROM payments p WHERE p.order_id = ${orders.id} AND p.status = 'succeeded')`,
+              sql`NOT EXISTS (SELECT 1 FROM refunds r WHERE r.order_id = ${orders.id} AND r.status IN ('pending', 'succeeded'))`,
+              inScope(scope),
+            ),
+          )
+          .orderBy(sql`2 NULLS FIRST`, asc(orders.orderNumber)),
+        db
+          .select({
+            orderNumber: orders.orderNumber,
+            createdAt: refunds.createdAt,
+            unknown: sql<boolean>`${refunds.gatewayRef} IS NULL AND ${refunds.gatewayStatus} IS NULL`,
+          })
+          .from(refunds)
+          .innerJoin(orders, eq(orders.id, refunds.orderId))
+          .where(and(eq(refunds.status, 'pending'), inScope(scope)))
+          .orderBy(asc(refunds.createdAt), asc(orders.orderNumber)),
       ]);
       return {
         ...money,
+        unrefunded,
+        refunding,
         failedPdf: failed.map((row) => row.orderNumber),
         unreturned,
         unassigned: unassigned.map((row) => row.orderNumber),
@@ -1081,6 +1125,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         partnerRows,
         assignmentRows,
         shipmentRows,
+        refundRows,
       ] = await Promise.all([
         itemIds.length === 0
           ? []
@@ -1215,6 +1260,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(smsMessages, eq(smsMessages.id, shipments.smsMessageId))
           .where(eq(shipments.orderId, order.id))
           .orderBy(asc(shipments.createdAt), asc(shipments.rowNo)),
+        db
+          .select({ refund: refunds, adminName: adminUsers.displayName })
+          .from(refunds)
+          .leftJoin(adminUsers, eq(adminUsers.id, refunds.adminUserId))
+          .where(eq(refunds.orderId, order.id))
+          .orderBy(desc(refunds.createdAt), desc(refunds.id)),
       ]);
 
       const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
@@ -1278,6 +1329,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
           };
         }),
+        refunds: refundRows.map(({ refund, adminName }) => ({ ...refund, adminName })),
       };
     },
 
@@ -1438,6 +1490,8 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       } catch (error) {
         // سفارشی که کد رهگیری زنده دارد از «تحویل پست شد» بیرون نمی‌رود (0022، در COMMIT): مرسوله‌ای که همین حالا نشست.
         if (constraintOf(error) === 'shipments_order_handed') return { ok: false, current: change.from, hasShipment: true };
+        // سفارشی که پولش برگشته یا در راه برگشت است از «لغو شد» برنمی‌گردد (0032): بازپرداختی که همین حالا ساخته شد.
+        if (constraintOf(error) === 'orders_status_flow' && change.from === 'cancelled') return { ok: false, current: 'cancelled', refunded: true };
         throw error;
       }
     },

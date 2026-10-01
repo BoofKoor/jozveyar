@@ -102,6 +102,17 @@ import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
 import { zibalGateway } from '@jozveyar/payments/zibal';
 import { PAYMENT_ATTEMPT_TTL_MS } from './orders.js';
 import { providersOf, settleWith, watchHeld } from './payments.js';
+import {
+  REFUND_AUTO_EVERY_MS,
+  REFUND_AUTO_WINDOW_MS,
+  REFUND_REQUEST_GRACE_MS,
+  createRefundStore,
+  inquirePendingRefunds,
+  inquireRefund,
+  requestRefund,
+  type RefundStart,
+} from './refunds.js';
+import { refunds } from './schema.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -125,6 +136,8 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 /** سفارش‌ها و هر چه به آنها بسته است؛ پرداخت cascade ندارد (سابقهٔ پول بی‌صدا پاک نمی‌شود). */
 async function clearOrders({ db }: Database) {
+  // بازپرداخت پاک‌نشدنی است (0032)؛ TRUNCATE تریگر ردیفی ندارد.
+  await db.execute(sql`TRUNCATE refunds`);
   await db.delete(payments);
   await db.delete(orders);
   await db.delete(sessions);
@@ -1817,7 +1830,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -2212,7 +2225,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -2545,7 +2558,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     let operator = '';
 
     /** سفارش پرداخت‌شده همان‌طور که سرور می‌سازد: سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد و کار PDF. */
-    async function paidOrder(due = END_MONDAY, name = 'سارا احمدی') {
+    async function paidOrder(due = END_MONDAY, name = 'سارا احمدی', raw: unknown = null, cardMask: string | null = null) {
       const sections = [{ documentId: docId, pageCount: 20 }];
       const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const breakdown = quote(
@@ -2585,8 +2598,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         kind: 'succeeded',
         verifiedAmountRials: payment.amountRials,
         refId: '803114',
-        cardMask: null,
-        raw: null,
+        cardMask,
+        raw,
         paidAt: tehran('2026-10-04 10:00'),
         postHandoffDueAt: due,
       }));
@@ -2629,7 +2642,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -2956,6 +2969,435 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await panel.stats(ALL_ORDERS, { since, at: new Date(END_MONDAY.getTime() - 1) })).toEqual({ printing: 2, handed: 2, onTime: 1 });
       expect(await panel.stats(ALL_ORDERS, { since, at: new Date(END_MONDAY.getTime() - 2) })).toEqual({ printing: 2, handed: 1, onTime: 0 });
     });
+
+    /* ── بازپرداخت (برش ۷٫۳، ADR-051) ── */
+
+    describe('بازپرداخت: محافظ‌های refunds، ساختن زیر قفل و استعلام (برش ۷٫۳)', () => {
+      const PAID_RAW = { decision: 'success', verified: true, refId: '803114' };
+      const paymentOf = async (orderId: string) =>
+        (await conn.db.select().from(payments).where(and(eq(payments.orderId, orderId), eq(payments.status, 'succeeded'))))[0]!;
+      const refundOf = async (id: string) => (await conn.db.select().from(refunds).where(eq(refunds.id, id)))[0]!;
+      const refundsOf = (orderId: string) => conn.db.select().from(refunds).where(eq(refunds.orderId, orderId));
+
+      /** سفارش پرداخت‌شده‌ای که لغو شد، مثل پنل؛ با `raw` پرداخت برای رفتار بازپرداخت درگاه نمونه (`MockRefundPlan`). */
+      async function cancelledOrder(raw: unknown = PAID_RAW, cardMask: string | null = null, at = NOW) {
+        const order = await paidOrder(END_MONDAY, 'سارا احمدی', raw, cardMask);
+        const written = await createPanelOrderStore(conn).changeStatus(ALL_ORDERS, change(order, 'paid', 'cancelled', { reason: 'مشتری خواست', at }));
+        expect(written.ok).toBe(true);
+        return { order, payment: await paymentOf(order.id) };
+      }
+
+      type RefundInsert = typeof refunds.$inferInsert;
+      /** ردیف خام بازپرداخت، برای محافظ‌ها؛ پیش‌فرض بازپرداخت دستی کامل. */
+      const manualRow = (order: { id: string; totalRials: number }, paymentId: string, over: Partial<RefundInsert> = {}): RefundInsert => ({
+        orderId: order.id,
+        paymentId,
+        amountRials: order.totalRials,
+        method: 'manual',
+        status: 'succeeded',
+        reference: '552190',
+        refundedOn: tehran('2026-10-05 00:00'),
+        adminUserId: owner,
+        createdAt: NOW,
+        finishedAt: NOW,
+        ...over,
+      });
+      const gatewayRow = (order: { id: string; totalRials: number }, paymentId: string, over: Partial<RefundInsert> = {}) =>
+        manualRow(order, paymentId, {
+          method: 'gateway',
+          status: 'pending',
+          feeRials: 15_000,
+          reference: null,
+          refundedOn: null,
+          finishedAt: null,
+          ...over,
+        });
+      const insert = (row: RefundInsert) => conn.db.insert(refunds).values(row).returning();
+      const failRow = (id: string) =>
+        conn.db.update(refunds).set({ status: 'failed', failureReason: 'balance', finishedAt: NOW, settledVia: 'request' }).where(eq(refunds.id, id));
+
+      /** ورودی `start`، مثل سرویس پنل. */
+      const startInput = (
+        order: { id: string; orderNumber: number; totalRials: number },
+        paymentId: string,
+        over: Partial<RefundStart> = {},
+      ): RefundStart => {
+        const method = over.method ?? 'manual';
+        const at = over.at ?? NOW;
+        return {
+          orderId: order.id,
+          paymentId,
+          seen: null,
+          method,
+          amountRials: order.totalRials,
+          feeRials: method === 'gateway' ? 15_000 : null,
+          reference: method === 'manual' ? '552190' : null,
+          refundedOn: method === 'manual' ? tehran('2026-10-05 00:00') : null,
+          note: method === 'manual' ? 'کارت‌به‌کارت به همان کارت' : null,
+          adminUserId: owner,
+          at,
+          event: {
+            adminUserId: owner,
+            action: 'orders.refund',
+            targetType: 'order',
+            targetId: order.id,
+            ipHash: 'ip',
+            detail: { orderNumber: order.orderNumber, method, amountRials: order.totalRials },
+            at,
+          },
+          ...over,
+        };
+      };
+
+      it('فقط پرداخت موفق سفارش «لغو شد»؛ شاهد: همان ردیف پس از لغو و با پرداخت درست درج می‌شود', async () => {
+        const order = await paidOrder(END_MONDAY, 'سارا احمدی', PAID_RAW);
+        const payment = await paymentOf(order.id);
+        expect(await rejectedConstraint(insert(manualRow(order, payment.id)))).toBe('refunds_cancelled_only');
+        expect((await createPanelOrderStore(conn).changeStatus(ALL_ORDERS, change(order, 'paid', 'cancelled', { reason: 'x' }))).ok).toBe(true);
+        const other = await cancelledOrder();
+        expect(await rejectedConstraint(insert(manualRow(order, other.payment.id)))).toBe('refunds_paid_only');
+        const failed = await createOrderStore(conn).insertPayment({
+          orderId: order.id,
+          provider: 'mock',
+          amountRials: order.totalRials,
+          authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
+          raw: null,
+        });
+        expect(await rejectedConstraint(insert(manualRow(order, failed.id)))).toBe('refunds_paid_only');
+        expect(await rejectedConstraint(insert(manualRow(order, payment.id)))).toBeUndefined();
+      });
+
+      it('جمع زنده از مبلغ پرداخت بیشتر نمی‌شود؛ «برنگشت» شمرده نمی‌شود', async () => {
+        const { order, payment } = await cancelledOrder();
+        expect(await rejectedConstraint(insert(manualRow(order, payment.id, { amountRials: order.totalRials - 10_000 })))).toBeUndefined();
+        expect(await rejectedConstraint(insert(manualRow(order, payment.id, { amountRials: 10_010 })))).toBe('refunds_within_payment');
+        // شاهد: درست تا سقف می‌نشیند، و یک ریال بیشتر نه.
+        expect(await rejectedConstraint(insert(manualRow(order, payment.id, { amountRials: 10_000 })))).toBeUndefined();
+        expect(await rejectedConstraint(insert(manualRow(order, payment.id, { amountRials: 1 })))).toBe('refunds_within_payment');
+
+        const second = await cancelledOrder();
+        const [failed] = await insert(gatewayRow(second.order, second.payment.id));
+        await failRow(failed!.id);
+        expect(await rejectedConstraint(insert(manualRow(second.order, second.payment.id)))).toBeUndefined();
+      });
+
+      it('یکی در جریان برای هر پرداخت؛ راه درگاه بی پاسخ درگاه درج می‌شود؛ شاهد: پس از «برنگشت» دوباره', async () => {
+        const { order, payment } = await cancelledOrder();
+        const done = { status: 'succeeded' as const, finishedAt: NOW, settledVia: 'request' };
+        expect(await rejectedConstraint(insert(gatewayRow(order, payment.id, done)))).toBe('refunds_insert_state');
+        expect(await rejectedConstraint(insert(gatewayRow(order, payment.id, { gatewayRef: 'MOCKRF1' })))).toBe('refunds_insert_state');
+        expect(await rejectedConstraint(insert(gatewayRow(order, payment.id, { gatewayError: 'unavailable' })))).toBe('refunds_insert_state');
+        const [first] = await insert(gatewayRow(order, payment.id, { amountRials: 1 }));
+        expect(await rejectedConstraint(insert(gatewayRow(order, payment.id, { amountRials: 1 })))).toBe('refunds_one_pending');
+        await failRow(first!.id);
+        expect(await rejectedConstraint(insert(gatewayRow(order, payment.id)))).toBeUndefined();
+      });
+
+      it('گذار فقط «در حال برگشت» ← نهایی؛ ستون‌های منجمد؛ شناسهٔ درگاه یک بار؛ پاک‌نشدنی', async () => {
+        const { order, payment } = await cancelledOrder();
+        const [row] = await insert(gatewayRow(order, payment.id));
+        const byId = eq(refunds.id, row!.id);
+        const set = (values: Partial<RefundInsert>) => rejectedConstraint(conn.db.update(refunds).set(values).where(byId));
+        expect(await set({ amountRials: order.totalRials - 10 })).toBe('refunds_frozen');
+        expect(await set({ feeRials: 0 })).toBe('refunds_frozen');
+        expect(await set({ adminUserId: operator })).toBe('refunds_frozen');
+        expect(await set({ createdAt: new Date(NOW.getTime() - 1) })).toBe('refunds_frozen');
+        // شاهد: آنچه درگاه می‌گوید عوض‌شدنی است.
+        expect(await set({ gatewayRef: 'MOCKRF1', gatewayStatus: 16, gatewayCheckedAt: NOW, raw: { status: 16 } })).toBeUndefined();
+        expect(await set({ gatewayRef: 'MOCKRF2' })).toBe('refunds_frozen');
+        expect(await set({ status: 'succeeded', reference: '552190', finishedAt: NOW, settledVia: 'auto' })).toBeUndefined();
+        expect(await set({ reference: '552191' })).toBe('refunds_flow');
+        expect(await set({ status: 'failed', failureReason: 'other' })).toBe('refunds_flow');
+        expect(await rejectedConstraint(conn.db.delete(refunds).where(byId))).toBe('refunds_append_only');
+        expect(await refundOf(row!.id)).toMatchObject({ status: 'succeeded', reference: '552190', gatewayRef: 'MOCKRF1' });
+      });
+
+      it('محدودیت‌های شکل: راه، نهایی با زمان و علت، کد پیگیری، یادداشت، روز و برچسب خطا', async () => {
+        const { order, payment } = await cancelledOrder();
+        const manual = (over: Partial<RefundInsert>) => rejectedConstraint(insert(manualRow(order, payment.id, over)));
+        const gateway = (over: Partial<RefundInsert>) => rejectedConstraint(insert(gatewayRow(order, payment.id, over)));
+        expect(await manual({ amountRials: 0 })).toBe('refunds_amount_positive');
+        expect(await manual({ reference: null })).toBe('refunds_method');
+        expect(await manual({ refundedOn: null })).toBe('refunds_method');
+        expect(await manual({ feeRials: 15_000 })).toBe('refunds_method');
+        expect(await manual({ status: 'pending', finishedAt: null })).toBe('refunds_method');
+        expect(await manual({ method: 'card', settledVia: 'request' })).toBe('refunds_method');
+        expect(await gateway({ feeRials: null })).toBe('refunds_method');
+        expect(await gateway({ note: 'x' })).toBe('refunds_method');
+        expect(await manual({ finishedAt: null })).toBe('refunds_finished');
+        expect(await manual({ failureReason: 'balance' })).toBe('refunds_finished');
+        expect(await manual({ reference: '۵۵۲۱۹۰' })).toBe('refunds_reference');
+        expect(await manual({ reference: '55' })).toBe('refunds_reference');
+        expect(await manual({ note: '   ' })).toBe('refunds_note');
+        expect(await manual({ note: 'ب'.repeat(201) })).toBe('refunds_note');
+        expect(await manual({ refundedOn: new Date(NOW.getTime() + 1) })).toBe('refunds_refunded_on');
+        const [row] = await insert(gatewayRow(order, payment.id));
+        const set = (values: Partial<RefundInsert>) => rejectedConstraint(conn.db.update(refunds).set(values).where(eq(refunds.id, row!.id)));
+        expect(await set({ gatewayError: 'unavailable merchant' })).toBe('refunds_gateway_error');
+        expect(await set({ gatewayRef: 'MOCK RF' })).toBe('refunds_gateway_ref');
+        expect(await set({ status: 'failed', failureReason: 'wallet', finishedAt: NOW, settledVia: 'request' })).toBe('refunds_failure_reason');
+        expect(await set({ status: 'failed', failureReason: 'balance', finishedAt: NOW })).toBe('refunds_finished');
+        expect(await set({ settledVia: 'request' })).toBe('refunds_finished');
+        // شاهد: همان‌ها با مقدار درست.
+        expect(await set({ gatewayError: 'unavailable:503', gatewayRef: 'MOCKRF_1-a' })).toBeUndefined();
+        expect(await set({ status: 'failed', failureReason: 'balance', finishedAt: NOW, settledVia: 'request' })).toBeUndefined();
+        expect(await manual({ note: 'ب'.repeat(200) })).toBeUndefined();
+      });
+
+      it('سفارش با بازپرداخت زنده از «لغو شد» برنمی‌گردد؛ شاهد: با «برنگشت» برمی‌گردد', async () => {
+        const store = createPanelOrderStore(conn);
+        const first = await cancelledOrder();
+        await insert(gatewayRow(first.order, first.payment.id));
+        expect(await rejectedConstraint(conn.db.update(orders).set({ status: 'paid' }).where(eq(orders.id, first.order.id)))).toBe(
+          'orders_status_flow',
+        );
+        expect(await store.changeStatus(ALL_ORDERS, change(first.order, 'cancelled', 'paid', { reason: 'اشتباه' }))).toEqual({
+          ok: false,
+          current: 'cancelled',
+          refunded: true,
+        });
+        const second = await cancelledOrder();
+        await insert(manualRow(second.order, second.payment.id));
+        expect(await rejectedConstraint(conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, second.order.id)))).toBe(
+          'orders_status_flow',
+        );
+        const third = await cancelledOrder();
+        const [failed] = await insert(gatewayRow(third.order, third.payment.id));
+        await failRow(failed!.id);
+        expect((await store.changeStatus(ALL_ORDERS, change(third.order, 'cancelled', 'paid', { reason: 'اشتباه' }))).ok).toBe(true);
+      });
+
+      it('ساختن زیر قفل: دستی «برگشت داده شد» با رویداد و شناسه‌اش؛ «همان که دیده شد»؛ وضعیت، پرداخت و محدوده', async () => {
+        const store = createRefundStore(conn);
+        const { order, payment } = await cancelledOrder();
+        const made = await store.start(ALL_ORDERS, startInput(order, payment.id));
+        expect(made.ok).toBe(true);
+        const refund = made.ok ? made.refund : null;
+        expect(refund).toMatchObject({
+          method: 'manual',
+          status: 'succeeded',
+          amountRials: order.totalRials,
+          reference: '552190',
+          note: 'کارت‌به‌کارت به همان کارت',
+          finishedAt: NOW,
+          adminUserId: owner,
+        });
+        const events = await eventsOf(order.id);
+        expect(events.at(-1)).toMatchObject({
+          action: 'orders.refund',
+          adminUserId: owner,
+          detail: { orderNumber: order.orderNumber, method: 'manual', amountRials: order.totalRials, refundId: refund!.id },
+        });
+        // همان فرم دوباره (دو کلیک): بازپرداخت زنده هست.
+        expect(await store.start(ALL_ORDERS, startInput(order, payment.id))).toMatchObject({ ok: false, reason: 'changed', latest: { id: refund!.id } });
+        expect(await refundsOf(order.id)).toHaveLength(1);
+
+        // سفارشی که لغو نشده، پرداختی که همان نیست، و بیرون از محدوده.
+        const paid = await paidOrder(END_MONDAY, 'سارا احمدی', PAID_RAW);
+        expect(await store.start(ALL_ORDERS, startInput(paid, (await paymentOf(paid.id)).id))).toEqual({ ok: false, reason: 'not_cancelled' });
+        const other = await cancelledOrder();
+        expect(await store.start(ALL_ORDERS, startInput(other.order, payment.id))).toEqual({ ok: false, reason: 'payment_changed' });
+        expect(await store.start({ kind: 'partner', partnerId: randomUUID() }, startInput(other.order, other.payment.id))).toEqual({
+          ok: false,
+          reason: 'not_found',
+        });
+
+        // پس از «برنگشت»: فقط با همان که دید.
+        const gw = await store.start(ALL_ORDERS, startInput(other.order, other.payment.id, { method: 'gateway' }));
+        expect(gw).toMatchObject({ ok: true, refund: { status: 'pending', method: 'gateway', feeRials: 15_000, reference: null } });
+        const gwId = gw.ok ? gw.refund.id : '';
+        await failRow(gwId);
+        expect(await store.start(ALL_ORDERS, startInput(other.order, other.payment.id))).toMatchObject({ ok: false, reason: 'changed', latest: { id: gwId } });
+        expect(await store.start(ALL_ORDERS, startInput(other.order, other.payment.id, { seen: gwId }))).toMatchObject({ ok: true });
+      });
+
+      it('دو کلیک هم‌زمان یک بازپرداخت؛ بازپرداخت و برگرداندن لغو هم‌زمان: فقط یکی', async () => {
+        const store = createRefundStore(conn);
+        const panel = createPanelOrderStore(conn);
+        for (let round = 0; round < 6; round += 1) {
+          const { order, payment } = await cancelledOrder();
+          const method = round % 2 === 0 ? 'manual' : 'gateway';
+          const results = await Promise.all([
+            store.start(ALL_ORDERS, startInput(order, payment.id, { method })),
+            store.start(ALL_ORDERS, startInput(order, payment.id, { method })),
+          ]);
+          expect(results.filter((result) => result.ok)).toHaveLength(1);
+          expect(await refundsOf(order.id)).toHaveLength(1);
+        }
+        for (let round = 0; round < 6; round += 1) {
+          const { order, payment } = await cancelledOrder();
+          const [refund, revert] = await Promise.all([
+            store.start(ALL_ORDERS, startInput(order, payment.id, { method: round % 2 === 0 ? 'manual' : 'gateway' })),
+            panel.changeStatus(ALL_ORDERS, change(order, 'cancelled', 'paid', { reason: 'اشتباه' })),
+          ]);
+          // دقیقاً یکی: یا پول برمی‌گردد و سفارش لغو می‌ماند، یا سفارش برگشت و بازپرداختی نیست.
+          expect(refund.ok !== revert.ok).toBe(true);
+          const after = await statusOf(order.id);
+          const rows = await refundsOf(order.id);
+          if (refund.ok) {
+            expect(after.status).toBe('cancelled');
+            expect(rows).toHaveLength(1);
+          } else {
+            expect(after.status).toBe('paid');
+            expect(rows).toHaveLength(0);
+          }
+        }
+      });
+
+      it('از درگاه: درخواست با شناسهٔ ردیف، «در حال برگشت» و بعد استعلام «برگشت داده شد»؛ رد روشن «برنگشت»', async () => {
+        const store = createRefundStore(conn);
+        let at = new Date(NOW.getTime() + 5 * MINUTE);
+        const deps = { store, gateways: { mock: mockGateway() }, now: () => at };
+        const { order, payment } = await cancelledOrder(PAID_RAW, '603799******1234');
+        const made = await store.start(ALL_ORDERS, startInput(order, payment.id, { method: 'gateway' }));
+        const refund = made.ok ? made.refund : null;
+        const asked = await requestRefund(deps, { refund: refund!, payment, description: `بازپرداخت سفارش ${order.orderNumber} جزوه‌یار` });
+        expect(asked).toMatchObject({ status: 'pending', gatewayStatus: 16, gatewayError: null, gatewayCheckedAt: at, finishedAt: null });
+        expect(asked.gatewayRef).toMatch(/^MOCKRF[0-9A-F]{32}$/);
+        at = new Date(at.getTime() + 3 * MINUTE);
+        const done = await inquireRefund(deps, refund!.id, { via: 'panel' });
+        expect(done).toMatchObject({ orderNumber: order.orderNumber, before: { status: 'pending' }, refund: { status: 'succeeded', settledVia: 'panel', gatewayStatus: 15, finishedAt: at, gatewayRef: asked.gatewayRef } });
+        expect(typeof done === 'object' && done?.refund.reference).toMatch(/^\d{6}$/);
+        // بسته‌شده دیگر استعلام نمی‌شود.
+        expect(await inquireRefund(deps, refund!.id, { via: 'panel' })).toBe('not_inquirable');
+
+        const balance = await cancelledOrder({ ...PAID_RAW, refund: 'balance' });
+        const second = await store.start(ALL_ORDERS, startInput(balance.order, balance.payment.id, { method: 'gateway' }));
+        const rejected = await requestRefund(deps, { refund: second.ok ? second.refund : refund!, payment: balance.payment, description: 'x' });
+        expect(rejected).toMatchObject({ status: 'failed', failureReason: 'balance', settledVia: 'request', finishedAt: at, gatewayError: null });
+      });
+
+      it('پاسخ گم‌شده: «معلوم نیست» تا استعلام؛ رسیده «برگشت داده شد»، نرسیده «برنگشت»؛ درخواست در راه استعلام نمی‌شود', async () => {
+        const store = createRefundStore(conn);
+        let at = new Date(NOW.getTime() + 5 * MINUTE);
+        const deps = { store, gateways: { mock: mockGateway() }, now: () => at };
+        const run = async (plan: string) => {
+          const { order, payment } = await cancelledOrder({ ...PAID_RAW, refund: plan });
+          const made = await store.start(ALL_ORDERS, startInput(order, payment.id, { method: 'gateway', at }));
+          const refund = made.ok ? made.refund : null;
+          // هنوز در راه: نه شناسه، نه خطا، و تازه.
+          expect(await inquireRefund(deps, refund!.id, { via: 'auto', skipLocked: true })).toBe('not_inquirable');
+          const asked = await requestRefund(deps, { refund: refund!, payment, description: 'x' });
+          expect(asked).toMatchObject({ status: 'pending', gatewayRef: null, gatewayStatus: null, gatewayError: 'unavailable' });
+          return asked;
+        };
+        const lost = await run('lost');
+        expect(await inquireRefund(deps, lost.id, { via: 'auto', skipLocked: true })).toMatchObject({
+          refund: { status: 'succeeded', settledVia: 'auto', gatewayRef: expect.stringMatching(/^MOCKRF/) },
+        });
+        const dropped = await run('dropped');
+        expect(await inquireRefund(deps, dropped.id, { via: 'panel' })).toMatchObject({
+          refund: { status: 'failed', failureReason: 'not_found', settledVia: 'panel' },
+        });
+
+        // پروسه وسط درخواست افتاد: پس از مهلت با شناسهٔ خودمان پرسیده می‌شود.
+        const { order, payment } = await cancelledOrder();
+        const made = await store.start(ALL_ORDERS, startInput(order, payment.id, { method: 'gateway', at }));
+        const id = made.ok ? made.refund.id : '';
+        expect(await inquireRefund(deps, id, { via: 'auto' })).toBe('not_inquirable');
+        at = new Date(at.getTime() + REFUND_REQUEST_GRACE_MS);
+        expect(await inquireRefund(deps, id, { via: 'auto' })).toMatchObject({ refund: { status: 'succeeded' } });
+      });
+
+      it('درگاه بی بازپرداخت یا بی کلید: درخواست نمی‌رود و «برنگشت»، بی پول؛ بی جواب: برچسب و همان «در حال برگشت»', async () => {
+        const store = createRefundStore(conn);
+        const deps = { store, gateways: {}, now: () => NOW };
+        const { order, payment } = await cancelledOrder();
+        const made = await store.start(ALL_ORDERS, startInput(order, payment.id, { method: 'gateway' }));
+        expect(await requestRefund(deps, { refund: made.ok ? made.refund : (null as never), payment, description: 'x' })).toMatchObject({
+          status: 'failed',
+          failureReason: 'unconfigured',
+          gatewayError: 'unconfigured',
+          settledVia: 'request',
+        });
+      });
+
+      it('استعلام خودکار: فقط در جریان، پس از ۲ دقیقه و تا ۲۴ ساعت، قدیمی‌ترین پرسش اول؛ SKIP LOCKED', async () => {
+        const store = createRefundStore(conn);
+        const base = NOW.getTime();
+        const make = async (createdAt: Date, plan?: string) => {
+          const { order, payment } = await cancelledOrder(plan ? { ...PAID_RAW, refund: plan } : PAID_RAW);
+          const made = await store.start(ALL_ORDERS, startInput(order, payment.id, { method: 'gateway', at: createdAt }));
+          return made.ok ? made.refund.id : '';
+        };
+        const fresh = await make(new Date(base - REFUND_AUTO_EVERY_MS + 1_000));
+        const due = await make(new Date(base - 10 * MINUTE));
+        const older = await make(new Date(base - 3 * 3_600_000));
+        const stale = await make(new Date(base - REFUND_AUTO_WINDOW_MS - 1_000));
+        const manual = (await cancelledOrder()).order;
+        await store.start(ALL_ORDERS, startInput(manual, (await paymentOf(manual.id)).id));
+        expect(await store.autoInquiry(NOW, 10, ['mock'])).toEqual([older, due]);
+        // درگاهی که این پنل بازپرداختش را ندارد: هیچ.
+        expect(await store.autoInquiry(NOW, 10, ['zibal'])).toEqual([]);
+        expect(await store.autoInquiry(NOW, 10, [])).toEqual([]);
+        // تازه پرسیده‌شده تا دو دقیقهٔ دیگر نه.
+        await conn.db.update(refunds).set({ gatewayCheckedAt: new Date(base - MINUTE), gatewayError: 'unavailable' }).where(eq(refunds.id, older));
+        expect(await store.autoInquiry(NOW, 10, ['mock'])).toEqual([due]);
+        expect([fresh, stale].every((id) => id.length === 36)).toBe(true);
+
+        // ردیفی که استعلام دیگری قفل کرده: busy.
+        const deps = { store, gateways: { mock: mockGateway() }, now: () => NOW };
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let locked!: () => void;
+        const isLocked = new Promise<void>((resolve) => (locked = resolve));
+        const holder = conn.db.transaction(async (tx) => {
+          await tx.select().from(refunds).where(eq(refunds.id, due)).for('update');
+          locked();
+          await held;
+        });
+        await isLocked;
+        expect(await inquireRefund(deps, due, { via: 'auto', skipLocked: true })).toBe('busy');
+        release();
+        await holder;
+        expect(await inquirePendingRefunds(deps)).toEqual({ checked: 1, closed: 1 });
+        expect(await refundOf(due)).toMatchObject({ status: 'succeeded', settledVia: 'auto' });
+      });
+
+      it('جزئیات پنل و پیشخوان: بازپرداخت‌ها با نام ادمین؛ «لغوشده، پول برنگشته» و «در حال برگشت» با «معلوم نیست»', async () => {
+        await clearOrders(conn);
+        const store = createRefundStore(conn);
+        const panel = createPanelOrderStore(conn);
+        const clock: PanelClock = {
+          at: NOW,
+          staleBefore: NOW,
+          unreturnedBefore: NOW,
+          untrackedSince: new Date(NOW.getTime() - 45 * DAY),
+        };
+        // b زودتر لغو شد: قدیمی‌ترین لغو اول، نه کوچک‌ترین شماره.
+        const a = await cancelledOrder();
+        const b = await cancelledOrder(PAID_RAW, null, new Date(NOW.getTime() - MINUTE));
+        // سفارش لغوشدهٔ بی پرداخت موفق هشدار ندارد: پرداخت آن در درگاه موفق شده بود؛ اینجا همان سفارش را بی پرداخت نمی‌شود ساخت، پس
+        // شمار فقط همین دو.
+        let alerts = await panel.alerts(ALL_ORDERS, clock);
+        expect(alerts.unrefunded).toEqual([
+          { orderNumber: b.order.orderNumber, cancelledAt: new Date(NOW.getTime() - MINUTE) },
+          { orderNumber: a.order.orderNumber, cancelledAt: NOW },
+        ]);
+        expect(alerts.refunding).toEqual([]);
+
+        const made = await store.start(ALL_ORDERS, startInput(a.order, a.payment.id, { method: 'gateway' }));
+        const id = made.ok ? made.refund.id : '';
+        await requestRefund({ store, gateways: { mock: mockGateway() }, now: () => NOW }, { refund: made.ok ? made.refund : (null as never), payment: a.payment, description: 'x' });
+        await store.start(ALL_ORDERS, startInput(b.order, b.payment.id, { method: 'gateway' }));
+        alerts = await panel.alerts(ALL_ORDERS, clock);
+        expect(alerts.unrefunded).toEqual([]);
+        expect(alerts.refunding).toEqual([
+          { orderNumber: a.order.orderNumber, createdAt: NOW, unknown: false },
+          { orderNumber: b.order.orderNumber, createdAt: NOW, unknown: true },
+        ].sort((x, y) => x.orderNumber - y.orderNumber));
+        // محدودهٔ چاپخانهٔ دیگر هیچ.
+        const partner = await panel.alerts({ kind: 'partner', partnerId: randomUUID() }, clock);
+        expect(partner.unrefunded).toEqual([]);
+        expect(partner.refunding).toEqual([]);
+
+        const details = await panel.details(ALL_ORDERS, a.order.orderNumber);
+        expect(details!.refunds).toMatchObject([{ id, adminName: 'سارا رضایی', status: 'pending', gatewayStatus: 16 }]);
+        // مشتری: همان ردیف‌ها، تازه‌ترین اول.
+        const customer = await createOrderStore(conn).details(a.order.publicToken);
+        expect(customer!.refunds.map((row) => row.id)).toEqual([id]);
+      });
+    });
   });
 
   // فایل چاپ، برگه و نگهداری (برش ۵٫۱، ADR-043 و ADR-044): محافظ‌ها، اثر انگشت برگه، و ذخیره‌گاه پنل. ساختن فایل‌ها و پاک
@@ -3059,7 +3501,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -3455,7 +3897,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -4364,7 +4806,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -4711,7 +5153,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -5142,7 +5584,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
