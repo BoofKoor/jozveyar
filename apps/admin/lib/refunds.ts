@@ -89,6 +89,18 @@ export function rejectionResult(tag: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/**
+ * نتیجهٔ «استعلام از درگاه» یک بازپرداخت (همان `RefundOutcome` سرویس)، برای رویدادهای سفارش و صفحهٔ «رویدادها». اگر استعلام بستش،
+ * سطر نتیجهٔ خود بازپرداخت همان را می‌گوید.
+ */
+export const REFUND_INQUIRY_TEXT: Record<string, string> = {
+  refunding: 'هنوز در راه است',
+  unknown: 'درگاه جواب روشن نداد',
+  refunded: 'پول به کارت برگشت',
+  failed: 'برنگشت',
+  busy: 'استعلام دیگری همان لحظه در کار بود',
+};
+
 /** چه چیزی راه درگاه را بست، برای رویدادهای سفارش. */
 export const REFUND_VIA: Record<string, string> = { auto: 'درگاه، استعلام خودکار', panel: 'درگاه، استعلام از پنل' };
 

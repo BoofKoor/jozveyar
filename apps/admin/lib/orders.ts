@@ -50,7 +50,7 @@ import { normalizeIranMobile, tidyInputFa } from '@jozveyar/text/input';
 
 import { tehranDay } from './format';
 import { assignmentText } from './partners';
-import { REFUND_VIA, rejectionPast, rejectionResult } from './refunds';
+import { REFUND_INQUIRY_TEXT, REFUND_VIA, rejectionPast, rejectionResult } from './refunds';
 
 /** تکهٔ متن: رشته، عدد (`.num`)، نام لاتین (`bdi`)، یا کد رهگیری پست (`jy-barcode`، برش ۶٫۱). */
 export type Seg = string | { num: string } | { ltr: string } | { barcode: string };
@@ -516,16 +516,6 @@ const INQUIRY_TEXT: Record<string, string> = {
   held: 'پول هنوز نزد درگاه است',
   returned: 'پول به کارت برگشت',
   verified: 'تأییدشده، و پولش خودکار برنمی‌گردد',
-};
-
-/** نتیجهٔ «استعلام از درگاه» یک بازپرداخت (برش ۷٫۳)، همان `RefundInquiryOutcome` سرویس. */
-export const REFUND_INQUIRY_TEXT: Record<string, string> = {
-  succeeded: 'برگشت داده شد',
-  failed: 'برنگشت',
-  pending: 'هنوز در حال برگشت',
-  unanswered: 'درگاه جواب روشن نداد',
-  closed: 'همان لحظه جای دیگری بسته شده بود',
-  busy: 'استعلام دیگری همان لحظه در کار بود',
 };
 
 /** کسی که تلاش را بست (`payments.settled_via`، برش ۷٫۲). */
@@ -1142,7 +1132,7 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     } else if (event.action === 'orders.refund_inquiry') {
       // «استعلام از درگاه» بازپرداخت (۷٫۳)؛ اگر بستش، سطر نتیجهٔ بازپرداخت بالا همان را می‌گوید.
       const outcome = String((detail as { outcome?: unknown }).outcome ?? '');
-      if (outcome === 'pending' || outcome === 'unanswered') {
+      if (outcome === 'refunding' || outcome === 'unknown') {
         entries.push({ at: event.at, text: [`استعلام بازپرداخت از درگاه: ${REFUND_INQUIRY_TEXT[outcome]}`], who });
       }
     } else if (event.action === 'payments.gateway_rejected') {

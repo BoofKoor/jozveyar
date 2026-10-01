@@ -13,6 +13,7 @@ import { gatewayName } from '@jozveyar/payments';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
 import { tehranDay } from './format';
+import { REFUND_INQUIRY_TEXT } from './refunds';
 import { ROLE_NAMES } from './messages';
 import { boundsText } from './report';
 import { KEY_INFO } from './settings';
@@ -152,15 +153,6 @@ function orderRef(detail: Detail): Segment[] {
   const item = typeof detail.item === 'number' && detail.item > 1 ? [' (جزوهٔ ', { ltr: String(detail.item) }, ')'] : [];
   return [{ ltr: number }, ...item];
 }
-
-/** نتیجهٔ «استعلام از درگاه» یک بازپرداخت (۷٫۳). */
-const REFUND_INQUIRY: Record<string, string> = {
-  refunding: 'هنوز در راه است',
-  unknown: 'درگاه جواب روشن نداد',
-  refunded: 'پول به کارت برگشت',
-  failed: 'برنگشت',
-  busy: 'استعلام دیگری همان لحظه در کار بود',
-};
 
 /** «462,500 تومان»، عدد جدا از جملهٔ فارسی. */
 const tomansOf = (value: unknown): Segment[] =>
@@ -410,7 +402,7 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
     case 'orders.refund_inquiry':
       return {
         badge: null,
-        text: ['سفارش ', ...orderRef(detail), `: استعلام بازپرداخت از درگاه؛ ${REFUND_INQUIRY[str(detail.outcome)] ?? str(detail.outcome)}`],
+        text: ['سفارش ', ...orderRef(detail), `: استعلام بازپرداخت از درگاه؛ ${REFUND_INQUIRY_TEXT[str(detail.outcome)] ?? str(detail.outcome)}`],
       };
     case 'payments.sms_resend':
       // «دوباره بفرست» پیامک پرداخت (۷٫۱)، زیر چیپ «پرداخت و بازپرداخت» (سؤال ۱۴۱).
