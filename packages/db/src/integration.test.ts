@@ -2426,6 +2426,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         held: [],
         verifiedUnused: [],
         autoClosed: { failed: 0, succeeded: 0 },
+        // بازپرداخت (۷٫۳): هیچ سفارش لغوشده‌ای اینجا نیست.
+        unrefunded: [],
+        refunding: [],
       });
       // نیم ساعت بعد، تلاش ۱۰ دقیقه‌ای هم بی برگشت است (شاهد مهلت تلاش).
       expect(
@@ -4633,6 +4636,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           held: [],
           verifiedUnused: [],
           autoClosed: { failed: 0, succeeded: 0 },
+          unrefunded: [],
+          refunding: [],
         });
         expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toMatchObject({ open: 1, awaiting: 1, all: 2 });
         expect(await panel.counts(NOOR, { search: null, clock })).toEqual({ open: 0, handed: 0, cancelled: 0, awaiting: 0, abandoned: 0, all: 0 });
