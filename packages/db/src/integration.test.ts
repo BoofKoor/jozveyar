@@ -1673,19 +1673,29 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           todayStart: new Date(at.getTime() - 3_600_000),
         });
         const alerts = () => panel.alerts(ALL_ORDERS, clockAt(new Date()));
-        const merchantCheck = (action: string, detail: Record<string, unknown>) =>
-          conn.db.insert(adminEvents).values({
+        // «پس از» پیشخوان اکید است و `created_at` پایگاه داده میکروثانیه، ولی Date میلی‌ثانیه: در یک میلی‌ثانیه دو رویداد پشت‌سرهم
+        // «پس از» هم نیستند، یا ردیف پیشین پایگاه داده «پس از» زمانی می‌افتد که بعدش ساخته شد. پس هر زمان این تست دو میلی‌ثانیه پس از
+        // هر چه پیش‌تر نوشته شد.
+        const tick = async () => {
+          const from = Date.now();
+          while (Date.now() < from + 2) await new Promise((resolve) => setTimeout(resolve, 1));
+          return new Date();
+        };
+        const merchantCheck = async (action: string, detail: Record<string, unknown>) => {
+          const at = await tick();
+          await conn.db.insert(adminEvents).values({
             adminUserId: null,
             action,
             targetType: SERVICE_KEY_TARGET,
             targetId: 'PAYMENT_MERCHANT_ID',
             detail: { ...detail, name: 'PAYMENT_MERCHANT_ID' },
-            at: new Date(),
+            at,
           });
+        };
 
         // ردِ شروع (۱۱۵): رویداد سیستم روی سفارش، بی ادمین؛ پیشخوان تا اولین شروع موفق همان درگاه.
         const { order } = await store().createOrder(await newOrder());
-        const rejectedAt = new Date();
+        const rejectedAt = await tick();
         await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 115, at: rejectedAt });
         const [event] = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'payments.gateway_rejected'), eq(adminEvents.targetId, order.id)));
         expect(event).toMatchObject({ adminUserId: null, targetType: 'order', detail: { orderNumber: order.orderNumber, provider: 'zibal', result: 115 } });
@@ -1698,20 +1708,22 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect((await alerts()).gatewayRejected).toBeNull();
 
         // دوباره رد شد (کد پذیرنده)؛ «آزمایش» ردشده پاکش نمی‌کند، «آزمایش» یا ذخیرهٔ آزموده می‌کند.
-        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 103, at: new Date() });
+        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 103, at: await tick() });
         expect((await alerts()).gatewayRejected).toMatchObject({ result: 103, orderNumber: order.orderNumber });
         await merchantCheck('settings.key_test', { subject: 'current', outcome: 'rejected', status: 115 });
         await merchantCheck('settings.key_set', { tested: 'skipped' });
         expect((await alerts()).gatewayRejected).toMatchObject({ result: 103 });
         await merchantCheck('settings.key_set', { tested: 'ok' });
         expect((await alerts()).gatewayRejected).toBeNull();
-        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 115, at: new Date() });
+        // ردی پس از ذخیرهٔ آزموده دوباره هشدار است، تا «آزمایش» درست بعد از خودش.
+        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 115, at: await tick() });
+        expect((await alerts()).gatewayRejected).toMatchObject({ result: 115, stage: 'start' });
         await merchantCheck('settings.key_test', { subject: 'current', outcome: 'ok' });
         expect((await alerts()).gatewayRejected).toBeNull();
 
         // همان کد در استعلام یک تلاش (سؤال ۱۴۷): از آخرین پرسش خود تلاش، بی رویداد تازه؛ تا «آزمایش» درست بعد از آن.
         const asked = await zibalAttempt();
-        const checkedAt = new Date();
+        const checkedAt = await tick();
         await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'rejected:115', at: checkedAt });
         expect((await alerts()).gatewayRejected).toEqual({
           at: checkedAt,
@@ -1721,9 +1733,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           stage: 'inquiry',
         });
         // شاهد: خطای گذرا (بی کد مالک) هشدار نیست.
-        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'unavailable:502', at: new Date() });
+        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'unavailable:502', at: await tick() });
         expect((await alerts()).gatewayRejected).toBeNull();
-        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'rejected:103', at: new Date() });
+        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'rejected:103', at: await tick() });
         expect((await alerts()).gatewayRejected).toMatchObject({ result: 103, stage: 'inquiry' });
         await merchantCheck('settings.key_test', { subject: 'current', outcome: 'ok' });
         expect((await alerts()).gatewayRejected).toBeNull();
