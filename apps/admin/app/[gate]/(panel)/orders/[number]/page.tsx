@@ -28,7 +28,7 @@ import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
-import { REFUND_NOTE_MAX, rejectionNow, rejectionResult } from '../../../../../lib/refunds';
+import { REFUND_NOTE_MAX, rejectionNow, rejectionResult, viaGateway } from '../../../../../lib/refunds';
 import { paymentSmsView, smsView } from '../../../../../lib/sms';
 import {
   REASON_MAX,
@@ -919,7 +919,8 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
   const { payment, latest, state } = refund;
   const amount = formatTomans(payment.amountRials, false);
   const provider = gatewayName(payment.provider);
-  const card = payment.cardMask ? formatCardMask(payment.cardMask) : null;
+  // کارت پوشیده یک تکه می‌ماند، همان کارت «پرداخت‌ها».
+  const card = payment.cardMask ? formatCardMask(payment.cardMask).replace(/ /g, '\u00a0') : null;
   const target = { gate, orderNumber: order.orderNumber, paymentId: payment.id, seen: refund.seen, amount, back: self };
 
   if (mode === 'refund' && refundFormOpen('refund', refund) && refund.gateway) {
@@ -966,7 +967,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
           </p>
         ) : (
           <p className="ad-hint">
-            بازپرداخت از درگاه {provider} هنوز در پنل نیست؛ پول را از پنل {provider} یا راه دیگری برگردان و اینجا ثبتش کن.
+            بازپرداخت از {viaGateway(payment.provider)} هنوز در پنل نیست؛ پول را از پنل {provider} یا راه دیگری برگردان و اینجا ثبتش کن.
           </p>
         )}
       </div>
@@ -987,7 +988,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
 
   if (state === 'none' || !latest) {
     return (
-      <section className="jy-card ad-status ad-refund" aria-labelledby="t-rf" data-refund="none">
+      <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund="none">
         {head(
           <span className="jy-badge jy-badge--warning">
             <span className="jy-icon jy-icon-warning" aria-hidden="true" />
@@ -1011,7 +1012,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
     const unknown = state === 'unknown';
     const checked = latest.gatewayCheckedAt;
     return (
-      <section className="jy-card ad-status ad-refund" aria-labelledby="t-rf" data-refund={state}>
+      <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund={state}>
         {head(
           unknown ? (
             <span className="jy-badge jy-badge--warning">
@@ -1068,7 +1069,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
   if (state === 'refunded') {
     const manual = latest.method === 'manual';
     return (
-      <section className="jy-card ad-status ad-refund" aria-labelledby="t-rf" data-refund="refunded">
+      <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund="refunded">
         {head(
           <span className="jy-badge jy-badge--success">
             <span className="jy-icon jy-icon-success" aria-hidden="true" />
@@ -1103,7 +1104,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
                 )
               ) : (
                 <>
-                  از درگاه {provider}، به {toCard}
+                  از {viaGateway(payment.provider)}، به {toCard}
                   {latest.feeRials !== null ? (
                     <>
                       {' '}
@@ -1133,7 +1134,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
   const why = rejectionNow(reason, payment.provider, rejectionResult(latest.gatewayError));
   const unsent = reason === 'unconfigured' || reason === 'not_found';
   return (
-    <section className="jy-card ad-status ad-refund" aria-labelledby="t-rf" data-refund="failed">
+    <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund="failed">
       {head(
         <span className="jy-badge jy-badge--error">
           <span className="jy-icon jy-icon-error" aria-hidden="true" />

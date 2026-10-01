@@ -94,7 +94,7 @@ import {
   type Seg,
   type StatusAction,
 } from '../orders';
-import { REFUND_SLOW_MS, readManualRefund, refundAskable, refundCard, type RefundCard, type RefundState } from '../refunds';
+import { REFUND_SLOW_MS, readManualRefund, refundAskable, refundCard, viaGateway, type RefundCard, type RefundState } from '../refunds';
 import { monthKey, monthLabel, monthRange, parseMonthKey } from '../report';
 import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
@@ -991,7 +991,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
   /** درگاه پرداخت موفق این سفارش، اگر همین پنل بازپرداختش را دارد. */
   function refundByOf(details: PanelOrderDetails): string | null {
     const paid = details.payments.find((payment) => payment.status === 'succeeded');
-    return paid && deps.payments?.gateways[paid.provider]?.refunds ? gatewayName(paid.provider) : null;
+    return paid && deps.payments?.gateways[paid.provider]?.refunds ? viaGateway(paid.provider) : null;
   }
 
   /** کارت «بازپرداخت» برای این نشست: مجوزها، درگاه و کارمزدش، و «استعلام از درگاه». */

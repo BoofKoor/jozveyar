@@ -9,11 +9,10 @@
  */
 
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
-import { gatewayName } from '@jozveyar/payments';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
 import { tehranDay } from './format';
-import { REFUND_INQUIRY_TEXT } from './refunds';
+import { REFUND_INQUIRY_TEXT, viaGateway } from './refunds';
 import { ROLE_NAMES } from './messages';
 import { boundsText } from './report';
 import { KEY_INFO } from './settings';
@@ -395,7 +394,7 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
               ...orderRef(detail),
               ': بازپرداخت ',
               ...tomansOf(detail.amountRials),
-              ` از درگاه ${gatewayName(str(detail.provider))} درخواست شد`,
+              ` از ${viaGateway(str(detail.provider))} درخواست شد`,
               ...(typeof detail.feeRials === 'number' ? ['؛ کارمزد ', ...tomansOf(detail.feeRials)] : []),
             ],
           };

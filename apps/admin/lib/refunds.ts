@@ -8,6 +8,12 @@ import { gatewayName, type RefundRejection } from '@jozveyar/payments';
 import { parseJalaliNumeric, tehranDayStart, toLatinDigits } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
 
+/** «درگاه زیبال»، «درگاه نمونه»: نام درگاه با «درگاه» یک بار، برای «از درگاه …». */
+export function viaGateway(provider: string): string {
+  const name = gatewayName(provider);
+  return name.startsWith('درگاه') ? name : `درگاه ${name}`;
+}
+
 /** حالت کارت: پول برنگشته، در حال برگشت، معلوم نیست (درخواست بی جواب روشن)، برگشت داده شد، یا برنگشت (رد درگاه). */
 export type RefundState = 'none' | 'refunding' | 'unknown' | 'refunded' | 'failed';
 
