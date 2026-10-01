@@ -275,6 +275,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   activate(list: PriceList): void;
   /** کدهای رهگیری زندهٔ هر سفارش با پیامکشان (برش ۶٫۳)؛ پنل می‌نشاندشان، اینجا تست. */
   parcels: Map<string, OrderDetails['parcels']>;
+  /** بازپرداخت‌های هر سفارش (برش ۷٫۳)، تازه‌ترین اول؛ پنل می‌نشاندشان، اینجا تست. */
+  refunds: Map<string, OrderDetails['refunds']>;
   /** پیامک‌های پرداخت منتظر و فرستاده (برش ۷٫۱)، و درگاه `deliverQueued` رویشان، مثل `createSmsOutbox`. */
   sms: Map<number, MemorySms>;
   smsOutbox: SmsOutbox;
@@ -283,6 +285,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
 } {
   const rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[] = [];
   const parcels = new Map<string, OrderDetails['parcels']>();
+  const refunds = new Map<string, OrderDetails['refunds']>();
   const sms = new Map<number, MemorySms>();
   let nextSms = 1;
   const documentsById = new Map<string, CheckoutDocument>();
@@ -349,6 +352,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
         .map((p) => ({ ...p })),
       parcels: [...(parcels.get(order.id) ?? [])],
+      refunds: [...(refunds.get(order.id) ?? [])],
     };
   }
 
@@ -364,6 +368,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     partners,
     assignments,
     parcels,
+    refunds,
     sms,
     rejections,
     // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامک پرداختی که سفارشش لغو نشده.

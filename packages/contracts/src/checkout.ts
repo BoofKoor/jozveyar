@@ -258,4 +258,24 @@ export interface OrderViewDetails {
   recipient: { name: string; phone: string; addressText: string; postalCode: string | null };
   /** بسته‌های پستی با کد رهگیری (برش ۶٫۳). */
   parcels: OrderViewParcel[];
+  /**
+   * بازپرداخت سفارش لغوشده (برش ۷٫۳، ADR-051، سؤال ۱۵۷): فقط پولی که در راه است یا برگشته. «برنگشت» (رد درگاه) و «معلوم نیست» (درخواست بی
+   * جواب روشن) اینجا null است: مشتری همان «برمی‌گردد» لغو را می‌بیند، چون چیزی که نمی‌دانیم گفته نمی‌شود. یادداشت و کارمزد هرگز.
+   */
+  refund: OrderViewRefund | null;
 }
+
+/** بازپرداخت برای مشتری (برش ۷٫۳): مبلغ، کارت پوشیده‌ای که پول به آن برمی‌گردد، و پس از برگشت روز و کد پیگیری. */
+export type OrderViewRefund =
+  | { state: 'refunding'; amountRials: number; cardMask: string | null }
+  | {
+      state: 'refunded';
+      amountRials: number;
+      /** فقط از درگاه، که به همان کارت برگرداند؛ دستی null («به کارتت» نمی‌گوییم، چون راهش را نمی‌دانیم). */
+      cardMask: string | null;
+      /** «سه‌شنبه 14 مهر». */
+      day: string;
+      /** «11:41» فقط از درگاه؛ دستی فقط روز دارد. */
+      time: string | null;
+      reference: string | null;
+    };
