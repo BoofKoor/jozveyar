@@ -9,6 +9,7 @@ import { notFound, redirect } from 'next/navigation';
 
 import {
   createAdminStore,
+  createOrderStore,
   createPanelOrderStore,
   createPartnerStore,
   createSecretStore,
@@ -21,13 +22,15 @@ import {
   getDb,
   serviceKeyReader,
 } from '@jozveyar/db';
+import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
+import { zibalClient, zibalGateway } from '@jozveyar/payments/zibal';
 import { consoleTransport, type SmsTransport } from '@jozveyar/sms';
 import { smsIrClient, smsIrTransport } from '@jozveyar/sms/smsir';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
 import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
-import { adminConfig, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
+import { adminConfig, panelMockGateway, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
@@ -66,6 +69,14 @@ function build(config: AdminConfig): Panel {
       ? smsIrTransport({ keys: serviceKeyReader(secrets, process.env, config.secretsKey), ...smsir })
       : consoleTransport();
   const sms = { transport, outbox: createSmsOutbox(getDb(), transport.name) };
+  // درگاه‌های پنل (۷٫۲، ADR-050): «استعلام از درگاه» با درگاه خود هر پرداخت؛ کد پذیرندهٔ زیبال با هر درخواست از «تنظیمات» یا `.env`، و
+  // نشانی پایه از `ZIBAL_API_URL` (تست و CI فقط سرور ساختگی). درگاه نمونه فقط با `CHECKOUT_MODE=mock` (ADR-035).
+  const keys = serviceKeyReader(secrets, process.env, config.secretsKey);
+  const zibal = { baseUrl: process.env.ZIBAL_API_URL };
+  const gateways: Record<string, PaymentGateway> = {
+    zibal: zibalGateway({ ...zibal, merchant: () => keys('PAYMENT_MERCHANT_ID') }),
+    ...(panelMockGateway(process.env) ? { mock: mockGateway() } : {}),
+  };
   return {
     config,
     auth,
@@ -76,6 +87,7 @@ function build(config: AdminConfig): Panel {
       storage: storageFromEnv(process.env)?.driver ?? null,
       secret: config.secret,
       sms,
+      payments: { orders: createOrderStore(getDb()), gateways },
     }),
     // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
     tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
@@ -89,6 +101,7 @@ function build(config: AdminConfig): Panel {
       env: process.env,
       secret: config.secret,
       smsir: smsIrClient(smsir),
+      zibal: { client: zibalClient(zibal), callbackUrl: process.env.PAYMENT_CALLBACK_URL?.trim() || null },
       smsStats: createSmsStats(getDb()),
       smsInUse: smsIrInUse(process.env),
     }),

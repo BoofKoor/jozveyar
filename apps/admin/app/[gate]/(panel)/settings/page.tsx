@@ -408,8 +408,8 @@ export default async function SettingsPage({ params, searchParams }: { params: P
               <span className="jy-icon jy-icon-lock" aria-hidden="true" />
               <span>
                 کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود؛ شناسهٔ قالب راز نیست و کامل دیده می‌شود. مقدار پنل بر
-                مقدار <bdi className="ad-ltr">.env</bdi> مقدم است. هر مقدار تازهٔ sms.ir پیش از ذخیره با خود sms.ir آزموده می‌شود، و «آزمایش»
-                مقدار امروز را بی تغییر می‌سنجد.
+                مقدار <bdi className="ad-ltr">.env</bdi> مقدم است. هر مقدار تازه پیش از ذخیره با خود sms.ir یا زیبال آزموده می‌شود، و
+                «آزمایش» مقدار امروز را بی تغییر می‌سنجد.
               </span>
             </p>
             <ul className="ad-keys ad-gap">
@@ -507,6 +507,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                             field={info.field}
                             test={info.test}
                             tested={info.testable}
+                            service={info.service}
                             envMask={key.envSet ? maskText(info.dots, key.envTail) : null}
                             seen={key.seen}
                             back={back}

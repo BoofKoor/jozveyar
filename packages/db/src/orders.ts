@@ -9,17 +9,21 @@
  *    وضعیت. محافظ معوق `order_items_cover_pages` در پایان همین تراکنش پوشش صفحه‌ها را می‌سنجد (0006).
  *  - `settlePayment` برگشت از درگاه را زیر قفل ردیف پرداخت و سفارش انجام می‌دهد: دو برگشت هم‌زمان
  *    (رفرش، دو زبانه) پشت‌سرهم اجرا می‌شوند و دومی نتیجهٔ اولی را می‌بیند. از برش ۵٫۲ چاپخانهٔ سفارش هم در همین
- *    تراکنش انتخاب می‌شود (`assignAtPayment`، ADR-042).
+ *    تراکنش انتخاب می‌شود (`assignAtPayment`، ADR-042). از برش ۷٫۲ (ADR-050) همین قفل برای برگشت با کلید برگشت، استعلام
+ *    خودکار (`SKIP LOCKED`: چند نود، یک استعلام) و «استعلام از درگاه» پنل؛ و «در انتظار» با آنچه از درگاه دانستیم (`settleWith`،
+ *    `payments.ts`).
  */
 
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
 import { formatDeadlineDay } from '@jozveyar/text';
 
+import { adminEventRow } from './admin.js';
 import { assignAtPayment } from './assignment.js';
 import type { DocumentRow } from './documents.js';
 import type { Database } from './index.js';
 import {
+  adminEvents,
   documents,
   jobs,
   orderItemSections,
@@ -69,11 +73,30 @@ export async function requeueTicket(tx: Tx, orderId: string): Promise<void> {
 export const FILE_MARGIN_MS = 60 * 60_000;
 
 /**
- * یک تلاش پرداخت تا این مدت سنجیده می‌شود؛ دیرتر یعنی «ناموفق» بی سنجش درگاه، و درگاه واقعی پول
- * سنجیده‌نشده را خودش برمی‌گرداند. کمتر از حاشیهٔ فایل است: پرداختی که پذیرفته شود فایل زنده دارد. پنل
- * تلاشی را که از این گذشته و هنوز در انتظار است «بی برگشت» می‌خواند (برش ۴٫۲، سؤال ۲۲).
+ * مهلت هر تلاش پرداخت (سؤال ۱۴۴، برش ۷٫۲؛ پیش از آن نیم ساعت): پس از آن `verify` هرگز، و تلاش «ناموفق، مهلت گذشت». کمتر از ۱۵
+ * دقیقه‌ای است که زیبال پول تأییدنشده را خودکار برمی‌گرداند (وبلاگ زیبال)، با ۵ دقیقه حاشیه حتی اگر زیبال از `request` بشمارد؛ و کمتر از
+ * حاشیهٔ فایل: پرداختی که پذیرفته شود فایل زنده دارد. پنل تلاشی را که از این گذشته و هنوز در انتظار است «بی برگشت» می‌خواند (برش ۴٫۲،
+ * سؤال ۲۲)، که استعلام خودکار می‌بندد.
  */
-export const PAYMENT_ATTEMPT_TTL_MS = 30 * 60_000;
+export const PAYMENT_ATTEMPT_TTL_MS = 10 * 60_000;
+
+/**
+ * تلاش بسته‌ای که پولش شاید هنوز نزد درگاه است (برش ۷٫۲): کدهای تصمیم ما که `verify` نخوردند (یا ناهمخوان ماندند)، با وضعیت
+ * «پرداخت‌شده، تأییدنشده» (۲) یا «در حال استرداد» (۱۶)، یا هنوز ناپیدا.
+ */
+export const HELD_FAILURES = ['expired', 'order_not_payable', 'amount_mismatch'] as const;
+export const MONEY_HELD_STATUSES = [2, 16] as const;
+/**
+ * استعلام خودکار پول چنین تلاشی را تا این مدت پس از ساختنش می‌پاید، هر ۲ دقیقه؛ زیبال پول تأییدنشده را ۱۵ دقیقه پس از پرداخت برمی‌گرداند،
+ * پس پولی که پس از این هنوز نزد درگاه است دیگر «برمی‌گردد» نیست: هشدار پیشخوان (برش ۷٫۲).
+ */
+export const HELD_WATCH_MS = 2 * 3_600_000;
+
+/**
+ * کدهای ردِ شروع پرداخت که کار مالک‌اند، نه مشتری (برش ۷٫۲، ADR-050): ۱۰۲ تا ۱۰۴ کد پذیرنده، و ۱۱۵ IP سرور در پنل زیبال. هر کدام رویداد
+ * سیستم `payments.gateway_rejected` و هشدار پیشخوان است، تا اولین شروع یا «آزمایش» درست.
+ */
+export const GATEWAY_NOT_READY_RESULTS: readonly number[] = [102, 103, 104, 115];
 
 export type OrderRow = typeof orders.$inferSelect;
 export type OrderItemRow = typeof orderItems.$inferSelect;
@@ -148,17 +171,57 @@ export interface OrderDetails {
   parcels: { barcode: string; createdAt: Date; sms: ShipmentSms | null }[];
 }
 
+/** آنچه این بار از درگاه دانستیم (`payments.gateway_*`، برش ۷٫۲): وضعیت (یا همان قبلی، اگر جوابی نیامد)، علت بی جوابی، و زمان. */
+export interface GatewayCheckInput {
+  status: number | null;
+  error: string | null;
+  at: Date;
+}
+
+/** چه چیزی تلاش را بست (`payments.settled_via`). */
+export type SettledVia = 'callback' | 'auto' | 'panel';
+
 /** نتیجهٔ سنجش درگاه، که `settlePayment` در همان تراکنش اعمال می‌کند. */
 export type Settlement =
   | {
       kind: 'succeeded';
       refId: string;
       cardMask: string | null;
+      /** مبلغی که درگاه نهایی کرد؛ پایگاه داده برابر مبلغ تلاش می‌خواهد (`payments_success_amount`). */
+      verifiedAmountRials: number;
       raw: unknown;
       paidAt: Date;
       postHandoffDueAt: Date;
+      check?: GatewayCheckInput;
     }
-  | { kind: 'failed'; code: string; raw: unknown };
+  | {
+      kind: 'failed';
+      code: string;
+      raw: unknown;
+      cardMask?: string | null;
+      /** فقط وقتی `verify` پول را نهایی کرد و با تلاش نخواند. */
+      verifiedAmountRials?: number | null;
+      check?: GatewayCheckInput;
+    }
+  /** درگاه هنوز «در انتظار پرداخت» است یا جواب روشن نداد (برش ۷٫۲): وضعیت تلاش همان، فقط آنچه از درگاه دانستیم. */
+  | { kind: 'pending'; check: GatewayCheckInput };
+
+/**
+ * کدام تلاش: با کلید برگشت (برگشت از درگاه، سؤال ۱۴۵) یا شناسه (استعلام خودکار و پنل)، هر دو فقط از درگاه‌هایی که همین حالا در کارند (درگاه
+ * نمونه هرگز در `live`)؛ یا درگاه و شناسهٔ تلاش نزد آن.
+ */
+export type PaymentLookup =
+  | { returnKey: string; providers: readonly string[] }
+  | { paymentId: string; providers: readonly string[] }
+  | { provider: string; authority: string };
+
+export interface SettleOptions {
+  via?: SettledVia;
+  /** برگشت مرورگر مشتری: `returned_at` اگر هنوز نیست. */
+  returned?: Date;
+  /** استعلام خودکار: تلاشی که کس دیگری همین حالا قفلش کرده رها می‌شود (`busy`)، نه منتظرش. */
+  skipLocked?: boolean;
+}
 
 export interface SettledPayment {
   payment: PaymentRow;
@@ -183,10 +246,16 @@ export interface OrderStore {
   createOrder(order: NewOrder): Promise<{ order: OrderRow; created: boolean }>;
   details(publicToken: string): Promise<OrderDetails | null>;
   insertPayment(payment: {
+    /** شناسهٔ تلاش، اگر پیش از درگاه ساخته شد (پسوند `gateway_order_id`). */
+    id?: string;
     orderId: string;
     provider: string;
     amountRials: number;
     authority: string;
+    /** شناسهٔ سفارش نزد درگاه (برش ۷٫۲)؛ برای زیبال اجباری. */
+    gatewayOrderId?: string | null;
+    /** کلید برگشت (سؤال ۱۴۵)؛ بی آن پیش‌فرض تصادفی پایگاه داده. */
+    returnKey?: string;
     raw: unknown;
   }): Promise<PaymentRow>;
   /** پرداخت یک درگاه با سفارشش؛ برای صفحهٔ درگاه نمونه. */
@@ -207,6 +276,32 @@ export interface OrderStore {
     authority: string,
     decide: (current: { payment: PaymentRow; order: OrderRow }) => Promise<Settlement>,
   ): Promise<SettledPayment | null>;
+  /**
+   * همان `settlePayment` با هر شکل پیدا کردن تلاش (برش ۷٫۲). «در انتظار» (`pending`) فقط آنچه از درگاه دانستیم را می‌نویسد؛ `busy` فقط
+   * با `skipLocked`.
+   */
+  settle(
+    lookup: PaymentLookup,
+    decide: (current: { payment: PaymentRow; order: OrderRow }) => Promise<Settlement>,
+    options?: SettleOptions,
+  ): Promise<SettledPayment | 'busy' | null>;
+  /**
+   * تلاش‌های بازی که استعلام خودکار می‌پرسد (برش ۷٫۲، سؤال ۱۴۴): در انتظار، ساخته پیش از `createdBefore`، و آخرین پرسش‌شان پیش از
+   * `checkedBefore`؛ قدیمی‌ترین اول.
+   */
+  pendingAttempts(input: { providers: readonly string[]; createdBefore: Date; checkedBefore: Date; limit: number }): Promise<string[]>;
+  /**
+   * تلاش‌های بسته‌ای که پولشان شاید هنوز نزد درگاه است (پرداخت دوم، مهلت گذشته، مبلغ ناهمخوان) و وضعیتشان ۲، ۱۶ یا ناپیداست: استعلام
+   * خودکار تا «ریورس‌شده» می‌پایدشان («پول مشتری برمی‌گردد»).
+   */
+  heldAttempts(input: { providers: readonly string[]; createdAfter: Date; checkedBefore: Date; limit: number }): Promise<PaymentRow[]>;
+  /** آنچه استعلام دربارهٔ تلاشی بسته دانست؛ وضعیت تلاش عوض نمی‌شود. */
+  recordGatewayCheck(paymentId: string, check: GatewayCheckInput): Promise<void>;
+  /**
+   * درگاه شروع پرداخت را با کدی رد کرد که کار مالک است (`GATEWAY_NOT_READY_RESULTS`): رویداد سیستم `payments.gateway_rejected` (بی ادمین،
+   * روی سفارش)، برای هشدار پیشخوان و رویدادهای سفارش. فقط کد و شمارهٔ سفارش؛ هیچ مقدار کلیدی.
+   */
+  recordGatewayRejection(input: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }): Promise<void>;
   /** سفارش در انتظاری که فایل‌هایش دیگر زنده نیستند. */
   expireOrder(orderId: string, at: Date): Promise<boolean>;
 }
@@ -224,6 +319,108 @@ export function createOrderStore({ db }: Database): OrderStore {
     const [row] = await db.select().from(orders).where(eq(orders.checkoutKey, checkoutKey)).limit(1);
     return row ?? null;
   }
+
+  const settle: OrderStore['settle'] = async (lookup, decide, options = {}) => {
+    if ('providers' in lookup && lookup.providers.length === 0) return null;
+    const where =
+      'returnKey' in lookup
+        ? and(eq(payments.returnKey, lookup.returnKey), inArray(payments.provider, [...lookup.providers]))
+        : 'paymentId' in lookup
+          ? and(eq(payments.id, lookup.paymentId), inArray(payments.provider, [...lookup.providers]))
+          : and(eq(payments.provider, lookup.provider), eq(payments.authority, lookup.authority));
+    return db.transaction(async (tx) => {
+      const query = tx.select().from(payments).where(where).limit(1);
+      const [payment] = await (options.skipLocked ? query.for('update', { skipLocked: true }) : query.for('update'));
+      if (!payment) {
+        if (!options.skipLocked) return null;
+        const [exists] = await tx.select({ id: payments.id }).from(payments).where(where).limit(1);
+        return exists ? 'busy' : null;
+      }
+      const [order] = await tx.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1).for('update');
+      if (payment.status !== 'pending') return { payment, order: order!, settled: false, smsId: null };
+
+      const outcome = await decide({ payment, order: order! });
+      const returned = options.returned && !payment.returnedAt ? { returnedAt: options.returned } : {};
+      const gateway = (check: GatewayCheckInput | undefined) =>
+        check ? { gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at } : {};
+      if (outcome.kind === 'pending') {
+        const [row] = await tx
+          .update(payments)
+          .set({ ...returned, ...gateway(outcome.check) })
+          .where(eq(payments.id, payment.id))
+          .returning();
+        return { payment: row!, order: order!, settled: false, smsId: null };
+      }
+      if (outcome.kind === 'failed') {
+        const [failed] = await tx
+          .update(payments)
+          .set({
+            status: 'failed',
+            failureCode: outcome.code,
+            raw: outcome.raw ?? null,
+            cardMask: outcome.cardMask ?? null,
+            verifiedAmountRials: outcome.verifiedAmountRials ?? null,
+            settledVia: options.via ?? null,
+            ...returned,
+            ...gateway(outcome.check),
+          })
+          .where(eq(payments.id, payment.id))
+          .returning();
+        return { payment: failed!, order: order!, settled: true, smsId: null };
+      }
+
+      // پیامک پرداخت (برش ۷٫۱، ADR-049): ردیف «منتظر» در همین تراکنش، و پرداخت موفق به آن وصل (تریگر `payments_sms`)؛ فرستادنش بعد از
+      // commit با `deliverQueued`، تا پیامکی که نرفت پرداخت را برنگرداند و در پنل «دوباره بفرست» داشته باشد.
+      const smsId = await queuedPaidSms(tx, {
+        toMobile: order!.recipientPhone,
+        orderNumber: order!.orderNumber,
+        handoffDay: formatDeadlineDay(outcome.postHandoffDueAt),
+        at: outcome.paidAt,
+      });
+      const [succeeded] = await tx
+        .update(payments)
+        .set({
+          status: 'succeeded',
+          refId: outcome.refId,
+          cardMask: outcome.cardMask,
+          raw: outcome.raw ?? null,
+          verifiedAt: outcome.paidAt,
+          verifiedAmountRials: outcome.verifiedAmountRials,
+          settledVia: options.via ?? null,
+          smsMessageId: smsId,
+          ...returned,
+          ...gateway(outcome.check),
+        })
+        .where(eq(payments.id, payment.id))
+        .returning();
+      const [paid] = await tx
+        .update(orders)
+        .set({ status: 'paid', paidAt: outcome.paidAt, postHandoffDueAt: outcome.postHandoffDueAt })
+        .where(and(eq(orders.id, order!.id), eq(orders.status, 'awaiting_payment')))
+        .returning();
+      // سرویس وضعیت سفارش را پیش از سنجش درگاه دیده؛ رسیدن به اینجا با سفارش غیرقابل پرداخت باگ است.
+      if (!paid) throw new Error(`سفارش ${order!.orderNumber} در انتظار پرداخت نیست.`);
+      await tx.insert(orderStatusEvents).values({
+        orderId: order!.id,
+        fromStatus: 'awaiting_payment',
+        toStatus: 'paid',
+        at: outcome.paidAt,
+        actor: 'gateway',
+        note: { paymentId: payment.id, provider: payment.provider, refId: outcome.refId, ...(options.via ? { via: options.via } : {}) },
+      });
+      // چاپخانه پیش از کار برگه: برگه نام و شهرش را دارد. بی چاپخانهٔ فعال سفارش بی چاپخانه می‌ماند (هشدار پیشخوان).
+      const assigned = await assignAtPayment(tx, paid, outcome.paidAt);
+      // برگشت دوباره از درگاه کار دوم نمی‌سازد: شاخص یکتای (سفارش، نوع) جلویش را می‌گیرد.
+      await tx
+        .insert(jobs)
+        .values([
+          { kind: PREPARE_ORDER_JOB, orderId: order!.id },
+          { kind: PREPARE_TICKET_JOB, orderId: order!.id },
+        ])
+        .onConflictDoNothing();
+      return { payment: succeeded!, order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid, settled: true, smsId };
+    });
+  };
 
   return {
     async documents(ids) {
@@ -384,10 +581,13 @@ export function createOrderStore({ db }: Database): OrderStore {
       const [row] = await db
         .insert(payments)
         .values({
+          ...(payment.id ? { id: payment.id } : {}),
           orderId: payment.orderId,
           provider: payment.provider,
           amountRials: payment.amountRials,
           authority: payment.authority,
+          gatewayOrderId: payment.gatewayOrderId ?? null,
+          ...(payment.returnKey ? { returnKey: payment.returnKey } : {}),
           raw: payment.raw ?? null,
         })
         .returning();
@@ -420,75 +620,65 @@ export function createOrderStore({ db }: Database): OrderStore {
       return rows.length > 0;
     },
 
-    async settlePayment(provider, authority, decide) {
-      return db.transaction(async (tx) => {
-        const [payment] = await tx
-          .select()
-          .from(payments)
-          .where(and(eq(payments.provider, provider), eq(payments.authority, authority)))
-          .limit(1)
-          .for('update');
-        if (!payment) return null;
-        const [order] = await tx.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1).for('update');
-        if (payment.status !== 'pending') return { payment, order: order!, settled: false, smsId: null };
+    settle,
 
-        const outcome = await decide({ payment, order: order! });
-        if (outcome.kind === 'failed') {
-          const [failed] = await tx
-            .update(payments)
-            .set({ status: 'failed', failureCode: outcome.code, raw: outcome.raw ?? null })
-            .where(eq(payments.id, payment.id))
-            .returning();
-          return { payment: failed!, order: order!, settled: true, smsId: null };
-        }
+    settlePayment: (provider, authority, decide) => settle({ provider, authority }, decide) as Promise<SettledPayment | null>,
 
-        // پیامک پرداخت (برش ۷٫۱، ADR-049): ردیف «منتظر» در همین تراکنش، و پرداخت موفق به آن وصل (تریگر `payments_sms`)؛ فرستادنش بعد از
-        // commit با `deliverQueued`، تا پیامکی که نرفت پرداخت را برنگرداند و در پنل «دوباره بفرست» داشته باشد.
-        const smsId = await queuedPaidSms(tx, {
-          toMobile: order!.recipientPhone,
-          orderNumber: order!.orderNumber,
-          handoffDay: formatDeadlineDay(outcome.postHandoffDueAt),
-          at: outcome.paidAt,
-        });
-        const [succeeded] = await tx
-          .update(payments)
-          .set({
-            status: 'succeeded',
-            refId: outcome.refId,
-            cardMask: outcome.cardMask,
-            raw: outcome.raw ?? null,
-            verifiedAt: outcome.paidAt,
-            smsMessageId: smsId,
-          })
-          .where(eq(payments.id, payment.id))
-          .returning();
-        const [paid] = await tx
-          .update(orders)
-          .set({ status: 'paid', paidAt: outcome.paidAt, postHandoffDueAt: outcome.postHandoffDueAt })
-          .where(and(eq(orders.id, order!.id), eq(orders.status, 'awaiting_payment')))
-          .returning();
-        // سرویس وضعیت سفارش را پیش از سنجش درگاه دیده؛ رسیدن به اینجا با سفارش غیرقابل پرداخت باگ است.
-        if (!paid) throw new Error(`سفارش ${order!.orderNumber} در انتظار پرداخت نیست.`);
-        await tx.insert(orderStatusEvents).values({
-          orderId: order!.id,
-          fromStatus: 'awaiting_payment',
-          toStatus: 'paid',
-          at: outcome.paidAt,
-          actor: 'gateway',
-          note: { paymentId: payment.id, provider, refId: outcome.refId },
-        });
-        // چاپخانه پیش از کار برگه: برگه نام و شهرش را دارد. بی چاپخانهٔ فعال سفارش بی چاپخانه می‌ماند (هشدار پیشخوان).
-        const assigned = await assignAtPayment(tx, paid, outcome.paidAt);
-        // برگشت دوباره از درگاه کار دوم نمی‌سازد: شاخص یکتای (سفارش، نوع) جلویش را می‌گیرد.
-        await tx
-          .insert(jobs)
-          .values([
-            { kind: PREPARE_ORDER_JOB, orderId: order!.id },
-            { kind: PREPARE_TICKET_JOB, orderId: order!.id },
-          ])
-          .onConflictDoNothing();
-        return { payment: succeeded!, order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid, settled: true, smsId };
-      });
+    async pendingAttempts({ providers, createdBefore, checkedBefore, limit }) {
+      if (providers.length === 0) return [];
+      const rows = await db
+        .select({ id: payments.id })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.status, 'pending'),
+            inArray(payments.provider, [...providers]),
+            lt(payments.createdAt, createdBefore),
+            or(isNull(payments.gatewayCheckedAt), lt(payments.gatewayCheckedAt, checkedBefore)),
+          ),
+        )
+        .orderBy(asc(payments.createdAt))
+        .limit(limit);
+      return rows.map((row) => row.id);
+    },
+
+    async heldAttempts({ providers, createdAfter, checkedBefore, limit }) {
+      if (providers.length === 0) return [];
+      return db
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.status, 'failed'),
+            inArray(payments.provider, [...providers]),
+            inArray(payments.failureCode, [...HELD_FAILURES]),
+            or(isNull(payments.gatewayStatus), inArray(payments.gatewayStatus, [...MONEY_HELD_STATUSES])),
+            gt(payments.createdAt, createdAfter),
+            or(isNull(payments.gatewayCheckedAt), lt(payments.gatewayCheckedAt, checkedBefore)),
+          ),
+        )
+        .orderBy(asc(payments.createdAt))
+        .limit(limit);
+    },
+
+    async recordGatewayCheck(paymentId, check) {
+      await db
+        .update(payments)
+        .set({ gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at })
+        .where(eq(payments.id, paymentId));
+    },
+
+    async recordGatewayRejection({ orderId, orderNumber, provider, result, at }) {
+      await db.insert(adminEvents).values(
+        adminEventRow({
+          adminUserId: null,
+          action: 'payments.gateway_rejected',
+          targetType: 'order',
+          targetId: orderId,
+          at,
+          detail: { orderNumber, provider, result },
+        }),
+      );
     },
 
     async expireOrder(orderId, at) {

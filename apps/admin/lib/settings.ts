@@ -167,7 +167,18 @@ export const keyTail = (value: string): string | null => (value.length >= KEY_TA
  */
 export const KEY_INFO: Record<
   ServiceKeyName,
-  { label: string; field: string; about: string; test: string; dots: number; kind: 'secret' | 'template'; purpose: SmsPurpose | null; testable: boolean }
+  {
+    label: string;
+    field: string;
+    about: string;
+    test: string;
+    dots: number;
+    kind: 'secret' | 'template';
+    purpose: SmsPurpose | null;
+    testable: boolean;
+    /** سرویسی که «آزمایش» با آن است، و نامش در متن‌ها (برش ۷٫۲: کد پذیرنده با زیبال). */
+    service: 'smsir' | 'zibal';
+  }
 > = {
   SMS_API_KEY: {
     label: 'کلید API sms.ir',
@@ -178,6 +189,7 @@ export const KEY_INFO: Record<
     kind: 'secret',
     purpose: null,
     testable: true,
+    service: 'smsir',
   },
   SMS_OTP_TEMPLATE: {
     label: 'شناسهٔ قالب کد تأیید',
@@ -188,6 +200,7 @@ export const KEY_INFO: Record<
     kind: 'template',
     purpose: 'otp',
     testable: true,
+    service: 'smsir',
   },
   SMS_PAID_TEMPLATE: {
     label: 'شناسهٔ قالب پیامک پرداخت',
@@ -198,6 +211,7 @@ export const KEY_INFO: Record<
     kind: 'template',
     purpose: 'order_paid',
     testable: true,
+    service: 'smsir',
   },
   SMS_TRACKING_TEMPLATE: {
     label: 'شناسهٔ قالب پیامک رهگیری',
@@ -208,16 +222,19 @@ export const KEY_INFO: Record<
     kind: 'template',
     purpose: 'tracking',
     testable: true,
+    service: 'smsir',
   },
   PAYMENT_MERCHANT_ID: {
     label: 'کد پذیرندهٔ زیبال',
     field: 'کد پذیرندهٔ تازه',
     about: 'کد پذیرنده‌ای که زیبال می‌دهد',
-    test: 'آزمایش کد پذیرنده با خود درگاه زیبال، با راه افتادن درگاه می‌آید.',
+    // برش ۷٫۲ (سؤال ۱۳۸، طرح `m-key-rejected`): «آزمایش و ذخیره»، مثل کلید API sms.ir.
+    test: 'آزمایش یک درخواست پرداخت 1,000 تومانی است که کسی به صفحه‌اش نمی‌رود: کد پذیرنده، نشانی برگشت و IP سرور را با هم می‌سنجد. «رد شد» ذخیره نمی‌شود.',
     dots: 4,
     kind: 'secret',
     purpose: null,
-    testable: false,
+    testable: true,
+    service: 'zibal',
   },
 };
 
@@ -282,10 +299,19 @@ export interface KeyCheckView {
   text: Seg[];
 }
 
+/** نام سرویس «آزمایش» هر کلید در متن‌ها. */
+export const serviceName = (name: ServiceKeyName) => (KEY_INFO[name].service === 'zibal' ? 'زیبال' : 'sms.ir');
+
+/** «رد شد» کد پذیرنده با کد زیبال (برش ۷٫۲، طرح `m-key-rejected`): ۱۱۵ یعنی IP سرور، نه خود کد پذیرنده. */
+function zibalRejected(code: number | null): Seg[] {
+  if (code === 115) return ['زیبال IP سرور را نپذیرفت (کد ', num(115), ')'];
+  return ['زیبال نپذیرفت', ...(code === null ? [] : [' (کد ', num(code), ')'])];
+}
+
 /**
  * خط «آخرین آزمایش» یک کلید (طرح `ad-keys__test`، سؤال ۱۳۸): آخرین «آزمایش» مقدار امروز، یا گذاشتن همین مقدار با آزمایش پیش از
- * ذخیره. بی خط وقتی مقدار امروز آزموده نشده: پیش از ۷٫۱، پس از «برگرداندن به .env»، یا کد پذیرنده تا ۷٫۲. فقط نتیجه و عدد پاسخ،
- * هرگز مقدار؛ موبایل پیامک آزمایشی همان پوشیدهٔ رویداد.
+ * ذخیره. بی خط وقتی مقدار امروز آزموده نشده: پیش از ۷٫۱، یا پس از «برگرداندن به .env». فقط نتیجه و عدد پاسخ، هرگز مقدار؛ موبایل
+ * پیامک آزمایشی همان پوشیدهٔ رویداد. کد پذیرنده از ۷٫۲ با زیبال.
  */
 export function keyCheckView(name: ServiceKeyName, check: KeyCheck | null, now: Date): KeyCheckView | null {
   if (!check) return null;
@@ -293,29 +319,35 @@ export function keyCheckView(name: ServiceKeyName, check: KeyCheck | null, now: 
   const detail = check.detail;
   const credit: Seg[] = typeof detail.credit === 'number' ? ['، اعتبار ', num(detail.credit)] : [];
   const template = KEY_INFO[name].kind === 'template';
+  const zibal = KEY_INFO[name].service === 'zibal';
+  const service = serviceName(name);
   if (check.action === 'settings.key_test') {
     const code = typeof detail.status === 'number' ? detail.status : typeof detail.http === 'number' ? detail.http : null;
     switch (detail.outcome) {
       case 'ok':
         return template
           ? { tone: 'ok', text: [`درست · پیامک آزمایشی ${when} به `, { num: typeof detail.mobile === 'string' ? detail.mobile : '•••' }, ' رفت.'] }
-          : { tone: 'ok', text: [`درست · آزمایش ${when}: sms.ir پذیرفت`, ...credit, '.'] };
+          : { tone: 'ok', text: [`درست · آزمایش ${when}: ${service} پذیرفت`, ...credit, '.'] };
       case 'rejected':
-        return { tone: 'bad', text: [`رد شد · آزمایش ${when}: sms.ir نپذیرفت`, ...(code === null ? [] : [' (کد ', num(code), ')']), '.'] };
+        return zibal
+          ? { tone: 'bad', text: [`رد شد · آزمایش ${when}: `, ...zibalRejected(code), '.'] }
+          : { tone: 'bad', text: [`رد شد · آزمایش ${when}: sms.ir نپذیرفت`, ...(code === null ? [] : [' (کد ', num(code), ')']), '.'] };
       case 'unavailable':
-        return { tone: 'warn', text: [`در دسترس نیست · آزمایش ${when}: sms.ir جواب نداد.`] };
+        return { tone: 'warn', text: [`در دسترس نیست · آزمایش ${when}: ${service} جواب نداد.`] };
       case 'unconfigured':
-        return { tone: 'warn', text: [`آزموده نشد · ${when}: کلید API sms.ir خالی است یا خوانده نشد.`] };
+        return zibal
+          ? { tone: 'warn', text: [`آزموده نشد · ${when}: نشانی برگشت (`, { ltr: 'PAYMENT_CALLBACK_URL' }, ') در ', { ltr: '.env' }, ' نیست.'] }
+          : { tone: 'warn', text: [`آزموده نشد · ${when}: کلید API sms.ir خالی است یا خوانده نشد.`] };
       default:
         return null;
     }
   }
   if (check.action === 'settings.key_set') {
     if (detail.tested === 'ok') {
-      return { tone: 'ok', text: [`درست · پیش از ذخیرهٔ ${when} `, ...(template ? ['پیامک آزمایشی رفت.'] : ['sms.ir پذیرفت', ...credit, '.'])] };
+      return { tone: 'ok', text: [`درست · پیش از ذخیرهٔ ${when} `, ...(template ? ['پیامک آزمایشی رفت.'] : [`${service} پذیرفت`, ...credit, '.'])] };
     }
     if (detail.tested === 'skipped') {
-      return { tone: 'warn', text: [`آزموده نشد · ${when} بی آزمایش ذخیره شد، چون sms.ir جواب نداد. با «آزمایش» بسنجش.`] };
+      return { tone: 'warn', text: [`آزموده نشد · ${when} بی آزمایش ذخیره شد، چون ${service} جواب نداد. با «آزمایش» بسنجش.`] };
     }
   }
   return null;

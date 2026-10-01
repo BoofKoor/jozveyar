@@ -385,6 +385,44 @@
     background: var(--color-green-50);
     border-radius: var(--radius-md);
   }
+  /* «پرداختت در حال بررسی است» (برش ۷٫۲، طرح `m-checking`): آنچه مشتری تا نتیجه بداند، و آخرین بررسی */
+  .ck-know {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block-start: 16px;
+  }
+  .ck-know li {
+    position: relative;
+    padding-inline-start: 18px;
+    line-height: 1.8;
+  }
+  .ck-know li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 2px;
+    inset-block-start: 0.8em;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-green-600);
+  }
+  .ck-refresh {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-block-start: 20px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-green-100);
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ck-refresh__text {
+    flex: 1;
+    min-width: 12rem;
+  }
   /* سفارش منقضی و نگاه غریبه: یک کارت، بی ستون خلاصه */
   .ck-solo {
     max-width: calc(640px + 2 * var(--jy-gutter));

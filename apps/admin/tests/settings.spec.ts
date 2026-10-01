@@ -214,7 +214,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(keys.getByRole('heading')).toHaveText('کلیدهای سرویس‌ها');
     await expect(keys.locator('.jy-card__meta')).toHaveText('فقط مالک');
     await expect(keys.locator('.jy-note--info')).toHaveText(
-      'کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود؛ شناسهٔ قالب راز نیست و کامل دیده می‌شود. مقدار پنل بر مقدار .env مقدم است. هر مقدار تازهٔ sms.ir پیش از ذخیره با خود sms.ir آزموده می‌شود، و «آزمایش» مقدار امروز را بی تغییر می‌سنجد.',
+      'کلیدها رمزشده نگه داشته می‌شوند و کاملشان دیگر نشان داده نمی‌شود؛ شناسهٔ قالب راز نیست و کامل دیده می‌شود. مقدار پنل بر مقدار .env مقدم است. هر مقدار تازه پیش از ذخیره با خود sms.ir یا زیبال آزموده می‌شود، و «آزمایش» مقدار امروز را بی تغییر می‌سنجد.',
     );
     await expect(keys.locator('.ad-keys__name')).toHaveText([
       'کلید API sms.ir',
@@ -244,8 +244,8 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(keyRow(page, 'SMS_TRACKING_TEMPLATE').locator('.ad-keys__tpl')).toHaveText(
       'متن در sms.ir: «جزوه‌یار: سفارش #ORDER# به پست رسید. کد رهگیری #BARCODE#» · پارامترها: ORDER، BARCODE',
     );
-    // کد پذیرنده تا برش ۷٫۲ آزمایش ندارد.
-    await expect(keyRow(page, 'PAYMENT_MERCHANT_ID').getByRole('button', { name: 'آزمایش' })).toHaveCount(0);
+    // کد پذیرنده از ۷٫۲ با زیبال آزموده می‌شود، وقتی مقدار دارد (`payments.spec.ts` خود آزمایش را می‌سنجد، با سقف ۱۰ در ساعت).
+    await expect(keyRow(page, 'PAYMENT_MERCHANT_ID').getByRole('button', { name: 'آزمایش' })).toHaveCount(process.env.PAYMENT_MERCHANT_ID ? 1 : 0);
     await expect(page.getByRole('link', { name: 'برگرداندن به .env' })).toHaveCount(0);
   });
 

@@ -12,9 +12,12 @@ import { paperSizeName, ptToMm } from '@jozveyar/analysis';
 import type { Breakdown, ItemBreakdown } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
+  HELD_FAILURES,
+  MONEY_HELD_STATUSES,
   OPEN_STATUSES,
   PANEL_BUCKETS,
   PAYMENT_ATTEMPT_TTL_MS,
+  isChecking,
   isPaidStatus,
   pdfErrorCode,
   type OrderRow,
@@ -32,11 +35,14 @@ import {
   type PanelStatusEvent,
   type PaymentRow,
 } from '@jozveyar/db';
+import { CARD_REASONS, parsePaymentErrorTag, statusLabel } from '@jozveyar/payments';
 import {
+  formatCardMask,
   formatDeadlineDay,
   formatJalaliWeekday,
   formatNumber,
   formatTehranTime,
+  formatTomans,
   tehranDayStart,
   toLatinDigits,
 } from '@jozveyar/text';
@@ -487,58 +493,227 @@ export const phoneText = (phone: string) => (/^\d{11}$/.test(phone) ? `${phone.s
 
 const PROVIDERS: Record<string, string> = { mock: 'درگاه نمونه', zibal: 'زیبال' };
 
+/** علت ناموفق به زبان پنل؛ کارت با علت خود زیبال (`CARD_REASONS`). */
 const FAILURES: Record<string, string> = {
   cancelled: 'مشتری در درگاه انصراف داد',
   declined: 'بانک پرداخت را نپذیرفت',
+  bank_error: 'بانک یا درگاه خطا داد',
+  returned: 'بانک پرداخت را برگرداند',
   verify_failed: 'درگاه پرداخت را تأیید نکرد',
   amount_mismatch: 'مبلغ با سفارش نخواند',
-  expired: 'دیرتر از 30 دقیقه برگشت و پذیرفته نشد',
-  order_not_payable: 'سفارش دیگر پرداختنی نبود',
+  order_not_payable: 'پرداخت دوم: سفارش پیش‌تر پرداخت شده بود، پس تأیید نشد',
 };
 
-export type PaymentKind = 'succeeded' | 'failed' | 'unreturned' | 'pending';
+/** نتیجهٔ «استعلام از درگاه» در رویدادهای سفارش (برش ۷٫۲). */
+const INQUIRY_TEXT: Record<string, string> = {
+  succeeded: 'پرداخت تأیید شد و سفارش در صف چاپ رفت',
+  failed: 'پرداخت انجام نشده بود',
+  pending: 'هنوز پرداخت نشده',
+  unanswered: 'درگاه جواب نداد',
+  closed: 'همان لحظه جای دیگری بسته شده بود',
+  busy: 'استعلام دیگری همان لحظه در کار بود',
+  held: 'پول هنوز نزد درگاه است',
+  returned: 'پول به کارت برگشت',
+  verified: 'تأییدشده، و پولش خودکار برنمی‌گردد',
+};
+
+/** کسی که تلاش را بست (`payments.settled_via`، برش ۷٫۲). */
+const VIA: Record<string, string> = { callback: 'برگشت مشتری', auto: 'استعلام خودکار', panel: 'استعلام پنل' };
+
+/** «کارت 6037 99•• •••• 1234»، یک‌تکه (فاصلهٔ نشکن). */
+const cardSeg = (mask: string | null): Seg[] => (mask ? [' · کارت ', { num: formatCardMask(mask).replace(/ /g, '\u00a0') }] : []);
+
+/** برچسب خطای آخرین پرسش (`payments.gateway_error`) به زبان پنل. */
+function gatewayErrorText(provider: string, tag: string | null): Seg[] {
+  const { code, number } = parsePaymentErrorTag(tag ?? '');
+  switch (code) {
+    case 'rejected':
+      return number === 115
+        ? [`${provider} IP سرور را نپذیرفت (کد `, num(115), ')']
+        : [`${provider} نپذیرفت`, ...(number !== null ? [' (کد ', num(number), ')'] : [])];
+    case 'malformed':
+      return [`${provider} پاسخ بدشکل داد`];
+    case 'unconfigured':
+      return ['کد پذیرنده خالی است یا خوانده نشد'];
+    default:
+      return [`${provider} جواب نداد`, ...(number !== null ? [' (HTTP ', num(number), ')'] : [])];
+  }
+}
+
+export type PaymentKind = 'succeeded' | 'failed' | 'returned' | 'checking' | 'unreturned' | 'pending';
 
 export interface PaymentView {
   kind: PaymentKind;
   at: Date;
   meta: Seg[];
+  /** «استعلام از درگاه» (برش ۷٫۲): تلاش باز، یا بسته‌ای که پولش شاید هنوز نزد درگاه است. */
+  inquirable: boolean;
+}
+
+/** «استعلام از درگاه» این تلاش معنا دارد: هنوز باز، یا بسته‌ای که پولش شاید نزد درگاه است (ناپیدا، ۲ یا ۱۶). */
+export function inquirable(payment: Pick<PaymentRow, 'status' | 'failureCode' | 'gatewayStatus'>): boolean {
+  if (payment.status === 'pending') return true;
+  return (
+    payment.status === 'failed' &&
+    (HELD_FAILURES as readonly string[]).includes(payment.failureCode ?? '') &&
+    (payment.gatewayStatus === null || (MONEY_HELD_STATUSES as readonly number[]).includes(payment.gatewayStatus))
+  );
 }
 
 /**
- * یک تلاش پرداخت. «بی برگشت»: هنوز در انتظار و بیش از مهلت هر تلاش (نیم ساعت) گذشته؛ مشتری به درگاه رفت و
- * برنگشت، و برگشت دیرش هم دیگر پذیرفته نمی‌شود (سؤال ۲۲؛ استعلام از درگاه با برش ۷).
+ * یک تلاش پرداخت (طرح `m-order` و `m-order-unpaid`، برش ۷٫۲): شناسهٔ زیبال (`trackId`)، کارت پوشیده و کد پیگیری از خود زیبال، و آخرین
+ * وضعیتی که درگاه گفت با نامش. «در حال بررسی»: پولی شاید گرفته شده و نتیجه نیامده (`isChecking`، همان سایت)؛ «بی برگشت»: از مهلت
+ * گذشته و استعلام هم جواب روشن نگرفت؛ «برگشت خورد»: پول تلاش بسته به کارت برگشت. «در حال بررسی» و «بی برگشت» را استعلام خودکار هر دقیقه
+ * می‌پرسد (سؤال ۱۴۴).
  */
 export function paymentView(payment: PaymentRow, at: Date): PaymentView {
   const provider = PROVIDERS[payment.provider] ?? payment.provider;
+  const id: Seg[] = payment.provider === 'zibal' ? ['شناسهٔ زیبال ', { num: payment.authority }] : [provider];
+  const status = payment.gatewayStatus;
+  const said: Seg[] = status !== null ? [' (درگاه: ', statusLabel(status), ')'] : [];
+  const checked = payment.gatewayCheckedAt;
+  const ask = inquirable(payment);
   if (payment.status === 'succeeded') {
     return {
       kind: 'succeeded',
       at: payment.verifiedAt ?? payment.createdAt,
       meta: [
-        provider,
+        ...id,
+        ...cardSeg(payment.cardMask),
         ...(payment.refId ? [' · کد پیگیری ', { num: payment.refId }] : []),
-        ...(payment.cardMask ? [' · کارت ', { num: payment.cardMask }] : []),
+        ...(status !== null ? [' · درگاه: ', statusLabel(status)] : []),
       ],
+      inquirable: false,
     };
   }
   if (payment.status === 'failed') {
     const code = payment.failureCode ?? '';
-    return { kind: 'failed', at: payment.createdAt, meta: [provider, ' · ', FAILURES[code] ?? (code || 'ناموفق')] };
+    const when: Seg[] = checked ? [' · ', VIA[payment.settledVia ?? ''] ?? 'استعلام', ' ', { num: formatTehranTime(checked) }] : [];
+    // پول به کارت برگشت (۱۵، ۱۸).
+    if (status === 15 || status === 18) {
+      return {
+        kind: 'returned',
+        at: payment.createdAt,
+        meta: [...id, ...cardSeg(payment.cardMask), ' · ', FAILURES[code] ?? 'ناموفق', `؛ ${provider} پولش را به کارت برگرداند`, ...said, ...when],
+        inquirable: false,
+      };
+    }
+    // مشتری برنگشت و مهلت گذشت (طرح `m-order-unpaid`): «استعلام خودکار 11:14: پرداخت نشده (درگاه: در انتظار پرداخت)، و مهلت 10 دقیقه
+    // گذشته بود.»؛ پولی که گرفته شده بود پایین‌تر، با «برمی‌گرداند».
+    if (code === 'expired' && (status === -1 || status === null)) {
+      return {
+        kind: 'failed',
+        at: payment.createdAt,
+        meta: checked
+          ? [
+              ...id,
+              ' · مشتری به درگاه رفت و برنگشت؛ ',
+              VIA[payment.settledVia ?? ''] ?? 'استعلام',
+              ' ',
+              { num: formatTehranTime(checked) },
+              status === -1 ? ': پرداخت نشده (درگاه: در انتظار پرداخت)، و مهلت ' : `: ${provider} جواب روشن نداد، و مهلت `,
+              num(PAYMENT_ATTEMPT_TTL_MS / 60_000),
+              ' دقیقه گذشته بود.',
+            ]
+          : [...id, ' · دیرتر از مهلت برگشت و پذیرفته نشد'],
+        inquirable: ask,
+      };
+    }
+    const reason: Seg[] =
+      code === 'declined' && status !== null && CARD_REASONS[status]
+        ? [CARD_REASONS[status]!]
+        : code === 'amount_mismatch'
+          ? mismatchSegs(provider, payment)
+          : code === 'expired'
+            ? ['مهلت ', num(PAYMENT_ATTEMPT_TTL_MS / 60_000), ' دقیقه گذشت و تأیید نشد']
+            : [FAILURES[code] ?? (code || 'ناموفق')];
+    // پولش نزد درگاه است و خودکار برمی‌گردد (۲، ۱۶)، یا تأییدشده است و برنمی‌گردد (۱).
+    const money: Seg[] =
+      status !== null && (MONEY_HELD_STATUSES as readonly number[]).includes(status)
+        ? [`؛ ${provider} پولش را خودکار به کارت برمی‌گرداند`]
+        : status === 1
+          ? [`؛ ${provider} آن را تأییدشده می‌گوید، پس پولش خودکار برنمی‌گردد: دستی برش گردان`]
+          : [];
+    return {
+      kind: 'failed',
+      at: payment.createdAt,
+      meta: [...id, ...cardSeg(payment.cardMask), ' · ', ...reason, ...money, ...(code === 'declined' || code === 'cancelled' ? [] : said), ...when],
+      inquirable: ask,
+    };
   }
-  // همان مرز برگشت سایت (`settle`): تا خود نیم ساعت هنوز پذیرفته می‌شود، بعدش نه.
+  // در انتظار. مهلت همان برگشت سایت (`judge`): تا خود مهلت هنوز پذیرفته می‌شود.
   const until = new Date(payment.createdAt.getTime() + PAYMENT_ATTEMPT_TTL_MS);
+  const lastAsked: Seg[] = checked ? ['، آخرین ', { num: formatTehranTime(checked) }] : [];
+  if (isChecking(payment)) {
+    const head: Seg[] =
+      status === 1 || status === 2
+        ? [`${provider} می‌گوید پرداخت شده، ولی تأییدش هنوز نهایی نشده`, ...(payment.gatewayError ? ['؛ ', ...gatewayErrorText(provider, payment.gatewayError)] : [])]
+        : [
+            'مشتری ',
+            ...(payment.returnedAt ? [{ num: formatTehranTime(payment.returnedAt) } as Seg, ' '] : []),
+            'برگشت ولی ',
+            ...gatewayErrorText(provider, payment.gatewayError),
+          ];
+    return {
+      kind: 'checking',
+      at: payment.createdAt,
+      meta: [
+        ...id,
+        ...cardSeg(payment.cardMask),
+        ' · ',
+        ...head,
+        '. استعلام خودکار هر دقیقه',
+        ...lastAsked,
+        ...(status === 1 ? ['.'] : ['؛ برگشتش تا ', { num: formatTehranTime(until) }, ' پذیرفته می‌شود.']),
+      ],
+      inquirable: ask,
+    };
+  }
   if (at.getTime() > until.getTime()) {
     return {
       kind: 'unreturned',
       at: payment.createdAt,
-      meta: [provider, ' · مشتری به درگاه رفت و برنگشت. بعد از ', num(30), ' دقیقه، برگشت دیرش هم پذیرفته نمی‌شود.'],
+      meta: checked
+        ? [
+            ...id,
+            ' · مشتری به درگاه رفت و برنگشت، و ',
+            ...(payment.gatewayError ? gatewayErrorText(provider, payment.gatewayError) : [`${provider} هنوز «در انتظار پرداخت» می‌گوید`]),
+            '. استعلام خودکار هر دقیقه دوباره می‌پرسد',
+            ...lastAsked,
+            '.',
+          ]
+        : [...id, ' · مشتری به درگاه رفت و برنگشت؛ هنوز از درگاه پرسیده نشده.'],
+      inquirable: ask,
     };
   }
   return {
     kind: 'pending',
     at: payment.createdAt,
-    meta: [provider, ' · مشتری در درگاه است؛ برگشتش تا ساعت ', { num: formatTehranTime(until) }, ' پذیرفته می‌شود.'],
+    meta: [
+      ...id,
+      payment.returnedAt && status === -1
+        ? ' · مشتری برگشت ولی هنوز پرداخت نکرده (درگاه: در انتظار پرداخت)؛ برگشتش تا ساعت '
+        : ' · مشتری در درگاه است؛ برگشتش تا ساعت ',
+      { num: formatTehranTime(until) },
+      ' پذیرفته می‌شود.',
+    ],
+    inquirable: ask,
   };
+}
+
+/** «مبلغ با سفارش نخواند: زیبال 37,475 تومان گفت، نه 374,750»؛ مبلغ تأییدشده، یا آنچه استعلام پیش از `verify` گفت. */
+function mismatchSegs(provider: string, payment: PaymentRow): Seg[] {
+  const said = (payment.raw as { amount?: unknown } | null)?.amount;
+  const reported = payment.verifiedAmountRials ?? (typeof said === 'number' && Number.isSafeInteger(said) ? said : null);
+  if (reported === null) return [FAILURES.amount_mismatch!];
+  return [
+    'مبلغ با سفارش نخواند: ',
+    provider,
+    ' ',
+    { num: formatTomans(reported, false) },
+    ' تومان گفت، نه ',
+    { num: formatTomans(payment.amountRials, false) },
+  ];
 }
 
 /* ───────────────────────── فایل چاپ و برگهٔ سفارش (برش ۵٫۱) ───────────────────────── */
@@ -918,6 +1093,15 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
       // «دوباره بفرست» پیامک پرداخت (۷٫۱)؛ از چشم چاپخانه نه (`withoutMoney`).
       const resent = detail as { outcome?: unknown };
       entries.push({ at: event.at, text: [resent.outcome === 'sent' ? 'پیامک پرداخت دوباره رفت' : 'پیامک پرداخت دوباره نرفت'], who });
+    } else if (event.action === 'payments.inquiry') {
+      // «استعلام از درگاه» (۷٫۲)، با نتیجه؛ از چشم چاپخانه نه.
+      const outcome = String((detail as { outcome?: unknown }).outcome ?? '');
+      entries.push({ at: event.at, text: [`استعلام از درگاه: ${INQUIRY_TEXT[outcome] ?? outcome}`], who });
+    } else if (event.action === 'payments.gateway_rejected') {
+      // رویداد سیستم (۷٫۲): درگاه شروع پرداخت را رد کرد.
+      const rejected = detail as { result?: unknown };
+      const why: Seg[] = rejected.result === 115 ? ['زیبال IP سرور را نپذیرفت (کد ', num(115), ')'] : ['زیبال کد پذیرنده را نپذیرفت', ...(typeof rejected.result === 'number' ? [' (کد ', num(rejected.result), ')'] : [])];
+      entries.push({ at: event.at, text: ['پرداخت شروع نشد: ', ...why], who: 'سایت' });
     }
     else if (event.action === 'orders.recipient') {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT_FIELDS[String(field)] ?? String(field)) : [];

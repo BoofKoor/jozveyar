@@ -478,6 +478,16 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
           // نشست این گوشی تمام شده یا جای دیگری باطل شد: یک بار دیگر کد.
           set({ auth: null, stage: 'mobile', mobile: state.auth?.mobile ?? state.mobile, mobileError: { kind: 'signed_out' } });
           return null;
+        case 'payment_checking': {
+          // پرداختی از همین سفارش در حال بررسی است (برش ۷٫۲): صفحهٔ سفارش «در حال بررسی» را نشان می‌دهد، نه تلاش تازه.
+          const token = (result.body.order as { token?: unknown } | undefined)?.token;
+          if (typeof token === 'string') {
+            placedOrder = token;
+            deps.navigate(`/order/${token}`);
+            return null;
+          }
+          break;
+        }
       }
       set({ payNotice: { kind: 'failure', failure: result } });
       return null;

@@ -94,9 +94,14 @@ import { createHash } from 'node:crypto';
 import { READ_POST_FILE_JOB, createShipmentStore } from './shipments.js';
 import { shipmentImportRows, shipmentImports, shipments } from './schema.js';
 import { barcodeOf, parcel, postTable } from './postfile.fixtures.js';
-import type { PanelScope } from './panel.js';
+import { MISMATCH_ALERT_MS, type PanelScope } from './panel.js';
 import { bandsDecision, bandsSeen, createShippingReportStore, currentBands } from './report.js';
 import { readSetting, REPORT_BANDS_SETTING } from './reference.js';
+import { createZibalMock, type ZibalMock } from '@jozveyar/payments/mock';
+import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
+import { zibalGateway } from '@jozveyar/payments/zibal';
+import { PAYMENT_ATTEMPT_TTL_MS } from './orders.js';
+import { providersOf, settleWith, watchHeld } from './payments.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -687,10 +692,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const { order } = await placeOrder();
       const attempt = (over: Partial<typeof payments.$inferInsert>) =>
         conn.db.insert(payments).values({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority: randomUUID(), ...over });
-      expect(await rejectedConstraint(attempt({ status: 'succeeded' }))).toBe('payments_success_has_ref');
+      const verified = { verifiedAmountRials: order.totalRials };
+      expect(await rejectedConstraint(attempt({ status: 'succeeded', ...verified }))).toBe('payments_success_has_ref');
       await attempt({ status: 'failed', failureCode: 'cancelled' });
-      await attempt({ status: 'succeeded', refId: '803114', verifiedAt: new Date() });
-      expect(await rejectedConstraint(attempt({ status: 'succeeded', refId: '803115', verifiedAt: new Date() }))).toBe('payments_one_success');
+      await attempt({ status: 'succeeded', refId: '803114', verifiedAt: new Date(), ...verified });
+      expect(await rejectedConstraint(attempt({ status: 'succeeded', refId: '803115', verifiedAt: new Date(), ...verified }))).toBe('payments_one_success');
       // سابقهٔ پول: سفارشی که پرداخت دارد پاک نمی‌شود.
       expect(await rejectedConstraint(conn.db.delete(orders).where(eq(orders.id, order.id)))).toBe('payments_order_id_orders_id_fk');
     });
@@ -1007,8 +1013,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
       const paidAt = new Date();
       const due = new Date(paidAt.getTime() + 2 * 86_400_000);
-      const settled = await store.settlePayment('mock', authority, async () => ({
+      const settled = await store.settlePayment('mock', authority, async ({ payment }) => ({
         kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
         refId: '803114',
         cardMask: null,
         raw: { decision: 'success' },
@@ -1046,11 +1053,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
       await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
       let asked = 0;
-      const decide = async () => {
+      const decide = async ({ payment }: { payment: { amountRials: number } }) => {
         asked += 1;
         await new Promise((resolve) => setTimeout(resolve, 50));
         const paidAt = new Date();
-        return { kind: 'succeeded' as const, refId: '1', cardMask: null, raw: null, paidAt, postHandoffDueAt: paidAt };
+        return { kind: 'succeeded' as const, refId: '1', cardMask: null, verifiedAmountRials: payment.amountRials, raw: null, paidAt, postHandoffDueAt: paidAt };
       };
       const results = await Promise.all([store.settlePayment('mock', authority, decide), store.settlePayment('mock', authority, decide)]);
       expect(asked).toBe(1);
@@ -1066,9 +1073,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       }
       const failed = await store.settlePayment('mock', authorities[0]!, async () => ({ kind: 'failed', code: 'declined', raw: { decision: 'failure' } }));
       expect(failed).toMatchObject({ settled: true, payment: { status: 'failed', failureCode: 'declined' }, order: { status: 'awaiting_payment' } });
-      const success = async () => {
+      const success = async ({ payment }: { payment: { amountRials: number } }) => {
         const paidAt = new Date();
-        return { kind: 'succeeded' as const, refId: '2', cardMask: null, raw: null, paidAt, postHandoffDueAt: paidAt };
+        return { kind: 'succeeded' as const, refId: '2', cardMask: null, verifiedAmountRials: payment.amountRials, raw: null, paidAt, postHandoffDueAt: paidAt };
       };
       await store.settlePayment('mock', authorities[1]!, success);
       expect(await rejectedConstraint(store.settlePayment('mock', authorities[2]!, success))).toBe('payments_one_success');
@@ -1094,8 +1101,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       return { store, order, authority, payment };
     }
 
-    const succeed = (paidAt: Date, due: Date) => async () => ({
+    const succeed = (paidAt: Date, due: Date) => async ({ payment }: { payment: { amountRials: number } }) => ({
       kind: 'succeeded' as const,
+      verifiedAmountRials: payment.amountRials,
       refId: '803114',
       cardMask: null,
       raw: null,
@@ -1198,7 +1206,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const succeedWith = (smsMessageId: number | null) =>
         conn.db
           .update(payments)
-          .set({ status: 'succeeded', refId: '1', verifiedAt: new Date(), smsMessageId })
+          .set({ status: 'succeeded', refId: '1', verifiedAt: new Date(), verifiedAmountRials: order.totalRials, smsMessageId })
           .where(eq(payments.id, payment.id));
 
       // `payments_sms`: تلاش تازه بی پیامک درج می‌شود (شاهد: همان درج بی پیامک، `insertPayment` بالا).
@@ -1225,7 +1233,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         await rejectedConstraint(
           conn.db
             .update(payments)
-            .set({ status: 'succeeded', refId: '2', verifiedAt: new Date(), smsMessageId: loose })
+            .set({ status: 'succeeded', refId: '2', verifiedAt: new Date(), verifiedAmountRials: other.order.totalRials, smsMessageId: loose })
             .where(eq(payments.id, other.payment.id)),
         ),
       ).toBe('payments_sms');
@@ -1360,6 +1368,430 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('تنظیم سقف کد کل سایت پیش‌فرض دارد', async () => {
       const [row] = await conn.db.select().from(settings).where(eq(settings.key, 'otp.site_hourly_limit'));
       expect(row!.value).toBe(300);
+    });
+
+    /* ── درگاه زیبال (برش ۷٫۲، ADR-050) ── */
+
+    describe('درگاه زیبال: محافظ‌های payments و برگشت زیر قفل (برش ۷٫۲)', () => {
+      const MERCHANT = 'mock-merchant-integration-71';
+      let zibal: ZibalMock;
+      let zibalUrl = '';
+      let gateways: Record<string, PaymentGateway>;
+
+      beforeAll(async () => {
+        zibal = createZibalMock({ merchants: [MERCHANT] });
+        zibalUrl = await zibal.listen();
+        gateways = { zibal: zibalGateway({ baseUrl: zibalUrl, merchant: async () => MERCHANT }) };
+      });
+
+      afterAll(() => zibal.close());
+
+      beforeEach(() => {
+        zibal.configure({ omit: [], fail: null, delayMs: 0, drop: 0, reverseAfterMs: null, ipRejected: false });
+      });
+
+      const store = () => createOrderStore(conn);
+      const payOnZibal = (trackId: string, outcome = 'success') =>
+        fetch(`${zibalUrl}/__mock/pay`, { method: 'POST', body: JSON.stringify({ trackId, outcome }) });
+      const verifiedAtZibal = (trackId: string) => zibal.state.transactions.get(Number(trackId))!.status === 1;
+
+      /** سفارش تازه با یک تلاش زیبال که واقعاً از زیبال ساختگی شروع شده، همان شکل `startPayment` وب. */
+      async function zibalAttempt(over: { amountRials?: number; createdAt?: Date; orderId?: string } = {}) {
+        const s = store();
+        const { order } = over.orderId
+          ? { order: (await conn.db.select().from(orders).where(eq(orders.id, over.orderId)))[0]! }
+          : await s.createOrder(await newOrder());
+        const id = randomUUID();
+        const gatewayOrderId = `${order.orderNumber}-${id.slice(0, 8)}`;
+        const started = await gateways.zibal!.start({
+          amountRials: over.amountRials ?? order.totalRials,
+          callbackUrl: `https://jozveyar.com/pay/callback/${'0'.repeat(32)}`,
+          orderId: gatewayOrderId,
+          description: `سفارش ${order.orderNumber} جزوه‌یار`,
+        });
+        await conn.db.insert(payments).values({
+          id,
+          orderId: order.id,
+          provider: 'zibal',
+          amountRials: order.totalRials,
+          authority: started.authority,
+          gatewayOrderId,
+          raw: started.raw as object,
+          ...(over.createdAt ? { createdAt: over.createdAt } : {}),
+        });
+        const [payment] = await conn.db.select().from(payments).where(eq(payments.id, id));
+        return { order, payment: payment!, trackId: started.authority };
+      }
+
+      const settle = (lookup: Parameters<typeof settleWith>[0]['lookup'], over: Partial<Parameters<typeof settleWith>[0]> = {}) =>
+        settleWith({ store: store(), lookup, gateways, via: 'callback', now: () => new Date(), ...over });
+
+      it('`payments_amount_is_total`: مبلغ تلاش در درج همان جمع منجمد سفارش (شاهد: همان درج با جمع)', async () => {
+        const { order } = await store().createOrder(await newOrder());
+        const insert = (amountRials: number) =>
+          conn.db.insert(payments).values({ orderId: order.id, provider: 'mock', amountRials, authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}` });
+        expect(await rejectedConstraint(insert(order.totalRials - 10))).toBe('payments_amount_is_total');
+        expect(await rejectedConstraint(insert(order.totalRials * 10))).toBe('payments_amount_is_total');
+        await insert(order.totalRials);
+      });
+
+      it('`payments_frozen`: سفارش، درگاه، مبلغ، شناسه‌ها، کلید برگشت و زمان ساختن پس از درج؛ «نخستین برگشت» یک بار', async () => {
+        const { payment } = await zibalAttempt();
+        const { order: other } = await store().createOrder(await newOrder());
+        const update = (patch: Partial<typeof payments.$inferInsert>) => conn.db.update(payments).set(patch).where(eq(payments.id, payment.id));
+        for (const patch of [
+          { amountRials: payment.amountRials + 1 },
+          { authority: '3714999999' },
+          { provider: 'mock', gatewayOrderId: null },
+          { orderId: other.id },
+          { gatewayOrderId: '99999-aaaaaaaa' },
+          { returnKey: 'f'.repeat(32) },
+          { createdAt: new Date(payment.createdAt.getTime() - 3_600_000) },
+        ] satisfies Partial<typeof payments.$inferInsert>[]) {
+          expect(await rejectedConstraint(update(patch)), JSON.stringify(Object.keys(patch))).toBe('payments_frozen');
+        }
+        // شاهد: آنچه از درگاه دانستیم و نخستین برگشت عوض‌شدنی است، ولی برگشت فقط یک بار.
+        const first = new Date();
+        await update({ gatewayStatus: -1, gatewayCheckedAt: first, returnedAt: first });
+        expect(await rejectedConstraint(update({ returnedAt: new Date(first.getTime() + 1000) }))).toBe('payments_frozen');
+        expect(await rejectedConstraint(update({ returnedAt: null }))).toBe('payments_frozen');
+      });
+
+      it('`payments_flow` و تلاش بسته: گذار فقط از «در انتظار»؛ پس از آن فقط آنچه از درگاه دانستیم', async () => {
+        const failed = await zibalAttempt();
+        const update = (id: string, patch: Partial<typeof payments.$inferInsert>) => conn.db.update(payments).set(patch).where(eq(payments.id, id));
+        // شاهد: در انتظار ← ناموفق می‌نشیند.
+        await update(failed.payment.id, { status: 'failed', failureCode: 'cancelled', settledVia: 'callback' });
+        const verified = { refId: '1', verifiedAt: new Date(), verifiedAmountRials: failed.payment.amountRials };
+        expect(await rejectedConstraint(update(failed.payment.id, { status: 'succeeded', ...verified }))).toBe('payments_flow');
+        expect(await rejectedConstraint(update(failed.payment.id, { status: 'pending' }))).toBe('payments_flow');
+        for (const patch of [{ failureCode: 'declined' }, { raw: { x: 1 } }, { cardMask: '6037' }, { settledVia: 'auto' }, { refId: '2' }] as const) {
+          expect(await rejectedConstraint(update(failed.payment.id, patch)), Object.keys(patch)[0]).toBe('payments_frozen');
+        }
+        // پول پرداخت دوم تا «ریورس‌شده» پاییده می‌شود: وضعیت درگاه تلاش بسته عوض‌شدنی است.
+        await update(failed.payment.id, { gatewayStatus: 18, gatewayError: null, gatewayCheckedAt: new Date() });
+        // موفق هم بسته است.
+        const paid = await zibalAttempt();
+        await payOnZibal(paid.trackId);
+        expect((await settle({ paymentId: paid.payment.id, providers: ['zibal'] }))).toMatchObject({ settled: true, payment: { status: 'succeeded' } });
+        expect(await rejectedConstraint(update(paid.payment.id, { status: 'failed', failureCode: 'cancelled' }))).toBe('payments_flow');
+        expect(await rejectedConstraint(update(paid.payment.id, { verifiedAmountRials: 1 }))).toBe('payments_frozen');
+      });
+
+      it('`payments_success_amount`: موفق یعنی مبلغ تأییدشده برابر مبلغ؛ بی آن یا جز آن نه', async () => {
+        const { order, payment } = await pendingPayment();
+        const [sms] = await conn.db
+          .insert(smsMessages)
+          .values({ provider: 'queued', toMobile: MOBILE, purpose: 'order_paid', body: 'جزوه‌یار', params: ['1', 'شنبه'], status: 'pending' })
+          .returning({ id: smsMessages.id });
+        const succeed = (verifiedAmountRials: number | null) =>
+          conn.db
+            .update(payments)
+            .set({ status: 'succeeded', refId: '1', verifiedAt: new Date(), verifiedAmountRials, smsMessageId: sms!.id })
+            .where(eq(payments.id, payment.id));
+        expect(await rejectedConstraint(succeed(null))).toBe('payments_success_amount');
+        expect(await rejectedConstraint(succeed(order.totalRials - 1))).toBe('payments_success_amount');
+        await succeed(order.totalRials);
+      });
+
+      it('کلید برگشت، شناسهٔ سفارش درگاه، علت و «چه بست»: شکل و یکتایی', async () => {
+        const { order } = await store().createOrder(await newOrder());
+        const base = { orderId: order.id, amountRials: order.totalRials };
+        const authority = () => `${Math.floor(Math.random() * 1e9) + 1e9}`;
+        expect(await rejectedConstraint(conn.db.insert(payments).values({ ...base, provider: 'mock', authority: authority(), returnKey: 'ABC' }))).toBe(
+          'payments_return_key',
+        );
+        expect(await rejectedConstraint(conn.db.insert(payments).values({ ...base, provider: 'zibal', authority: authority() }))).toBe(
+          'payments_gateway_order_id',
+        );
+        await conn.db.insert(payments).values({ ...base, provider: 'zibal', authority: authority(), gatewayOrderId: 'G-1', returnKey: 'a'.repeat(32) });
+        expect(
+          await rejectedConstraint(conn.db.insert(payments).values({ ...base, provider: 'zibal', authority: authority(), gatewayOrderId: 'G-1' })),
+        ).toBe('payments_gateway_order');
+        expect(
+          await rejectedConstraint(conn.db.insert(payments).values({ ...base, provider: 'zibal', authority: authority(), gatewayOrderId: 'G-2', returnKey: 'a'.repeat(32) })),
+        ).toBe('payments_return_key');
+        // شاهد: همان شناسهٔ سفارش نزد درگاه دیگر.
+        await conn.db.insert(payments).values({ ...base, provider: 'mock', authority: authority(), gatewayOrderId: 'G-1' });
+        expect(
+          await rejectedConstraint(conn.db.insert(payments).values({ ...base, provider: 'mock', authority: authority(), gatewayError: 'rejected:115 x' })),
+        ).toBe('payments_gateway_error');
+        expect(
+          await rejectedConstraint(conn.db.insert(payments).values({ ...base, provider: 'mock', authority: authority(), settledVia: 'callback' })),
+        ).toBe('payments_settled_via');
+        await conn.db.insert(payments).values({ ...base, provider: 'mock', authority: authority(), gatewayError: 'rejected:115' });
+      });
+
+      it('برگشت با کلید: فقط درگاه‌های در کار (درگاه نمونه در live نه)، «نخستین برگشت»، و برگشت زودرس در انتظار می‌ماند', async () => {
+        const { payment, trackId } = await zibalAttempt();
+        expect(await settle({ returnKey: payment.returnKey, providers: ['mock'] })).toBeNull();
+        expect(await settle({ returnKey: 'f'.repeat(32), providers: ['zibal'] })).toBeNull();
+        const early = await settle({ returnKey: payment.returnKey, providers: ['zibal'] }, { returned: true });
+        expect(early).toMatchObject({ settled: false, payment: { status: 'pending', gatewayStatus: -1, gatewayError: null } });
+        const returnedAt = (early as { payment: { returnedAt: Date } }).payment.returnedAt;
+        expect(returnedAt).toBeInstanceOf(Date);
+        await payOnZibal(trackId);
+        const done = await settle({ returnKey: payment.returnKey, providers: ['zibal'] }, { returned: true });
+        expect(done).toMatchObject({
+          settled: true,
+          payment: { status: 'succeeded', settledVia: 'callback', gatewayStatus: 1, verifiedAmountRials: payment.amountRials, returnedAt },
+          order: { status: 'paid' },
+        });
+        const row = (done as { payment: { refId: string; cardMask: string } }).payment;
+        expect(row.refId).toMatch(/^\d+$/);
+        expect(row.cardMask).toMatch(/^603799\*+1234$/);
+        expect(verifiedAtZibal(trackId)).toBe(true);
+      });
+
+      it('دو برگشت هم‌زمان یک تلاش: یک verify، یکی موفق و دیگری همان نتیجه', async () => {
+        const { payment, trackId } = await zibalAttempt();
+        await payOnZibal(trackId);
+        let verifies = 0;
+        const counting: PaymentGateway = { ...gateways.zibal!, verify: async (attempt) => (verifies++, gateways.zibal!.verify(attempt)) };
+        const both = await Promise.all(
+          [1, 2].map(() => settleWith({ store: store(), lookup: { returnKey: payment.returnKey, providers: ['zibal'] }, gateways: { zibal: counting }, via: 'callback', now: () => new Date() })),
+        );
+        expect(verifies).toBe(1);
+        expect(both.map((r) => (r as { settled: boolean }).settled).sort()).toEqual([false, true]);
+      });
+
+      it('برگشت و استعلام خودکار هم‌زمان: استعلام خودکار تلاش قفل‌شده را رها می‌کند (`busy`)، و verify یک بار', async () => {
+        const { payment, trackId } = await zibalAttempt();
+        await payOnZibal(trackId);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let verifies = 0;
+        const slow: PaymentGateway = {
+          ...gateways.zibal!,
+          inquire: async (attempt) => {
+            await held;
+            return gateways.zibal!.inquire(attempt);
+          },
+          verify: async (attempt) => (verifies++, gateways.zibal!.verify(attempt)),
+        };
+        const callback = settleWith({ store: store(), lookup: { returnKey: payment.returnKey, providers: ['zibal'] }, gateways: { zibal: slow }, via: 'callback', now: () => new Date() });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const auto = await settleWith({ store: store(), lookup: { paymentId: payment.id, providers: ['zibal'] }, gateways: { zibal: slow }, via: 'auto', now: () => new Date(), skipLocked: true });
+        expect(auto).toBe('busy');
+        release();
+        expect(await callback).toMatchObject({ settled: true, payment: { status: 'succeeded', settledVia: 'callback' } });
+        expect(verifies).toBe(1);
+      });
+
+      it('مبلغ درگاه ناهمخوان: ناموفق بی verify (شاهد: verify نخورده، پول خودکار برمی‌گردد)', async () => {
+        const { payment, trackId } = await zibalAttempt({ amountRials: 1_234_000 });
+        await payOnZibal(trackId);
+        expect(await settle({ returnKey: payment.returnKey, providers: ['zibal'] })).toMatchObject({
+          settled: true,
+          payment: { status: 'failed', failureCode: 'amount_mismatch', gatewayStatus: 2, verifiedAmountRials: null },
+          order: { status: 'awaiting_payment' },
+        });
+        expect(verifiedAtZibal(trackId)).toBe(false);
+      });
+
+      it('دو تلاش پرداخت‌شدهٔ یک سفارش: اولی موفق، دومی هرگز verify («سفارش پرداختنی نبود»، با کارت پوشیده)', async () => {
+        const first = await zibalAttempt();
+        const second = await zibalAttempt({ orderId: first.order.id });
+        await payOnZibal(first.trackId);
+        await payOnZibal(second.trackId);
+        expect(await settle({ paymentId: first.payment.id, providers: ['zibal'] })).toMatchObject({ payment: { status: 'succeeded' } });
+        expect(await settle({ returnKey: second.payment.returnKey, providers: ['zibal'] })).toMatchObject({
+          payment: { status: 'failed', failureCode: 'order_not_payable', gatewayStatus: 2 },
+        });
+        expect((await conn.db.select().from(payments).where(eq(payments.id, second.payment.id)))[0]!.cardMask).toMatch(/1234$/);
+        expect(verifiedAtZibal(second.trackId)).toBe(false);
+      });
+
+      it('مهلت ۱۰ دقیقه: پرداخت‌شده پس از مهلت ناموفق «مهلت گذشت» بی verify؛ تا خود مهلت پذیرفته', async () => {
+        expect(PAYMENT_ATTEMPT_TTL_MS).toBe(10 * 60_000);
+        const late = await zibalAttempt({ createdAt: new Date(Date.now() - PAYMENT_ATTEMPT_TTL_MS - 60_000) });
+        await payOnZibal(late.trackId);
+        expect(await settle({ paymentId: late.payment.id, providers: ['zibal'] }, { via: 'auto' })).toMatchObject({
+          payment: { status: 'failed', failureCode: 'expired', gatewayStatus: 2, settledVia: 'auto' },
+        });
+        expect(verifiedAtZibal(late.trackId)).toBe(false);
+        const edge = await zibalAttempt({ createdAt: new Date(Date.now() - PAYMENT_ATTEMPT_TTL_MS + 30_000) });
+        await payOnZibal(edge.trackId);
+        expect(await settle({ paymentId: edge.payment.id, providers: ['zibal'] })).toMatchObject({ payment: { status: 'succeeded' } });
+      });
+
+      it('زیبال جواب نداد: در انتظار با علت، نه ناموفق؛ IP (۱۱۵) هم', async () => {
+        const { payment } = await zibalAttempt();
+        zibal.configure({ fail: { http: 503, times: 1 } });
+        expect(await settle({ paymentId: payment.id, providers: ['zibal'] })).toMatchObject({
+          settled: false,
+          payment: { status: 'pending', gatewayError: 'unavailable:503' },
+        });
+        zibal.configure({ ipRejected: true });
+        expect(await settle({ paymentId: payment.id, providers: ['zibal'] })).toMatchObject({ payment: { status: 'pending', gatewayError: 'rejected:115' } });
+      });
+
+      it('فهرست استعلام خودکار و پاییدن پول پرداخت دوم تا «ریورس‌شده»', async () => {
+        const at = new Date();
+        const fresh = await zibalAttempt();
+        const old = await zibalAttempt({ createdAt: new Date(at.getTime() - 3 * 60_000) });
+        const ids = await store().pendingAttempts({
+          providers: ['zibal'],
+          createdBefore: new Date(at.getTime() - 2 * 60_000),
+          checkedBefore: new Date(at.getTime() - 50_000),
+          limit: 100,
+        });
+        expect(ids).toContain(old.payment.id);
+        expect(ids).not.toContain(fresh.payment.id);
+        expect(await store().pendingAttempts({ providers: [], createdBefore: at, checkedBefore: at, limit: 10 })).toEqual([]);
+        // پرسیده‌شده در همین دقیقه دوباره نه.
+        await store().recordGatewayCheck(old.payment.id, { status: -1, error: null, at });
+        expect(
+          await store().pendingAttempts({ providers: ['zibal'], createdBefore: at, checkedBefore: new Date(at.getTime() - 50_000), limit: 100 }),
+        ).not.toContain(old.payment.id);
+
+        // پرداخت دوم: پول نزد زیبال، تا ریورس.
+        const first = await zibalAttempt();
+        const second = await zibalAttempt({ orderId: first.order.id });
+        await payOnZibal(first.trackId);
+        await payOnZibal(second.trackId);
+        await settle({ paymentId: first.payment.id, providers: ['zibal'] });
+        await settle({ paymentId: second.payment.id, providers: ['zibal'] });
+        const window = { providers: ['zibal'], createdAfter: new Date(at.getTime() - 3_600_000), checkedBefore: new Date(Date.now() + 1000), limit: 100 };
+        const held = await store().heldAttempts(window);
+        expect(held.map((p) => p.id)).toContain(second.payment.id);
+        zibal.configure({ reverseAfterMs: 0 });
+        const row = held.find((p) => p.id === second.payment.id)!;
+        expect(await watchHeld({ store: store(), payment: row, gateway: gateways.zibal!, now: () => new Date() })).toBe(18);
+        expect((await store().heldAttempts(window)).map((p) => p.id)).not.toContain(second.payment.id);
+        const [after] = await conn.db.select().from(payments).where(eq(payments.id, second.payment.id));
+        expect(after).toMatchObject({ status: 'failed', failureCode: 'order_not_payable', gatewayStatus: 18 });
+      });
+
+      it('پیشخوان: ردِ شروع تا اولین شروع یا «آزمایش» درست؛ مبلغ ناهمخوان، پولی که نزد درگاه است، تأییدشدهٔ بی‌استفاده، و بستهٔ خودکار امروز', async () => {
+        const panel = createPanelOrderStore(conn);
+        const clockAt = (at: Date): PanelClock => ({
+          at,
+          staleBefore: at,
+          unreturnedBefore: at,
+          untrackedSince: new Date(at.getTime() - 45 * 86_400_000),
+          todayStart: new Date(at.getTime() - 3_600_000),
+        });
+        const alerts = () => panel.alerts(ALL_ORDERS, clockAt(new Date()));
+        const merchantCheck = (action: string, detail: Record<string, unknown>) =>
+          conn.db.insert(adminEvents).values({
+            adminUserId: null,
+            action,
+            targetType: SERVICE_KEY_TARGET,
+            targetId: 'PAYMENT_MERCHANT_ID',
+            detail: { ...detail, name: 'PAYMENT_MERCHANT_ID' },
+            at: new Date(),
+          });
+
+        // ردِ شروع (۱۱۵): رویداد سیستم روی سفارش، بی ادمین؛ پیشخوان تا اولین شروع موفق همان درگاه.
+        const { order } = await store().createOrder(await newOrder());
+        const rejectedAt = new Date();
+        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 115, at: rejectedAt });
+        const [event] = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'payments.gateway_rejected'), eq(adminEvents.targetId, order.id)));
+        expect(event).toMatchObject({ adminUserId: null, targetType: 'order', detail: { orderNumber: order.orderNumber, provider: 'zibal', result: 115 } });
+        expect((await alerts()).gatewayRejected).toEqual({ at: rejectedAt, orderNumber: order.orderNumber, provider: 'zibal', result: 115, stage: 'start' });
+        expect((await panel.alerts({ kind: 'partner', partnerId: randomUUID() }, clockAt(new Date()))).gatewayRejected).toBeNull();
+        // شاهد: پرداخت درگاه دیگر پاکش نمی‌کند؛ شروع زیبال می‌کند.
+        await pendingPayment();
+        expect((await alerts()).gatewayRejected).not.toBeNull();
+        await zibalAttempt();
+        expect((await alerts()).gatewayRejected).toBeNull();
+
+        // دوباره رد شد (کد پذیرنده)؛ «آزمایش» ردشده پاکش نمی‌کند، «آزمایش» یا ذخیرهٔ آزموده می‌کند.
+        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 103, at: new Date() });
+        expect((await alerts()).gatewayRejected).toMatchObject({ result: 103, orderNumber: order.orderNumber });
+        await merchantCheck('settings.key_test', { subject: 'current', outcome: 'rejected', status: 115 });
+        await merchantCheck('settings.key_set', { tested: 'skipped' });
+        expect((await alerts()).gatewayRejected).toMatchObject({ result: 103 });
+        await merchantCheck('settings.key_set', { tested: 'ok' });
+        expect((await alerts()).gatewayRejected).toBeNull();
+        await store().recordGatewayRejection({ orderId: order.id, orderNumber: order.orderNumber, provider: 'zibal', result: 115, at: new Date() });
+        await merchantCheck('settings.key_test', { subject: 'current', outcome: 'ok' });
+        expect((await alerts()).gatewayRejected).toBeNull();
+
+        // همان کد در استعلام یک تلاش (سؤال ۱۴۷): از آخرین پرسش خود تلاش، بی رویداد تازه؛ تا «آزمایش» درست بعد از آن.
+        const asked = await zibalAttempt();
+        const checkedAt = new Date();
+        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'rejected:115', at: checkedAt });
+        expect((await alerts()).gatewayRejected).toEqual({
+          at: checkedAt,
+          orderNumber: asked.order.orderNumber,
+          provider: 'zibal',
+          result: 115,
+          stage: 'inquiry',
+        });
+        // شاهد: خطای گذرا (بی کد مالک) هشدار نیست.
+        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'unavailable:502', at: new Date() });
+        expect((await alerts()).gatewayRejected).toBeNull();
+        await store().recordGatewayCheck(asked.payment.id, { status: null, error: 'rejected:103', at: new Date() });
+        expect((await alerts()).gatewayRejected).toMatchObject({ result: 103, stage: 'inquiry' });
+        await merchantCheck('settings.key_test', { subject: 'current', outcome: 'ok' });
+        expect((await alerts()).gatewayRejected).toBeNull();
+
+        // مبلغ ناهمخوان (۲، بی verify): مبلغی که درگاه گفت از استعلام؛ پولش نزد درگاه.
+        const odd = await zibalAttempt({ amountRials: 1_234_000 });
+        await payOnZibal(odd.trackId);
+        await settle({ paymentId: odd.payment.id, providers: ['zibal'] });
+        // پرداخت دوم (۲): پولش نزد درگاه، تا «ریورس‌شده».
+        const first = await zibalAttempt();
+        const second = await zibalAttempt({ orderId: first.order.id });
+        await payOnZibal(first.trackId);
+        await payOnZibal(second.trackId);
+        await settle({ paymentId: first.payment.id, providers: ['zibal'] }, { via: 'auto' });
+        await settle({ paymentId: second.payment.id, providers: ['zibal'] }, { via: 'auto' });
+        // تأییدشدهٔ بی‌استفاده (۱): پولش خودکار برنمی‌گردد.
+        await conn.db.insert(payments).values({
+          orderId: first.order.id,
+          provider: 'zibal',
+          amountRials: first.order.totalRials,
+          authority: '3714999001',
+          gatewayOrderId: `${first.order.orderNumber}-verified`,
+          status: 'failed',
+          failureCode: 'order_not_payable',
+          gatewayStatus: 1,
+          settledVia: 'auto',
+        });
+
+        const now = await alerts();
+        expect(now.mismatched).toContainEqual({
+          orderNumber: odd.order.orderNumber,
+          amountRials: odd.order.totalRials,
+          reportedRials: 1_234_000,
+          createdAt: odd.payment.createdAt,
+        });
+        expect(now.held).toEqual(
+          expect.arrayContaining([
+            { orderNumber: odd.order.orderNumber, failureCode: 'amount_mismatch', createdAt: odd.payment.createdAt },
+            { orderNumber: first.order.orderNumber, failureCode: 'order_not_payable', createdAt: second.payment.createdAt },
+          ]),
+        );
+        expect(now.verifiedUnused).toContainEqual({ orderNumber: first.order.orderNumber, failureCode: 'order_not_payable' });
+        // بستهٔ خودکار امروز: یکی موفق، دو ناموفق (پرداخت دوم و تأییدشدهٔ بی‌استفاده)، دست‌کم.
+        expect(now.autoClosed.succeeded).toBeGreaterThanOrEqual(1);
+        expect(now.autoClosed.failed).toBeGreaterThanOrEqual(2);
+        expect((await panel.alerts(ALL_ORDERS, { ...clockAt(new Date()), todayStart: undefined })).autoClosed).toEqual({ failed: 0, succeeded: 0 });
+        // هفت روز بعد مبلغ ناهمخوان دیگر خطای پیشخوان نیست؛ برگشت پول دیگر «نزد درگاه» نیست.
+        expect((await panel.alerts(ALL_ORDERS, clockAt(new Date(Date.now() + MISMATCH_ALERT_MS + 60_000)))).mismatched.map((m) => m.orderNumber)).not.toContain(
+          odd.order.orderNumber,
+        );
+        await conn.db.update(payments).set({ gatewayStatus: 18 }).where(eq(payments.id, second.payment.id));
+        expect((await alerts()).held.map((h) => h.createdAt.getTime())).not.toContain(second.payment.createdAt.getTime());
+      });
+
+      it('درگاه نمونه از همان مسیر: بی تصمیم در انتظار، با تصمیم موفق', async () => {
+        const { order, payment } = await pendingPayment();
+        const mock = { mock: mockGateway() };
+        expect(providersOf(mock)).toEqual(['mock']);
+        expect(await settleWith({ store: store(), lookup: { returnKey: payment.returnKey, providers: ['mock'] }, gateways: mock, via: 'callback', now: () => new Date() })).toMatchObject({
+          payment: { status: 'pending', gatewayStatus: -1 },
+        });
+        await store().recordMockDecision(payment.authority, 'success', new Date());
+        expect(await settleWith({ store: store(), lookup: { returnKey: payment.returnKey, providers: ['mock'] }, gateways: mock, via: 'callback', now: () => new Date() })).toMatchObject({
+          settled: true,
+          payment: { status: 'succeeded', verifiedAmountRials: order.totalRials },
+          order: { status: 'paid' },
+        });
+      });
     });
   });
   describe('پنل ادمین روی پستگرس (برش ۴٫۱)', () => {
@@ -1744,25 +2176,19 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       totals[key] = order.totalRials;
     }
 
-    /** یک تلاش پرداخت با زمان ساختن دلخواه (پرداخت‌ها محافظ تغییر ندارند). */
+    /** یک تلاش پرداخت با زمان ساختن دلخواه، در خود درج: زمان ساختن پس از درج منجمد است (`payments_frozen`، برش ۷٫۲). */
     async function attempt(key: string, createdAt: Date): Promise<string> {
       const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
-      const payment = await createOrderStore(conn).insertPayment({
-        orderId: ids[key]!,
-        provider: 'mock',
-        amountRials: totals[key]!,
-        authority,
-        raw: null,
-      });
-      await conn.db.update(payments).set({ createdAt }).where(eq(payments.id, payment.id));
+      await conn.db.insert(payments).values({ orderId: ids[key]!, provider: 'mock', amountRials: totals[key]!, authority, createdAt });
       return authority;
     }
 
     /** پرداخت موفق از همان راه برگشت درگاه: سفارش `paid` با مهلت، رویداد، و کار `prepare_order` در صف. */
     async function pay(key: string, paidAt: Date, due: Date) {
       const authority = await attempt(key, new Date(paidAt.getTime() - MINUTE));
-      await createOrderStore(conn).settlePayment('mock', authority, async () => ({
+      await createOrderStore(conn).settlePayment('mock', authority, async ({ payment }) => ({
         kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
         refId: '803114',
         cardMask: null,
         raw: null,
@@ -1969,6 +2395,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         // پیامک پرداخت (۷٫۱) این سفارش‌ها منتظر ماند و هرگز فرستاده نشد (تست فرستنده ندارد): پس از ۵ دقیقه «نرفت» است. «شنبه» پس
         // از «حالا»ی تست پرداخت شد، پس پیامکش هنوز در راه است.
         paidSmsFailed: [num.late!, num.today2!, num.today1!, num.tomorrow!, num.wed!].sort((a, b) => a - b),
+        // هشدارهای پول و درگاه (۷٫۲): این سفارش‌ها هیچ‌کدام را ندارند.
+        gatewayRejected: null,
+        mismatched: [],
+        held: [],
+        verifiedUnused: [],
+        autoClosed: { failed: 0, succeeded: 0 },
       });
       // نیم ساعت بعد، تلاش ۱۰ دقیقه‌ای هم بی برگشت است (شاهد مهلت تلاش).
       expect(
@@ -2137,8 +2569,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
         raw: null,
       });
-      const settled = await store.settlePayment('mock', payment.authority, async () => ({
+      const settled = await store.settlePayment('mock', payment.authority, async ({ payment }) => ({
         kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
         refId: '803114',
         cardMask: null,
         raw: null,
@@ -2562,8 +2995,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
         raw: null,
       });
-      await store.settlePayment('mock', payment.authority, async () => ({
+      await store.settlePayment('mock', payment.authority, async ({ payment }) => ({
         kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
         refId: '803114',
         cardMask: null,
         raw: null,
@@ -2969,8 +3403,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         raw: null,
       });
       if (!settle) return { id: order.id, orderNumber: order.orderNumber, partnerId: null };
-      const settled = await store.settlePayment('mock', payment.authority, async () => ({
+      const settled = await store.settlePayment('mock', payment.authority, async ({ payment }) => ({
         kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
         refId: '803114',
         cardMask: null,
         raw: null,
@@ -3738,6 +4173,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           untracked: [],
           smsFailed: [],
           paidSmsFailed: [],
+          // پول و درگاه (۷٫۲): ردِ شروع در محدودهٔ چاپخانه هیچ.
+          gatewayRejected: null,
+          mismatched: [],
+          held: [],
+          verifiedUnused: [],
+          autoClosed: { failed: 0, succeeded: 0 },
         });
         expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toMatchObject({ open: 1, awaiting: 1, all: 2 });
         expect(await panel.counts(NOOR, { search: null, clock })).toEqual({ open: 0, handed: 0, cancelled: 0, awaiting: 0, abandoned: 0, all: 0 });
@@ -4600,8 +5041,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         raw: null,
       });
       if (!settle) return order;
-      const settled = await orderStore.settlePayment('mock', payment.authority, async () => ({
+      const settled = await orderStore.settlePayment('mock', payment.authority, async ({ payment }) => ({
         kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
         refId: '803114',
         cardMask: null,
         raw: null,

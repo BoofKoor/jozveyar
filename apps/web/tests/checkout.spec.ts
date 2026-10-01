@@ -472,20 +472,47 @@ test.describe('قدم‌ها', () => {
 });
 
 test.describe('پرداخت', () => {
-  test('پرداخت ناموفق: «پرداخت انجام نشد»، همان قیمت منجمد، و «دوباره پرداخت کن» تا «ثبت شد»', async ({ browser }) => {
+  test('پرداخت ناموفق: علت از درگاه (کارت، لغو)، همان قیمت منجمد، و «دوباره پرداخت کن» تا «ثبت شد»', async ({ browser }) => {
     const context = await newContext(browser);
     const page = await context.newPage();
     await dropReady(page);
     await toPay(page);
     await signIn(page, newMobile());
-    const number = await payAt(page, 'پرداخت ناموفق', TEN.other.totalRials);
 
-    await expect(page.getByTestId('payment-failed')).toContainText('پرداخت انجام نشد.');
+    // تا هدایت به درگاه (برش ۷٫۲، سؤال ۱۲۹): دکمهٔ بستهٔ «در حال رفتن…» و «خودکار برمی‌گردی».
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/checkout/orders', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await visibleButton(page, `پرداخت ${toman(TEN.other.totalRials)} تومان`).click();
+    await expect(page.getByTestId('pay-going')).toContainText('به درگاه پرداخت نمونه می‌روی.');
+    await expect(page.getByTestId('pay-going')).toContainText('بعد از پرداخت، خودکار به همین سایت برمی‌گردی و سفارشت را می‌بینی.');
+    await expect(visibleButton(page, 'در حال رفتن به درگاه نمونه…')).toBeDisabled();
+    release();
+    await page.waitForURL(/\/pay\/mock\/MOCK[0-9A-F]{32}$/);
+    await page.unroute('**/api/checkout/orders');
+    const number = Number(await page.locator('.ck-gate__lines dd.num').textContent());
+    await page.getByRole('button', { name: 'پرداخت ناموفق' }).click();
+    await page.waitForURL(/\/order\/[0-9a-f-]{36}$/);
+
+    // علت از استعلام درگاه، گروه کارت (سؤال ۱۳۱)
+    await expect(page.getByTestId('payment-failed')).toContainText(
+      'پرداخت انجام نشد: موجودی کارت کافی نبود. پولی از حسابت کم نشده؛ با کارت دیگری دوباره پرداخت کن.',
+    );
     await expect(page.getByTestId('order-awaiting')).toContainText(`سفارش ${number}`);
     await expect(page.getByTestId('order-awaiting')).toContainText('در انتظار پرداخت');
     await expect(page.getByTestId('summary-total')).toHaveText(toman(TEN.other.totalRials));
     // سفارش ساخته شده: مرور پیوند ویرایش ندارد
     await expect(page.getByTestId('order-awaiting').getByRole('button')).toHaveCount(0);
+
+    // انصراف در درگاه: گروه لغو
+    await visibleButton(page, 'دوباره پرداخت کن').click();
+    await page.waitForURL(/\/pay\/mock\//);
+    await page.getByRole('button', { name: 'انصراف و بازگشت' }).click();
+    await page.waitForURL(/\/order\//);
+    await expect(page.getByTestId('payment-failed')).toHaveText('پرداخت را در درگاه لغو کردی. پولی از حسابت کم نشده.');
 
     await visibleButton(page, 'دوباره پرداخت کن').click();
     await page.waitForURL(/\/pay\/mock\//);
@@ -493,9 +520,102 @@ test.describe('پرداخت', () => {
     await page.getByRole('button', { name: 'پرداخت موفق' }).click();
     await page.waitForURL(/\/order\//);
     await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
-    const payments = await sql()`select p.status from payments p join orders o on o.id = p.order_id
+    const payments = await sql()`select p.status, p.failure_code, p.gateway_status, p.settled_via from payments p join orders o on o.id = p.order_id
                                  where o.order_number = ${number} order by p.created_at`;
-    expect(payments.map((p) => p.status)).toEqual(['failed', 'succeeded']);
+    expect(payments.map((p) => [p.status, p.failure_code, p.gateway_status, p.settled_via])).toEqual([
+      ['failed', 'declined', 5, 'callback'],
+      ['failed', 'cancelled', 3, 'callback'],
+      ['succeeded', null, 1, 'callback'],
+    ]);
+    await context.close();
+  });
+
+  test('برگشت زودرس: «پرداخت هنوز انجام نشده» و تلاش نمی‌سوزد؛ پرداخت دوم بعد از «ثبت شد» یادداشت دارد (برش ۷٫۲)', async ({ browser }) => {
+    const context = await newContext(browser);
+    const page = await context.newPage();
+    await dropReady(page);
+    await toPay(page);
+    await signIn(page, newMobile());
+    await visibleButton(page, `پرداخت ${toman(TEN.other.totalRials)} تومان`).click();
+    await page.waitForURL(/\/pay\/mock\/MOCK[0-9A-F]{32}$/);
+    const first = page.url().split('/').at(-1)!;
+    const [row] = await sql()`select p.return_key, o.public_token, o.order_number from payments p join orders o on o.id = p.order_id
+                              where p.authority = ${first}`;
+
+    // برگشت پیش از هر تصمیمی (زودرس، یا نشانی دست‌ساز) با پارامترهای زیبال «ناموفق»، و بعد «موفق»: برگشت فقط کلید همان تلاش را
+    // می‌خواند، و درگاه «در انتظار پرداخت» می‌گوید؛ پس نه می‌سوزد و نه پرداخت می‌شود (سؤال ۱۴۵).
+    for (const forged of ['success=0&status=3', 'success=1&status=2']) {
+      await page.goto(`/pay/callback/${row!.return_key}?trackId=${first}&${forged}&orderId=${row!.order_number}`);
+      await page.waitForURL(`**/order/${row!.public_token}`);
+      await expect(page.getByTestId('payment-unpaid')).toHaveText(
+        'پرداخت هنوز انجام نشده. درگاه نمونه می‌گوید این پرداخت هنوز منتظر توست و پولی از حسابت کم نشده. اگر صفحهٔ پرداخت را بستی، دوباره پرداخت کن.',
+      );
+      await expect(page.getByTestId('payment-failed')).toHaveCount(0);
+    }
+    // فقط مبدأ به درگاه (سؤال ۱۲۲): «دوباره پرداخت کن» از همین صفحه به زیبال می‌رود.
+    await expect(page.locator('meta[name="referrer"]')).toHaveAttribute('content', 'strict-origin');
+    // کلید ناشناس ۴۰۴؛ پارامتر درگاه چیزی را عوض نمی‌کند.
+    expect((await page.request.get(`/pay/callback/${'0'.repeat(32)}?trackId=1&success=1&status=2`, { maxRedirects: 0 })).status()).toBe(404);
+
+    // تلاش دوم با «دوباره پرداخت کن»، موفق.
+    await visibleButton(page, 'دوباره پرداخت کن').click();
+    await page.waitForURL(/\/pay\/mock\//);
+    await page.getByRole('button', { name: 'پرداخت موفق' }).click();
+    await page.waitForURL(/\/order\//);
+    await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
+    await expect(page.getByTestId('extra-payment')).toHaveCount(0);
+
+    // همان زبانهٔ اول هنوز باز بود و آن هم پرداخت شد: سفارش پیش‌تر پرداخت شده، پس `verify` هرگز (سؤال ۱۲۱).
+    const decided = await page.request.post(`/api/checkout/mock-gateway/${first}`, { data: { decision: 'success' } });
+    expect(decided.status()).toBe(200);
+    const back = await page.request.get(((await decided.json()) as { redirectUrl: string }).redirectUrl, { maxRedirects: 0 });
+    expect(back.status()).toBe(303);
+    await page.reload();
+    await expect(page.getByTestId('extra-payment')).toHaveText(
+      `یک پرداخت دیگر هم برای همین سفارش انجام شد (${toman(TEN.other.totalRials)} تومان). سفارش پیش‌تر پرداخت شده بود، پس این یکی را تأیید نکردیم: ` +
+        'درگاه نمونه آن را 15 دقیقه پس از پرداخت خودکار به همان کارت برمی‌گرداند، و بعضی بانک‌ها تا 72 ساعت دیرتر نشانش می‌دهند. کاری لازم نیست.',
+    );
+    await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
+    const payments = await sql()`select p.status, p.failure_code, p.gateway_status from payments p join orders o on o.id = p.order_id
+                                 where o.order_number = ${row!.order_number} order by p.created_at`;
+    expect(payments.map((p) => [p.status, p.failure_code, p.gateway_status])).toEqual([
+      ['failed', 'order_not_payable', 2],
+      ['succeeded', null, 1],
+    ]);
+    await context.close();
+  });
+
+  test('«پرداختت در حال بررسی است»: بی «دوباره پرداخت کن»، و صفحه خودش به «ثبت شد» می‌رسد (برش ۷٫۲، سؤال ۱۳۰)', async ({ browser }) => {
+    const context = await newContext(browser);
+    const page = await context.newPage();
+    await page.clock.install();
+    await dropReady(page);
+    await toPay(page);
+    await signIn(page, newMobile());
+    await visibleButton(page, `پرداخت ${toman(TEN.other.totalRials)} تومان`).click();
+    await page.waitForURL(/\/pay\/mock\/MOCK[0-9A-F]{32}$/);
+    const authority = page.url().split('/').at(-1)!;
+    // پول گرفته شد و پاسخ `verify` نرسید: همان حالت با SQL (درگاه نمونه شکست شبکه ندارد).
+    const [row] = await sql()`update payments set gateway_status = 2, gateway_checked_at = now(), returned_at = now()
+                              where authority = ${authority} returning (select public_token from orders where id = order_id) as public_token`;
+    await page.goto(`/order/${row!.public_token}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'پرداختت در حال بررسی است' })).toBeVisible();
+    await expect(page.getByTestId('order-checking')).toContainText('دوباره پرداخت نکن. اگر پولی از حسابت کم شده، همین پرداخت است.');
+    await expect(visibleButton(page, 'در حال بررسی پرداخت…')).toBeDisabled();
+    await expect(page.getByRole('button', { name: /دوباره پرداخت/ })).toHaveCount(0);
+    await expect(page.getByTestId('checking-refresh')).toContainText(/آخرین بررسی ساعت \d\d:\d\d\./);
+    // تلاش تازه هم نه (دو زبانه): ۴۰۹ «در حال بررسی».
+    const again = await page.request.post(`/api/checkout/orders/${row!.public_token}/pay`);
+    expect(again.status()).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toBe('payment_checking');
+    await page.getByRole('button', { name: 'الان دوباره ببین' }).click();
+    await expect(page.getByTestId('order-checking')).toBeVisible();
+
+    // درگاه «پرداخت موفق» و برگشت از جای دیگر (Push Transaction)؛ این صفحه در ۱۵ ثانیه خودش «ثبت شد» است.
+    const decided = await page.request.post(`/api/checkout/mock-gateway/${authority}`, { data: { decision: 'success' } });
+    await page.request.get(((await decided.json()) as { redirectUrl: string }).redirectUrl, { maxRedirects: 0 });
+    await page.clock.fastForward(15_000);
+    await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
     await context.close();
   });
 

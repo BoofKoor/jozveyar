@@ -18,12 +18,14 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   // حالت مسیر خرید (ADR-035)، یک خط: صاحب پروژه بعد از استقرار «مسیر خرید: off» را می‌بیند.
-  const { configuredMode, describeMode, describeSms, sessionSecretOf } = await import('./lib/server/checkoutMode');
+  const { configuredMode, describeMode, describePayments, describeSms, sessionSecretOf } = await import('./lib/server/checkoutMode');
   const mode = configuredMode(process.env.CHECKOUT_MODE);
   console.log(describeMode(mode, sessionSecretOf(process.env.SESSION_SECRET) !== null));
-  // پیامک وب (برش ۷٫۱): کنسولی یا sms.ir، بی مقدار کلید.
+  // پیامک و درگاه وب (برش‌های ۷٫۱ و ۷٫۲): کنسولی یا sms.ir، درگاه نمونه یا زیبال، بی مقدار کلید.
   const sms = describeSms(mode);
   if (sms) console.log(sms);
+  const payments = describePayments(mode);
+  if (payments) console.log(payments);
 
   const url = process.env.DATABASE_URL;
   if (!url) return;
@@ -63,4 +65,8 @@ export async function register() {
   } finally {
     await conn.client.end();
   }
+
+  // استعلام خودکار پرداخت‌ها (برش ۷٫۲، سؤال ۱۴۴): پس از مهاجرت، فقط وقتی مسیر خرید روشن است.
+  const { startAutoInquiry } = await import('./lib/server/checkoutContext');
+  startAutoInquiry();
 }

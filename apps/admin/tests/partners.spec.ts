@@ -104,8 +104,8 @@ async function paidOrder(name: string, phone: string, { assign = true } = {}): P
     await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor)
              VALUES (${row!.id}, NULL, 'awaiting_payment', ${createdAt}, 'user')`;
     const [payment] = await tx<{ id: string }[]>`
-      INSERT INTO payments (order_id, provider, amount_rials, status, authority, ref_id, verified_at, created_at)
-      VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, 'succeeded', ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`},
+      INSERT INTO payments (order_id, provider, amount_rials, verified_amount_rials, status, authority, ref_id, verified_at, created_at)
+      VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, ${breakdown.totalRials}, 'succeeded', ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`},
               '803114', ${paidAt}, ${new Date(paidAt.getTime() - MINUTE)})
       RETURNING id`;
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${tehranDayStart(new Date(), 2)}

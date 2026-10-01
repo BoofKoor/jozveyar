@@ -19,6 +19,7 @@ export * from './holidays.js';
 export * from './reference.js';
 export * from './auth.js';
 export * from './orders.js';
+export * from './payments.js';
 export * from './sms.js';
 export * from './admin.js';
 export * from './panel.js';

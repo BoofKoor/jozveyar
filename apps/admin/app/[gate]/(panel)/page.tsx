@@ -2,11 +2,13 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Fragment } from 'react';
 
-import { formatJalaliWeekday, formatNumber, formatTehranTime } from '@jozveyar/text';
+import { HELD_WATCH_MS } from '@jozveyar/db';
+import { formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { DueBadge } from '../../../components/OrderBadges';
 import { OrderRows } from '../../../components/OrderRows';
 import { Segments } from '../../../components/Segments';
+import { whenText } from '../../../lib/format';
 import { panelPath } from '../../../lib/gate';
 import { statsSegs } from '../../../lib/orders';
 import { can } from '../../../lib/server/auth';
@@ -22,6 +24,26 @@ function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: read
       {i === 0 ? '' : i === numbers.length - 1 ? ' و ' : '، '}
       <Link className="jy-link" href={`${panelPath(gate, `/orders/${n}`)}${query}`}>
         <span className="num">{n}</span>
+      </Link>
+    </Fragment>
+  ));
+}
+
+/** نام هر تلاش بسته‌ای که پولش نزد درگاه ماند، در «پول مشتری برمی‌گردد» (برش ۷٫۲، طرح `m-dash-alerts`). */
+const HELD_KIND: Record<string, string> = {
+  order_not_payable: 'پرداخت دوم',
+  amount_mismatch: 'پرداخت ناهمخوان',
+  expired: 'پرداخت دیرهنگام',
+};
+
+/** «پرداخت دوم سفارش 10047 و پرداخت ناهمخوان 10044»: هر تلاش با شمارهٔ سفارشش، پیوند سفارش. */
+function HeldList({ gate, held }: { gate: string; held: readonly { orderNumber: number; failureCode: string }[] }) {
+  return held.map((item, i) => (
+    <Fragment key={`${item.orderNumber}-${i}`}>
+      {i === 0 ? '' : i === held.length - 1 ? ' و ' : '، '}
+      {HELD_KIND[item.failureCode] ?? 'پرداخت'} سفارش{' '}
+      <Link className="jy-link" href={panelPath(gate, `/orders/${item.orderNumber}`)}>
+        <span className="num">{item.orderNumber}</span>
       </Link>
     </Fragment>
   ));
@@ -77,6 +99,22 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   const unreturned = alerts.unreturned.reduce((sum, u) => sum + u.attempts, 0);
   const oneFailed = alerts.failedPdf.length === 1;
   const oneUnassigned = alerts.unassigned.length === 1;
+  // پول و درگاه (۷٫۲): پولی که دو ساعت پس از پرداخت هنوز نزد درگاه است دیگر خبر نیست، هشدار است.
+  const heldLate = alerts.held.filter((item) => now.getTime() - item.createdAt.getTime() > HELD_WATCH_MS);
+  const heldSoon = alerts.held.filter((item) => now.getTime() - item.createdAt.getTime() <= HELD_WATCH_MS);
+  const rejected = alerts.gatewayRejected;
+  const merchantLink = can(session, 'secrets.edit') ? (
+    <>
+      کد پذیرنده را در{' '}
+      <Link className="jy-link" href={panelPath(gate, '/settings#key-PAYMENT_MERCHANT_ID')}>
+        «تنظیمات»
+      </Link>{' '}
+      بیازما.
+    </>
+  ) : (
+    'به مالک بگو کد پذیرنده را در «تنظیمات» بیازماید.'
+  );
+  const auto = alerts.autoClosed;
 
   return (
     <>
@@ -111,6 +149,10 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
 
       {alerts.failedPdf.length > 0 ||
       unreturned > 0 ||
+      rejected ||
+      alerts.mismatched.length > 0 ||
+      alerts.verifiedUnused.length > 0 ||
+      alerts.held.length > 0 ||
       alerts.unassigned.length > 0 ||
       alerts.reviewRows > 0 ||
       alerts.smsFailed.length > 0 ||
@@ -120,6 +162,69 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
       low ? (
         // ترتیب (سؤال ۱۴۰): اول آنچه پول یا مسیر خرید همه را می‌بندد (خطا)، بعد آنچه کار مالک یا متصدی می‌خواهد (هشدار)، بعد خبر.
         <div className="ad-alerts">
+          {rejected ? (
+            // درگاه شروع پرداخت را رد کرد و کار مالک است (۷٫۲، سؤال ۱۳۹): تا اولین شروع یا «آزمایش» درست کد پذیرنده.
+            <p className="jy-note jy-note--error" data-alert="gateway">
+              <span className="jy-icon jy-icon-error" aria-hidden="true" />
+              {rejected.result === 115 ? (
+                <span>
+                  <b>زیبال IP سرور را نپذیرفت</b> (کد <span className="num">115</span>)، {whenText(rejected.at, now)}
+                  {rejected.orderNumber !== null ? (
+                    <>
+                      {' '}
+                      هنگام {rejected.stage === 'inquiry' ? 'استعلام پرداخت' : 'پرداخت'} سفارش{' '}
+                      <OrderLinks gate={gate} numbers={[rejected.orderNumber]} />
+                    </>
+                  ) : null}
+                  . تا IP همین سرور در پنل زیبال ثبت نشود، پرداخت تازه شروع نمی‌شود و پرداخت‌های در راه تأیید نمی‌شوند (پولشان خودکار برمی‌گردد).
+                  بعد از ثبت IP، {merchantLink}
+                </span>
+              ) : (
+                <span>
+                  <b>زیبال کد پذیرنده را نپذیرفت</b> (کد <span className="num">{rejected.result}</span>)، {whenText(rejected.at, now)}
+                  {rejected.orderNumber !== null ? (
+                    <>
+                      {' '}
+                      هنگام {rejected.stage === 'inquiry' ? 'استعلام پرداخت' : 'پرداخت'} سفارش{' '}
+                      <OrderLinks gate={gate} numbers={[rejected.orderNumber]} />
+                    </>
+                  ) : null}
+                  . تا کد پذیرندهٔ درست نیاید، پرداخت تازه شروع نمی‌شود. کد را از پنل زیبال بردار؛ {merchantLink}
+                </span>
+              )}
+            </p>
+          ) : null}
+          {alerts.mismatched.map((item) => (
+            // مبلغی که درگاه گفت با سفارش نخواند (۷٫۲، ADR-050): `verify` نخورد؛ هر تلاش یک یادداشت.
+            <p key={`m-${item.orderNumber}-${item.createdAt.getTime()}`} className="jy-note jy-note--error" data-alert="mismatch">
+              <span className="jy-icon jy-icon-error" aria-hidden="true" />
+              <span>
+                <b>مبلغ ناهمخوان:</b> زیبال برای یک تلاش پرداخت سفارش <OrderLinks gate={gate} numbers={[item.orderNumber]} />
+                {item.reportedRials !== null ? (
+                  <>
+                    {' '}
+                    مبلغ <span className="num">{formatTomans(item.reportedRials, false)}</span> تومان گزارش داد، نه{' '}
+                    <span className="num">{formatTomans(item.amountRials, false)}</span>
+                  </>
+                ) : (
+                  ' مبلغ دیگری گزارش داد'
+                )}
+                . تأیید نشد و سفارش پرداخت‌نشده ماند؛ پول مشتری خودکار برمی‌گردد. یعنی کسی یا چیزی مبلغ دیگری به درگاه داده؛ جزئیاتش در همان
+                سفارش است.
+              </span>
+            </p>
+          ))}
+          {alerts.verifiedUnused.length > 0 ? (
+            // تأییدشده ولی سفارش نگرفتش (۷٫۲): خودکار برنمی‌گردد؛ بازپرداخت از پنل با ۷٫۳.
+            <p className="jy-note jy-note--error" data-alert="verified-unused">
+              <span className="jy-icon jy-icon-error" aria-hidden="true" />
+              <span>
+                <b>پولی که خودکار برنمی‌گردد:</b> زیبال یک تلاش پرداخت {alerts.verifiedUnused.length === 1 ? 'سفارش ' : 'سفارش‌های '}
+                <OrderLinks gate={gate} numbers={alerts.verifiedUnused.map((item) => item.orderNumber)} /> را تأییدشده می‌گوید، ولی سفارش آن را
+                نگرفت. این پول را از پنل زیبال به همان کارت برگردان.
+              </span>
+            </p>
+          ) : null}
           {alerts.failedPdf.length > 0 ? (
             <p className="jy-note jy-note--error" data-alert="pdf">
               <span className="jy-icon jy-icon-error" aria-hidden="true" />
@@ -206,6 +311,15 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
               </span>
             </p>
           ) : null}
+          {heldLate.length > 0 ? (
+            <p className="jy-note jy-note--warning" data-alert="held-late">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                <b>پول مشتری هنوز برنگشته:</b> <HeldList gate={gate} held={heldLate} />؛ بیش از دو ساعت از پرداخت گذشته و زیبال هنوز «برگشت
+                خورد» نگفته. از صفحهٔ سفارش «استعلام از درگاه» بزن؛ اگر همان ماند، از پشتیبانی زیبال بپرس.
+              </span>
+            </p>
+          ) : null}
           {untracked.map((day) => {
             const one = day.orderNumbers.length === 1;
             return (
@@ -233,7 +347,18 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
               </span>
             </p>
           ) : null}
+          {heldSoon.length > 0 ? (
+            <p className="jy-note jy-note--info" data-alert="held">
+              <span className="jy-icon jy-icon-info" aria-hidden="true" />
+              <span>
+                <b>پول مشتری برمی‌گردد:</b> <HeldList gate={gate} held={heldSoon} /> تأیید {heldSoon.length === 1 ? 'نشد' : 'نشدند'}؛ زیبال{' '}
+                <span className="num">15</span> دقیقه پس از هر پرداخت خودکار برش می‌گرداند. تا استعلام بگوید «برگشت خورد»، اینجا{' '}
+                {heldSoon.length === 1 ? 'می‌ماند' : 'می‌مانند'}.
+              </span>
+            </p>
+          ) : null}
           {unreturned > 0 ? (
+            // «پرداخت بی برگشت» (۴٫۲) با استعلام خودکار (۷٫۲، سؤال ۱۴۴): فقط آنچه استعلام هم نتوانست ببندد.
             <p className="jy-note jy-note--info" data-alert="unreturned">
               <span className="jy-icon jy-icon-info" aria-hidden="true" />
               <span>
@@ -247,7 +372,15 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
                 >
                   <span className="num">{formatNumber(unreturned)}</span> تلاش پرداخت
                 </Link>{' '}
-                از درگاه برنگشت.
+                از درگاه برنگشت و درگاه هم به استعلام جواب روشن نداد؛ هر دقیقه دوباره می‌پرسیم.
+                {auto.failed + auto.succeeded > 0 ? (
+                  <>
+                    {' '}
+                    از صبح استعلام خودکار <span className="num">{formatNumber(auto.failed + auto.succeeded)}</span> تلاش بی برگشت را بست:{' '}
+                    <span className="num">{formatNumber(auto.failed)}</span> پرداخت‌نشده، <span className="num">{formatNumber(auto.succeeded)}</span>{' '}
+                    پرداخت‌شده.
+                  </>
+                ) : null}
               </span>
             </p>
           ) : null}

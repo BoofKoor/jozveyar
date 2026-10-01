@@ -420,6 +420,8 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           go('desk', { replace: true });
           reset();
         }}
+        // درگاه نمونه فقط در `mock` (ADR-035)؛ هر چه نامعلوم، نام زیبال.
+        gateway={mode === 'mock' ? 'mock' : 'zibal'}
       />
     );
   }

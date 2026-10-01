@@ -20,12 +20,14 @@ import {
   type SettingsStore,
   type SmsStats,
 } from '@jozveyar/db';
+import { createZibalMock, type ZibalMock } from '@jozveyar/payments/mock';
+import { zibalClient, type ZibalClient } from '@jozveyar/payments/zibal';
 import { createSmsIrMock, type SmsIrMock } from '@jozveyar/sms/mock';
 import { smsIrClient } from '@jozveyar/sms/smsir';
 
 import type { AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
-import { createPanelSettings, keySeenOf } from './settings';
+import { MERCHANT_TEST_RIALS, createPanelSettings, keySeenOf } from './settings';
 
 /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -130,6 +132,7 @@ function service(
     secretsKey?: Buffer;
     env?: Record<string, string>;
     smsir?: ReturnType<typeof smsIrClient>;
+    zibal?: { client: ZibalClient; callbackUrl: string | null };
     smsStats?: SmsStats;
     smsInUse?: boolean;
     now?: () => Date;
@@ -147,6 +150,7 @@ function service(
     env: options.env ?? { SMS_API_KEY: ENV_VALUE, PAYMENT_MERCHANT_ID: 'env-merchant-0000' },
     secret: SECRET,
     ...(options.smsir ? { smsir: options.smsir } : {}),
+    ...(options.zibal ? { zibal: options.zibal } : {}),
     ...(options.smsStats ? { smsStats: options.smsStats } : {}),
     ...(options.smsInUse ? { smsInUse: options.smsInUse } : {}),
     now: options.now ?? (() => NOW),
@@ -579,7 +583,7 @@ describe('آزمایش کلیدهای sms.ir (۷٫۱)، روی سرور ساخت
     expect(leaks(API, result, secrets.events, logs, view)).toBe(false);
   });
 
-  it('کلید نادرست ۴۰۱ «رد شد»، sms.ir بی پاسخ «جواب نداد»؛ کلید خالی و کد پذیرنده آزمایش ندارند', async () => {
+  it('کلید نادرست ۴۰۱ «رد شد»، sms.ir بی پاسخ «جواب نداد»؛ کلید خالی، و کد پذیرنده بی زیبال، آزمایش ندارند', async () => {
     const wrong = tested({ env: { SMS_API_KEY: 'mock-api-key-unknown-00000' } });
     expect(await wrong.panel.testKey(OWNER, { name: 'SMS_API_KEY' }, 'ip')).toMatchObject({ ok: true, value: { outcome: 'rejected', http: 401 } });
     mock.configure({ fail: { http: 503, times: 1 } });
@@ -644,7 +648,7 @@ describe('آزمایش کلیدهای sms.ir (۷٫۱)، روی سرور ساخت
   it('کلید API «آزمایش و ذخیره»: رد شد ذخیره نمی‌شود و کد نمی‌خواهد؛ در دسترس نیست با رسید، و «بی آزمایش ذخیره کن» فقط با همان', async () => {
     const { panel, secrets, stepUp } = tested();
     const set = (value: string, over: Record<string, unknown> = {}) => panel.setKey(OWNER, { name: 'SMS_API_KEY', value, seen: 'none', code: '1', ...over }, 'ip');
-    expect(await set('mock-api-key-unknown-00000')).toMatchObject({ status: 400, error: 'key_rejected', http: 401, smsStatus: 401 });
+    expect(await set('mock-api-key-unknown-00000')).toMatchObject({ status: 400, error: 'key_rejected', http: 401, serviceStatus: 401 });
     expect(stepUp).not.toHaveBeenCalled();
     expect(secrets.rows.size).toBe(0);
     mock.configure({ drop: 1 });
@@ -757,5 +761,91 @@ describe('آزمایش کلیدهای sms.ir (۷٫۱)، روی سرور ساخت
     ).toEqual(ok({ written: ['otp.site_daily_limit'] }));
     expect(settings.values.get('otp.site_daily_limit')).toBe(3000);
     expect(settings.events).toMatchObject([{ action: 'settings.update', detail: { key: 'otp.site_daily_limit', from: 2000, to: 3000 } }]);
+  });
+});
+
+describe('آزمایش کد پذیرندهٔ زیبال (۷٫۲)، روی سرور ساختگی', () => {
+  const MERCHANT = 'mock-merchant-settings-72';
+  const OTHER = 'mock-merchant-settings-other';
+  const CALLBACK = 'https://jozveyar.com/pay/callback';
+  let mock: ZibalMock;
+  let client: ZibalClient;
+  beforeAll(async () => {
+    mock = createZibalMock({ merchants: [MERCHANT, OTHER] });
+    client = zibalClient({ baseUrl: await mock.listen() });
+  });
+  afterAll(() => mock.close());
+  beforeEach(() => {
+    mock.configure({ merchants: [MERCHANT, OTHER], ipRejected: false, fail: null, delayMs: 0, drop: 0 });
+    mock.state.transactions.clear();
+  });
+  const tested = (options: Parameters<typeof service>[0] = {}) =>
+    service({ env: { PAYMENT_MERCHANT_ID: MERCHANT }, zibal: { client, callbackUrl: CALLBACK }, ...options });
+
+  it('«آزمایش» امروز، بی کد: یک درخواست پرداخت 1,000 تومانی با کلید برگشت تصادفی؛ رویداد با نتیجه، بی مقدار', async () => {
+    const { panel, secrets, stepUp, logs } = tested();
+    const result = await panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip');
+    expect(result).toEqual(ok({ outcome: 'ok', http: null, status: null, credit: null, name: 'PAYMENT_MERCHANT_ID', subject: 'current', mobile: null, receipt: null }));
+    expect(stepUp).not.toHaveBeenCalled();
+    const [made] = [...mock.state.transactions.values()];
+    expect(made).toMatchObject({ merchant: MERCHANT, amount: MERCHANT_TEST_RIALS, status: -1 });
+    expect(made!.callbackUrl).toMatch(/^https:\/\/jozveyar\.com\/pay\/callback\/[0-9a-f]{32}$/);
+    expect(made!.orderId).toMatch(/^test-[0-9a-f]{8}$/);
+    expect(secrets.events).toMatchObject([{ action: 'settings.key_test', targetId: 'PAYMENT_MERCHANT_ID', detail: { subject: 'current', outcome: 'ok' } }]);
+    expect(leaks(MERCHANT, result, secrets.events, logs)).toBe(false);
+  });
+
+  it('IP سرور (۱۱۵) و کد پذیرندهٔ ناشناس «رد شد» با کد زیبال؛ بی پاسخ «در دسترس نیست»؛ بی نشانی برگشت «آزموده نشد»', async () => {
+    mock.configure({ ipRejected: true });
+    expect(await tested().panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip')).toMatchObject({ ok: true, value: { outcome: 'rejected', status: 115 } });
+    mock.configure({ ipRejected: false });
+    expect(await tested({ env: { PAYMENT_MERCHANT_ID: 'mock-merchant-unknown' } }).panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip')).toMatchObject({
+      ok: true,
+      value: { outcome: 'rejected', status: 102 },
+    });
+    mock.configure({ fail: { http: 502, times: 1 } });
+    expect(await tested().panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip')).toMatchObject({ ok: true, value: { outcome: 'unavailable', http: 502 } });
+    const unconfigured = tested({ zibal: { client, callbackUrl: null } });
+    expect(await unconfigured.panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip')).toMatchObject({ ok: true, value: { outcome: 'unconfigured' } });
+    expect(mock.state.transactions.size).toBe(0);
+    // بی زیبال (پیکربندی) آزمایش نیست، و کد پذیرندهٔ خالی «خالی».
+    expect(await service().panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip')).toMatchObject({ status: 409, error: 'key_not_testable' });
+    expect(await tested({ env: {} }).panel.testKey(OWNER, { name: 'PAYMENT_MERCHANT_ID' }, 'ip')).toMatchObject({ status: 409, error: 'key_empty' });
+  });
+
+  it('«آزمایش و ذخیره»: درست با کد تازه؛ ۱۱۵ و ناشناس بی کد و بی نوشتن؛ «در دسترس نیست» با رسید و «بی آزمایش ذخیره کن»', async () => {
+    const { panel, secrets, stepUp } = tested();
+    // شکل کد پذیرندهٔ زیبال پیش از هر درخواست: فاصله و نویسهٔ فارسی نه.
+    expect(await panel.setKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', value: 'abc', seen: 'none', code: '1' }, 'ip')).toMatchObject({ error: 'invalid_key_value' });
+    mock.configure({ ipRejected: true });
+    expect(await panel.setKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', value: OTHER, seen: 'none', code: '1' }, 'ip')).toEqual(
+      fail(400, 'key_rejected', { name: 'PAYMENT_MERCHANT_ID', http: null, serviceStatus: 115, unconfigured: false }),
+    );
+    mock.configure({ ipRejected: false });
+    expect(await panel.setKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', value: 'mock-merchant-unknown', seen: 'none', code: '1' }, 'ip')).toMatchObject({
+      error: 'key_rejected',
+      serviceStatus: 102,
+    });
+    expect(stepUp).not.toHaveBeenCalled();
+    expect(secrets.rows.has('PAYMENT_MERCHANT_ID')).toBe(false);
+    expect(await panel.setKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', value: OTHER, seen: 'none', code: '123456' }, 'ip')).toEqual(ok({ name: 'PAYMENT_MERCHANT_ID' }));
+    expect(unseal(KEY, secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed, serviceKeyContext('PAYMENT_MERCHANT_ID'))).toBe(OTHER);
+    expect(secrets.events.at(-1)).toMatchObject({ action: 'settings.key_set', detail: { name: 'PAYMENT_MERCHANT_ID', from: 'env', tested: 'ok' } });
+
+    mock.configure({ fail: { http: 503, times: 1 } });
+    const seen = keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed);
+    const down = await panel.setKey(OWNER, { name: 'PAYMENT_MERCHANT_ID', value: MERCHANT, seen, code: '1' }, 'ip');
+    expect(down).toMatchObject({ status: 503, error: 'key_unavailable' });
+    const receipt = (down as unknown as { receipt: { outcome: string; at: string; mac: string } }).receipt;
+    expect(
+      await panel.setKey(
+        OWNER,
+        { name: 'PAYMENT_MERCHANT_ID', value: MERCHANT, seen, code: '1', skipTest: '1', tested: receipt.outcome, testedAt: receipt.at, receipt: receipt.mac },
+        'ip',
+      ),
+    ).toEqual(ok({ name: 'PAYMENT_MERCHANT_ID' }));
+    expect(secrets.events.at(-1)).toMatchObject({ action: 'settings.key_set', detail: { tested: 'skipped' } });
+    expect(leaks(MERCHANT, secrets.events)).toBe(false);
+    expect(leaks(OTHER, secrets.events)).toBe(false);
   });
 });

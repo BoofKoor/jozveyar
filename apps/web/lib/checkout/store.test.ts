@@ -412,6 +412,15 @@ describe('مسیر خرید در مرورگر', () => {
       });
     });
 
+    it('پرداختی از همین سفارش در حال بررسی است (۴۰۹، برش ۷٫۲): صفحهٔ همان سفارش، نه تلاش تازه', async () => {
+      net.replies.placeOrder = async () =>
+        fail(409, 'payment_checking', { order: { number: 10001, token: 'tok', status: 'awaiting_payment', totalRials: 1 } });
+      expect(await store.pay()).toBeNull();
+      expect(visited).toEqual(['/order/tok']);
+      expect(store.getState().payNotice).toBeNull();
+      expect(store.draft()).toMatchObject({ order: 'tok' });
+    });
+
     it('بقیهٔ شکست‌ها پیام همان قدم‌اند و سفارش را دوباره نمی‌سازند تا کاربر بزند', async () => {
       net.replies.placeOrder = async () => fail(409, 'files_expiring', { documentIds: ITEM.documentIds });
       await store.pay();

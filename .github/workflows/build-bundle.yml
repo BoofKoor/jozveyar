@@ -55,8 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # هیچ درخواستی از CI به sms.ir یا زیبال واقعی نمی‌رود (برش ۷، ADR-049، سؤال ۱۲۸): میزبان‌های API پیش از هر تست به همین ماشین؛
-      # تست‌ها با سرور ساختگی به شکل مستند کار می‌کنند (`packages/sms/mock`). سنجش فقط با خواندن نام از /etc/hosts، بی هیچ درخواست.
+      # هیچ درخواستی از CI به sms.ir یا زیبال واقعی نمی‌رود (برش ۷، ADR-049 و ۰۵۰، سؤال ۱۲۸): میزبان‌های API پیش از هر تست به همین
+      # ماشین؛ تست‌ها با سرور ساختگی به شکل مستند کار می‌کنند (`packages/sms/mock`، `packages/payments/mock`). سنجش فقط با خواندن نام از
+      # /etc/hosts، بی هیچ درخواست.
       - name: دیوار sms.ir و زیبال
         run: |
           set -eu
@@ -331,6 +332,9 @@ jobs:
       # پیامک sms.ir (برش ۷٫۱، ADR-049): sms.ir ساختگی روی ۳۳۰۰ (`SMSIR_API_URL`)، که «آزمایش» کلیدهای `settings.spec.ts` به آن می‌رود؛ اجرای
       # اصلی کنسولی است. بعد همان build پنل با `SMS_PROVIDER=smsir` و شناسهٔ قالب‌ها در `.env` روی ۳۲۰۱ و فقط `smsir.spec.ts`: پیامک رهگیری
       # و پرداخت با sms.ir، شکست ۵۰۰ و «دوباره بفرست»، اعتبار و هشدارهای پیشخوان. کلیدهای ساختگی هم در لاگ‌ها جسته می‌شوند.
+      # درگاه زیبال (برش ۷٫۲، ADR-050، `payments.spec.ts`): زیبال ساختگی روی ۳۴۰۰ (`ZIBAL_API_URL`) با کد پذیرندهٔ تصادفی که پنل از `.env`
+      # دارد؛ «استعلام از درگاه»، پرداخت دوم تا «برگشت خورد»، مبلغ ناهمخوان، و «آزمایش» کد پذیرنده با هشدار ۱۱۵. کد پذیرنده هم در لاگ‌ها
+      # جسته می‌شود.
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
@@ -342,10 +346,18 @@ jobs:
           DOCWORKER_POLL_SECONDS: '0.5'
           DOCWORKER_RETENTION_SECONDS: '2'
           SMSIR_API_URL: http://127.0.0.1:3300
+          # زیبال ساختگی (۷٫۲): «استعلام از درگاه» و «آزمایش» کد پذیرندهٔ پنل؛ نشانی برگشت همان سایت روی ۳۱۰۱.
+          ZIBAL_API_URL: http://127.0.0.1:3400
+          PAYMENT_CALLBACK_URL: http://127.0.0.1:3101/pay/callback
         run: |
           set -eu
           node packages/sms/mock/smsir.mjs 3300 > "$RUNNER_TEMP/smsir.log" 2>&1 &
           timeout 30 sh -c 'until curl -sf http://127.0.0.1:3300/__mock/messages > /dev/null; do sleep 1; done'
+          # کد پذیرندهٔ تصادفی، همان در .env پنل و تست؛ زیبال ساختگی فقط همین را می‌شناسد و هیچ‌جا چاپش نمی‌کند.
+          PAYMENT_MERCHANT_ID="$(openssl rand -hex 16)"
+          export PAYMENT_MERCHANT_ID
+          ZIBAL_MOCK_MERCHANTS="$PAYMENT_MERCHANT_ID" node packages/payments/mock/zibal.mjs 3400 > "$RUNNER_TEMP/zibal.log" 2>&1 &
+          timeout 30 sh -c 'until curl -sf http://127.0.0.1:3400/__mock/transactions > /dev/null; do sleep 1; done'
           docker run --rm --network host -e PGPASSWORD=jozveyar postgres:17-alpine \
             psql -h 127.0.0.1 -U jozveyar -d jozveyar -v ON_ERROR_STOP=1 -c 'CREATE DATABASE jy_admin'
           node apps/web/scripts/serve-standalone.mjs 3101 > "$RUNNER_TEMP/web-admin.log" 2>&1 &
@@ -367,6 +379,7 @@ jobs:
           if grep -F "$ADMIN_BASE_PATH" "$RUNNER_TEMP/admin.log"; then echo 'مسیر محرمانه در لاگ پنل آمد' >&2; exit 1; fi
           timeout 30 sh -c 'until grep -qF "✓ پنل ادمین: کلیدهای سرویس‌ها — SMS_API_KEY از .env" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
           grep -F '✓ پنل ادمین: پیامک کنسولی (در sms_messages)' "$RUNNER_TEMP/admin.log"
+          grep -F '✓ پنل ادمین: درگاه زیبال (ZIBAL_API_URL) برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL هست' "$RUNNER_TEMP/admin.log"
           cd apps/admin
           pnpm exec playwright test
           # پیامک با sms.ir (۷٫۱): همان build، پنل دوم روی ۳۲۰۱ با SMS_PROVIDER=smsir؛ پنل اول می‌ماند و کاری با آن نیست.
@@ -375,8 +388,8 @@ jobs:
           timeout 120 sh -c 'until curl -sf http://127.0.0.1:3201/api/health > /dev/null; do sleep 1; done'
           timeout 30 sh -c 'until grep -qF "✓ پنل ادمین: پیامک sms.ir (SMS_PROVIDER=smsir)" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin-smsir.log"
           ADMIN_ORIGIN=http://127.0.0.1:3201 E2E_ADMIN_BASE_URL=http://127.0.0.1:3201 pnpm exec playwright test tests/smsir.spec.ts
-          for secret in "$SMS_API_KEY" "$E2E_KEY_PROBE"; do
-            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/admin-smsir.log" "$RUNNER_TEMP/web-admin.log" "$RUNNER_TEMP/smsir.log"; do
+          for secret in "$SMS_API_KEY" "$E2E_KEY_PROBE" "$PAYMENT_MERCHANT_ID"; do
+            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/admin-smsir.log" "$RUNNER_TEMP/web-admin.log" "$RUNNER_TEMP/smsir.log" "$RUNNER_TEMP/zibal.log"; do
               if grep -qF "$secret" "$log"; then echo "مقدار کلید در $(basename "$log") آمد" >&2; exit 1; fi
             done
           done
@@ -388,6 +401,7 @@ jobs:
           cat "$RUNNER_TEMP/admin.log" || true
           cat "$RUNNER_TEMP/admin-smsir.log" || true
           cat "$RUNNER_TEMP/smsir.log" || true
+          cat "$RUNNER_TEMP/zibal.log" || true
           docker logs docworker-admin || true
 
       # خروجی standalone دو چیز را خودش نمی‌آورد و باید کنار server.js بنشینند.

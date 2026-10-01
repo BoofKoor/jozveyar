@@ -1,6 +1,6 @@
 /**
  * یک خط هنگام بالا آمدن پنل، که `deploy-bundle.sh` می‌جوید (تصمیم ۲۳): آماده یا بسته و چرا، و اگر هنوز هیچ
- * ادمینی ثبت نکرده، دستور ساختن اولی؛ از ۴٫۶ منبع هر کلید سرویس، و از ۷٫۱ منبع پیامک پنل. مسیر محرمانه و هیچ مقدار دیگری از
+ * ادمینی ثبت نکرده، دستور ساختن اولی؛ از ۴٫۶ منبع هر کلید سرویس، از ۷٫۱ منبع پیامک پنل، و از ۷٫۲ درگاه‌های پنل. مسیر محرمانه و هیچ مقدار دیگری از
  * `.env` هرگز در لاگ نیست.
  *
  * مهاجرت و دادهٔ پایه (نقش‌ها و مجوزها) با وب است (`apps/web/instrumentation.ts`)؛ کانتینر پنل بعد از «وب
@@ -9,15 +9,16 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  const { adminConfig, describeConfig, describeSms } = await import('./lib/server/config');
+  const { adminConfig, describeConfig, describePayments, describeSms } = await import('./lib/server/config');
   console.log(describeConfig(process.env));
   const config = adminConfig(process.env);
   if (!config) return;
   // بی استوریج، پنل بالا می‌آید و فقط دانلود PDF جزوه (۴٫۲) بسته است؛ بلند، تا بعد از استقرار دیده شود.
   const { storageFromEnv } = await import('@jozveyar/storage');
   if (!storageFromEnv(process.env)) console.log('⚠ پنل ادمین: استوریج (S3_*) پیکربندی نشده؛ دانلود PDF جزوه بسته است.');
-  // پیامک پنل (۷٫۱، ADR-049): کنسولی یا sms.ir با `SMS_PROVIDER`، بی مقدار کلید.
+  // پیامک پنل (۷٫۱، ADR-049): کنسولی یا sms.ir با `SMS_PROVIDER`، بی مقدار کلید؛ و درگاه‌های پنل (۷٫۲، ADR-050).
   console.log(describeSms(process.env));
+  console.log(describePayments(process.env));
 
   const { createDb } = await import('@jozveyar/db');
   const conn = createDb(config.databaseUrl, { max: 1 });

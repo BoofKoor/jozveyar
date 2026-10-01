@@ -15,6 +15,7 @@
     "@jozveyar/contracts": "workspace:*",
     "@jozveyar/db": "workspace:*",
     "@jozveyar/geo": "workspace:*",
+    "@jozveyar/payments": "workspace:*",
     "@jozveyar/pricing": "workspace:*",
     "@jozveyar/sms": "workspace:*",
     "@jozveyar/storage": "workspace:*",

@@ -73,6 +73,15 @@ export function formatBytes(bytes: number): string {
   return `${value} ${unit}`;
 }
 
+/**
+ * کارت پوشیده‌ای که درگاه گفت («603799******1234»، برش ۷٫۲) در چهار گروه چهارتایی با «•»، مثل طرح: «6037 99•• •••• 1234»؛ هر طول
+ * دیگر فقط با «•». سایت و پنل هر دو همین.
+ */
+export function formatCardMask(mask: string): string {
+  const chars = mask.replace(/[\s-]/g, '').replace(/[*xX]/g, '•');
+  return chars.length === 16 ? chars.match(/.{4}/g)!.join(' ') : chars;
+}
+
 /** جمع فارسی بدون «ها»ی اضافه: `147 صفحه`. فارسی شکل جمع عددی ندارد. */
 export function pluralFa(count: number, noun: string): string {
   return `${formatNumber(count)} ${noun}`;

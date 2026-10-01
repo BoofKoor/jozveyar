@@ -25,14 +25,15 @@ import {
   type AuthStore,
   type OrderStore,
 } from '@jozveyar/db';
+import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
+import { zibalGateway } from '@jozveyar/payments/zibal';
 import { consoleTransport, loggedSms, type SmsTransport } from '@jozveyar/sms';
 import { smsIrTransport } from '@jozveyar/sms/smsir';
 
 import { createAuthService, tokenHash, type AuthService, type AuthUser } from './auth';
-import { createCheckoutService, orderView, type CheckoutService } from './checkout';
+import { AUTO_INQUIRY_EVERY_MS, createCheckoutService, orderView, type CheckoutService } from './checkout';
 import { configuredMode, effectiveMode, sessionSecretOf } from './checkoutMode';
 import { noStore, respond } from './context';
-import { mockGateway } from './payments';
 import type { Result } from './result';
 import { readSetting } from './settings';
 
@@ -89,8 +90,27 @@ export function webSmsTransport(env: Readonly<Record<string, string | undefined>
 }
 
 /**
+ * درگاه وب (برش ۷٫۲، ADR-050): در `live` فقط زیبال، با کد پذیرنده از «تنظیمات» یا `.env` با هر درخواست (`readServiceKey`) و نشانی برگشت
+ * `PAYMENT_CALLBACK_URL`؛ در `mock` فقط درگاه نمونه با نشانی برگشت نسبی (ADR-035). برگشت و استعلام هر پرداخت فقط با درگاه همین حالت: پرداخت
+ * درگاه نمونه در `live` انگار نیست، و زیبال در `mock` هرگز.
+ */
+export function webPayments(env: Readonly<Record<string, string | undefined>> = process.env): {
+  gateway: PaymentGateway;
+  gateways: Record<string, PaymentGateway>;
+  callbackUrl: string;
+} {
+  if (configuredMode(env.CHECKOUT_MODE) !== 'live') {
+    const mock = mockGateway();
+    return { gateway: mock, gateways: { mock }, callbackUrl: '/pay/callback' };
+  }
+  const keys = serviceKeyReader(createSecretStore(getDb()), env, secretsKeyOf(env.SECRETS_KEY));
+  const zibal = zibalGateway({ merchant: () => keys('PAYMENT_MERCHANT_ID'), baseUrl: env.ZIBAL_API_URL });
+  return { gateway: zibal, gateways: { zibal }, callbackUrl: env.PAYMENT_CALLBACK_URL?.trim() ?? '' };
+}
+
+/**
  * سرویس‌های خرید. امروز فقط `mock` به اینجا می‌رسد (`live` تا ۷٫۵ خاموش است، `LIVE_ADAPTERS_READY`)، پس آداپتورها درگاه نمونه و
- * پیامک کنسولی‌اند. پیامک با حالت از ۷٫۱ اینجا انتخاب می‌شود (`webSmsTransport`)؛ درگاه واقعی ۷٫۲.
+ * پیامک کنسولی‌اند. پیامک با حالت از ۷٫۱ اینجا انتخاب می‌شود (`webSmsTransport`)، و درگاه از ۷٫۲ (`webPayments`).
  */
 function servicesOf(): Services {
   if (services) return services;
@@ -107,12 +127,38 @@ function servicesOf(): Services {
     }),
     checkout: createCheckoutService({
       orders,
-      gateway: mockGateway(),
+      ...webPayments(),
       sms: { transport, outbox: createSmsOutbox(getDb(), transport.name) },
-      callbackUrl: '/pay/callback',
     }),
   };
   return services;
+}
+
+/**
+ * استعلام خودکار «پرداخت بی برگشت» (برش ۷٫۲، سؤال ۱۴۴): هر دقیقه در خود وب، نه کارگر پایتون (آداپتور دوم به زبان دیگر نه، ADR-050).
+ * فقط وقتی مسیر خرید این سرور روشن است (`mock`، یا `live` از ۷٫۵)؛ سایت زنده با `off` هیچ درخواستی به هیچ درگاهی نمی‌دهد. چند نود هر کدام
+ * حلقهٔ خودش را دارد و `SKIP LOCKED` یک استعلام می‌گذارد. یک دور در هر زمان؛ شکست فقط لاگ است.
+ */
+export function startAutoInquiry(log: (message: string, error?: unknown) => void = console.error): (() => void) | null {
+  if (!process.env.DATABASE_URL || !sessionSecret()) return null;
+  if (effectiveMode(configuredMode(process.env.CHECKOUT_MODE), []) === 'off') return null;
+  const { checkout } = servicesOf();
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    checkout
+      .autoInquiry()
+      .then((done) => {
+        if (done.settled > 0) console.log(`✓ استعلام خودکار: ${done.settled} تلاش پرداخت بسته شد.`);
+      })
+      .catch((error) => log('✗ استعلام خودکار پرداخت‌ها:', error))
+      .finally(() => {
+        running = false;
+      });
+  }, AUTO_INQUIRY_EVERY_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 /* ────────────────────────── پاسخ ────────────────────────── */

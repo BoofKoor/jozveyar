@@ -47,6 +47,9 @@ const PAYMENT: Record<PaymentKind, { badge: string; icon: string | null; label: 
   failed: { badge: 'jy-badge jy-badge--error', icon: 'jy-icon jy-icon-error', label: 'ناموفق' },
   unreturned: { badge: 'jy-badge jy-badge--neutral', icon: null, label: 'بی برگشت' },
   pending: { badge: 'jy-badge jy-badge--info', icon: 'jy-icon jy-icon-info', label: 'در درگاه' },
+  // برش ۷٫۲ (طرح `m-order-unpaid` و `m-order-second`): پولی شاید گرفته شده و نتیجه نیامده؛ و پول تلاش بسته که به کارت برگشت.
+  checking: { badge: 'jy-badge jy-badge--info', icon: 'jy-icon jy-icon-info', label: 'در حال بررسی' },
+  returned: { badge: 'jy-badge jy-badge--neutral', icon: null, label: 'برگشت خورد' },
 };
 
 export function PaymentBadge({ kind }: { kind: PaymentKind }) {

@@ -119,13 +119,13 @@ async function paidOrder(name: string, phone: string, { printing = true, paidSms
         VALUES ('queued', ${phone}, 'order_paid', ${orderPaidText(row!.order_number, day)}, ${tx.json([String(row!.order_number), day])},
                 'pending', ${new Date(Date.now() - 10 * MINUTE)})
         RETURNING id`;
-      await tx`UPDATE payments SET status = 'succeeded', ref_id = '803114', verified_at = ${paidAt}, sms_message_id = ${sms!.id}
-               WHERE id = ${payment!.id}`;
+      await tx`UPDATE payments SET status = 'succeeded', ref_id = '803114', verified_at = ${paidAt}, verified_amount_rials = amount_rials,
+               sms_message_id = ${sms!.id} WHERE id = ${payment!.id}`;
       paymentId = payment!.id;
     } else {
       const [payment] = await tx<{ id: string }[]>`
-        INSERT INTO payments (order_id, provider, amount_rials, status, authority, ref_id, verified_at, created_at)
-        VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, 'succeeded', ${authority}, '803114', ${paidAt}, ${new Date(paidAt.getTime() - MINUTE)})
+        INSERT INTO payments (order_id, provider, amount_rials, verified_amount_rials, status, authority, ref_id, verified_at, created_at)
+        VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, ${breakdown.totalRials}, 'succeeded', ${authority}, '803114', ${paidAt}, ${new Date(paidAt.getTime() - MINUTE)})
         RETURNING id`;
       paymentId = payment!.id;
     }

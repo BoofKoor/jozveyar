@@ -137,8 +137,8 @@ async function pay(o: Seeded, due: Date) {
   const paidAt = new Date(Date.now() - 60 * MINUTE);
   await sql.begin(async (tx) => {
     const [payment] = await tx<{ id: string }[]>`
-      INSERT INTO payments (order_id, provider, amount_rials, status, authority, ref_id, verified_at, created_at)
-      VALUES (${o.id}, 'mock', ${o.totalRials}, 'succeeded', ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`},
+      INSERT INTO payments (order_id, provider, amount_rials, verified_amount_rials, status, authority, ref_id, verified_at, created_at)
+      VALUES (${o.id}, 'mock', ${o.totalRials}, ${o.totalRials}, 'succeeded', ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`},
               '803114', ${paidAt}, ${new Date(paidAt.getTime() - MINUTE)})
       RETURNING id`;
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${due} WHERE id = ${o.id}`;
@@ -218,7 +218,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await pay(o.B, tehranDayStart(now)); // پایان دیروز: دیر شده
     await pay(o.A, tehranDayStart(now, 1)); // پایان امروز
     await pay(o.E, tehranDayStart(now, 5)); // بعدتر
-    await attempt(o.C, new Date(now.getTime() - 40 * MINUTE)); // بیش از نیم ساعت: بی برگشت
+    await attempt(o.C, new Date(now.getTime() - 40 * MINUTE)); // بیش از مهلت ده دقیقه (۷٫۲): بی برگشت
     await expire(o.D);
 
     ownerContext = await newContext(browser);
@@ -251,7 +251,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await expect(pdfAlert).toHaveText(`PDF جزوهٔ سفارش ${o.B.number} ساخته نشد؛ پیش از چاپ دوباره بسازش.`);
     await expect(pdfAlert.getByRole('link')).toHaveAttribute('href', at(`/orders/${o.B.number}`));
     const payAlert = ownerPage.locator('[data-alert="unreturned"]');
-    await expect(payAlert).toHaveText('1 تلاش پرداخت از درگاه برنگشت.');
+    await expect(payAlert).toHaveText('1 تلاش پرداخت از درگاه برنگشت و درگاه هم به استعلام جواب روشن نداد؛ هر دقیقه دوباره می‌پرسیم.');
     await expect(payAlert.getByRole('link')).toHaveAttribute('href', at(`/orders/${o.C.number}`));
 
     const queue = ownerPage.locator('section', { has: ownerPage.getByRole('heading', { name: 'صف تحویل به پست' }) });
@@ -393,9 +393,9 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await expect(ownerPage.getByText('فایل چاپ و برگهٔ سفارش بعد از پرداخت ساخته می‌شوند.')).toBeVisible();
     const payment = ownerPage.locator('[data-payment="unreturned"]');
     await expect(payment.locator('.jy-badge')).toHaveText('بی برگشت');
-    await expect(payment.locator('.ad-pay__meta')).toHaveText(
-      'درگاه نمونه · مشتری به درگاه رفت و برنگشت. بعد از 30 دقیقه، برگشت دیرش هم پذیرفته نمی‌شود.',
-    );
+    // درگاه نمونه بی `CHECKOUT_MODE=mock` در پنل نیست، پس «استعلام از درگاه» ندارد (۷٫۲).
+    await expect(payment.locator('.ad-pay__meta')).toHaveText('درگاه نمونه · مشتری به درگاه رفت و برنگشت؛ هنوز از درگاه پرسیده نشده.');
+    await expect(payment.getByRole('button', { name: 'استعلام از درگاه' })).toHaveCount(0);
     await expect(ownerPage.locator('.ad-sum__total')).toHaveText(`مبلغ سفارش${formatTomans(o.C.totalRials)}`);
 
     await ownerPage.goto(at(`/orders/${o.C.number}/pdf/1`));

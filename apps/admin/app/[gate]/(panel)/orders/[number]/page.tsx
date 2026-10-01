@@ -4,13 +4,15 @@ import { notFound } from 'next/navigation';
 
 import { Fragment } from 'react';
 
-import { FILE_MARGIN_MS, IRAN_POST, isPaidStatus, voidKept, type PanelOrderDetails, type PanelOrderItem, type VoidKept } from '@jozveyar/db';
+import { FILE_MARGIN_MS, IRAN_POST, isChecking, isPaidStatus, voidKept, type PanelOrderDetails, type PanelOrderItem, type VoidKept } from '@jozveyar/db';
+import { GATEWAY_NAMES } from '@jozveyar/payments';
 import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
 import { AssignForm } from '../../../../../components/AssignForm';
 import { Barcode } from '../../../../../components/Barcode';
 import { NoAccess } from '../../../../../components/NoAccess';
+import { InquiryForm } from '../../../../../components/InquiryForm';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
@@ -57,7 +59,7 @@ import {
 } from '../../../../../lib/orders';
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
-import type { OrderDetailsView } from '../../../../../lib/server/orders';
+import type { InquiryOutcome, OrderDetailsView } from '../../../../../lib/server/orders';
 import { advanceOrderAction, rebuildPdfAction } from '../../../actions';
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
@@ -91,6 +93,8 @@ const PAGE_ERRORS = new Set([
   'reason_required',
   'payment_not_found',
   'paid_sms_closed',
+  'gateway_not_configured',
+  'payment_final',
   'unavailable',
 ]);
 
@@ -565,6 +569,22 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
 
   const until = filesUntil(details.items, now);
   const payableUntil = until ? new Date(until.getTime() - FILE_MARGIN_MS) : null;
+  // «در حال بررسی» (برش ۷٫۲، طرح `m-order-unpaid`): پولی شاید گرفته شده و نتیجه نیامده؛ مشتری «دوباره پرداخت کن» ندارد.
+  if (order.status === 'awaiting_payment' && details.payments.some(isChecking)) {
+    return (
+      <section className="jy-card ad-status" aria-labelledby="t-st" data-status="checking">
+        <h2 id="t-st" className="jy-card__title">
+          پرداخت در حال بررسی
+        </h2>
+        <p className="ad-meta">ساخته شد {whenText(order.createdAt, now)}</p>
+        <p className="jy-note ad-gap">
+          مشتری از درگاه برگشت ولی درگاه هنوز نتیجهٔ روشن نداده؛ مشتری «پرداختت در حال بررسی است» می‌بیند، بی «دوباره پرداخت کن». استعلام
+          خودکار هر دقیقه دوباره می‌پرسد؛ «استعلام از درگاه» در کارت «پرداخت‌ها» همین حالا.
+          {payableUntil ? <> فایل‌ها تا {whenText(until!, now)} روی سرورند.</> : null}
+        </p>
+      </section>
+    );
+  }
   if (order.status === 'awaiting_payment' && !stale && payableUntil) {
     return (
       <section className="jy-card ad-status" aria-labelledby="t-st">
@@ -867,6 +887,19 @@ function PaymentSmsRow({
   );
 }
 
+/** نتیجهٔ «استعلام از درگاه» (برش ۷٫۲) بالای صفحه؛ جزئیاتش در خود کارت «پرداخت‌ها». */
+const INQUIRY_DONE: Record<InquiryOutcome, { tone: 'success' | 'info' | 'warning' | 'error'; text: string }> = {
+  succeeded: { tone: 'success', text: 'درگاه پرداخت را تأیید کرد و سفارش «در صف چاپ» رفت؛ پیامک پرداخت به مشتری می‌رود.' },
+  failed: { tone: 'info', text: 'درگاه گفت این پرداخت انجام نشد؛ تلاش «ناموفق» شد. علتش در کارت «پرداخت‌ها» است.' },
+  pending: { tone: 'info', text: 'درگاه گفت این پرداخت هنوز انجام نشده؛ تلاش باز ماند.' },
+  unanswered: { tone: 'warning', text: 'درگاه جواب روشن نداد؛ چیزی عوض نشد. استعلام خودکار هر دقیقه دوباره می‌پرسد.' },
+  closed: { tone: 'info', text: 'این تلاش همین حالا جای دیگری بسته شد (برگشت مشتری یا استعلام خودکار)؛ نتیجه در کارت «پرداخت‌ها» است.' },
+  busy: { tone: 'info', text: 'همین حالا استعلام دیگری روی همین تلاش در کار است؛ چند ثانیهٔ دیگر صفحه را تازه کن.' },
+  held: { tone: 'info', text: 'این تلاش تأیید نشد و پولش نزد درگاه است؛ خودکار به کارت مشتری برمی‌گردد. علتش در کارت «پرداخت‌ها» است.' },
+  returned: { tone: 'success', text: 'درگاه پول این تلاش را به کارت مشتری برگرداند.' },
+  verified: { tone: 'error', text: 'درگاه این تلاش را تأییدشده می‌گوید، پس پولش خودکار برنمی‌گردد؛ دستی به مشتری برش گردان.' },
+};
+
 export default async function OrderPage({
   params,
   searchParams,
@@ -910,6 +943,9 @@ export default async function OrderPage({
   const ticketRow = <TicketRow gate={gate} details={details} now={now} canDownload={canDownload} />;
   const entries = orderTimeline(details);
   const when = timelineWhen(entries);
+  // نام درگاه سر کارت «پرداخت‌ها» (طرح)، وقتی همهٔ تلاش‌ها از یک درگاه‌اند.
+  const providers = new Set(details.payments.map((payment) => payment.provider));
+  const payGateway = providers.size === 1 ? (GATEWAY_NAMES[[...providers][0]!] ?? null) : null;
 
   return (
     <>
@@ -936,6 +972,9 @@ export default async function OrderPage({
         ) : (
           <Alert tone="error">پیامک پرداخت باز نرفت؛ علتش در کارت «پرداخت‌ها» است. کمی بعد دوباره بفرست، یا روز تحویل را خودت به مشتری بگو.</Alert>
         )
+      ) : null}
+      {query.done === 'inquiry' && typeof query.r === 'string' && query.r in INQUIRY_DONE ? (
+        <Alert tone={INQUIRY_DONE[query.r as InquiryOutcome].tone}>{INQUIRY_DONE[query.r as InquiryOutcome].text}</Alert>
       ) : null}
       {query.done === 'void' ? (
         <Alert tone="success">
@@ -1127,22 +1166,30 @@ export default async function OrderPage({
               </section>
 
               <section className="jy-card" aria-labelledby="t-pay">
-                <h2 id="t-pay" className="jy-card__title">
-                  پرداخت‌ها
-                </h2>
+                <div className="jy-card__head">
+                  <h2 id="t-pay" className="jy-card__title">
+                    پرداخت‌ها
+                  </h2>
+                  {payGateway ? <span className="jy-card__meta">{payGateway}</span> : null}
+                </div>
                 {details.payments.length === 0 ? (
                   <p className="ad-hint ad-gap">مشتری هنوز به درگاه نرفته است.</p>
                 ) : (
                   <ol className="ad-pay">
                     {details.payments.map((payment) => {
-                      const view = paymentView(payment, now);
+                      const pay = paymentView(payment, now);
                       return (
-                        <li key={payment.id} data-payment={view.kind}>
-                          <PaymentBadge kind={view.kind} />
-                          <span>{whenText(view.at, now)}</span>
+                        <li key={payment.id} data-payment={pay.kind}>
+                          <PaymentBadge kind={pay.kind} />
+                          <span>{whenText(pay.at, now)}</span>
                           <span className="ad-pay__meta">
-                            <Segments segs={view.meta} />
+                            <Segments segs={pay.meta} />
                           </span>
+                          {pay.inquirable && view.inquiryProviders.includes(payment.provider) ? (
+                            <span className="ad-pay__act">
+                              <InquiryForm gate={gate} paymentId={payment.id} orderNumber={order.orderNumber} />
+                            </span>
+                          ) : null}
                         </li>
                       );
                     })}

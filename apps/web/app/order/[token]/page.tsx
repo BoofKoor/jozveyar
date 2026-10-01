@@ -1,16 +1,16 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { OrderView, OrderViewDetails } from '@jozveyar/contracts/checkout';
-import { formatNumber } from '@jozveyar/text';
+import { formatCardMask, formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
 import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
-import { OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
+import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
 import { FlowNav, SumValue, SummaryLines, Tomans, printLabel } from '../../../components/checkout/parts';
 import { JozveBrief, Recap, RecapAddress, RecapDelivery, RecapJozveValue } from '../../../components/checkout/recap';
 import { formatMobile } from '../../../lib/checkout/format';
-import { AUTH_COOKIE, authTokenFrom, orderViewOf } from '../../../lib/server/checkoutContext';
+import { AUTH_COOKIE, authTokenFrom, checkoutModeFor, orderViewOf } from '../../../lib/server/checkoutContext';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,9 +19,10 @@ export const metadata: Metadata = {
   title: 'سفارش',
   robots: { index: false, follow: false },
   alternates: { canonical: null },
-  // دیوار دوم (برش ۶٫۳، ADR-047): نشانی صفحه توکن سفارش است و به هیچ سایت دیگری نمی‌رود، حتی اگر پیوندی `noreferrer` نداشت. نشان
-  // اینماد پاورقی `referrerpolicy="origin"` خودش را دارد (ADR-032).
-  referrer: 'no-referrer',
+  // فقط مبدأ (برش ۷٫۲، سؤال ۱۲۲): صفحهٔ پرداخت زیبال Referer دامنهٔ ثبت‌شده را می‌خواهد و «دوباره پرداخت کن» از همین صفحه به آن
+  // می‌رود؛ `strict-origin` فقط `https://jozveyar.com/` را می‌فرستد، بی مسیر و بی توکن سفارش، و به http هیچ (دیوار ۶٫۳، ADR-047، همان
+  // می‌ماند). پیوند سایت پست همچنان `noreferrer` است، و نشان اینماد پاورقی `referrerpolicy="origin"` خودش را دارد (ADR-032).
+  referrer: 'strict-origin',
 };
 
 /**
@@ -32,7 +33,10 @@ export const metadata: Metadata = {
  * - **وضعیت‌های پنل** (برش ۴٫۳، طرح `admin.html`، سؤال ۲۷): «جزوه‌ات در حال چاپ است»، «جزوه‌ات به پست رسید» با
  *   روزش، و «سفارش لغو شد … مبلغ پرداختی برمی‌گردد». دلیل لغو فقط در پنل است. پیامکی با تغییر وضعیت نیست (سؤال ۱۸).
  * - **در انتظار پرداخت:** اگر آخرین تلاش ناموفق بود «پرداخت انجام نشد»؛ همان مرور، با همان قیمت منجمد، و
- *   «دوباره پرداخت کن». سفارش ساخته شده، پس مرور پیوند ویرایش ندارد.
+ *   «دوباره پرداخت کن». سفارش ساخته شده، پس مرور پیوند ویرایش ندارد. از برش ۷٫۲ (طرح `checkout.html`، سؤال‌های ۱۳۰ تا ۱۳۲): علت
+ *   ناموفق در پنج گروه، «پرداخت هنوز انجام نشده» (برگشت زودرس)، و «پرداختت در حال بررسی است» بی «دوباره پرداخت کن»، با جزیرهٔ
+ *   ۱۵ ثانیه‌ای (`CheckingWatch`).
+ * - **پرداخت دوم:** یادداشت بالای «سفارش ثبت شد»: درگاه خودکار برش می‌گرداند (سؤال ۱۳۲).
  * - **منقضی:** پیام روشن و «دوباره بینداز».
  * - **غریبه** (نه صاحب سفارش، ADR-033): فقط شماره، وضعیت و روز تحویل به پست؛ از ۶٫۳ اینکه کد رهگیری پیامک شد، بی خود کد.
  * - **کد رهگیری** (برش ۶٫۳، ADR-047، طرح `m-c-shipped`): صاحب سفارش گام «کد رهگیری پست» را انجام‌شده می‌بیند، با کد هر بستهٔ زنده و
@@ -48,8 +52,13 @@ export default async function OrderPage({ params }: { params: Promise<{ token: s
   const view = result.value;
 
   if (!view.details) return <Stranger view={view} />;
-  if (view.status === 'expired' || (view.status === 'awaiting_payment' && !view.details.canPay)) return <Expired view={view} />;
-  return <Owner token={token.toLowerCase()} view={view} details={view.details} />;
+  // در حال بررسی منقضی نیست: پولی شاید گرفته شده (برش ۷٫۲).
+  if (view.status === 'expired' || (view.status === 'awaiting_payment' && !view.details.canPay && !view.details.checking)) {
+    return <Expired view={view} />;
+  }
+  const requestHeaders = await headers();
+  const mode = checkoutModeFor([requestHeaders.get('host'), requestHeaders.get('x-forwarded-host')]);
+  return <Owner token={token.toLowerCase()} view={view} details={view.details} zibal={mode === 'live'} />;
 }
 
 /** نشانهٔ حالت سفارش: صفحه green-50، سربرگ بی ناوبری و لوگو بی پیوند (globals.css)، و شبکهٔ سفارش (home.css). */
@@ -367,7 +376,133 @@ function ShipLine({ view }: { view: OrderView }) {
   );
 }
 
-function Owner({ token, view, details }: { token: string; view: OrderView; details: OrderViewDetails }) {
+type LastPayment = NonNullable<OrderViewDetails['lastPayment']>;
+
+/** «درگاه زیبال» یا «درگاه نمونه»، از نام درگاه همان تلاش (`gatewayName`). */
+const gatewayPhrase = (name: string) => (name.startsWith('درگاه') ? name : `درگاه ${name}`);
+
+function PaymentNote({ tone, testId, children }: { tone: 'info' | 'error'; testId: string; children: ReactNode }) {
+  return (
+    <p className={`jy-note jy-note--${tone}`} role={tone === 'error' ? 'alert' : 'status'} data-testid={testId}>
+      <span className={tone === 'error' ? 'jy-icon jy-icon-error' : 'jy-icon jy-icon-info'} aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+/**
+ * پرداخت ناموفق (برش ۷٫۲، طرح `m-failed`، سؤال ۱۳۱): پنج گروه علت از استعلام درگاه، نه از پارامتر نشانی برگشت؛ هر کدام یک متن، و راه
+ * جلو همان «دوباره پرداخت کن». بی علت روشن، همان متن برش ۳.
+ */
+function FailureNote({ payment }: { payment: LastPayment }) {
+  const n = (value: number) => <span className="num">{value}</span>;
+  switch (payment.failureGroup) {
+    case 'cancelled':
+      return (
+        <PaymentNote tone="info" testId="payment-failed">
+          <b className="font-semibold">پرداخت را در درگاه لغو کردی.</b> پولی از حسابت کم نشده.
+        </PaymentNote>
+      );
+    case 'card':
+      if (payment.cardReason) {
+        return (
+          <PaymentNote tone="error" testId="payment-failed">
+            <b className="font-semibold">پرداخت انجام نشد: {payment.cardReason}.</b> پولی از حسابت کم نشده؛ با کارت دیگری دوباره پرداخت کن.
+          </PaymentNote>
+        );
+      }
+      break;
+    case 'paid_unverified':
+      return (
+        <PaymentNote tone="error" testId="payment-failed">
+          <b className="font-semibold">پرداخت تأیید نشد.</b> {payment.gateway} پولی را که از حسابت کم شد، {n(15)} دقیقه پس از پرداخت خودکار
+          به همان کارت برمی‌گرداند؛ بعضی بانک‌ها تا {n(72)} ساعت دیرتر نشانش می‌دهند. سفارشت با همین قیمت مانده؛ دوباره پرداخت کن.
+        </PaymentNote>
+      );
+    case 'returned':
+      return (
+        <PaymentNote tone="error" testId="payment-failed">
+          <b className="font-semibold">پرداخت انجام نشد: بانک این پرداخت را برگرداند.</b> پولش به همان کارت برمی‌گردد؛ بعضی بانک‌ها تا{' '}
+          {n(72)} ساعت دیرتر نشانش می‌دهند.
+        </PaymentNote>
+      );
+  }
+  return (
+    <PaymentNote tone="error" testId="payment-failed">
+      <b className="font-semibold">پرداخت انجام نشد.</b> بانک پرداخت را تأیید نکرد، یا از درگاه برگشتی. اگر پولی از حسابت کم شده، تا {n(72)}{' '}
+      ساعت خودکار برمی‌گردد.
+    </PaymentNote>
+  );
+}
+
+/**
+ * پرداخت دوم سفارشی که پیش‌تر پرداخت شد (برش ۷٫۲، طرح `m-second`، سؤال‌های ۱۲۱ و ۱۳۲): `verify` هرگز، و درگاه خودکار برش می‌گرداند.
+ */
+function ExtraPaymentNote({ payment }: { payment: OrderViewDetails['extraPayments'][number] }) {
+  return (
+    <PaymentNote tone="info" testId="extra-payment">
+      <b className="font-semibold">یک پرداخت دیگر هم برای همین سفارش انجام شد</b> (<Tomans rials={payment.amountRials} /> تومان
+      {payment.cardMask ? (
+        <>
+          ، کارت <span className="num nw">{formatCardMask(payment.cardMask)}</span>
+        </>
+      ) : null}
+      ). سفارش پیش‌تر پرداخت شده بود، پس این یکی را تأیید نکردیم: {payment.gateway} آن را <span className="num">15</span> دقیقه پس از پرداخت
+      خودکار به همان کارت برمی‌گرداند، و بعضی بانک‌ها تا <span className="num">72</span> ساعت دیرتر نشانش می‌دهند. کاری لازم نیست.
+    </PaymentNote>
+  );
+}
+
+/**
+ * «پرداختت در حال بررسی است» (برش ۷٫۲، طرح `m-checking`، سؤال ۱۳۰): پولی شاید گرفته شده و نتیجه‌اش نیامده؛ تا نتیجه نه «دوباره پرداخت
+ * کن» و نه تلاش تازه، و آنچه مشتری تا آن موقع بداند. صفحه خودش به‌روز می‌شود (`CheckingWatch`).
+ */
+function CheckingCard({ token, view, details }: { token: string; view: OrderView; details: OrderViewDetails }) {
+  return (
+    <section className="jy-card" aria-labelledby="order-title" data-testid="order-checking">
+      <span className="jy-icon jy-icon-info ck-done__icon ck-done__icon--info" aria-hidden="true" />
+      <h1 id="order-title" className="ck-done__title">
+        پرداختت در حال بررسی است
+      </h1>
+      <p className="ck-sub">
+        سفارش <span className="num">{view.number}</span> · <Tomans rials={details.totalRials} /> تومان. از درگاه برگشتی، ولی بانک هنوز نتیجه را
+        به ما نگفته؛ معمولاً چند دقیقه طول می‌کشد.
+      </p>
+      <p className="jy-note jy-note--warning ck-card-note">
+        <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+        <span>
+          <b className="font-semibold">دوباره پرداخت نکن.</b> اگر پولی از حسابت کم شده، همین پرداخت است.
+        </span>
+      </p>
+      <ul className="ck-know">
+        <li>
+          اگر پرداخت انجام شده باشد، سفارشت ثبت می‌شود و شمارهٔ سفارش به <span className="num">{formatMobile(details.recipient.phone)}</span>{' '}
+          پیامک می‌شود.
+        </li>
+        <li>اگر انجام نشده باشد یا تأیید نشود، پولی که کم شده خودکار به کارتت برمی‌گردد و «دوباره پرداخت کن» همین‌جا می‌آید.</li>
+        <li>سفارشت تا آن موقع با همین قیمت نگه داشته می‌شود.</li>
+      </ul>
+      <CheckingWatch token={token} checkedAt={details.checking?.checkedAt ?? null} />
+    </section>
+  );
+}
+
+/** کار بعدی وقتی کاری با مشتری نیست (سؤال ۱۳۰): دکمهٔ بسته‌ای که متنش وضعیت است، در خلاصه و نوار موبایل. */
+function CheckingButton({ short = false }: { short?: boolean }) {
+  return (
+    <button
+      type="button"
+      disabled
+      aria-busy="true"
+      aria-label={short ? 'در حال بررسی پرداخت' : undefined}
+      className={`jy-btn jy-btn--primary jy-btn--lg is-loading${short ? ' shrink-0' : ' jy-btn--block home-sum__go'}`}
+    >
+      {short ? 'بررسی' : 'در حال بررسی پرداخت…'}
+    </button>
+  );
+}
+
+function Owner({ token, view, details, zibal }: { token: string; view: OrderView; details: OrderViewDetails; zibal: boolean }) {
   const paid = PAID.has(view.status);
   const breakdown = details.breakdown;
   const item = details.items[0]!;
@@ -375,7 +510,8 @@ function Owner({ token, view, details }: { token: string; view: OrderView; detai
   const place = details.shipping.cityName ?? `استان ${details.shipping.provinceName}`;
   const print = printLabel(item.colorMode, item.sidesMode);
   const files = item.sections.map((section) => ({ name: section.name, pageCount: section.pageCount }));
-  const failed = details.lastPayment?.status === 'failed';
+  const last = details.lastPayment;
+  const checking = !paid && details.checking !== null;
 
   return (
     <main>
@@ -387,17 +523,23 @@ function Owner({ token, view, details }: { token: string; view: OrderView; detai
 
         <div className="home-desk">
           {paid ? (
-            <PaidCard view={view} details={details} />
+            <>
+              {details.extraPayments.map((payment, i) => (
+                <ExtraPaymentNote key={i} payment={payment} />
+              ))}
+              <PaidCard view={view} details={details} />
+            </>
+          ) : checking ? (
+            <CheckingCard token={token} view={view} details={details} />
           ) : (
             <>
-              {failed ? (
-                <p className="jy-note jy-note--error" role="alert" data-testid="payment-failed">
-                  <span className="jy-icon jy-icon-error" aria-hidden="true" />
-                  <span>
-                    <b className="font-semibold">پرداخت انجام نشد.</b> بانک پرداخت را تأیید نکرد، یا از درگاه برگشتی. اگر
-                    پولی از حسابت کم شده، تا <span className="num">72</span> ساعت خودکار برمی‌گردد.
-                  </span>
-                </p>
+              {last?.status === 'failed' ? <FailureNote payment={last} /> : null}
+              {last?.unpaid ? (
+                // برگشت زودرس یا دست‌ساز: درگاه هنوز «در انتظار پرداخت» می‌گوید، پس تلاش نسوخت (ADR-050).
+                <PaymentNote tone="info" testId="payment-unpaid">
+                  <b className="font-semibold">پرداخت هنوز انجام نشده.</b> {gatewayPhrase(last.gateway)} می‌گوید این پرداخت هنوز منتظر توست و
+                  پولی از حسابت کم نشده. اگر صفحهٔ پرداخت را بستی، دوباره پرداخت کن.
+                </PaymentNote>
               ) : null}
               <PayAgainNote />
               <section className="jy-card" aria-labelledby="order-title" data-testid="order-awaiting">
@@ -471,12 +613,14 @@ function Owner({ token, view, details }: { token: string; view: OrderView; detai
               <SumValue rials={details.totalRials} testId="summary-total" />
             </div>
             <ShipLine view={view} />
-            {paid ? null : (
+            {paid ? null : checking ? (
+              <CheckingButton />
+            ) : (
               <>
                 <PayAgainButton token={token} />
                 <p className="home-sum__secure">
                   <span className="jy-icon jy-icon-lock" aria-hidden="true" />
-                  پرداخت امن با همهٔ کارت‌های بانکی
+                  {zibal ? 'پرداخت امن با درگاه زیبال و همهٔ کارت‌های بانکی' : 'پرداخت امن با همهٔ کارت‌های بانکی'}
                 </p>
                 <p className="home-sum__terms">
                   با پرداخت،{' '}
@@ -490,7 +634,14 @@ function Owner({ token, view, details }: { token: string; view: OrderView; detai
           </div>
         </aside>
       </div>
-      {paid ? null : <OrderDock token={token} totalRials={details.totalRials} ship={`${details.shipping.methodName} به ${place}`} />}
+      {paid ? null : (
+        <OrderDock
+          token={token}
+          totalRials={details.totalRials}
+          ship={`${details.shipping.methodName} به ${place}`}
+          action={checking ? <CheckingButton short /> : undefined}
+        />
+      )}
     </main>
   );
 }

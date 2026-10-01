@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutDocument } from '@jozveyar/db';
@@ -15,9 +15,10 @@ import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import type { SmsMessage, SmsTransport } from '@jozveyar/sms';
 
+import { MOCK_AUTHORITY, PaymentError, mockGateway, type PaymentGateway } from '@jozveyar/payments';
+
 import type { AuthUser } from './auth';
-import { createCheckoutService } from './checkout';
-import { MOCK_AUTHORITY, mockGateway } from './payments';
+import { PAYMENT_ATTEMPT_TTL_MS, RETURN_KEY, createCheckoutService } from './checkout';
 import { memoryOrderStore } from './testing';
 
 const ME = 'a'.repeat(64);
@@ -25,9 +26,9 @@ const OTHER = 'b'.repeat(64);
 const SARA: AuthUser = { userId: 'user-sara', mobile: '09121234567' };
 const REZA: AuthUser = { userId: 'user-reza', mobile: '09351234567' };
 const DAY = 86_400_000;
-/** عددهای ADR-034، صریح: فایل دست‌کم یک ساعت دیگر زنده؛ تلاش پرداخت نیم ساعت. */
+/** عددهای ADR-034، صریح: فایل دست‌کم یک ساعت دیگر زنده؛ تلاش پرداخت از ۷٫۲ ده دقیقه (سؤال ۱۴۴). */
 const HOUR = 3_600_000;
-const HALF_HOUR = HOUR / 2;
+const MINUTE = 60_000;
 /** استان‌ها و شهرها از `@jozveyar/geo`. */
 const TEHRAN = { provinceId: 8, cityId: 394 };
 const MASHHAD = { provinceId: 11, cityId: 1326 };
@@ -48,10 +49,10 @@ describe('مسیر خرید روی سرور', () => {
     },
   };
 
-  function build(transport: SmsTransport = capture) {
+  function build(transport: SmsTransport = capture, gateway: PaymentGateway = mockGateway({ newRefId: () => '803114' })) {
     service = createCheckoutService({
       orders,
-      gateway: mockGateway({ newRefId: () => '803114' }),
+      gateway,
       sms: { transport, outbox: orders.smsOutbox },
       callbackUrl: '/pay/callback',
       now: () => clock,
@@ -114,14 +115,18 @@ describe('مسیر خرید روی سرور', () => {
     return result.value;
   }
 
-  /** همان کاری که صفحهٔ درگاه نمونه و بعد برگشت مرورگر می‌کنند. */
-  async function pay(redirectUrl: string, decision: 'success' | 'failure' | 'cancel', status?: string) {
+  /** همان کاری که صفحهٔ درگاه نمونه و بعد برگشت مرورگر می‌کنند: برگشت به نشانی کلیددار همان تلاش (برش ۷٫۲). */
+  async function pay(redirectUrl: string, decision: 'success' | 'failure' | 'cancel') {
     const authority = redirectUrl.split('/').at(-1)!;
     const decided = await service.mockDecision(authority, { decision });
     if (!decided.ok) throw new Error(decided.error);
-    const query = new URL(decided.value.redirectUrl, 'http://localhost').searchParams;
-    return service.settle(query.get('Authority')!, status ?? query.get('Status'));
+    return service.settle(keyOf(decided.value.redirectUrl));
   }
+
+  /** کلید برگشت از نشانی برگشت (`/pay/callback/<کلید>`). */
+  const keyOf = (url: string) => new URL(url, 'http://localhost').pathname.split('/').at(-1)!;
+  /** کلید برگشت تلاشی که به این صفحهٔ درگاه رفت. */
+  const returnKeyOf = (redirectUrl: string) => orders.payments.find((p) => p.authority === redirectUrl.split('/').at(-1))!.returnKey;
 
   describe('قیمت سرور', () => {
     it('اسکن زرد ۱۴۷ صفحه‌ای: ۲۸۰,۲۰۰ تومان، و کرایهٔ هر دو منطقه برای کارت شهر', async () => {
@@ -451,35 +456,51 @@ describe('مسیر خرید روی سرور', () => {
     it('برگشت تکراری (رفرش) همان نتیجه است: پیامک و کار دوم نمی‌سازد', async () => {
       const { payment } = await placed([doc(10)]);
       await pay(payment!.redirectUrl, 'success');
-      const authority = payment!.redirectUrl.split('/').at(-1)!;
-      expect(await service.settle(authority, 'OK')).toMatchObject({ ok: true, value: { payment: 'succeeded' } });
+      expect(await service.settle(returnKeyOf(payment!.redirectUrl))).toMatchObject({ ok: true, value: { payment: 'succeeded' } });
       expect(orders.jobs).toHaveLength(2);
       expect(orders.assignments).toHaveLength(1);
       expect(sent).toHaveLength(1);
       expect(orders.sms.size).toBe(1);
     });
 
-    it('`Status=OK` نشانی هیچ‌وقت پرداخت نمی‌سازد: سنجش، تصمیم ثبت‌شدهٔ درگاه را می‌خواند', async () => {
-      const { payment } = await placed([doc(10)]);
-      expect(await pay(payment!.redirectUrl, 'failure', 'OK')).toMatchObject({ ok: true, value: { payment: 'failed' } });
+    it('برگشت هیچ پارامتر درگاه نمی‌خواند: سنجش با استعلام؛ برگشت زودرس یا دست‌ساز تلاش را نمی‌سوزاند (ADR-050)', async () => {
+      const { payment, order } = await placed([doc(10)]);
+      expect(await pay(payment!.redirectUrl, 'failure')).toMatchObject({ ok: true, value: { payment: 'failed' } });
       expect(orders.orders[0]!.status).toBe('awaiting_payment');
-      expect(orders.payments[0]).toMatchObject({ status: 'failed', failureCode: 'declined' });
+      expect(orders.payments[0]).toMatchObject({ status: 'failed', failureCode: 'declined', gatewayStatus: 5, settledVia: 'callback' });
+      // علت کارت برای مشتری (سؤال ۱۳۱): «با کارت دیگری دوباره پرداخت کن».
+      const declined = await service.orderView(order.token, SARA);
+      expect(declined.ok && declined.value.details?.lastPayment).toMatchObject({ failureGroup: 'card', cardReason: 'موجودی کارت کافی نبود', unpaid: false });
 
-      // برگشت دست‌ساز، بی هیچ تصمیمی: انصراف.
-      const again = await service.payAgain(SARA, orders.orders[0]!.publicToken);
-      const authority = again.ok ? again.value.payment!.redirectUrl.split('/').at(-1)! : '';
-      expect(await service.settle(authority, 'OK')).toMatchObject({ value: { payment: 'failed' } });
-      expect(orders.payments.find((p) => p.authority === authority)).toMatchObject({ failureCode: 'cancelled' });
-      expect(orders.jobs).toHaveLength(0);
-      expect(sent).toHaveLength(0);
-      expect(orders.sms.size).toBe(0);
+      // برگشت پیش از هر تصمیمی (زودرس، یا نشانی دست‌ساز): درگاه «در انتظار پرداخت» می‌گوید، پس تلاش باز می‌ماند.
+      later(1000);
+      const again = await service.payAgain(SARA, order.token);
+      if (!again.ok) throw new Error(again.error);
+      const key = returnKeyOf(again.value.payment!.redirectUrl);
+      expect(await service.settle(key)).toMatchObject({ value: { payment: 'pending' } });
+      const early = orders.payments.find((p) => p.returnKey === key)!;
+      expect(early).toMatchObject({ status: 'pending', gatewayStatus: -1, gatewayError: null, failureCode: null });
+      expect(early.returnedAt).toEqual(clock);
+      const view = await service.orderView(order.token, SARA);
+      expect(view.ok && view.value.details).toMatchObject({
+        canPay: true,
+        checking: null,
+        lastPayment: { status: 'pending', gatewayStatus: -1, unpaid: true, failureGroup: null, gateway: 'درگاه نمونه' },
+      });
+      // و همان تلاش بعد هنوز پرداختنی است.
+      expect(await pay(again.value.payment!.redirectUrl, 'success')).toMatchObject({ value: { payment: 'succeeded' } });
+      expect(orders.jobs).toHaveLength(2);
     });
 
     it('پرداخت ناموفق: سفارش با همان قیمت می‌ماند و «دوباره پرداخت کن» تلاش تازه است', async () => {
       const { order, payment } = await placed([doc(10)]);
       await pay(payment!.redirectUrl, 'cancel');
       const view = await service.orderView(order.token, SARA);
-      expect(view.ok && view.value.details).toMatchObject({ canPay: true, lastPayment: { status: 'failed', failureCode: 'cancelled' } });
+      expect(view.ok && view.value.details).toMatchObject({
+        canPay: true,
+        checking: null,
+        lastPayment: { status: 'failed', failureCode: 'cancelled', failureGroup: 'cancelled', cardReason: null, unpaid: false },
+      });
 
       const again = await service.payAgain(SARA, order.token);
       expect(again.ok).toBe(true);
@@ -490,14 +511,21 @@ describe('مسیر خرید روی سرور', () => {
       expect(orders.orders[0]!.status).toBe('paid');
     });
 
-    it('تلاش پرداخت کهنه‌تر از نیم ساعت سنجیده نمی‌شود', async () => {
+    it('مهلت هر تلاش ۱۰ دقیقه (سؤال ۱۴۴): پس از آن verify هرگز، تلاش «مهلت گذشت» با وضعیت درگاه؛ تا خود مهلت پذیرفته', async () => {
+      expect(PAYMENT_ATTEMPT_TTL_MS).toBe(10 * MINUTE);
       const { payment } = await placed([doc(10)]);
       const authority = payment!.redirectUrl.split('/').at(-1)!;
       await service.mockDecision(authority, { decision: 'success' });
-      later(HALF_HOUR + 1);
-      expect(await service.settle(authority, 'OK')).toMatchObject({ value: { payment: 'failed' } });
-      expect(orders.payments[0]!.failureCode).toBe('expired');
+      later(PAYMENT_ATTEMPT_TTL_MS + 1);
+      expect(await service.settle(returnKeyOf(payment!.redirectUrl))).toMatchObject({ value: { payment: 'failed' } });
+      expect(orders.payments[0]).toMatchObject({ failureCode: 'expired', gatewayStatus: 2, refId: null });
       expect(orders.orders[0]!.status).toBe('awaiting_payment');
+
+      const second = await service.payAgain(SARA, orders.orders[0]!.publicToken);
+      if (!second.ok) throw new Error(second.error);
+      await service.mockDecision(second.value.payment!.redirectUrl.split('/').at(-1)!, { decision: 'success' });
+      later(PAYMENT_ATTEMPT_TTL_MS);
+      expect(await service.settle(returnKeyOf(second.value.payment!.redirectUrl))).toMatchObject({ value: { payment: 'succeeded' } });
     });
 
     it('سفارش پرداخت‌شده دوباره پرداخت نمی‌شود: تلاش دیگرش سنجیده نمی‌شود', async () => {
@@ -543,10 +571,18 @@ describe('مسیر خرید روی سرور', () => {
       expect(logs.some((line) => line.includes('panel down'))).toBe(false);
     });
 
-    it('Authority ناشناس یا بدشکل: ۴۰۴', async () => {
-      expect(await service.settle('MOCK' + '0'.repeat(32), 'OK')).toMatchObject({ status: 404 });
-      expect(await service.settle('../../etc', 'OK')).toMatchObject({ status: 404 });
-      expect(await service.settle('', null)).toMatchObject({ status: 404 });
+    it('کلید برگشت ناشناس یا بدشکل: ۴۰۴؛ شناسهٔ تلاش درگاه (Authority) کلید برگشت نیست', async () => {
+      const { payment } = await placed([doc(10)]);
+      expect(await service.settle('0'.repeat(32))).toMatchObject({ status: 404 });
+      expect(await service.settle('../../etc')).toMatchObject({ status: 404 });
+      expect(await service.settle('')).toMatchObject({ status: 404 });
+      expect(await service.settle(payment!.redirectUrl.split('/').at(-1)!)).toMatchObject({ status: 404 });
+      // کلید بدشکل حتی به ذخیره‌گاه نمی‌رسد.
+      const settle = vi.spyOn(orders, 'settle');
+      for (const key of ['ABC', 'F'.repeat(32), 'f'.repeat(31), `${'a'.repeat(32)}x`, `${'a'.repeat(31)}/`]) {
+        expect(await service.settle(key), key).toMatchObject({ status: 404 });
+      }
+      expect(settle).not.toHaveBeenCalled();
     });
 
     it('فایل‌های سفارش در انتظار پاک شد: «دوباره پرداخت کن» سفارش را منقضی می‌کند', async () => {
@@ -568,6 +604,248 @@ describe('مسیر خرید روی سرور', () => {
     });
   });
 
+  /**
+   * درگاه واقعی (برش ۷٫۲، ADR-050) با درگاه ساختگی به شکل زیبال: هر شروع را نگه می‌دارد، وضعیت هر تلاش را تست می‌گذارد، و هر verify را
+   * می‌شمارد. آداپتور خود زیبال روی سرور ساختگی‌اش در `packages/payments`، و قفل و تراکنش روی پستگرس در `packages/db`.
+   */
+  describe('درگاه واقعی: شروع، برگشت، «در حال بررسی» و استعلام خودکار (برش ۷٫۲)', () => {
+    let starts: Parameters<PaymentGateway['start']>[0][];
+    let statuses: Map<string, number | Error>;
+    let verifies: string[];
+    let startError: Error | null;
+    let next = 3_714_560_001;
+
+    function fakeZibal(): PaymentGateway {
+      return {
+        name: 'zibal',
+        async start(input) {
+          starts.push(input);
+          if (startError) throw startError;
+          const authority = String(next++);
+          statuses.set(authority, -1);
+          return { authority, redirectUrl: `https://gateway.zibal.ir/start/${authority}`, raw: { trackId: authority } };
+        },
+        async inquire(attempt) {
+          const status = statuses.get(attempt.authority);
+          if (status instanceof Error) throw status;
+          return {
+            status: status ?? 203,
+            amountRials: attempt.amountRials,
+            orderId: attempt.orderId,
+            refId: status === 1 || status === 2 ? '900001' : null,
+            cardMask: status === 1 || status === 2 ? '603799******1234' : null,
+            raw: { status },
+          };
+        },
+        async verify(attempt) {
+          verifies.push(attempt.authority);
+          statuses.set(attempt.authority, 1);
+          return { kind: 'verified', amountRials: attempt.amountRials, orderId: attempt.orderId, refId: '900001', cardMask: '603799******1234', raw: {} };
+        },
+      };
+    }
+
+    beforeEach(() => {
+      starts = [];
+      statuses = new Map();
+      verifies = [];
+      startError = null;
+      build(capture, fakeZibal());
+    });
+
+    const zibalOf = (redirectUrl: string) => orders.payments.find((p) => p.authority === redirectUrl.split('/').at(-1))!;
+
+    it('شروع: مبلغ منجمد، شناسهٔ سفارش «شماره-۸ نویسهٔ شناسهٔ تلاش»، نشانی برگشت با کلید تصادفی؛ نه موبایل', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      const row = zibalOf(payment!.redirectUrl);
+      expect(starts).toEqual([
+        {
+          amountRials: order.totalRials,
+          callbackUrl: `/pay/callback/${row.returnKey}`,
+          orderId: `${order.number}-${row.id.slice(0, 8)}`,
+          description: `سفارش ${order.number} جزوه‌یار`,
+        },
+      ]);
+      expect(row).toMatchObject({ provider: 'zibal', gatewayOrderId: `${order.number}-${row.id.slice(0, 8)}`, amountRials: order.totalRials });
+      expect(row.returnKey).toMatch(RETURN_KEY);
+      expect(row.returnKey).not.toContain(row.authority);
+      expect(JSON.stringify(starts)).not.toContain(SARA.mobile);
+    });
+
+    it('شکست شروع: ۱۱۳ «بالاتر از سقف یک پرداخت»، ۱۱۵ و کد پذیرندهٔ خالی «درگاه آماده نیست»، بقیه «جواب نداد»؛ لاگ فقط برچسب', async () => {
+      for (const [error, code, status] of [
+        [new PaymentError('rejected', { result: 113 }), 'amount_over_gateway_limit', 409],
+        [new PaymentError('rejected', { result: 115 }), 'gateway_not_ready', 503],
+        [new PaymentError('rejected', { result: 103 }), 'gateway_not_ready', 503],
+        [new PaymentError('unconfigured'), 'gateway_not_ready', 503],
+        [new PaymentError('unavailable', { http: 502 }), 'gateway_unavailable', 503],
+        [new Error('socket hang up merchant=secret-value'), 'gateway_unavailable', 503],
+      ] as const) {
+        startError = error;
+        const scan = doc(10);
+        const priced = await service.quote(ME, { items: [item([scan])], place: TEHRAN });
+        if (!priced.ok) throw new Error(priced.error);
+        const result = await service.placeOrder(ME, SARA, {
+          items: [item([scan])],
+          place: TEHRAN,
+          recipient,
+          checkoutKey: randomUUID(),
+          expectedTotalRials: priced.value.breakdown.totalRials,
+        });
+        expect(result).toMatchObject({ ok: false, status, error: code });
+      }
+      expect(orders.payments).toHaveLength(0);
+      // کار مالک (۱۱۵ و ۱۰۳): رویداد سیستم برای پیشخوان، با کد و شمارهٔ سفارش؛ ۱۱۳، خالی و قطعی نه.
+      expect(orders.rejections.map((r) => [r.provider, r.result])).toEqual([
+        ['zibal', 115],
+        ['zibal', 103],
+      ]);
+      expect(orders.rejections[0]).toMatchObject({ orderNumber: orders.orders[1]!.orderNumber, orderId: orders.orders[1]!.id, at: clock });
+      expect(logs.some((line) => line.includes('rejected:113'))).toBe(true);
+      expect(logs.some((line) => line.includes('secret-value'))).toBe(false);
+    });
+
+    it('«در حال بررسی»: پول گرفته شده و verify جواب نداد، یا مشتری برگشت و درگاه جواب نداد؛ نه «دوباره پرداخت کن» و نه تلاش تازه', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      const row = zibalOf(payment!.redirectUrl);
+      statuses.set(row.authority, new PaymentError('unavailable'));
+      expect(await service.settle(row.returnKey)).toMatchObject({ value: { payment: 'pending' } });
+      const view = await service.orderView(order.token, SARA);
+      expect(view.ok && view.value.details).toMatchObject({
+        canPay: false,
+        checking: { checkedAt: clock.toISOString() },
+        lastPayment: { status: 'pending', unpaid: false, failureGroup: null, gateway: 'زیبال', gatewayStatus: null },
+      });
+      expect(await service.payAgain(SARA, order.token)).toMatchObject({ status: 409, error: 'payment_checking' });
+      expect(starts).toHaveLength(1);
+
+      // درگاه برگشت: پرداخت‌شده، تأییدنشده ← verify ← موفق.
+      statuses.set(row.authority, 2);
+      expect(await service.settle(row.returnKey)).toMatchObject({ value: { payment: 'succeeded' } });
+      expect(verifies).toEqual([row.authority]);
+      expect(orders.payments[0]).toMatchObject({ status: 'succeeded', refId: '900001', cardMask: '603799******1234', verifiedAmountRials: order.totalRials });
+    });
+
+    it('تلاش قدیمی‌تری که در حال بررسی است هم «دوباره پرداخت کن» را می‌بندد، نه فقط آخرین تلاش', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      const first = zibalOf(payment!.redirectUrl);
+      later(1000);
+      const again = await service.payAgain(SARA, order.token);
+      if (!again.ok) throw new Error(again.error);
+      statuses.set(first.authority, new PaymentError('unavailable'));
+      expect(await service.settle(first.returnKey)).toMatchObject({ value: { payment: 'pending' } });
+      const view = await service.orderView(order.token, SARA);
+      expect(view.ok && view.value.details).toMatchObject({
+        canPay: false,
+        checking: { checkedAt: clock.toISOString() },
+        lastPayment: { status: 'pending', unpaid: false, failureGroup: null },
+      });
+      expect(await service.payAgain(SARA, order.token)).toMatchObject({ status: 409, error: 'payment_checking' });
+    });
+
+    it('استعلام خودکار: تلاش باز بیش از ۲ دقیقه با همان حکم بسته می‌شود («خودکار»)، تازه نه، و در همان دقیقه دوباره پرسیده نمی‌شود', async () => {
+      const first = await placed([doc(10)]);
+      const old = zibalOf(first.payment!.redirectUrl);
+      statuses.set(old.authority, 2);
+      later(3 * MINUTE);
+      const fresh = await placed([doc(10)]);
+      statuses.set(zibalOf(fresh.payment!.redirectUrl).authority, -1);
+      expect(await service.autoInquiry()).toEqual({ checked: 1, settled: 1, watched: 0 });
+      expect(orders.payments.find((p) => p.id === old.id)).toMatchObject({ status: 'succeeded', settledVia: 'auto' });
+      expect(sent.map((message) => message.purpose)).toEqual(['order_paid']);
+      later(MINUTE / 2);
+      expect((await service.autoInquiry()).checked).toBe(0);
+      later(3 * MINUTE);
+      // تلاش تازه حالا قدیمی است و هنوز در انتظار پرداخت: پرسیده می‌شود و باز می‌ماند.
+      expect(await service.autoInquiry()).toMatchObject({ checked: 1, settled: 0 });
+    });
+
+    it('پول پرداخت دوم تا «ریورس‌شده» پاییده می‌شود (فقط استعلام)؛ صفحهٔ «ثبت شد» یادداشتش را دارد', async () => {
+      const scan = doc(10);
+      const priced = await service.quote(ME, { items: [item([scan])], place: TEHRAN });
+      const body = { items: [item([scan])], place: TEHRAN, recipient, checkoutKey: randomUUID(), expectedTotalRials: priced.ok ? priced.value.breakdown.totalRials : 0 };
+      const a = await service.placeOrder(ME, SARA, body);
+      const b = await service.placeOrder(ME, SARA, body);
+      if (!a.ok || !b.ok) throw new Error('placeOrder');
+      const one = zibalOf(a.value.payment!.redirectUrl);
+      const two = zibalOf(b.value.payment!.redirectUrl);
+      statuses.set(one.authority, 2);
+      statuses.set(two.authority, 2);
+      await service.settle(one.returnKey);
+      expect(await service.settle(two.returnKey)).toMatchObject({ value: { payment: 'failed' } });
+      expect(verifies).toEqual([one.authority]);
+      expect(orders.payments.find((p) => p.id === two.id)).toMatchObject({ failureCode: 'order_not_payable', gatewayStatus: 2, cardMask: '603799******1234' });
+      const view = await service.orderView(a.value.order.token, SARA);
+      expect(view.ok && view.value.details?.extraPayments).toEqual([{ amountRials: a.value.order.totalRials, cardMask: '603799******1234', gateway: 'زیبال' }]);
+
+      later(3 * MINUTE);
+      statuses.set(two.authority, 18);
+      expect(await service.autoInquiry()).toMatchObject({ watched: 1 });
+      expect(orders.payments.find((p) => p.id === two.id)).toMatchObject({ status: 'failed', gatewayStatus: 18 });
+      later(3 * MINUTE);
+      expect((await service.autoInquiry()).watched).toBe(0);
+    });
+
+    it('«پرداخت هنوز انجام نشده» فقط وقتی درگاه آخرین بار روشن «در انتظار» گفت؛ پرسشی که بعدش بی جواب ماند «در حال بررسی» است', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      const row = zibalOf(payment!.redirectUrl);
+      expect(await service.settle(row.returnKey)).toMatchObject({ value: { payment: 'pending' } });
+      let view = await service.orderView(order.token, SARA);
+      expect(view.ok && view.value.details).toMatchObject({ canPay: true, checking: null, lastPayment: { unpaid: true, gatewayStatus: -1 } });
+      statuses.set(row.authority, new PaymentError('unavailable'));
+      later(3 * MINUTE);
+      expect(await service.autoInquiry()).toMatchObject({ checked: 1, settled: 0 });
+      view = await service.orderView(order.token, SARA);
+      expect(view.ok && view.value.details).toMatchObject({
+        canPay: false,
+        checking: { checkedAt: clock.toISOString() },
+        lastPayment: { status: 'pending', unpaid: false, gatewayStatus: -1 },
+      });
+    });
+
+    it('پرداخت دومی که درگاه نگفت پولش گرفته شد یادداشت ندارد: پولی از مشتری نزد درگاه نیست', async () => {
+      const scan = doc(10);
+      const priced = await service.quote(ME, { items: [item([scan])], place: TEHRAN });
+      const body = { items: [item([scan])], place: TEHRAN, recipient, checkoutKey: randomUUID(), expectedTotalRials: priced.ok ? priced.value.breakdown.totalRials : 0 };
+      const a = await service.placeOrder(ME, SARA, body);
+      const b = await service.placeOrder(ME, SARA, body);
+      if (!a.ok || !b.ok) throw new Error('placeOrder');
+      const one = zibalOf(a.value.payment!.redirectUrl);
+      const two = zibalOf(b.value.payment!.redirectUrl);
+      statuses.set(one.authority, 2);
+      await service.settle(one.returnKey);
+      expect(await service.settle(two.returnKey)).toMatchObject({ value: { payment: 'failed' } });
+      expect(orders.payments.find((p) => p.id === two.id)).toMatchObject({ failureCode: 'order_not_payable', gatewayStatus: -1 });
+      const view = await service.orderView(a.value.order.token, SARA);
+      expect(view.ok && view.value.details?.extraPayments).toEqual([]);
+    });
+
+    it('درگاه نمونه پولی ندارد که پاییده شود: پول پرداخت دومش در استعلام خودکار پرسیده نمی‌شود', async () => {
+      build();
+      const scan = doc(10);
+      const priced = await service.quote(ME, { items: [item([scan])], place: TEHRAN });
+      const body = { items: [item([scan])], place: TEHRAN, recipient, checkoutKey: randomUUID(), expectedTotalRials: priced.ok ? priced.value.breakdown.totalRials : 0 };
+      const a = await service.placeOrder(ME, SARA, body);
+      const b = await service.placeOrder(ME, SARA, body);
+      if (!a.ok || !b.ok) throw new Error('placeOrder');
+      const [one, two] = [a, b].map((r) => orders.payments.find((p) => p.authority === r.value.payment!.redirectUrl.split('/').at(-1))!);
+      for (const p of [one!, two!]) await service.mockDecision(p.authority, { decision: 'success' });
+      await service.settle(one!.returnKey);
+      expect(await service.settle(two!.returnKey)).toMatchObject({ value: { payment: 'failed' } });
+      expect(orders.payments.find((p) => p.id === two!.id)).toMatchObject({ provider: 'mock', failureCode: 'order_not_payable', gatewayStatus: 2 });
+      later(3 * MINUTE);
+      expect(await service.autoInquiry()).toEqual({ checked: 0, settled: 0, watched: 0 });
+    });
+
+    it('دیوار درگاه: پرداخت زیبال در سرویسی که فقط درگاه نمونه دارد پیدا نمی‌شود (درگاه نمونه هرگز در live، زیبال هرگز در mock)', async () => {
+      const { payment } = await placed([doc(10)]);
+      const row = zibalOf(payment!.redirectUrl);
+      build();
+      expect(await service.settle(row.returnKey)).toMatchObject({ status: 404 });
+      expect(await service.autoInquiry()).toEqual({ checked: 0, settled: 0, watched: 0 });
+    });
+  });
+
   describe('درگاه نمونه', () => {
     it('تصمیم فقط یک بار ثبت می‌شود؛ تصمیم دوم اولی را عوض نمی‌کند', async () => {
       const { payment, order } = await placed([doc(10)]);
@@ -576,13 +854,12 @@ describe('مسیر خرید روی سرور', () => {
         ok: true,
         value: { merchant: 'جزوه‌یار', orderNumber: order.number, amountRials: order.totalRials, decided: false },
       });
-      expect(await service.mockDecision(authority, { decision: 'failure' })).toMatchObject({
-        ok: true,
-        value: { redirectUrl: `/pay/callback?Authority=${authority}&Status=NOK` },
-      });
+      const key = orders.payments[0]!.returnKey;
+      expect(await service.mockDecision(authority, { decision: 'failure' })).toMatchObject({ ok: true, value: { redirectUrl: `/pay/callback/${key}` } });
+      expect(await service.mockGatewayView(authority)).toMatchObject({ value: { decided: true, returnUrl: `/pay/callback/${key}` } });
       await service.mockDecision(authority, { decision: 'success' });
       expect(orders.payments[0]!.raw).toMatchObject({ decision: 'failure' });
-      expect(await service.settle(authority, 'OK')).toMatchObject({ value: { payment: 'failed' } });
+      expect(await service.settle(key)).toMatchObject({ value: { payment: 'failed' } });
     });
 
     it('تصمیم نادرست و Authority ناشناس رد می‌شوند', async () => {

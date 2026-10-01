@@ -71,6 +71,17 @@ export function describeSms(configured: CheckoutMode): string | null {
   return configured === 'live' ? '✓ پیامک وب: sms.ir (کلید و قالب‌ها از «تنظیمات» یا .env)' : '✓ پیامک وب: کنسولی (در sms_messages)';
 }
 
+/**
+ * درگاه وب در این حالت (برش ۷٫۲، ADR-050)، یک خط برای لاگ بالا آمدن: منبع، هرگز مقدار. `off` درگاهی ندارد و به هیچ درگاهی درخواست
+ * نمی‌دهد، استعلام خودکار هم نه.
+ */
+export function describePayments(configured: CheckoutMode): string | null {
+  if (configured === 'off') return null;
+  return configured === 'live'
+    ? '✓ درگاه وب: زیبال (کد پذیرنده از «تنظیمات» یا .env، نشانی برگشت PAYMENT_CALLBACK_URL)؛ استعلام خودکار هر دقیقه'
+    : '✓ درگاه وب: درگاه نمونه؛ استعلام خودکار هر دقیقه';
+}
+
 /** یک خط برای لاگ بالا آمدن سرور؛ صاحب پروژه بعد از استقرار همین را می‌جوید. */
 export function describeMode(configured: CheckoutMode, secretOk: boolean): string {
   if (configured === 'off') return '✓ مسیر خرید: off (ثبت سفارش آنلاین به‌زودی)';

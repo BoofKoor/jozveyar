@@ -39,6 +39,9 @@ import { adminEventRow, type AdminEventInput } from './admin.js';
 import type { AssignmentRule } from './assignment.js';
 import type { Database } from './index.js';
 import {
+  GATEWAY_NOT_READY_RESULTS,
+  HELD_FAILURES,
+  MONEY_HELD_STATUSES,
   PREPARE_ORDER_JOB,
   PREPARE_TICKET_JOB,
   requeueTicket,
@@ -141,7 +144,12 @@ export interface PanelClock {
   unreturnedBefore: Date;
   /** «کد رهگیری ندارد» فقط برای تحویل‌های پس از این لحظه (برش ۶٫۲): `at` − `TRACKING_ALERT_DAYS` روز. */
   untrackedSince: Date;
+  /** آغاز امروز به وقت تهران: «از صبح استعلام خودکار …» پیشخوان (برش ۷٫۲). بی آن، آن شمار صفر است. */
+  todayStart?: Date;
 }
+
+/** «مبلغ ناهمخوان» پیشخوان فقط برای تلاش‌های این چند روز اخیر (برش ۷٫۲): خطای پیشخوان همیشگی نمی‌شود؛ کارت پرداخت‌ها همیشه دارد. */
+export const MISMATCH_ALERT_MS = 7 * 86_400_000;
 
 /**
  * هشدار «کد رهگیری ندارد» (برش ۶٫۲، ADR-047، تصمیم ۸۲): سفارش «تحویل پست شد» بی کد زنده، وقتی این چند روز کاری از روز تحویل
@@ -251,6 +259,23 @@ export interface PanelAlerts {
    * نیست»، فقط پرداخت‌های پس از `untrackedSince`؛ کوچک‌ترین شماره اول. پیشخوان فقط با «دوباره بفرست» (`orders.money`).
    */
   paidSmsFailed: number[];
+  /**
+   * آخرین ردِ درگاه که کار مالک است (برش ۷٫۲، سؤال‌های ۱۳۹ و ۱۴۷؛ ۱۱۵ IP، یا ۱۰۲ تا ۱۰۴ کد پذیرنده): در شروع پرداخت (رویداد سیستم
+   * `payments.gateway_rejected`)، یا آخرین پرسش یک تلاش (`payments.gateway_error`، بی رویداد تازه با هر دقیقهٔ استعلام خودکار)؛ اگر پس از
+   * آن نه پرداختی از همان درگاه شروع شد و نه «آزمایش» کد پذیرنده درست بود؛ پس از `untrackedSince`. در محدودهٔ چاپخانه هیچ.
+   */
+  gatewayRejected: { at: Date; orderNumber: number | null; provider: string; result: number; stage: 'start' | 'inquiry' } | null;
+  /** تلاش‌هایی که درگاه مبلغ دیگری برایشان گفت (`amount_mismatch`)، در `MISMATCH_ALERT_MS` اخیر؛ تازه‌ترین اول. */
+  mismatched: { orderNumber: number; amountRials: number; reportedRials: number | null; createdAt: Date }[];
+  /**
+   * پول تلاش‌های بسته‌ای که هنوز نزد درگاه است (`HELD_FAILURES` با وضعیت ۲ یا ۱۶)، ساخته پس از `untrackedSince`؛ تازه‌ترین اول. پیشخوان
+   * پس از `HELD_WATCH_MS` «برمی‌گردد» را هشدار می‌کند.
+   */
+  held: { orderNumber: number; failureCode: string; createdAt: Date }[];
+  /** تلاش بسته‌ای که درگاه «پرداخت‌شده، تأییدشده» (۱) می‌گوید ولی سفارش نگرفتش: پولش خودکار برنمی‌گردد. پس از `untrackedSince`. */
+  verifiedUnused: { orderNumber: number; failureCode: string }[];
+  /** تلاش‌های امروز (`todayStart`) که استعلام خودکار بست، به نتیجه. */
+  autoClosed: { failed: number; succeeded: number };
 }
 
 /** یک تلاش پرداخت در جزئیات سفارش، با پیامک پرداختش (برش ۷٫۱)؛ پرداخت پیش از ۷٫۱ و ناموفق پیامک ندارد. */
@@ -580,6 +605,8 @@ export interface PanelOrderStore {
   assignPartner(scope: PanelScope, input: PanelAssign): Promise<PanelAssignWrite>;
   /** پیامک پرداخت یک تلاش پرداخت در محدوده (برش ۷٫۱)؛ null یعنی چنین پرداختی (در این محدوده) نیست. */
   paymentSms(scope: PanelScope, paymentId: string): Promise<PaymentSmsRef | null>;
+  /** یک تلاش پرداخت در محدوده، برای «استعلام از درگاه» (برش ۷٫۲)؛ null یعنی چنین پرداختی (در این محدوده) نیست. */
+  paymentOf(scope: PanelScope, paymentId: string): Promise<{ payment: PaymentRow; orderId: string; orderNumber: number } | null>;
   logEvent(event: AdminEventInput): Promise<void>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
@@ -660,6 +687,126 @@ function searchWhere(search: PanelSearch | null): SQL | undefined {
 }
 
 export function createPanelOrderStore({ db }: Database): PanelOrderStore {
+  /**
+   * هشدارهای پول پیشخوان (برش ۷٫۲، طرح `m-dash-alerts`): ردِ شروع که کار مالک است، مبلغ ناهمخوان، پولی که نزد درگاه مانده، تأییدشدهٔ
+   * بی‌استفاده، و آنچه استعلام خودکار امروز بست. همه در محدوده؛ ردِ شروع مال سفارش پرداخت‌نشده است، پس در محدودهٔ چاپخانه هیچ.
+   */
+  async function paymentAlerts(
+    scope: PanelScope,
+    clock: PanelClock,
+  ): Promise<Pick<PanelAlerts, 'gatewayRejected' | 'mismatched' | 'held' | 'verifiedUnused' | 'autoClosed'>> {
+    const since = ts(clock.untrackedSince);
+    const closed = (where: SQL) =>
+      db
+        .select({
+          orderNumber: orders.orderNumber,
+          failureCode: payments.failureCode,
+          amountRials: payments.amountRials,
+          verifiedAmountRials: payments.verifiedAmountRials,
+          raw: payments.raw,
+          createdAt: payments.createdAt,
+        })
+        .from(payments)
+        .innerJoin(orders, eq(orders.id, payments.orderId))
+        .where(and(eq(payments.status, 'failed'), where, inScope(scope)))
+        .orderBy(desc(payments.createdAt));
+    // پس از آن پرداختی از همان درگاه شروع شد، یا «آزمایش» کد پذیرنده درست بود (سؤال ۱۳۹): درگاه آماده است.
+    const ready = (provider: SQL, after: SQL) => sql`(
+      EXISTS (SELECT 1 FROM payments p WHERE p.provider = ${provider} AND p.created_at > ${after})
+      OR EXISTS (SELECT 1 FROM admin_events k WHERE k.target_type = 'service_key' AND k.target_id = 'PAYMENT_MERCHANT_ID'
+        AND k.at > ${after}
+        AND ((k.action = 'settings.key_test' AND k.detail ->> 'outcome' = 'ok')
+          OR (k.action = 'settings.key_set' AND k.detail ->> 'tested' = 'ok'))))`;
+    const later = alias(payments, 'rejected_payment');
+    const [rejected, inquired, mismatched, held, verifiedUnused, auto] = await Promise.all([
+      scope.kind === 'all'
+        ? db
+            .select({ at: adminEvents.at, detail: adminEvents.detail, orderNumber: orders.orderNumber })
+            .from(adminEvents)
+            .leftJoin(orders, sql`${orders.id}::text = ${adminEvents.targetId}`)
+            .where(
+              and(
+                eq(adminEvents.action, 'payments.gateway_rejected'),
+                sql`${adminEvents.at} > ${since}`,
+                sql`NOT ${ready(sql`${adminEvents.detail} ->> 'provider'`, sql`${adminEvents.at}`)}`,
+              ),
+            )
+            .orderBy(desc(adminEvents.at))
+            .limit(1)
+        : Promise.resolve([]),
+      scope.kind === 'all'
+        ? db
+            .select({ at: later.gatewayCheckedAt, error: later.gatewayError, provider: later.provider, orderNumber: orders.orderNumber })
+            .from(later)
+            .innerJoin(orders, eq(orders.id, later.orderId))
+            .where(
+              and(
+                sql`${later.gatewayError} ~ ${`^rejected:(${GATEWAY_NOT_READY_RESULTS.join('|')})$`}`,
+                sql`${later.gatewayCheckedAt} > ${since}`,
+                sql`NOT ${ready(sql`${later.provider}`, sql`${later.gatewayCheckedAt}`)}`,
+              ),
+            )
+            .orderBy(desc(later.gatewayCheckedAt))
+            .limit(1)
+        : Promise.resolve([]),
+      closed(and(eq(payments.failureCode, 'amount_mismatch'), sql`${payments.createdAt} > ${ts(new Date(clock.at.getTime() - MISMATCH_ALERT_MS))}`)!),
+      closed(
+        and(
+          inArray(payments.failureCode, [...HELD_FAILURES]),
+          inArray(payments.gatewayStatus, [...MONEY_HELD_STATUSES]),
+          sql`${payments.createdAt} > ${since}`,
+        )!,
+      ),
+      closed(and(eq(payments.gatewayStatus, 1), sql`${payments.createdAt} > ${since}`)!),
+      clock.todayStart
+        ? db
+            .select({ status: payments.status, n: sql<number>`count(*)::int` })
+            .from(payments)
+            .innerJoin(orders, eq(orders.id, payments.orderId))
+            .where(and(eq(payments.settledVia, 'auto'), sql`${payments.createdAt} >= ${ts(clock.todayStart)}`, inScope(scope)))
+            .groupBy(payments.status)
+        : Promise.resolve([]),
+    ]);
+    const last = rejected[0];
+    const detail = (last?.detail ?? {}) as { provider?: unknown; result?: unknown };
+    const fromStart: PanelAlerts['gatewayRejected'] =
+      last && typeof detail.result === 'number'
+        ? {
+            at: last.at,
+            orderNumber: last.orderNumber ?? null,
+            provider: typeof detail.provider === 'string' ? detail.provider : '',
+            result: detail.result,
+            stage: 'start',
+          }
+        : null;
+    const asked = inquired[0];
+    const fromInquiry: PanelAlerts['gatewayRejected'] =
+      asked?.at && asked.error
+        ? { at: asked.at, orderNumber: asked.orderNumber, provider: asked.provider, result: Number(asked.error.split(':')[1]), stage: 'inquiry' }
+        : null;
+    return {
+      // تازه‌ترین از هر دو.
+      gatewayRejected:
+        fromStart && fromInquiry ? (fromInquiry.at.getTime() > fromStart.at.getTime() ? fromInquiry : fromStart) : (fromStart ?? fromInquiry),
+      // مبلغی که درگاه گفت: تأییدشده، یا آنچه استعلام پیش از `verify` گفت (`raw.amount` زیبال).
+      mismatched: mismatched.map((row) => {
+        const said = (row.raw as { amount?: unknown } | null)?.amount;
+        return {
+          orderNumber: row.orderNumber,
+          amountRials: row.amountRials,
+          reportedRials: row.verifiedAmountRials ?? (typeof said === 'number' && Number.isSafeInteger(said) ? said : null),
+          createdAt: row.createdAt,
+        };
+      }),
+      held: held.map((row) => ({ orderNumber: row.orderNumber, failureCode: row.failureCode ?? '', createdAt: row.createdAt })),
+      verifiedUnused: verifiedUnused.map((row) => ({ orderNumber: row.orderNumber, failureCode: row.failureCode ?? '' })),
+      autoClosed: {
+        failed: auto.find((row) => row.status === 'failed')?.n ?? 0,
+        succeeded: auto.find((row) => row.status === 'succeeded')?.n ?? 0,
+      },
+    };
+  }
+
   function lineFields(clock: PanelClock) {
     return {
       id: orders.id,
@@ -748,7 +895,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
     async alerts(scope, clock) {
       const stuck = ts(new Date(clock.at.getTime() - SMS_STUCK_MS));
-      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed] = await Promise.all([
+      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed, money] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -830,8 +977,10 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             ),
           )
           .orderBy(asc(orders.orderNumber)),
+        paymentAlerts(scope, clock),
       ]);
       return {
+        ...money,
         failedPdf: failed.map((row) => row.orderNumber),
         unreturned,
         unassigned: unassigned.map((row) => row.orderNumber),
@@ -1421,6 +1570,16 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         orderStatus: row.orderStatus,
         sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
       };
+    },
+
+    async paymentOf(scope, paymentId) {
+      const [row] = await db
+        .select({ payment: payments, orderId: orders.id, orderNumber: orders.orderNumber })
+        .from(payments)
+        .innerJoin(orders, eq(orders.id, payments.orderId))
+        .where(and(eq(payments.id, paymentId), inScope(scope)))
+        .limit(1);
+      return row ?? null;
     },
 
     async logEvent(event) {

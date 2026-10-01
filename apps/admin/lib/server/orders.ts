@@ -27,6 +27,7 @@
 
 import {
   FILE_MARGIN_MS,
+  MONEY_HELD_STATUSES,
   PAYMENT_ATTEMPT_TTL_MS,
   PREPARE_ORDER_JOB,
   PREPARE_TICKET_JOB,
@@ -34,6 +35,8 @@ import {
   TRACKING_GRACE_WORKDAYS,
   isPaidStatus,
   readSetting,
+  settleWith,
+  watchHeld,
   type AdminEventInput,
   type AdminPermission,
   type OrderStatus,
@@ -46,7 +49,9 @@ import {
   type PanelOrderStore,
   type PanelPartnerOption,
   type PanelSearch,
+  type OrderStore,
 } from '@jozveyar/db';
+import type { PaymentGateway } from '@jozveyar/payments';
 import { deliverQueued, resendable, smsState, type SmsErrorCode, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import type { StorageDriver } from '@jozveyar/storage';
 import { postHandoffDue, tehranDayStart } from '@jozveyar/text';
@@ -59,6 +64,7 @@ import {
   bucketsOf,
   dayBounds,
   dueTiles,
+  inquirable,
   isOpen,
   isStatusAction,
   linesWithoutMoney,
@@ -102,9 +108,22 @@ export interface PanelOrdersDeps {
    * «دوباره بفرست» نیست.
    */
   sms?: { transport: SmsTransport; outbox: SmsOutbox; log?: (message: string, error?: unknown) => void };
+  /**
+   * «استعلام از درگاه» (برش ۷٫۲، ADR-050): همان `settleWith` برگشت و استعلام خودکار سایت، با درگاه خود هر پرداخت (`payments.provider`).
+   * بی آن، یا بی درگاه همان پرداخت، «استعلام» نیست.
+   */
+  payments?: { orders: OrderStore; gateways: Readonly<Record<string, PaymentGateway>> };
   now?: () => Date;
   log?: (message: string, error?: unknown) => void;
 }
+
+/**
+ * نتیجهٔ «استعلام از درگاه» (برش ۷٫۲): تلاش باز به کجا رسید (`succeeded`، `failed`، هنوز `pending`، `unanswered` اگر درگاه جواب روشن
+ * نداد، `closed` اگر همین حالا جای دیگری بسته شد، `busy` اگر استعلام دیگری همین حالا روی آن است)؛ یا پول تلاش بسته کجاست (`held` هنوز
+ * نزد درگاه، `returned` برگشت، `verified` تأییدشده و برنمی‌گردد، `unanswered`).
+ */
+export type InquiryOutcome = 'succeeded' | 'failed' | 'pending' | 'unanswered' | 'closed' | 'busy' | 'held' | 'returned' | 'verified';
+
 
 /** سفارش‌هایی که یک روز «تحویل پست شد» شدند و هنوز کد رهگیری ندارند (برش ۶٫۲، ADR-047). */
 export interface UntrackedDay {
@@ -175,6 +194,8 @@ export interface OrderDetailsView {
   partnerOptions: PanelPartnerOption[];
   /** مبلغ و پرداخت‌ها (۵٫۳، `orders.money`)؛ بی آن، `details` بی مبلغ است. */
   canMoney: boolean;
+  /** درگاه‌هایی که «استعلام از درگاه» پرداخت‌هایشان در این پنل هست (برش ۷٫۲)؛ فقط با `canMoney`. */
+  inquiryProviders: string[];
   /** از چشم چاپخانه (۵٫۳): بی کارت چاپخانه و بی یادداشت‌های درونی؛ لغوشده «چاپ نمی‌شود» می‌گوید. */
   partnerView: boolean;
 }
@@ -241,6 +262,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     staleBefore: new Date(at.getTime() + FILE_MARGIN_MS),
     unreturnedBefore: new Date(at.getTime() - PAYMENT_ATTEMPT_TTL_MS),
     untrackedSince: new Date(at.getTime() - TRACKING_ALERT_DAYS * 86_400_000),
+    todayStart: tehranDayStart(at),
   });
 
   return {
@@ -267,6 +289,10 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
           reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
           smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
           paidSmsFailed: can(session, 'orders.money') ? alerts.paidSmsFailed : [],
+          // پول و درگاه (۷٫۲، سؤال ۱۴۰): فقط مالک و متصدی.
+          ...(can(session, 'orders.money')
+            ? {}
+            : { gatewayRejected: null, mismatched: [], held: [], verifiedUnused: [], autoClosed: { failed: 0, succeeded: 0 } }),
         },
         untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
@@ -342,6 +368,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         canAssign: partnerOptions.length > 0,
         partnerOptions,
         canMoney,
+        inquiryProviders: canMoney && deps.payments ? Object.keys(deps.payments.gateways) : [],
         partnerView: scope.kind === 'partner',
       });
     },
@@ -597,6 +624,89 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         detail: { orderNumber: file.orderNumber },
         what: `برگهٔ سفارش ${file.orderNumber}`,
       });
+    },
+
+    /**
+     * «استعلام از درگاه» (برش ۷٫۲، ADR-050؛ طرح `m-order-unpaid`، کارت «پرداخت‌ها»): فقط مالک و متصدی (`orders.money`)، فقط با درگاه خود
+     * همان پرداخت. تلاش باز: همان `settleWith` برگشت و استعلام خودکار (`via: 'panel'`، `SKIP LOCKED`)، استعلام پیش از `verify`؛ موفق یعنی
+     * در همان تراکنش «در صف چاپ»، و پیامک پرداخت بعد از commit. تلاش بسته‌ای که پولش شاید نزد درگاه است: فقط استعلام (`watchHeld`)، هرگز
+     * `verify`. رویداد `payments.inquiry` با نتیجه، وضعیت درگاه و برچسب خطا؛ بی کد تازه، چون پولی جابه‌جا نمی‌کند جز همان که درگاه گفته.
+     */
+    async inquirePayment(
+      session: AdminSession,
+      form: { payment: unknown },
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: InquiryOutcome }>> {
+      if (!can(session, 'orders.money')) return fail(403, 'forbidden');
+      const paymentId = typeof form.payment === 'string' && UUID.test(form.payment) ? form.payment : null;
+      const found = paymentId ? await store.paymentOf(scopeOf(session), paymentId) : null;
+      if (!found) return fail(404, 'payment_not_found');
+      const { payment, orderId, orderNumber } = found;
+      const gateway = deps.payments?.gateways[payment.provider];
+      if (!deps.payments || !gateway) return fail(409, 'gateway_not_configured', { orderNumber });
+      if (!inquirable(payment)) return fail(409, 'payment_final', { orderNumber });
+
+      let outcome: InquiryOutcome;
+      let seen: { status: number | null; error: string | null } = { status: null, error: null };
+      if (payment.status === 'pending') {
+        const result = await settleWith({
+          store: deps.payments.orders,
+          lookup: { paymentId: payment.id, providers: [payment.provider] },
+          gateways: deps.payments.gateways,
+          via: 'panel',
+          now,
+          skipLocked: true,
+          log,
+        });
+        if (result === null) return fail(404, 'payment_not_found');
+        if (result === 'busy') outcome = 'busy';
+        else {
+          const row = result.payment;
+          seen = { status: row.gatewayStatus, error: row.gatewayError };
+          // بسته شد ولی پولش نزد درگاه است (پرداخت دوم، مبلغ ناهمخوان، دیرهنگام): «برمی‌گردد»؛ تأییدشده: «برنمی‌گردد».
+          const held = row.gatewayStatus !== null && (MONEY_HELD_STATUSES as readonly number[]).includes(row.gatewayStatus);
+          outcome = result.settled
+            ? row.status === 'succeeded'
+              ? 'succeeded'
+              : held
+                ? 'held'
+                : row.gatewayStatus === 1
+                  ? 'verified'
+                  : 'failed'
+            : row.status !== 'pending'
+              ? 'closed'
+              : row.gatewayError
+                ? 'unanswered'
+                : 'pending';
+          if (result.settled && result.smsId !== null && deps.sms) {
+            try {
+              await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log ?? log }, [result.smsId]);
+            } catch (error) {
+              log(`✗ پیامک پرداخت سفارش ${orderNumber} فرستاده نشد:`, error);
+            }
+          }
+        }
+      } else {
+        const status = await watchHeld({ store: deps.payments.orders, payment, gateway, now });
+        seen = { status, error: null };
+        outcome =
+          status === null ? 'unanswered' : status === 1 ? 'verified' : status === 15 || status === 18 ? 'returned' : 'held';
+      }
+      await store.logEvent({
+        adminUserId: session.userId,
+        action: 'payments.inquiry',
+        targetType: 'order',
+        targetId: orderId,
+        ipHash: ipHashOf(deps.secret, ip),
+        at: now(),
+        detail: {
+          orderNumber,
+          outcome,
+          ...(seen.status !== null ? { status: seen.status } : {}),
+          ...(seen.error ? { error: seen.error } : {}),
+        },
+      });
+      return ok({ orderNumber, outcome });
     },
 
     /**

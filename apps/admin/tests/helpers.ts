@@ -209,3 +209,38 @@ export const smsirMock = {
   reset: () => mockCall('/__mock/reset', {}),
   messages: async () => (await mockCall('/__mock/messages')) as { messages: MockSms[]; credit: number },
 };
+
+/**
+ * زیبال ساختگی (برش ۷٫۲، `node packages/payments/mock/zibal.mjs 3400`)، که پنل با `ZIBAL_API_URL` به آن وصل است؛ کد پذیرندهٔ پنل
+ * همان `PAYMENT_MERCHANT_ID` محیط است و سرور ساختگی با `ZIBAL_MOCK_MERCHANTS` همان را می‌شناسد. هیچ درخواستی به زیبال واقعی نمی‌رود.
+ */
+export const ZIBAL = process.env.ZIBAL_API_URL?.trim().replace(/\/+$/, '') || null;
+
+async function zibalCall(path: string, body: unknown) {
+  if (!ZIBAL) throw new Error('ZIBAL_API_URL نیست');
+  const response = await fetch(`${ZIBAL}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const parsed = (await response.json()) as Record<string, unknown>;
+  if (!response.ok) throw new Error(`زیبال ساختگی: ${response.status}`);
+  return parsed;
+}
+
+export const zibalMock = {
+  configure: (config: { ipRejected?: boolean; fail?: { http?: number; result?: number; times: number; path?: string } | null }) =>
+    zibalCall('/__mock/config', config),
+  /** پرداخت بی مرورگر: «پرداخت‌شده، تأییدنشده» (۲)، کارت (۵) یا لغو (۳). */
+  pay: (trackId: string, outcome: 'success' | 'declined' | 'cancel') => zibalCall('/__mock/pay', { trackId, outcome }),
+  /** وضعیت دلخواه، مثل «ریورس‌شده» (۱۸) که زیبال پس از ۱۵ دقیقه می‌گذارد. */
+  status: (trackId: string, status: number) => zibalCall('/__mock/status', { trackId, status }),
+  /** تلاشی که سایت شروع می‌کند (`startPayment`): همان کد پذیرندهٔ محیط؛ `trackId` برمی‌گرداند. */
+  async request(input: { amountRials: number; orderId: string; callbackUrl: string }): Promise<string> {
+    const body = await zibalCall('/v1/request', {
+      merchant: process.env.PAYMENT_MERCHANT_ID,
+      amount: input.amountRials,
+      callbackUrl: input.callbackUrl,
+      orderId: input.orderId,
+      description: 'e2e',
+    });
+    if (body.result !== 100) throw new Error(`زیبال ساختگی نپذیرفت: ${String(body.result)}`);
+    return String(body.trackId);
+  },
+};

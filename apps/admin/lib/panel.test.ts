@@ -15,7 +15,7 @@ import { dayHeading, dayText, whenText } from './format';
 import { gateOf, panelPath } from './gate';
 import { roleLabel } from './messages';
 import { contentSecurityPolicy, originOf, sameOrigin } from './security';
-import { adminConfig, configProblems, describeConfig } from './server/config';
+import { adminConfig, configProblems, describeConfig, describePayments, panelMockGateway } from './server/config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './server/cookie';
 import { qrPath } from './server/qr';
 import { newTotpSecret, otpauthUri } from './server/totp';
@@ -100,6 +100,19 @@ describe('پیکربندی', () => {
     expect(line).not.toContain('short');
     expect(configProblems({})).toHaveLength(4);
     expect(adminConfig({ ...ENV, ADMIN_ORIGIN: undefined })).toMatchObject({ origin: null });
+  });
+
+  it('درگاه‌های پنل (۷٫۲): زیبال همیشه؛ درگاه نمونه فقط با CHECKOUT_MODE=mock، همان دیوار وب؛ خط لاگ بی مقدار', () => {
+    expect(panelMockGateway({})).toBe(false);
+    expect(panelMockGateway({ CHECKOUT_MODE: 'off' })).toBe(false);
+    expect(panelMockGateway({ CHECKOUT_MODE: 'live' })).toBe(false);
+    expect(panelMockGateway({ CHECKOUT_MODE: ' MOCK ' })).toBe(true);
+    expect(describePayments({ PAYMENT_MERCHANT_ID: 'merchant-secret-value', PAYMENT_CALLBACK_URL: 'https://jozveyar.com/pay/callback' })).toBe(
+      '✓ پنل ادمین: درگاه زیبال (نشانی پیش‌فرض زیبال) برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL هست',
+    );
+    expect(describePayments({ CHECKOUT_MODE: 'mock', ZIBAL_API_URL: 'http://127.0.0.1:3400' })).toBe(
+      '✓ پنل ادمین: درگاه زیبال (ZIBAL_API_URL) و درگاه نمونه برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL نیست، پس «آزمایش» کد پذیرنده نه',
+    );
   });
 });
 
