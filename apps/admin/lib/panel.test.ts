@@ -102,16 +102,16 @@ describe('پیکربندی', () => {
     expect(adminConfig({ ...ENV, ADMIN_ORIGIN: undefined })).toMatchObject({ origin: null });
   });
 
-  it('درگاه‌های پنل (۷٫۲): زیبال همیشه؛ درگاه نمونه فقط با CHECKOUT_MODE=mock، همان دیوار وب؛ خط لاگ بی مقدار', () => {
+  it('درگاه‌های پنل (۷٫۲): زیبال همیشه؛ درگاه نمونه فقط با CHECKOUT_MODE=mock، همان دیوار وب؛ خط لاگ بی مقدار، با راه بازپرداخت (۷٫۳)', () => {
     expect(panelMockGateway({})).toBe(false);
     expect(panelMockGateway({ CHECKOUT_MODE: 'off' })).toBe(false);
     expect(panelMockGateway({ CHECKOUT_MODE: 'live' })).toBe(false);
     expect(panelMockGateway({ CHECKOUT_MODE: ' MOCK ' })).toBe(true);
     expect(describePayments({ PAYMENT_MERCHANT_ID: 'merchant-secret-value', PAYMENT_CALLBACK_URL: 'https://jozveyar.com/pay/callback' })).toBe(
-      '✓ پنل ادمین: درگاه زیبال (نشانی پیش‌فرض زیبال) برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL هست',
+      '✓ پنل ادمین: درگاه زیبال (نشانی پیش‌فرض زیبال) برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL هست؛ بازپرداخت فقط ثبت دستی',
     );
     expect(describePayments({ CHECKOUT_MODE: 'mock', ZIBAL_API_URL: 'http://127.0.0.1:3400' })).toBe(
-      '✓ پنل ادمین: درگاه زیبال (ZIBAL_API_URL) و درگاه نمونه برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL نیست، پس «آزمایش» کد پذیرنده نه',
+      '✓ پنل ادمین: درگاه زیبال (ZIBAL_API_URL) و درگاه نمونه برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL نیست، پس «آزمایش» کد پذیرنده نه؛ بازپرداخت از درگاه نمونه، با استعلام خودکار',
     );
   });
 });

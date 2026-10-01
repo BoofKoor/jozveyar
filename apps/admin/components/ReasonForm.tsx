@@ -19,6 +19,8 @@ interface Props {
   toLabel: string;
   /** لغو: مبلغ پرداختی، «374,750». */
   amount: string;
+  /** لغو (۷٫۳): درگاهی که مالک پس از لغو پول را از همین صفحه با آن برمی‌گرداند؛ null یعنی فقط ثبت دستی. */
+  refundBy?: string | null;
   /** بیشترین طول دلیل (`REASON_MAX`). */
   maxLength: number;
   back: string;
@@ -26,10 +28,10 @@ interface Props {
 
 /**
  * لغو سفارش (طرح پنل `m-order-cancel`) و برگرداندن وضعیت اشتباه (فقط مالک، سؤال ۲۶؛ در طرح نیست)، در ستون کنار و به
- * جای کار بعدی: دلیل، که فقط در پنل دیده می‌شود. لغو هشدار می‌دهد که پول خودکار برنمی‌گردد (دکمهٔ خطر)؛ برگرداندن
+ * جای کار بعدی: دلیل، که فقط در پنل دیده می‌شود. لغو هشدار می‌دهد که پول خودکار برنمی‌گردد و از ۷٫۳ کجا برمی‌گردد (دکمهٔ خطر)؛ برگرداندن
  * می‌گوید مشتری چه می‌بیند.
  */
-export function ReasonForm({ kind, gate, orderNumber, from, fromLabel, toLabel: target, amount, maxLength, back }: Props) {
+export function ReasonForm({ kind, gate, orderNumber, from, fromLabel, toLabel: target, amount, refundBy = null, maxLength, back }: Props) {
   const [state, action, pending] = useActionState<ReasonState, FormData>(orderReasonAction, {});
   const cancel = kind === 'cancel';
   const error = state.error ? messageOf(state.error) : null;
@@ -53,8 +55,10 @@ export function ReasonForm({ kind, gate, orderNumber, from, fromLabel, toLabel: 
         <p className="jy-note jy-note--warning ad-gap">
           <span className="jy-icon jy-icon-warning" aria-hidden="true" />
           <span>
-            مشتری در صفحهٔ سفارشش «لغو شد» را می‌بیند. پول خودکار برنمی‌گردد: <span className="num">{amount}</span> تومان را خودت
-            برگردان و در دلیل بنویس چطور.
+            مشتری در صفحهٔ سفارشش «لغو شد» را می‌بیند. پول خودکار برنمی‌گردد: بعد از لغو، مالک <span className="num">{amount}</span>{' '}
+            {refundBy
+              ? `تومان را از همین صفحه برمی‌گرداند، از درگاه ${refundBy} یا با ثبت دستی.`
+              : 'تومان را برمی‌گرداند و در همین صفحه با «ثبت بازپرداخت دستی» ثبتش می‌کند.'}
           </span>
         </p>
       ) : (

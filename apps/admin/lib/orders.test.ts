@@ -404,6 +404,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     shippingMethodName: 'پست پیشتاز',
     items: [item],
     payments: [],
+    refunds: [],
     statusEvents: [],
     pdfJob: { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: order.paidAt!, updatedAt: order.paidAt!, finishedAt: order.paidAt! },
     ticketJob: null,

@@ -102,6 +102,11 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       held: [{ orderNumber: 10047, failureCode: 'order_not_payable', createdAt: NOW }],
       verifiedUnused: [{ orderNumber: 10048, failureCode: 'order_not_payable' }],
       autoClosed: { failed: 2, succeeded: 1 },
+      unrefunded: [{ orderNumber: 10026, cancelledAt: NOW }],
+      refunding: [
+        { orderNumber: 10049, createdAt: new Date(NOW.getTime() - 3 * 3_600_000), unknown: false },
+        { orderNumber: 10050, createdAt: new Date(NOW.getTime() - 10 * 60_000), unknown: false },
+      ],
     }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
@@ -191,6 +196,7 @@ function failedDetails(
     partner: null,
     assignments: [],
     shipments: [],
+    refunds: [],
   } as unknown as PanelOrderDetails;
 }
 
@@ -509,6 +515,7 @@ function orderDetails(
     shipments: [],
     events: [],
     payments: [],
+    refunds: [],
     order: {
       id: 'order-1',
       orderNumber: 10027,

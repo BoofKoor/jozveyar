@@ -1,6 +1,7 @@
 /**
  * یک خط هنگام بالا آمدن پنل، که `deploy-bundle.sh` می‌جوید (تصمیم ۲۳): آماده یا بسته و چرا، و اگر هنوز هیچ
- * ادمینی ثبت نکرده، دستور ساختن اولی؛ از ۴٫۶ منبع هر کلید سرویس، از ۷٫۱ منبع پیامک پنل، و از ۷٫۲ درگاه‌های پنل. مسیر محرمانه و هیچ مقدار دیگری از
+ * ادمینی ثبت نکرده، دستور ساختن اولی؛ از ۴٫۶ منبع هر کلید سرویس، از ۷٫۱ منبع پیامک پنل، از ۷٫۲ درگاه‌های پنل، و از ۷٫۳ راه بازپرداخت و
+ * استعلام خودکارش. مسیر محرمانه و هیچ مقدار دیگری از
  * `.env` هرگز در لاگ نیست.
  *
  * مهاجرت و دادهٔ پایه (نقش‌ها و مجوزها) با وب است (`apps/web/instrumentation.ts`)؛ کانتینر پنل بعد از «وب
@@ -19,6 +20,10 @@ export async function register() {
   // پیامک پنل (۷٫۱، ADR-049): کنسولی یا sms.ir با `SMS_PROVIDER`، بی مقدار کلید؛ و درگاه‌های پنل (۷٫۲، ADR-050).
   console.log(describeSms(process.env));
   console.log(describePayments(process.env));
+
+  // استعلام خودکار بازپرداخت (۷٫۳): فقط وقتی درگاهی از این پنل بازپرداخت دارد.
+  const { startRefundInquiry } = await import('./lib/server/context');
+  startRefundInquiry();
 
   const { createDb } = await import('@jozveyar/db');
   const conn = createDb(config.databaseUrl, { max: 1 });

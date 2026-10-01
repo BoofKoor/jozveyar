@@ -118,3 +118,6 @@ export function readManualRefund(
   if (note.length > REFUND_NOTE_MAX) return { ok: false, field: 'note', error: 'refund_note_too_long' };
   return { ok: true, value: { refundedOn: day, reference, note: note || null } };
 }
+
+/** پیشخوان «هنوز در حال برگشت» (سؤال ۱۵۸): بازپرداخت از درگاهی که این‌قدر پس از درخواست هنوز بسته نشده (زیبال ۵ تا ۳۰ دقیقه). */
+export const REFUND_SLOW_MS = 2 * 3_600_000;

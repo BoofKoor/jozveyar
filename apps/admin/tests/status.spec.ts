@@ -245,7 +245,8 @@ test.describe.serial('وضعیت سفارش در پنل', () => {
     await side(ownerPage).getByRole('link', { name: 'لغو سفارش' }).click();
     const form = side(ownerPage).locator('form');
     await expect(form.locator('.jy-note--warning')).toHaveText(
-      `مشتری در صفحهٔ سفارشش «لغو شد» را می‌بیند. پول خودکار برنمی‌گردد: ${formatTomans(o.B.totalRials, false)} تومان را خودت برگردان و در دلیل بنویس چطور.`,
+      // درگاه نمونه در این پنل نیست (`CHECKOUT_MODE` خاموش)، پس فقط ثبت دستی (۷٫۳)؛ با درگاه، `refunds.spec.ts`.
+      `مشتری در صفحهٔ سفارشش «لغو شد» را می‌بیند. پول خودکار برنمی‌گردد: بعد از لغو، مالک ${formatTomans(o.B.totalRials, false)} تومان را برمی‌گرداند و در همین صفحه با «ثبت بازپرداخت دستی» ثبتش می‌کند.`,
     );
     await expect(form.getByText('فقط در پنل دیده می‌شود، نه برای مشتری.')).toBeVisible();
     // دلیل فقط فاصله: مرورگر می‌فرستد (required فقط خالی را می‌گیرد) و سرور همان‌جا می‌گوید.
