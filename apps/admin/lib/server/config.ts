@@ -46,6 +46,22 @@ export function adminConfig(env: Env): AdminConfig | null {
   };
 }
 
+/**
+ * پیامک پنل (برش ۷٫۱، ADR-049، سؤال ۱۱۴): `SMS_PROVIDER=smsir` یعنی sms.ir؛ هر چیز دیگر کنسولی. جدا از `CHECKOUT_MODE`، تا ترمز مسیر
+ * خرید پیامک رهگیری سفارش‌های پرداخت‌شده را خاموش نکند.
+ */
+export const panelSmsProvider = (env: Env): 'smsir' | 'console' => (env.SMS_PROVIDER?.trim().toLowerCase() === 'smsir' ? 'smsir' : 'console');
+
+/** sms.ir در کار است: پیامک پنل با آن، یا مسیر خرید سایت در `live` خواسته شده (وب همان `.env` را دارد). */
+export const smsIrInUse = (env: Env) => panelSmsProvider(env) === 'smsir' || env.CHECKOUT_MODE?.trim().toLowerCase() === 'live';
+
+/** یک خط برای لاگ بالا آمدن: منبع پیامک پنل، هرگز مقدار کلید. */
+export function describeSms(env: Env): string {
+  return panelSmsProvider(env) === 'smsir'
+    ? '✓ پنل ادمین: پیامک sms.ir (SMS_PROVIDER=smsir)؛ کلید و قالب‌ها از «تنظیمات» یا .env'
+    : '✓ پنل ادمین: پیامک کنسولی (در sms_messages)؛ SMS_PROVIDER=smsir نیست';
+}
+
 /** یک خط برای لاگ بالا آمدن؛ `deploy-bundle.sh` همین را می‌جوید. مسیر محرمانه هرگز در آن نیست. */
 export function describeConfig(env: Env): string {
   const problems = configProblems(env);

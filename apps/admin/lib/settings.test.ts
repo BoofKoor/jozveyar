@@ -9,16 +9,26 @@ import { describe, expect, it } from 'vitest';
 import { OFFICIAL_HOLIDAYS } from '@jozveyar/db';
 import { formatJalaliNumeric } from '@jozveyar/text';
 
+import type { KeyCheck } from '@jozveyar/db';
+
+import type { Seg } from './orders';
+import type { CreditView } from './server/settings';
 import {
+  creditCard,
   holidaysView,
   jalaliDate,
+  keyCheckView,
   keyTail,
   maskText,
+  otpCapAlert,
+  otpUsageSegs,
   parseJalaliInput,
   parseWholeNumber,
   readHolidayInput,
   readKeyValue,
   sortHolidays,
+  templateView,
+  untilText,
 } from './settings';
 
 /** «حالا»ی طرح: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
@@ -139,5 +149,103 @@ describe('کلید', () => {
     expect(maskText(8, '3f9a')).toBe('••••••••3f9a');
     expect(maskText(4, 'c2d8')).toBe('••••c2d8');
     expect(maskText(4, null)).toBe('••••');
+  });
+});
+
+/** متن سادهٔ تکه‌ها، برای سنجش؛ عدد با نشان [..] تا جای `.num` هم سنجیده شود. */
+const plain = (segs: readonly Seg[]) => segs.map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? `[${seg.num}]` : '')).join('');
+
+describe('آزمایش کلیدها، متن قالب و اعتبار (۷٫۱)', () => {
+  it('متن قالب از همان یک منبع پیامک: سطرها، جای پارامتر #NAME#، و نام پارامترها به ترتیب', () => {
+    expect(templateView('otp')).toEqual({ lines: [['کد تأیید جزوه‌یار: ', { mark: '#CODE#' }], ['این کد را به کسی نده.']], params: ['CODE'] });
+    expect(templateView('order_paid')).toEqual({
+      lines: [['جزوه‌یار: سفارش ', { mark: '#ORDER#' }, ' پرداخت شد؛ تحویل به پست تا ', { mark: '#DAY#' }]],
+      params: ['ORDER', 'DAY'],
+    });
+    expect(templateView('tracking').params).toEqual(['ORDER', 'BARCODE']);
+  });
+
+  const check = (over: Partial<KeyCheck> & { detail: Record<string, unknown> }): KeyCheck => ({
+    name: 'SMS_API_KEY',
+    action: 'settings.key_test',
+    at: tehran('2026-10-05 10:52'),
+    adminName: 'سارا',
+    ...over,
+  });
+
+  it('خط آخرین آزمایش: درست با اعتبار یا موبایل پوشیده، رد شد با کد بدنه (وگرنه HTTP)، در دسترس نیست، کلید API خالی', () => {
+    const view = (c: KeyCheck) => {
+      const v = keyCheckView(c.name, c, NOW);
+      return v && { tone: v.tone, text: plain(v.text) };
+    };
+    expect(view(check({ detail: { subject: 'current', outcome: 'ok', credit: 184_200 } }))).toEqual({
+      tone: 'ok',
+      text: 'درست · آزمایش امروز 10:52: sms.ir پذیرفت، اعتبار [184,200].',
+    });
+    expect(view(check({ name: 'SMS_OTP_TEMPLATE', at: tehran('2026-10-05 10:47'), detail: { outcome: 'ok', mobile: '0912 ••• 6789' } }))).toEqual({
+      tone: 'ok',
+      text: 'درست · پیامک آزمایشی امروز 10:47 به [0912 ••• 6789] رفت.',
+    });
+    expect(view(check({ detail: { outcome: 'rejected', http: 400, status: 105 } }))?.text).toBe('رد شد · آزمایش امروز 10:52: sms.ir نپذیرفت (کد [105]).');
+    expect(view(check({ detail: { outcome: 'rejected', http: 401 } }))).toEqual({ tone: 'bad', text: 'رد شد · آزمایش امروز 10:52: sms.ir نپذیرفت (کد [401]).' });
+    expect(view(check({ detail: { outcome: 'unavailable' } }))).toEqual({ tone: 'warn', text: 'در دسترس نیست · آزمایش امروز 10:52: sms.ir جواب نداد.' });
+    expect(view(check({ name: 'SMS_PAID_TEMPLATE', detail: { outcome: 'unconfigured' } }))?.tone).toBe('warn');
+  });
+
+  it('خط پس از ذخیره: آزموده پیش از ذخیره درست، «بی آزمایش ذخیره شد» هشدار؛ بی آزمایش (پیش از ۷٫۱، کد پذیرنده) و برگرداندن بی خط', () => {
+    const view = (c: KeyCheck) => {
+      const v = keyCheckView(c.name, c, NOW);
+      return v && { tone: v.tone, text: plain(v.text) };
+    };
+    expect(view(check({ action: 'settings.key_set', detail: { from: 'env', tested: 'ok', credit: 5000 } }))).toEqual({
+      tone: 'ok',
+      text: 'درست · پیش از ذخیرهٔ امروز 10:52 sms.ir پذیرفت، اعتبار [5,000].',
+    });
+    expect(view(check({ name: 'SMS_OTP_TEMPLATE', action: 'settings.key_set', detail: { tested: 'ok' } }))?.text).toBe(
+      'درست · پیش از ذخیرهٔ امروز 10:52 پیامک آزمایشی رفت.',
+    );
+    expect(view(check({ action: 'settings.key_set', detail: { tested: 'skipped' } }))?.tone).toBe('warn');
+    expect(view(check({ name: 'PAYMENT_MERCHANT_ID', action: 'settings.key_set', detail: { from: 'empty' } }))).toBeNull();
+    expect(view(check({ action: 'settings.key_revert', detail: { to: 'env' } }))).toBeNull();
+    expect(keyCheckView('SMS_API_KEY', null, NOW)).toBeNull();
+  });
+
+  it('کارت اعتبار: عدد خود sms.ir بی «تومان»، کی و از کجا، «برای حدود N روز» یا چرا نه، و یادداشت وقتی عددی نیست', () => {
+    const week = { cost: 56_000, count: 518 };
+    const at = tehran('2026-10-05 11:20');
+    const card = (view: CreditView) => {
+      const c = creditCard(view, NOW);
+      return { meta: c.meta, amount: c.amount, usage: c.usage && plain(c.usage), note: c.note && { tone: c.note.tone, text: plain(c.note.text) } };
+    };
+    expect(card({ state: 'ok', credit: 184_200, at, live: true, days: 23, week })).toEqual({
+      meta: 'sms.ir، ساعت 11:20',
+      amount: '184,200',
+      usage: 'برای حدود [23] روز با مصرف هفتهٔ گذشته ([518] پیامک).',
+      note: null,
+    });
+    expect(card({ state: 'ok', credit: 900, at, live: false, days: null, week: { cost: 0, count: 0 } })).toMatchObject({
+      meta: 'آخرین «آزمایش» کلید API، ساعت 11:20',
+      amount: '900',
+      usage: 'هفتهٔ گذشته پیامکی با sms.ir نرفت؛ روزهای باقی‌مانده با اولین پیامک‌ها حساب می‌شود.',
+    });
+    expect(card({ state: 'rejected', at, live: true, http: 401 })).toMatchObject({ amount: null, note: { tone: 'error', text: expect.stringContaining('(کد [401])') } });
+    expect(card({ state: 'unavailable', at, live: true, http: null }).note?.tone).toBe('warning');
+    expect(card({ state: 'unconfigured' })).toMatchObject({ meta: null, amount: null, note: { tone: 'info' } });
+    expect(card({ state: 'untested' })).toMatchObject({ meta: null, amount: null, note: { tone: 'info' } });
+    expect(JSON.stringify(creditCard({ state: 'ok', credit: 1, at, live: true, days: 1, week }, NOW))).not.toContain('تومان');
+  });
+
+  it('شمار کد و سقف پرشده: «تا حدود»، فردا اگر روز دیگر است؛ و «امروز پر شد» پس از باز شدن', () => {
+    expect(plain(otpUsageSegs({ hour: 18, day: 312 }))).toBe('ساعت گذشته [18] کد · [24] ساعت گذشته [312] کد');
+    expect(untilText(tehran('2026-10-05 13:05'), NOW)).toBe('13:05');
+    expect(untilText(tehran('2026-10-06 09:40'), NOW)).toBe('فردا 09:40');
+    const day = otpCapAlert({ kind: 'day', limit: 2000, at: tehran('2026-10-05 10:40'), until: tehran('2026-10-05 13:05') }, NOW);
+    expect({ tone: day.tone, head: day.head, text: plain(day.text) }).toEqual({
+      tone: 'warning',
+      head: 'سقف کد پیامکی کل سایت پر شد:',
+      text: ' [2,000] کد در [24] ساعت گذشته، از [10:40]. تا حدود [13:05] به هیچ شماره‌ای کد تازه نمی‌رود.',
+    });
+    const hour = otpCapAlert({ kind: 'hour', limit: 300, at: tehran('2026-10-05 09:10'), until: null }, NOW);
+    expect({ tone: hour.tone, text: plain(hour.text) }).toEqual({ tone: 'info', text: ' [300] کد در یک ساعت، از [09:10]؛ حالا دوباره کد می‌رود.' });
   });
 });

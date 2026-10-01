@@ -24,15 +24,19 @@ interface Props {
   /** پیام خطای مقدار، با بازه. */
   rangeError: string;
   hint: React.ReactNode;
+  /** کنار عنوان (`jy-card__meta`): «sms.ir، امروز 11:20» کارت اعتبار پیامک (۷٫۱). */
+  meta?: React.ReactNode;
+  /** میان عنوان و فرم: عدد اعتبار و «برای حدود N روز» (۷٫۱). */
+  lead?: React.ReactNode;
 }
 
 /**
- * یک تنظیم عددی در کارت خودش (طرح پنل `m-settings`): روز کاری تحویل به پست و روزهای نگهداری فایل‌های سفارش با شمارنده، و سقف
- * ساعتی کد پیامکی با فیلد. خطای
+ * یک تنظیم عددی در کارت خودش (طرح پنل `m-settings`): روز کاری تحویل به پست، روزهای نگهداری فایل‌های سفارش و از ۷٫۱ آستانهٔ هشدار
+ * اعتبار پیامک با شمارنده (سقف کد پیامکی از ۷٫۱ کارت خودش را دارد، `OtpLimitsForm`). خطای
  * مقدار همین‌جا با عدد نوشته‌شده؛ عددی که صفحه نشان داد با فرم می‌رود (`seen`)، تا اگر زبانه یا ادمین دیگری همین حالا
  * عوضش کرده باشد، رونویسی نشود.
  */
-export function NumberSettingForm({ gate, settingKey, title, label, id, value, min, max, stepper, rangeError, hint }: Props) {
+export function NumberSettingForm({ gate, settingKey, title, label, id, value, min, max, stepper, rangeError, hint, meta, lead }: Props) {
   const [state, action, pending] = useActionState<SettingState, FormData>(saveSettingAction, {});
   const input = useRef<HTMLInputElement>(null);
   const [current, setCurrent] = useState(value);
@@ -86,10 +90,20 @@ export function NumberSettingForm({ gate, settingKey, title, label, id, value, m
   );
 
   return (
-    <section className="jy-card" aria-labelledby={`t-${id}`} data-setting={settingKey}>
-      <h2 id={`t-${id}`} className="jy-card__title">
-        {title}
-      </h2>
+    <section id={id} className="jy-card" aria-labelledby={`t-${id}`} data-setting={settingKey}>
+      {meta ? (
+        <div className="jy-card__head">
+          <h2 id={`t-${id}`} className="jy-card__title">
+            {title}
+          </h2>
+          <span className="jy-card__meta">{meta}</span>
+        </div>
+      ) : (
+        <h2 id={`t-${id}`} className="jy-card__title">
+          {title}
+        </h2>
+      )}
+      {lead}
       {/* سنجش با سرور و پیام خودش زیر فیلد، نه حباب مرورگر برای min و max */}
       <form action={action} noValidate>
         <input type="hidden" name="gate" value={gate} />

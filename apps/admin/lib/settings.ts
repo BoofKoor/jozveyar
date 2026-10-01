@@ -10,9 +10,14 @@
  */
 
 import type { Holiday } from '@jozveyar/contracts';
-import type { ServiceKeyName } from '@jozveyar/db';
-import { formatJalaliNumeric, jalaliYear, toLatinDigits } from '@jozveyar/text';
+import type { KeyCheck, ServiceKeyName } from '@jozveyar/db';
+import { SMS_TEMPLATES, paramMark, type SmsPurpose } from '@jozveyar/sms';
+import { formatJalaliNumeric, formatNumber, formatTehranTime, jalaliYear, toLatinDigits } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
+
+import { tehranDay, whenText } from './format';
+import type { Seg } from './orders';
+import type { CreditView, SmsAlertsView } from './server/settings';
 
 const DAY_MS = 86_400_000;
 
@@ -28,8 +33,17 @@ export const HOLIDAYS_SHOWN = 5;
 /** از بهمن، نبودن تعطیلی‌های سال بعد هشدار است: نوروز سال بعد در مهلت سفارش‌های اسفند می‌افتد. */
 export const NEXT_YEAR_WARNING_MONTH = 11;
 
-/** تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044). */
-export const NUMBER_SETTINGS = ['order.sla_days', 'otp.site_hourly_limit', 'order.files_retention_days'] as const;
+/**
+ * تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044)، و از ۷٫۱ سقف ۲۴ ساعتهٔ کد و آستانهٔ
+ * هشدار اعتبار پیامک (ADR-049).
+ */
+export const NUMBER_SETTINGS = [
+  'order.sla_days',
+  'otp.site_hourly_limit',
+  'otp.site_daily_limit',
+  'order.files_retention_days',
+  'sms.credit_alert_days',
+] as const;
 export type NumberSettingKey = (typeof NUMBER_SETTINGS)[number];
 export const isNumberSetting = (value: unknown): value is NumberSettingKey =>
   typeof value === 'string' && (NUMBER_SETTINGS as readonly string[]).includes(value);
@@ -134,8 +148,8 @@ export function holidaysView(list: readonly Holiday[], officialThrough: number, 
 /* ───────────────────────── کلیدها ───────────────────────── */
 
 /**
- * مقدار تازهٔ یک کلید: ارقام لاتین و بی فاصلهٔ دو سر؛ ۱ تا ۵۱۲ نویسهٔ دیدنی ASCII، بی فاصله. null اگر نه. کلید API،
- * نام قالب و کد پذیرنده همه همین‌اند؛ آزمایش خود مقدار با پنل پیامک و درگاه واقعی در برش ۷.
+ * مقدار تازهٔ یک کلید: ارقام لاتین و بی فاصلهٔ دو سر؛ ۱ تا ۵۱۲ نویسهٔ دیدنی ASCII، بی فاصله. null اگر نه. شکل ویژهٔ هر کلید
+ * (کلید API sms.ir، شناسهٔ قالب عددی) را سرویس با آداپتور می‌سنجد.
  */
 export function readKeyValue(input: unknown): string | null {
   if (typeof input !== 'string') return null;
@@ -147,32 +161,246 @@ export function readKeyValue(input: unknown): string | null {
 export const keyTail = (value: string): string | null => (value.length >= KEY_TAIL_MIN_LENGTH ? value.slice(-KEY_TAIL) : null);
 
 /**
- * نام و متن‌های هر کلید در صفحه (طرح `m-settings`). `dots` شمار نقطه‌های پیش از ۴ نویسهٔ آخر، مثل طرح. پنل پیامک sms.ir است، نه
- * کاوه‌نگار (صاحب پروژه، ۱۴۰۵/۰۷/۰۸): از ۶٫۴ برچسب‌ها و راهنماها هم (تصمیم‌های ۱۰۷ و ۱۱۱؛ فقط متن، نام کلیدها همان).
+ * نام و متن‌های هر کلید در صفحه (طرح `m-settings`، برش ۷ سؤال ۱۳۸). `kind`: کلید راز (فقط ۴ نویسهٔ آخر) یا شناسهٔ قالب sms.ir (راز
+ * نیست؛ کامل دیده می‌شود، با متن قالب زیرش). `dots` شمار نقطه‌های پیش از ۴ نویسهٔ آخر، مثل طرح. `testable`: «آزمایش» با خود سرویس از
+ * ۷٫۱ (sms.ir)؛ کد پذیرندهٔ زیبال در ۷٫۲.
  */
-export const KEY_INFO: Record<ServiceKeyName, { label: string; field: string; about: string; test: string; dots: number }> = {
+export const KEY_INFO: Record<
+  ServiceKeyName,
+  { label: string; field: string; about: string; test: string; dots: number; kind: 'secret' | 'template'; purpose: SmsPurpose | null; testable: boolean }
+> = {
   SMS_API_KEY: {
     label: 'کلید API sms.ir',
     field: 'کلید تازه',
     about: 'کلیدی که پنل sms.ir می‌دهد',
-    test: 'آزمایش کلید با خود پنل پیامک واقعی می‌آید.',
+    test: 'پیش از ذخیره با خود sms.ir آزموده می‌شود: اعتبار حساب، بی پیامک و بی هزینه. «رد شد» ذخیره نمی‌شود.',
     dots: 8,
+    kind: 'secret',
+    purpose: null,
+    testable: true,
   },
   SMS_OTP_TEMPLATE: {
-    label: 'قالب کد پیامکی sms.ir',
-    field: 'نام قالب',
-    about: 'نام قالبی که در پنل sms.ir تأیید می‌شود',
-    test: 'آزمایش قالب با خود پنل پیامک واقعی می‌آید.',
-    dots: 4,
+    label: 'شناسهٔ قالب کد تأیید',
+    field: 'شناسهٔ قالب',
+    about: 'قالبی که با همین متن در sms.ir تأیید شد',
+    test: 'پیش از ذخیره یک پیامک آزمایشی با پارامترهای نمونه می‌رود.',
+    dots: 0,
+    kind: 'template',
+    purpose: 'otp',
+    testable: true,
+  },
+  SMS_PAID_TEMPLATE: {
+    label: 'شناسهٔ قالب پیامک پرداخت',
+    field: 'شناسهٔ قالب',
+    about: 'قالبی که با همین متن در sms.ir تأیید شد',
+    test: 'پیش از ذخیره یک پیامک آزمایشی با پارامترهای نمونه می‌رود.',
+    dots: 0,
+    kind: 'template',
+    purpose: 'order_paid',
+    testable: true,
+  },
+  SMS_TRACKING_TEMPLATE: {
+    label: 'شناسهٔ قالب پیامک رهگیری',
+    field: 'شناسهٔ قالب',
+    about: 'قالبی که با همین متن در sms.ir تأیید شد',
+    test: 'پیش از ذخیره یک پیامک آزمایشی با پارامترهای نمونه می‌رود.',
+    dots: 0,
+    kind: 'template',
+    purpose: 'tracking',
+    testable: true,
   },
   PAYMENT_MERCHANT_ID: {
     label: 'کد پذیرندهٔ زیبال',
     field: 'کد پذیرندهٔ تازه',
     about: 'کد پذیرنده‌ای که زیبال می‌دهد',
-    test: 'آزمایش کد پذیرنده با خود درگاه واقعی می‌آید.',
+    test: 'آزمایش کد پذیرنده با خود درگاه زیبال، با راه افتادن درگاه می‌آید.',
     dots: 4,
+    kind: 'secret',
+    purpose: null,
+    testable: false,
   },
 };
 
 /** «••••c2d8»، یا فقط نقطه برای کلید کوتاه و مقداری که خوانده نشد. */
 export const maskText = (dots: number, tail: string | null) => `${'•'.repeat(dots)}${tail ?? ''}`;
+
+/**
+ * پارامترهای نمونهٔ پیامک آزمایشی هر قالب (سؤال ۱۳۸): همان که مالک باید روی گوشی ببیند. کد پنج رقمی، سفارش اول سایت، روز تحویل
+ * نمونه، و بارکد به شکل واقعی پست.
+ */
+export const TEMPLATE_SAMPLES: Record<SmsPurpose, readonly string[]> = {
+  otp: ['48213'],
+  order_paid: ['10001', 'دوشنبه 6 مهر'],
+  tracking: ['10027', '118800000000000000000101'],
+};
+
+/** سقف «آزمایش» کلیدها (ADR-049): پیامک آزمایشی هزینه دارد. */
+export const KEY_TESTS_PER_HOUR = 10;
+/** «رسید» آزمایش مقدار تازه چقدر برای «ذخیره» معتبر است. */
+export const KEY_RECEIPT_MS = 15 * 60_000;
+
+/** موبایل پیامک آزمایشی در رویداد و صفحه، پوشیده (سؤال ۱۴۱): «0912 ••• 6789». */
+export const maskMobile = (mobile: string) => (/^09\d{9}$/.test(mobile) ? `${mobile.slice(0, 4)} ••• ${mobile.slice(7)}` : '•••');
+
+/**
+ * «برای حدود N روز» کارت اعتبار پیامک (سؤال ۱۳۷): اعتبار تقسیم بر هزینهٔ روزانهٔ هفت روز گذشته، هر دو به واحد خود sms.ir. بی
+ * مصرف در هفتهٔ گذشته null (روز ندارد).
+ */
+export function creditDays(credit: number, weekCost: number): number | null {
+  if (!(weekCost > 0) || !Number.isFinite(credit)) return null;
+  return Math.max(0, Math.floor(credit / (weekCost / 7)));
+}
+
+/* ───────────────────────── آزمایش کلیدها، متن قالب، اعتبار و شمار کد (برش ۷٫۱، طرح `m-settings`) ───────────────────────── */
+
+const num = (n: number): Seg => ({ num: formatNumber(n) });
+
+/** یک تکهٔ متن قالب: متن، یا جای پارامتر (`#CODE#`). */
+export type TemplatePart = string | { mark: string };
+
+/**
+ * متن قالب هر شناسه، همان که مالک در sms.ir می‌سازد (طرح `ad-keys__tpl`): سطرها و تکه‌های هر سطر، و نام پارامترها؛ از همان یک منبع
+ * `@jozveyar/sms`، پس متنی که پنل نشان می‌دهد همان است که پیامک می‌شود.
+ */
+export function templateView(purpose: SmsPurpose): { lines: TemplatePart[][]; params: readonly string[] } {
+  const lines: TemplatePart[][] = [[]];
+  for (const part of SMS_TEMPLATES[purpose].parts as readonly (string | { readonly param: string })[]) {
+    if (typeof part !== 'string') {
+      lines.at(-1)!.push({ mark: paramMark(part.param) });
+      continue;
+    }
+    part.split('\n').forEach((piece, i) => {
+      if (i > 0) lines.push([]);
+      if (piece) lines.at(-1)!.push(piece);
+    });
+  }
+  return { lines, params: SMS_TEMPLATES[purpose].params };
+}
+
+export interface KeyCheckView {
+  tone: 'ok' | 'bad' | 'warn';
+  text: Seg[];
+}
+
+/**
+ * خط «آخرین آزمایش» یک کلید (طرح `ad-keys__test`، سؤال ۱۳۸): آخرین «آزمایش» مقدار امروز، یا گذاشتن همین مقدار با آزمایش پیش از
+ * ذخیره. بی خط وقتی مقدار امروز آزموده نشده: پیش از ۷٫۱، پس از «برگرداندن به .env»، یا کد پذیرنده تا ۷٫۲. فقط نتیجه و عدد پاسخ،
+ * هرگز مقدار؛ موبایل پیامک آزمایشی همان پوشیدهٔ رویداد.
+ */
+export function keyCheckView(name: ServiceKeyName, check: KeyCheck | null, now: Date): KeyCheckView | null {
+  if (!check) return null;
+  const when = whenText(check.at, now);
+  const detail = check.detail;
+  const credit: Seg[] = typeof detail.credit === 'number' ? ['، اعتبار ', num(detail.credit)] : [];
+  const template = KEY_INFO[name].kind === 'template';
+  if (check.action === 'settings.key_test') {
+    const code = typeof detail.status === 'number' ? detail.status : typeof detail.http === 'number' ? detail.http : null;
+    switch (detail.outcome) {
+      case 'ok':
+        return template
+          ? { tone: 'ok', text: [`درست · پیامک آزمایشی ${when} به `, { num: typeof detail.mobile === 'string' ? detail.mobile : '•••' }, ' رفت.'] }
+          : { tone: 'ok', text: [`درست · آزمایش ${when}: sms.ir پذیرفت`, ...credit, '.'] };
+      case 'rejected':
+        return { tone: 'bad', text: [`رد شد · آزمایش ${when}: sms.ir نپذیرفت`, ...(code === null ? [] : [' (کد ', num(code), ')']), '.'] };
+      case 'unavailable':
+        return { tone: 'warn', text: [`در دسترس نیست · آزمایش ${when}: sms.ir جواب نداد.`] };
+      case 'unconfigured':
+        return { tone: 'warn', text: [`آزموده نشد · ${when}: کلید API sms.ir خالی است یا خوانده نشد.`] };
+      default:
+        return null;
+    }
+  }
+  if (check.action === 'settings.key_set') {
+    if (detail.tested === 'ok') {
+      return { tone: 'ok', text: [`درست · پیش از ذخیرهٔ ${when} `, ...(template ? ['پیامک آزمایشی رفت.'] : ['sms.ir پذیرفت', ...credit, '.'])] };
+    }
+    if (detail.tested === 'skipped') {
+      return { tone: 'warn', text: [`آزموده نشد · ${when} بی آزمایش ذخیره شد، چون sms.ir جواب نداد. با «آزمایش» بسنجش.`] };
+    }
+  }
+  return null;
+}
+
+/** کارت «اعتبار پیامک» (سؤال ۱۳۷): کی و از کجا، عدد، «برای حدود N روز»، و یادداشت وقتی عددی نیست. */
+export interface CreditCard {
+  meta: string | null;
+  amount: string | null;
+  usage: Seg[] | null;
+  note: { tone: 'info' | 'warning' | 'error'; text: Seg[] } | null;
+}
+
+/**
+ * کارت «اعتبار پیامک» از `CreditView`. عدد همان عدد خود sms.ir است: واحدش در مستندی دیده نشد، پس «تومان» نمی‌خورد؛ «برای حدود N
+ * روز» به واحد نیاز ندارد (اعتبار تقسیم بر هزینهٔ پیامک‌های sms.ir در هفت روز گذشته، هر دو به واحد خود sms.ir).
+ */
+export function creditCard(view: CreditView, now: Date): CreditCard {
+  // امروز «ساعت 11:20» (طرح)، وگرنه روزش.
+  const stamp = (at: Date) => (tehranDay(at) === tehranDay(now) ? `ساعت ${formatTehranTime(at)}` : whenText(at, now));
+  switch (view.state) {
+    case 'ok':
+      return {
+        meta: view.live ? `sms.ir، ${stamp(view.at)}` : `آخرین «آزمایش» کلید API، ${stamp(view.at)}`,
+        amount: view.credit === null ? null : formatNumber(view.credit),
+        usage:
+          view.days !== null
+            ? ['برای حدود ', num(view.days), ' روز با مصرف هفتهٔ گذشته (', num(view.week.count), ' پیامک).']
+            : ['هفتهٔ گذشته پیامکی با sms.ir نرفت؛ روزهای باقی‌مانده با اولین پیامک‌ها حساب می‌شود.'],
+        note: view.credit === null ? { tone: 'warning', text: ['sms.ir عدد اعتبار را نداد.'] } : null,
+      };
+    case 'rejected':
+    case 'unavailable':
+      return {
+        meta: view.live ? `sms.ir، ${stamp(view.at)}` : `آخرین «آزمایش» کلید API، ${stamp(view.at)}`,
+        amount: null,
+        usage: null,
+        note:
+          view.state === 'rejected'
+            ? {
+                tone: 'error',
+                text: ['sms.ir کلید API را نپذیرفت', ...(view.http === null ? [] : [' (کد ', num(view.http), ')']), '؛ کلید را پایین همین صفحه بیازما یا عوض کن.'],
+              }
+            : { tone: 'warning', text: ['sms.ir جواب نداد و اعتبار خوانده نشد؛ کمی بعد دوباره ببین.'] },
+      };
+    case 'unconfigured':
+      return { meta: null, amount: null, usage: null, note: { tone: 'info', text: ['کلید API sms.ir خالی است یا خوانده نشد؛ با واردکردنش اعتبار دیده می‌شود.'] } };
+    case 'untested':
+      return {
+        meta: null,
+        amount: null,
+        usage: null,
+        note: { tone: 'info', text: ['پیامک‌ها هنوز کنسولی‌اند؛ اعتبار با «آزمایش» کلید API خوانده می‌شود، پایین همین صفحه.'] },
+      };
+  }
+}
+
+/** شمار کد کارت «سقف کد پیامکی»: «ساعت گذشته 18 کد · 24 ساعت گذشته 312 کد». */
+export const otpUsageSegs = (usage: { hour: number; day: number }): Seg[] => [
+  'ساعت گذشته ',
+  num(usage.hour),
+  ' کد · ',
+  { num: '24' },
+  ' ساعت گذشته ',
+  num(usage.day),
+  ' کد',
+];
+
+/** «13:05»، یا «فردا 09:40» اگر روز تهران دیگری است (پنجرهٔ ۲۴ ساعته). */
+export const untilText = (until: Date, now: Date) => (tehranDay(until) === tehranDay(now) ? formatTehranTime(until) : `فردا ${formatTehranTime(until)}`);
+
+/**
+ * هشدار «سقف کد پیامکی» پیشخوان (طرح `m-dash-alerts`، سؤال ۱۴۰): پر است (هشدار، «تا حدود …»)، یا امروز پر شد و حالا دوباره کد
+ * می‌رود (خبر). راه جلو برای مالک «تنظیمات» است؛ متصدی به مالک می‌گوید.
+ */
+export function otpCapAlert(cap: NonNullable<SmsAlertsView['otpCap']>, now: Date): { tone: 'warning' | 'info'; head: string; text: Seg[] } {
+  const window: Seg[] = cap.kind === 'day' ? [' کد در ', { num: '24' }, ' ساعت گذشته'] : [' کد در ساعت گذشته'];
+  const since: Seg[] = ['، از ', { num: formatTehranTime(cap.at) }];
+  if (cap.until) {
+    return {
+      tone: 'warning',
+      head: 'سقف کد پیامکی کل سایت پر شد:',
+      text: [' ', num(cap.limit), ...window, ...since, '. تا حدود ', { num: untilText(cap.until, now) }, ' به هیچ شماره‌ای کد تازه نمی‌رود.'],
+    };
+  }
+  const span: Seg[] = cap.kind === 'day' ? [' کد در ', { num: '24' }, ' ساعت'] : [' کد در یک ساعت'];
+  return { tone: 'info', head: 'سقف کد پیامکی کل سایت امروز پر شد:', text: [' ', num(cap.limit), ...span, ...since, '؛ حالا دوباره کد می‌رود.'] };
+}

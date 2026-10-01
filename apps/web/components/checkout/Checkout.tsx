@@ -5,10 +5,10 @@ import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/checkout';
 import { PROVINCES, findCity, findProvince, placeIsValid, popularCities, searchCities, type City } from '@jozveyar/geo';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { formatNumber, formatTomans } from '@jozveyar/text';
+import { formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 import { RECIPIENT_LIMITS, checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
-import { formatClock, formatMobile, minutesFrom } from '../../lib/checkout/format';
+import { formatClock, formatMobile, retryWhen } from '../../lib/checkout/format';
 import type { Step } from '../../lib/checkout/steps';
 import {
   createCheckoutStore,
@@ -96,19 +96,38 @@ function failureText(failure: ApiFailure, retry: string): ReactNode {
     case 'network':
       return `ارتباط برقرار نشد. اینترنت را ببین و دوباره «${retry}» را بزن.`;
     case 'too_many_codes': {
-      const minutes = minutesFrom(Number(failure.body.retryAfterSeconds) || 60);
-      const who =
-        failure.body.scope === 'ip'
-          ? 'از این اینترنت در یک ساعت گذشته کد زیادی خواسته شده.'
-          : failure.body.scope === 'site'
-            ? 'الان درخواست کد پیامکی خیلی زیاد است.'
-            : 'برای این شماره در یک ساعت گذشته کد زیادی خواسته شده.';
-      return (
-        <>
-          {who} حدود <span className="num">{formatNumber(minutes)}</span> دقیقهٔ دیگر دوباره امتحان کن.
-        </>
-      );
+      // سقف لایه‌لایهٔ کد (برش ۷، ADR-049، سؤال ۱۳۳): علت هر لایه، و زمان «دوباره».
+      const wait = retryWhen(Number(failure.body.retryAfterSeconds), Date.now());
+      const when =
+        wait.kind === 'minutes' ? (
+          <>
+            حدود <span className="num">{formatNumber(wait.minutes)}</span> دقیقهٔ دیگر
+          </>
+        ) : (
+          <>
+            از ساعت <span className="num">{formatTehranTime(wait.at)}</span>
+          </>
+        );
+      switch (failure.body.scope) {
+        case 'site':
+        case 'site_day':
+          return (
+            <>
+              ارسال کد الان شلوغ است. {when} دوباره «{retry}» را بزن؛ سفارشت همین‌جا می‌ماند.
+            </>
+          );
+        case 'browser':
+          return <>از این مرورگر در یک ساعت گذشته کد زیادی خواسته شده. {when} دوباره امتحان کن.</>;
+        case 'ip':
+          return <>از این اینترنت در یک ساعت گذشته کد زیادی خواسته شده. {when} دوباره امتحان کن.</>;
+        case 'mobile_day':
+          return <>برای این شماره امروز کد زیادی خواسته شده. {when} دوباره امتحان کن.</>;
+        default:
+          return <>برای این شماره در یک ساعت گذشته کد زیادی خواسته شده. {when} دوباره امتحان کن.</>;
+      }
     }
+    case 'otp_no_documents':
+      return 'کد نفرستادیم: فایل‌های این جزوه دیگر روی سرور نمی‌مانند. جزوه را دوباره بینداز تا با فایل تازه سفارش بدهی.';
     case 'sms_unavailable':
       return 'پیامک فرستاده نشد. چند دقیقهٔ دیگر دوباره امتحان کن.';
     case 'shipping_unavailable':
@@ -469,10 +488,12 @@ function MobileStep({ state }: { state: CheckoutState }) {
   const input = useFocusOnMount<HTMLInputElement>();
   const store = checkoutStore();
   const error = state.mobileError;
+  // دروازهٔ جزوه (برش ۷): خطای شماره نیست؛ یادداشت کارت، و کار بعدی «دوباره بینداز».
+  const gone = error?.kind === 'failure' && error.failure.error === 'otp_no_documents';
   const fieldError =
     error?.kind === 'invalid'
       ? 'شمارهٔ موبایل درست نیست؛ 11 رقم است و با 09 شروع می‌شود.'
-      : error?.kind === 'failure'
+      : error?.kind === 'failure' && !gone
         ? failureText(error.failure, 'ارسال کد')
         : null;
 
@@ -486,6 +507,12 @@ function MobileStep({ state }: { state: CheckoutState }) {
         <div className="ck-card-note">
           <Note tone="warning" testId="signed-out">
             تأیید موبایل این گوشی دیگر معتبر نیست. یک بار دیگر کد بگیر؛ سفارشت همین‌جا مانده.
+          </Note>
+        </div>
+      ) : gone ? (
+        <div className="ck-card-note" role="alert">
+          <Note tone="error" testId="otp-gate">
+            {failureText(error.failure, 'ارسال کد')}
           </Note>
         </div>
       ) : null}
@@ -908,7 +935,9 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
       : step === 'address'
         ? { label: 'ادامه — موبایل و پرداخت', short: 'ادامه', name: 'ادامه — موبایل و پرداخت', form: 'ck-address', busy: false }
         : stage === 'mobile'
-          ? { label: 'ارسال کد', short: 'ارسال کد', form: 'ck-mobile', busy: state.busy === 'code' }
+          ? state.mobileError?.kind === 'failure' && state.mobileError.failure.error === 'otp_no_documents'
+            ? { label: 'دوباره بینداز', short: 'دوباره بینداز', onClick: onRestart, busy: false }
+            : { label: 'ارسال کد', short: 'ارسال کد', form: 'ck-mobile', busy: state.busy === 'code' }
           : stage === 'code'
             ? otpClosed
               ? {

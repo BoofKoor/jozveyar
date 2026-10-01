@@ -133,6 +133,8 @@ export type CheckoutErrorCode =
   | 'invalid_mobile'
   | 'resend_too_soon'
   | 'too_many_codes'
+  /** دروازهٔ جزوه (برش ۷، ADR-049): این مرورگر جزوهٔ آماده و زنده روی سرور ندارد، پس کد نمی‌رود. */
+  | 'otp_no_documents'
   | 'sms_unavailable'
   | 'invalid_code'
   | 'no_code'

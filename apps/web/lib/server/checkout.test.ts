@@ -13,12 +13,12 @@ import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutDocument } from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
-import { consoleSms, type SmsProvider } from '@jozveyar/sms';
+import type { SmsMessage, SmsTransport } from '@jozveyar/sms';
 
 import type { AuthUser } from './auth';
 import { createCheckoutService } from './checkout';
 import { MOCK_AUTHORITY, mockGateway } from './payments';
-import { memoryOrderStore, memorySmsLog } from './testing';
+import { memoryOrderStore } from './testing';
 
 const ME = 'a'.repeat(64);
 const OTHER = 'b'.repeat(64);
@@ -36,15 +36,23 @@ const KARAJ_IN_TEHRAN = { provinceId: 8, cityId: 1094 };
 describe('مسیر خرید روی سرور', () => {
   let clock: Date;
   let orders: ReturnType<typeof memoryOrderStore>;
-  let sms: ReturnType<typeof memorySmsLog>;
+  /** پیامک‌هایی که به آداپتور رسید (پیامک پرداخت از صف، برش ۷٫۱). */
+  let sent: SmsMessage[];
   let service: ReturnType<typeof createCheckoutService>;
   const logs: string[] = [];
+  const capture: SmsTransport = {
+    name: 'console',
+    async send(message) {
+      sent.push(message);
+      return { status: 'logged', providerMessageId: null };
+    },
+  };
 
-  function build(provider?: SmsProvider) {
+  function build(transport: SmsTransport = capture) {
     service = createCheckoutService({
       orders,
       gateway: mockGateway({ newRefId: () => '803114' }),
-      sms: provider ?? consoleSms(sms, () => undefined),
+      sms: { transport, outbox: orders.smsOutbox },
       callbackUrl: '/pay/callback',
       now: () => clock,
       log: (message) => logs.push(message),
@@ -54,7 +62,7 @@ describe('مسیر خرید روی سرور', () => {
   beforeEach(() => {
     clock = new Date('2026-09-26T08:00:00Z');
     orders = memoryOrderStore({ priceList: SEED_PRICE_LIST, now: () => clock });
-    sms = memorySmsLog();
+    sent = [];
     logs.length = 0;
     build();
   });
@@ -383,11 +391,17 @@ describe('مسیر خرید روی سرور', () => {
         { kind: 'prepare_order', orderId: row!.id },
         { kind: 'prepare_ticket', orderId: row!.id },
       ]);
-      expect(sms.messages).toEqual([
-        expect.objectContaining({ toMobile: SARA.mobile, purpose: 'order_paid' }),
+      // پیامک پرداخت از صف (برش ۷٫۱): ردیف منتظر در همان تراکنش، و بعد از commit همان به آداپتور، با دو پارامتر قالب.
+      expect(sent).toEqual([
+        {
+          to: SARA.mobile,
+          purpose: 'order_paid',
+          text: 'جزوه‌یار: سفارش 10001 پرداخت شد؛ تحویل به پست تا دوشنبه 6 مهر',
+          params: ['10001', 'دوشنبه 6 مهر'],
+        },
       ]);
-      expect(sms.messages[0]!.body).toContain('10001');
-      expect(sms.messages[0]!.body).toContain('دوشنبه 6 مهر');
+      expect(orders.payments[0]!.smsMessageId).toBe(1);
+      expect(orders.sms.get(1)).toMatchObject({ status: 'logged', attempts: 1, to: SARA.mobile });
     });
 
     it('پرداخت چاپخانه را هم انتخاب می‌کند (برش ۵٫۲): هم‌شهر، وگرنه هم‌استان، وگرنه پیش‌فرض؛ کرایه همان', async () => {
@@ -431,7 +445,7 @@ describe('مسیر خرید روی سرور', () => {
       expect(orders.orders[0]).toMatchObject({ status: 'paid', printPartnerId: null });
       expect(orders.assignments).toEqual([]);
       expect(orders.jobs).toHaveLength(2);
-      expect(sms.messages).toHaveLength(1);
+      expect(sent).toHaveLength(1);
     });
 
     it('برگشت تکراری (رفرش) همان نتیجه است: پیامک و کار دوم نمی‌سازد', async () => {
@@ -441,7 +455,8 @@ describe('مسیر خرید روی سرور', () => {
       expect(await service.settle(authority, 'OK')).toMatchObject({ ok: true, value: { payment: 'succeeded' } });
       expect(orders.jobs).toHaveLength(2);
       expect(orders.assignments).toHaveLength(1);
-      expect(sms.messages).toHaveLength(1);
+      expect(sent).toHaveLength(1);
+      expect(orders.sms.size).toBe(1);
     });
 
     it('`Status=OK` نشانی هیچ‌وقت پرداخت نمی‌سازد: سنجش، تصمیم ثبت‌شدهٔ درگاه را می‌خواند', async () => {
@@ -456,7 +471,8 @@ describe('مسیر خرید روی سرور', () => {
       expect(await service.settle(authority, 'OK')).toMatchObject({ value: { payment: 'failed' } });
       expect(orders.payments.find((p) => p.authority === authority)).toMatchObject({ failureCode: 'cancelled' });
       expect(orders.jobs).toHaveLength(0);
-      expect(sms.messages).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+      expect(orders.sms.size).toBe(0);
     });
 
     it('پرداخت ناموفق: سفارش با همان قیمت می‌ماند و «دوباره پرداخت کن» تلاش تازه است', async () => {
@@ -516,12 +532,15 @@ describe('مسیر خرید روی سرور', () => {
       expect(logs.some((line) => line.includes('calendar.holidays'))).toBe(true);
     });
 
-    it('پیامکی که نرفت پرداخت را برنمی‌گرداند', async () => {
+    it('پیامکی که نرفت پرداخت را برنمی‌گرداند: ردیفش «نرفت» می‌ماند، برای «دوباره بفرست» پنل', async () => {
       build({ name: 'broken', send: async () => Promise.reject(new Error('panel down')) });
       const { payment } = await placed([doc(10)]);
       expect(await pay(payment!.redirectUrl, 'success')).toMatchObject({ value: { payment: 'succeeded' } });
       expect(orders.orders[0]!.status).toBe('paid');
-      expect(logs.some((line) => line.includes('پیامک پرداخت'))).toBe(true);
+      expect(orders.sms.get(1)).toMatchObject({ status: 'failed', error: 'unavailable', attempts: 1 });
+      expect(logs.some((line) => line.includes('order_paid') && line.includes('نرفت'))).toBe(true);
+      // و خود خطا (متن پنل) در لاگ نیست، فقط کدش.
+      expect(logs.some((line) => line.includes('panel down'))).toBe(false);
     });
 
     it('Authority ناشناس یا بدشکل: ۴۰۴', async () => {

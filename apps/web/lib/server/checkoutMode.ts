@@ -63,6 +63,14 @@ export function effectiveMode(
   return 'off';
 }
 
+/**
+ * پیامک وب در این حالت (برش ۷٫۱، ADR-049، سؤال ۱۱۴)، یک خط برای لاگ بالا آمدن: منبع، هرگز مقدار. `off` پیامکی نمی‌فرستد.
+ */
+export function describeSms(configured: CheckoutMode): string | null {
+  if (configured === 'off') return null;
+  return configured === 'live' ? '✓ پیامک وب: sms.ir (کلید و قالب‌ها از «تنظیمات» یا .env)' : '✓ پیامک وب: کنسولی (در sms_messages)';
+}
+
 /** یک خط برای لاگ بالا آمدن سرور؛ صاحب پروژه بعد از استقرار همین را می‌جوید. */
 export function describeMode(configured: CheckoutMode, secretOk: boolean): string {
   if (configured === 'off') return '✓ مسیر خرید: off (ثبت سفارش آنلاین به‌زودی)';

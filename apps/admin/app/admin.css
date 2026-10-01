@@ -796,6 +796,42 @@
     line-height: 1.7;
     color: var(--color-muted);
   }
+  /* پیامک پرداخت زیر پرداخت‌ها (۷٫۱، طرح `ad-paysms`) */
+  .ad-paysms {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 8px;
+    margin-block-start: 8px;
+    padding-block-start: 12px;
+    border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .ad-paysms b {
+    font-weight: 600;
+  }
+  .ad-paysms__ok,
+  .ad-paysms__fail {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ad-paysms__fail {
+    font-weight: 600;
+    color: var(--color-error-text);
+  }
+  .ad-paysms__ok .jy-icon,
+  .ad-paysms__fail .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .ad-paysms__ok .jy-icon {
+    color: var(--color-success-text);
+  }
+  .ad-paysms .ad-inline-form .jy-btn {
+    margin-block: -6px;
+  }
 
   /* ===== چاپخانه‌ها (۵٫۲، طرح پنل برش ۵): کارت چاپخانهٔ سفارش، فهرست «چاپخانه‌ها» و فیلد شهر ===== */
   .ad-partner {
@@ -1267,6 +1303,71 @@
     unicode-bidi: isolate;
     letter-spacing: 0.08em;
     color: var(--color-ink);
+  }
+  /* آزمایش کلیدها و متن قالب (۷٫۱، طرح `m-settings`) */
+  .ad-keys__test {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-block-start: 2px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-keys__test > .jy-icon {
+    width: 16px;
+    height: 16px;
+    margin-block-start: 3px;
+  }
+  .ad-keys__test > span:last-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .ad-keys__test .is-ok {
+    color: var(--color-success-text);
+  }
+  .ad-keys__test .is-bad {
+    color: var(--color-error-text);
+  }
+  .ad-keys__test .is-warn {
+    color: var(--color-warning-text);
+  }
+  .ad-keys__form .jy-note + .ad-form {
+    margin-block-start: 16px;
+  }
+  .ad-keys__tpl {
+    margin-block-start: 4px;
+    padding: 6px 10px;
+    background: var(--color-green-50);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-small);
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+  }
+  .ad-keys__tpl code {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-family: inherit;
+    font-weight: 600;
+  }
+  /* کارت «اعتبار پیامک» و شمار کد کارت «سقف کد پیامکی» (۷٫۱) */
+  .ad-credit {
+    margin-block-start: 8px;
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .ad-credit small {
+    margin-inline-start: 6px;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .ad-usage {
+    margin-block-start: 4px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
   }
   @media (max-width: 520px) {
     .ad-keys > li {

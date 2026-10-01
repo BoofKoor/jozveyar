@@ -47,6 +47,7 @@ import {
   type PanelPartnerOption,
   type PanelSearch,
 } from '@jozveyar/db';
+import { deliverQueued, resendable, smsState, type SmsErrorCode, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import type { StorageDriver } from '@jozveyar/storage';
 import { postHandoffDue, tehranDayStart } from '@jozveyar/text';
 import { checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
@@ -96,6 +97,11 @@ export interface PanelOrdersDeps {
   storage: StorageDriver | null;
   /** `SESSION_SECRET`: کلید HMAC IP، مثل ورود. */
   secret: string;
+  /**
+   * پیامک پرداخت (برش ۷٫۱، ADR-049): «دوباره بفرست» در کارت «پرداخت‌ها»، با همان آداپتور پیامک رهگیری پنل (`SMS_PROVIDER`). بی آن
+   * «دوباره بفرست» نیست.
+   */
+  sms?: { transport: SmsTransport; outbox: SmsOutbox; log?: (message: string, error?: unknown) => void };
   now?: () => Date;
   log?: (message: string, error?: unknown) => void;
 }
@@ -255,11 +261,12 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       return ok({
         bounds,
         tiles: dueTiles(summary, bounds),
-        // صف تأیید و پیامکی که نرفت (۶٫۲، ۶٫۳): فقط مالک و متصدی، که «همین است» و «دوباره بفرست» دارند.
+        // صف تأیید و پیامکی که نرفت (۶٫۲، ۶٫۳، ۷٫۱): فقط مالک و متصدی، که «همین است» و «دوباره بفرست» دارند.
         alerts: {
           ...alerts,
           reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
           smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
+          paidSmsFailed: can(session, 'orders.money') ? alerts.paidSmsFailed : [],
         },
         untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
@@ -590,6 +597,43 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         detail: { orderNumber: file.orderNumber },
         what: `برگهٔ سفارش ${file.orderNumber}`,
       });
+    },
+
+    /**
+     * «دوباره بفرست» پیامک پرداخت (برش ۷٫۱، ADR-049؛ طرح `m-order-second`، کارت «پرداخت‌ها»): فقط مالک و متصدی (`orders.money`)، فقط
+     * پیامکی که نرفت یا معلوم نیست رفت، و فقط برای سفارشی که هنوز در صف چاپ یا در حال چاپ است؛ همان ردیف، یک تلاش بیشتر، و رویداد
+     * `payments.sms_resend` با نتیجه.
+     */
+    async resendPaymentSms(
+      session: AdminSession,
+      form: { payment: unknown },
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: 'sent' | 'failed'; error: SmsErrorCode | null }>> {
+      if (!can(session, 'orders.money')) return fail(403, 'forbidden');
+      const paymentId = typeof form.payment === 'string' && /^[0-9a-f-]{36}$/.test(form.payment) ? form.payment : null;
+      const found = paymentId ? await store.paymentSms(scopeOf(session), paymentId) : null;
+      if (!found) return fail(404, 'payment_not_found');
+      if (!deps.sms) return fail(503, 'unavailable');
+      if (found.orderStatus !== 'paid' && found.orderStatus !== 'printing') return fail(409, 'paid_sms_closed', { orderNumber: found.orderNumber });
+      const at = now();
+      if (!found.sms || !resendable(smsState(found.sms, at))) return fail(409, 'sms_not_failed', { orderNumber: found.orderNumber });
+      const [delivery] = await deliverQueued(
+        { outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log ?? log },
+        [found.sms.id],
+        { mode: 'retry' },
+      );
+      // برداشته نشد: کس دیگری همین حالا فرستاد، یا سفارش همین حالا لغو شد.
+      if (!delivery || delivery.outcome === 'skipped') return fail(409, 'sms_not_failed', { orderNumber: found.orderNumber });
+      await store.logEvent({
+        adminUserId: session.userId,
+        action: 'payments.sms_resend',
+        targetType: 'order',
+        targetId: found.orderId,
+        ipHash: ipHashOf(deps.secret, ip),
+        at: now(),
+        detail: { orderNumber: found.orderNumber, outcome: delivery.outcome, ...(delivery.tag ? { error: delivery.tag } : {}) },
+      });
+      return ok({ orderNumber: found.orderNumber, outcome: delivery.outcome, error: delivery.error ?? null });
     },
   };
 

@@ -16,15 +16,18 @@ import {
   createShipmentStore,
   createShippingReportStore,
   createSmsOutbox,
+  createSmsStats,
   createTariffStore,
   getDb,
+  serviceKeyReader,
 } from '@jozveyar/db';
-import { consoleTransport } from '@jozveyar/sms';
+import { consoleTransport, type SmsTransport } from '@jozveyar/sms';
+import { smsIrClient, smsIrTransport } from '@jozveyar/sms/smsir';
 import { storageFromEnv } from '@jozveyar/storage';
 
 import { panelPath } from '../gate';
 import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
-import { adminConfig, type AdminConfig } from './config';
+import { adminConfig, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
@@ -54,33 +57,48 @@ function build(config: AdminConfig): Panel {
     secretsKey: config.secretsKey,
     secret: config.secret,
   });
+  // پیامک پنل (۷٫۱، ADR-049، سؤال ۱۱۴): `SMS_PROVIDER=smsir` یعنی sms.ir، با کلید و شناسهٔ قالب‌ها از «تنظیمات» یا `.env` با هر پیامک؛
+  // وگرنه کنسولی، هر چه `CHECKOUT_MODE` بگوید. نشانی پایهٔ sms.ir از `SMSIR_API_URL` (تست و CI فقط سرور ساختگی).
+  const secrets = createSecretStore(getDb());
+  const smsir = { baseUrl: process.env.SMSIR_API_URL };
+  const transport: SmsTransport =
+    panelSmsProvider(process.env) === 'smsir'
+      ? smsIrTransport({ keys: serviceKeyReader(secrets, process.env, config.secretsKey), ...smsir })
+      : consoleTransport();
+  const sms = { transport, outbox: createSmsOutbox(getDb(), transport.name) };
   return {
     config,
     auth,
-    // بی استوریج (`S3_*` در `.env` نیست) فقط دانلود PDF جزوه بسته است؛ لاگ بالا آمدن همین را می‌گوید.
+    // بی استوریج (`S3_*` در `.env` نیست) فقط دانلود PDF جزوه بسته است؛ لاگ بالا آمدن همین را می‌گوید. پیامک پرداخت (۷٫۱) با همان
+    // آداپتور پنل، برای «دوباره بفرست».
     orders: createPanelOrders({
       store: createPanelOrderStore(getDb()),
       storage: storageFromEnv(process.env)?.driver ?? null,
       secret: config.secret,
+      sms,
     }),
     // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
     tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
-    // کلیدها کار حساس‌اند (کد تازه)؛ مقدار `.env` هر کلید از همان `.env` کانتینر، با هر درخواست (ADR-041).
+    // کلیدها کار حساس‌اند (کد تازه)؛ مقدار `.env` هر کلید از همان `.env` کانتینر، با هر درخواست (ADR-041). «آزمایش» کلیدها و اعتبار
+    // با خود sms.ir (۷٫۱)؛ اعتبار خودکار فقط وقتی sms.ir در کار است.
     settings: createPanelSettings({
       settings: createSettingsStore(getDb()),
-      secrets: createSecretStore(getDb()),
+      secrets,
       stepUp: auth.stepUp,
       secretsKey: config.secretsKey,
       env: process.env,
       secret: config.secret,
+      smsir: smsIrClient(smsir),
+      smsStats: createSmsStats(getDb()),
+      smsInUse: smsIrInUse(process.env),
     }),
     // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
     partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),
     // ارسال (۶٫۱): ورود فایل پست؛ خواندن فایل با کارگر است، پس پنل بایت‌ها را فقط در پایگاه داده می‌گذارد (ADR-045). پیامک رهگیری
-    // (۶٫۳، ADR-047): تا برش ۷ همیشه کنسولی، هر چه `.env` بگوید؛ نه `SMS_PROVIDER` خوانده می‌شود و نه کلید پنل پیامک (ADR-035).
+    // (۶٫۳، ADR-047) با آداپتور پنل (۷٫۱).
     shipments: createPanelShipments({
       store: createShipmentStore(getDb()),
-      sms: { transport: consoleTransport(), outbox: createSmsOutbox(getDb(), 'console') },
+      sms,
       secret: config.secret,
     }),
     // گزارش ارسال (۶٫۴، ADR-048): فقط خواندن، کوئری زنده؛ بازه‌های وزنش را سرویس تنظیمات عوض می‌کند.

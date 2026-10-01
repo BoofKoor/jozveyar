@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  SMS_PARAM_MAX,
   SMS_STUCK_MS,
+  SMS_TEMPLATES,
   SmsError,
   consoleSms,
   deliverQueued,
   loggedSms,
   orderPaidText,
+  otpParams,
   otpText,
+  paidParams,
+  parseSmsErrorTag,
   resendable,
+  smsErrorTag,
+  smsSegments,
   smsState,
+  templateSource,
+  templateText,
   trackingParams,
   trackingText,
   type QueuedSms,
@@ -21,32 +30,67 @@ import {
 
 const BARCODE = '118800000000000000000101';
 
-describe('متن‌ها', () => {
-  it('کد و پرداخت همان متن برش ۳', () => {
+describe('متن‌ها: یک منبع برای کد و قالب‌های sms.ir (ADR-049)', () => {
+  it('سه متن عیناً جدول ADR-049', () => {
     expect(otpText('12345')).toBe('کد تأیید جزوه‌یار: 12345\nاین کد را به کسی نده.');
-    expect(orderPaidText(10001, 'دوشنبه 6 مهر')).toBe(
-      'جزوه‌یار: سفارش 10001 پرداخت شد. تحویل به پست تا دوشنبه 6 مهر؛ کد رهگیری پست را هم پیامک می‌کنیم.',
-    );
+    expect(orderPaidText(10001, 'دوشنبه 6 مهر')).toBe('جزوه‌یار: سفارش 10001 پرداخت شد؛ تحویل به پست تا دوشنبه 6 مهر');
+    expect(trackingText(10027, BARCODE)).toBe('جزوه‌یار: سفارش 10027 به پست رسید. کد رهگیری 118800000000000000000101');
   });
 
-  it('رهگیری عیناً متن ADR-047، فقط از دو پارامتر بی فاصله', () => {
-    expect(trackingText(10027, BARCODE)).toBe(
-      'جزوه‌یار: سفارش 10027 تحویل پست شد. کد رهگیری: 118800000000000000000101 (tracking.post.ir)',
-    );
-    expect(trackingParams(10027, BARCODE)).toEqual(['10027', BARCODE]);
-    // متن جز همین دو پارامتر چیز متغیری ندارد: با پارامترهای دیگر فقط همان‌ها عوض می‌شوند.
-    expect(trackingText(10028, '118811111111111111111111').replace('10028', '10027').replace('118811111111111111111111', BARCODE)).toBe(
-      trackingText(10027, BARCODE),
-    );
-    for (const param of trackingParams(10027, BARCODE)) expect(param).not.toMatch(/\s/);
-    // حدود ۹۰ نویسه: دو تکهٔ پیامک فارسی (۷۰ نویسه‌ای)، نه سه.
-    expect(trackingText(10027, BARCODE).length).toBeLessThanOrEqual(134);
+  it('متن قالب برای پنل sms.ir با جای پارامترها؛ نام و ترتیب پارامترها ثابت', () => {
+    expect(templateSource('otp')).toBe('کد تأیید جزوه‌یار: #CODE#\nاین کد را به کسی نده.');
+    expect(templateSource('order_paid')).toBe('جزوه‌یار: سفارش #ORDER# پرداخت شد؛ تحویل به پست تا #DAY#');
+    expect(templateSource('tracking')).toBe('جزوه‌یار: سفارش #ORDER# به پست رسید. کد رهگیری #BARCODE#');
+    expect(Object.values(SMS_TEMPLATES).map((t) => [t.purpose, t.key, t.params])).toEqual([
+      ['otp', 'SMS_OTP_TEMPLATE', ['CODE']],
+      ['order_paid', 'SMS_PAID_TEMPLATE', ['ORDER', 'DAY']],
+      ['tracking', 'SMS_TRACKING_TEMPLATE', ['ORDER', 'BARCODE']],
+    ]);
+    // متن جز پارامترها چیز متغیری ندارد: قالب با همان پارامترها همان متن است.
+    expect(templateText('tracking', trackingParams(10027, BARCODE))).toBe(trackingText(10027, BARCODE));
+    expect(templateText('order_paid', paidParams(10001, 'دوشنبه 6 مهر'))).toBe(orderPaidText(10001, 'دوشنبه 6 مهر'));
+    expect(templateText('otp', otpParams('12345'))).toBe(otpText('12345'));
   });
 
-  it('بارکد نه ۲۴ رقم، یا با فاصله، متن نمی‌سازد', () => {
+  it('هر پیامک یک تکه، حتی با شمارهٔ شش رقمی و بلندترین روز تحویل', () => {
+    const longest = 'چهارشنبه 16 اردیبهشت';
+    const texts = [otpText('12345'), orderPaidText(999999, longest), trackingText(999999, BARCODE)];
+    expect(texts.map((text) => [...text].length)).toEqual([46, 70, 70]);
+    for (const text of texts) expect(smsSegments(text)).toBe(1);
+    // شاهد: متن‌های برش ۶٫۳ دو تکه بودند.
+    expect(smsSegments('جزوه‌یار: سفارش 10027 تحویل پست شد. کد رهگیری: 118800000000000000000101 (tracking.post.ir)')).toBe(2);
+    expect(smsSegments('x'.repeat(70))).toBe(1);
+    expect(smsSegments('x'.repeat(71))).toBe(2);
+    expect(smsSegments('x'.repeat(134))).toBe(2);
+    expect(smsSegments('x'.repeat(135))).toBe(3);
+  });
+
+  it('پارامتر نادرست متن نمی‌سازد: بارکد نه ۲۴ رقم، شمارهٔ منفی، روز خالی یا بلندتر از ۵۰ نویسه، کد نه رقم', () => {
     expect(() => trackingText(10027, '1188 0000 0000 0000 0000 0101')).toThrow();
     expect(() => trackingText(10027, '1188')).toThrow();
     expect(() => trackingParams(-1, BARCODE)).toThrow();
+    expect(() => paidParams(10001, '')).toThrow();
+    expect(() => paidParams(10001, 'x'.repeat(SMS_PARAM_MAX + 1))).toThrow();
+    expect(paidParams(10001, 'x'.repeat(SMS_PARAM_MAX))[1]).toHaveLength(50);
+    expect(() => paidParams(10001, 'دوشنبه\n6 مهر')).toThrow();
+    expect(() => otpText('12a45')).toThrow();
+    expect(() => templateText('tracking', ['10027'])).toThrow();
+    for (const param of trackingParams(10027, BARCODE)) expect(param).not.toMatch(/\s/);
+  });
+});
+
+describe('علت «نرفت»: فقط کد و عدد پاسخ', () => {
+  it('برچسب و برگشتش', () => {
+    expect(smsErrorTag(new SmsError('rejected', { http: 400, status: 12 }))).toBe('rejected:12');
+    expect(smsErrorTag(new SmsError('rejected', { http: 401 }))).toBe('rejected:401');
+    expect(smsErrorTag(new SmsError('unconfigured'))).toBe('unconfigured');
+    expect(smsErrorTag(new Error('کلید: secret-value'))).toBe('unavailable');
+    expect(parseSmsErrorTag('rejected:401')).toEqual({ code: 'rejected', number: 401 });
+    expect(parseSmsErrorTag('unconfigured')).toEqual({ code: 'unconfigured', number: null });
+    expect(parseSmsErrorTag('rejected')).toEqual({ code: 'rejected', number: null });
+    expect(parseSmsErrorTag('چیز دیگر')).toEqual({ code: 'unavailable', number: null });
+    expect(parseSmsErrorTag(null)).toEqual({ code: 'unavailable', number: null });
+    expect(new SmsError('rejected', { http: 401 }).message).toBe('rejected');
   });
 });
 
@@ -60,19 +104,21 @@ describe('پیامک کد و پرداخت (`loggedSms`)', () => {
       text: otpText('12345'),
     });
     expect(rows).toEqual([
-      { provider: 'console', toMobile: '09123456789', purpose: 'otp', body: otpText('12345'), status: 'logged', providerMessageId: null },
+      { provider: 'console', toMobile: '09123456789', purpose: 'otp', body: otpText('12345'), status: 'logged', providerMessageId: null, cost: null },
     ]);
     expect(lines).toEqual(['✉ پیامک کنسولی به 09123456789 (otp): کد تأیید جزوه‌یار: 12345 ⏎ این کد را به کسی نده.']);
   });
 
-  it('پنل واقعی: متن کد نمی‌ماند؛ شکست ردیف «failed» و پرتاب', async () => {
+  it('پنل واقعی: متن کد نمی‌ماند، هزینه می‌ماند؛ شکست ردیف «failed» با برچسب علت و پرتاب', async () => {
     const rows: SmsRecord[] = [];
-    const ok: SmsTransport = { name: 'real', send: async () => ({ status: 'sent', providerMessageId: 'm1' }) };
-    await loggedSms(ok, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'otp', text: 'x' });
-    expect(rows[0]).toMatchObject({ body: null, status: 'sent', providerMessageId: 'm1' });
-    const bad: SmsTransport = { name: 'real', send: async () => Promise.reject(new SmsError('rejected')) };
+    const ok: SmsTransport = { name: 'real', send: async () => ({ status: 'sent', providerMessageId: 'm1', cost: 1.5 }) };
+    await loggedSms(ok, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'otp', text: 'x', params: ['12345'] });
+    expect(rows[0]).toMatchObject({ body: null, status: 'sent', providerMessageId: 'm1', cost: 1.5 });
+    const bad: SmsTransport = { name: 'real', send: async () => Promise.reject(new SmsError('rejected', { http: 400, status: 12 })) };
     await expect(loggedSms(bad, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'order_paid', text: 'y' })).rejects.toThrow();
-    expect(rows[1]).toMatchObject({ status: 'failed', error: 'rejected', body: 'y' });
+    expect(rows[1]).toMatchObject({ status: 'failed', error: 'rejected:12', body: 'y' });
+    await expect(loggedSms(bad, { insert: async (row) => void rows.push(row) }).send({ to: '09123456789', purpose: 'otp', text: 'z' })).rejects.toThrow();
+    expect(rows[2]).toMatchObject({ status: 'failed', body: null });
   });
 });
 

@@ -17,6 +17,7 @@ import { formatTehranTime } from '@jozveyar/text';
 
 import { panelPath } from '../../lib/gate';
 import { cityLabel } from '../../lib/partners';
+import { parseWholeNumber } from '../../lib/settings';
 import { boundErrorText, monthKey, parseMonthKey, type BoundError } from '../../lib/report';
 import { draftFormFromEntries, type DraftIssue } from '../../lib/tariff';
 import type { IssuedInvite } from '../../lib/server/auth';
@@ -383,27 +384,165 @@ export async function confirmHolidaysAction(form: FormData): Promise<void> {
   redirect(result.ok ? `${home}?done=official&y=${result.value.year}&${doneMark()}#holidays` : `${home}?e=${result.error}&${doneMark()}#holidays`);
 }
 
+/** رسید «آزمایش» مقدار تازه (۷٫۱): با فرم برمی‌گردد تا «ذخیره» یا «بی آزمایش ذخیره کن» همان مقدار را بپذیرد؛ خود مقدار در آن نیست. */
+export interface KeyReceiptFields {
+  outcome: 'ok' | 'unavailable';
+  at: string;
+  mac: string;
+}
+
+export interface KeyState extends FormState {
+  /** «در دسترس نیست» کلید API (۷٫۱): رسید، برای «بی آزمایش ذخیره کن». */
+  receipt?: KeyReceiptFields;
+  /** «رد شد» (۷٫۱): عدد پاسخ sms.ir، کد بدنه یا HTTP. */
+  code?: number | null;
+}
+
+const receiptFields = (value: unknown): KeyReceiptFields | undefined => {
+  const receipt = value as Partial<KeyReceiptFields> | null | undefined;
+  return receipt && (receipt.outcome === 'ok' || receipt.outcome === 'unavailable') && typeof receipt.at === 'string' && typeof receipt.mac === 'string'
+    ? { outcome: receipt.outcome, at: receipt.at, mac: receipt.mac }
+    : undefined;
+};
+
+const numberOr = (...values: unknown[]) => (values.find((value) => typeof value === 'number') as number | undefined) ?? null;
+
+/** نشانی صفحهٔ «تنظیمات» با نشان کلید. */
+const keyAnchor = (name: string) => (/^[A-Z_]{1,40}$/.test(name) ? `#key-${name}` : '');
+
 /**
  * مقدار پنل یک کلید، یا «برگرداندن به .env»، با کد تازه (۴٫۶، کار حساس). مقدار کلید هرگز در حالت فرم برنمی‌گردد: خطای کد یا
  * مقدار همین‌جا، و فیلد خالی (فرم پس از هر پاسخ از نو). کلیدی که همین حالا جای دیگری عوض شد به صفحه با پیامش، با وضعیت تازه.
+ * از ۷٫۱ کلید API «آزمایش و ذخیره» است (سؤال ۱۳۸): «رد شد» با عدد پاسخ، «در دسترس نیست» با رسید، و «بی آزمایش ذخیره کن» (`skip`)
+ * فقط با همان رسید و همان کلید، که دوباره وارد می‌شود.
  */
-export async function keyAction(_state: FormState, form: FormData): Promise<FormState> {
+export async function keyAction(_state: KeyState, form: FormData): Promise<KeyState> {
   const gate = field(form, 'gate');
   const { settings } = requirePanel(gate);
   const session = await requireSession(gate);
   const name = field(form, 'name');
   const input = { name, seen: field(form, 'seen'), code: form.get('code') };
-  const revert = field(form, 'intent') === 'revert';
+  const intent = field(form, 'intent');
+  const revert = intent === 'revert';
+  const skip =
+    intent === 'skip' ? { skipTest: '1', tested: field(form, 'tested'), testedAt: field(form, 'testedAt'), receipt: field(form, 'receipt') } : {};
   const result = revert
     ? await settings.revertKey(session, input, await requestIp())
-    : await settings.setKey(session, { ...input, value: form.get('value') }, await requestIp());
+    : await settings.setKey(session, { ...input, value: form.get('value'), ...skip }, await requestIp());
   const home = panelPath(gate, '/settings');
-  const anchor = /^[A-Z_]{1,40}$/.test(name) ? `#key-${name}` : '';
+  const anchor = keyAnchor(name);
   if (result.ok) redirect(`${home}?done=${revert ? 'key_revert' : 'key_set'}&k=${result.value.name}&${doneMark()}${anchor}`);
   if (result.error === 'key_changed' || result.error === 'key_not_found' || result.error === 'forbidden') {
     redirect(`${home}?e=${result.error}&${doneMark()}${anchor}`);
   }
+  if (result.error === 'key_unavailable') return { error: result.error, receipt: receiptFields(result.receipt) };
+  if (result.error === 'key_rejected') return { error: result.error, code: numberOr(result.smsStatus, result.http) };
+  // «بی آزمایش ذخیره کن» با کد اشتباه: رسید همان می‌ماند تا بار دوم.
+  if (intent === 'skip' && (result.error === 'wrong_code' || result.error === 'code_used' || result.error === 'invalid_api_key')) {
+    return { ...failure(result), receipt: receiptFields({ outcome: field(form, 'tested'), at: field(form, 'testedAt'), mac: field(form, 'receipt') }) };
+  }
   return failure(result);
+}
+
+/**
+ * «آزمایش» مقدار امروز یک کلید sms.ir (۷٫۱، سؤال ۱۳۸)، بی کد: کلید API با اعتبار (دکمه، بی JS)، قالب با پیامک آزمایشی به موبایلی
+ * که همین‌جا وارد می‌شود. نتیجه هر چه باشد رویداد است و کنار همان کلید دیده می‌شود؛ به صفحه با `done=key_test`. خطای موبایل همین‌جا.
+ */
+export async function testKeyAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const name = field(form, 'name');
+  const mobile = field(form, 'mobile').slice(0, 40);
+  const result = await settings.testKey(session, { name, ...(form.has('mobile') ? { mobile } : {}) }, await requestIp());
+  const home = panelPath(gate, '/settings');
+  const anchor = keyAnchor(name);
+  if (result.ok) redirect(`${home}?done=key_test&k=${result.value.name}&${doneMark()}${anchor}`);
+  if (result.error === 'invalid_test_mobile') return { error: result.error, values: { mobile } };
+  redirect(`${home}?e=${result.error}&k=${encodeURIComponent(name.slice(0, 40))}&${doneMark()}${anchor}`);
+}
+
+export interface TemplateKeyState extends FormState {
+  /** پیامک آزمایشی همین شناسه رفت (یا sms.ir جواب نداد): نتیجه و رسید، برای «ذخیره». */
+  tested?: { outcome: 'ok' | 'rejected' | 'unavailable' | 'unconfigured'; code: number | null; mobile: string | null; receipt?: KeyReceiptFields };
+}
+
+/**
+ * شناسهٔ قالب تازه (۷٫۱، طرح `m-key-tpl`، سؤال ۱۳۸): اول «پیامک آزمایشی بفرست» (`test`، بی کد)، بعد «ذخیره» با کد تازه، فقط با رسید
+ * همان شناسه تا ۱۵ دقیقه. شناسهٔ قالب راز نیست، پس شناسه و موبایل در حالت فرم می‌مانند؛ رسید هم (HMAC همین ادمین و همین شناسه).
+ */
+export async function templateKeyAction(state: TemplateKeyState, form: FormData): Promise<TemplateKeyState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const name = field(form, 'name');
+  const values = { value: field(form, 'value').slice(0, 40), mobile: field(form, 'mobile').slice(0, 40) };
+  const home = panelPath(gate, '/settings');
+  const anchor = keyAnchor(name);
+  const away = (error: string) => redirect(`${home}?e=${error}&${doneMark()}${anchor}`);
+  if (field(form, 'intent') === 'test') {
+    const result = await settings.testKey(session, { name, value: values.value, mobile: values.mobile }, await requestIp());
+    if (!result.ok) {
+      if (result.error === 'key_not_found' || result.error === 'forbidden' || result.error === 'key_not_testable') away(result.error);
+      return { error: result.error, values };
+    }
+    const { outcome, http, status, mobile, receipt } = result.value;
+    return { values, tested: { outcome, code: numberOr(status, http), mobile, ...(receipt ? { receipt: receiptFields(receipt) } : {}) } };
+  }
+  const result = await settings.setKey(
+    session,
+    {
+      name,
+      value: values.value,
+      seen: field(form, 'seen'),
+      code: form.get('code'),
+      tested: field(form, 'tested'),
+      testedAt: field(form, 'testedAt'),
+      receipt: field(form, 'receipt'),
+    },
+    await requestIp(),
+  );
+  if (result.ok) redirect(`${home}?done=key_set&k=${result.value.name}&${doneMark()}${anchor}`);
+  if (result.error === 'key_changed' || result.error === 'key_not_found' || result.error === 'forbidden') away(result.error);
+  // «اول پیامک آزمایشی»: رسید کهنه یا شناسهٔ دیگر؛ نتیجهٔ قبلی دیگر معتبر نیست.
+  if (result.error === 'key_untested') return { error: result.error, values };
+  return { ...failure(result, values), ...(state.tested ? { tested: state.tested } : {}) };
+}
+
+export interface OtpLimitsState {
+  error?: AdminErrorCode;
+  /** فیلدهایی که عدد درست نیستند. */
+  invalid?: ('hour' | 'day')[];
+  values?: { hour: string; day: string };
+}
+
+/**
+ * کارت «سقف کد پیامکی» (۷٫۱): ساعتی و ۲۴ ساعتهٔ کل سایت با یک «ذخیره»، هر کدام «همان که دیده شد». خطای هر فیلد زیر خودش با
+ * نوشته‌ها؛ «همین حالا جای دیگری عوض شد» به صفحه با پیامش.
+ */
+export async function saveOtpLimitsAction(_state: OtpLimitsState, form: FormData): Promise<OtpLimitsState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const values = { hour: field(form, 'hour').slice(0, 50), day: field(form, 'day').slice(0, 50) };
+  const result = await settings.saveNumbers(
+    session,
+    [
+      { key: 'otp.site_hourly_limit', value: values.hour, seen: field(form, 'seenHour') },
+      { key: 'otp.site_daily_limit', value: values.day, seen: field(form, 'seenDay') },
+    ],
+    await requestIp(),
+  );
+  const home = panelPath(gate, '/settings');
+  // عدد خوانده‌شده (ارقام فارسی و جداکننده یکدست)، تا صفحه پیام را فقط وقتی نشان دهد که هنوز راست است.
+  if (result.ok) redirect(`${home}?done=otp_limits&h=${parseWholeNumber(values.hour)}&d=${parseWholeNumber(values.day)}&${doneMark()}#otp`);
+  if (result.error === 'setting_changed') redirect(`${home}?e=setting_changed&${doneMark()}`);
+  const keys = Array.isArray(result.keys) ? (result.keys as string[]) : [];
+  const invalid = [
+    ...(keys.includes('otp.site_hourly_limit') ? (['hour'] as const) : []),
+    ...(keys.includes('otp.site_daily_limit') ? (['day'] as const) : []),
+  ];
+  return { error: result.error, invalid, values };
 }
 
 /* ───────────────────────── چاپخانه‌ها (۵٫۲) ───────────────────────── */
@@ -672,6 +811,24 @@ export async function resendSmsAction(form: FormData): Promise<void> {
   redirect(
     result.ok
       ? withQuery(back, `done=sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
+      : withQuery(back, `e=${result.error}&${doneMark()}`),
+  );
+}
+
+/**
+ * «دوباره بفرست» پیامک پرداخت (۷٫۱، طرح `ad-paysms`؛ مالک و متصدی): از کارت «پرداخت‌ها» سفارش؛ برگشت به همان سفارش با نتیجه
+ * (`done=paid_sms_resend&sent=1|0`) یا پیامش. کد تازه نمی‌خواهد: فقط پیامکی را دوباره می‌فرستد که نرفت.
+ */
+export async function resendPaymentSmsAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await orders.resendPaymentSms(session, { payment: field(form, 'payment') }, await requestIp());
+  const number = result.ok ? String(result.value.orderNumber) : typeof result.orderNumber === 'number' ? String(result.orderNumber) : field(form, 'number');
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number.slice(0, 20))}`);
+  redirect(
+    result.ok
+      ? withQuery(back, `done=paid_sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
       : withQuery(back, `e=${result.error}&${doneMark()}`),
   );
 }

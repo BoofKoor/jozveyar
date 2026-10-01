@@ -22,6 +22,15 @@ export function minutesFrom(seconds: number): number {
 }
 
 /**
+ * «دوباره» سقف کد پیامکی (برش ۷، سؤال ۱۳۳): تا یک ساعت «حدود N دقیقه»، بیشتر «از ساعت HH:MM» به وقت تهران، چون پنجرهٔ ۲۴ ساعته
+ * لغزان است و «فردا» یا «نیمه‌شب» نادرست.
+ */
+export function retryWhen(seconds: number, now: number): { kind: 'minutes'; minutes: number } | { kind: 'clock'; at: Date } {
+  const s = Number.isFinite(seconds) && seconds > 0 ? seconds : 60;
+  return s <= 3600 ? { kind: 'minutes', minutes: minutesFrom(s) } : { kind: 'clock', at: new Date(now + Math.ceil(s) * 1000) };
+}
+
+/**
  * کلید یکتای «پرداخت» (ADR-034). `randomUUID` فقط در زمینهٔ امن (https یا localhost) هست؛ بیرون از آن،
  * همان UUID نسخهٔ ۴ از `getRandomValues`.
  */

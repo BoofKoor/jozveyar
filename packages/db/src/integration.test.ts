@@ -56,8 +56,9 @@ import {
 import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
 import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
-import { createSmsLog, createSmsOutbox } from './sms.js';
-import { consoleTransport, deliverQueued, SMS_STUCK_MS, trackingText } from '@jozveyar/sms';
+import { createSmsLog, createSmsOutbox, createSmsStats } from './sms.js';
+import { consoleTransport, deliverQueued, orderPaidText, SMS_STUCK_MS, trackingText, type SmsTransport } from '@jozveyar/sms';
+import { formatDeadlineDay } from '@jozveyar/text';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
 import {
   ALL_ORDERS,
@@ -82,7 +83,7 @@ import {
 } from './schema.js';
 import { createTariffStore, type TariffActor } from './tariff.js';
 import { createSettingsStore, SETTING_TARGET, type SettingsActor } from './settings.js';
-import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TARGET } from './secrets.js';
+import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TARGET, SERVICE_KEYS } from './secrets.js';
 import { seal } from './sealed.js';
 import { serviceSecrets } from './schema.js';
 import { FILES_RETENTION_SETTING, OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTING } from './reference.js';
@@ -768,12 +769,18 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expiresAt: new Date(createdAt.getTime() + 120_000),
     });
 
+    /** پنجره‌های شمارش کد: یک ساعت و ۲۴ ساعت پیش از `at`، و سند زنده تا یک ساعت بعد (همان وب). */
+    const windowAt = (at: Date) => ({
+      hourSince: new Date(at.getTime() - 3_600_000),
+      daySince: new Date(at.getTime() - 86_400_000),
+      readyUntil: new Date(at.getTime() + 3_600_000),
+    });
+
     it('صدور کد زیر قفل: ده درخواست هم‌زمان برای یک شماره، فقط پنج کد', async () => {
       const auth = createAuthStore(conn);
-      const since = new Date(Date.now() - 3_600_000);
       const results = await Promise.all(
         Array.from({ length: 10 }, (_, i) =>
-          auth.issueOtp({ mobile: MOBILE, ipHash: `ip${i}`, sessionHash: SESSION, since }, (counts) =>
+          auth.issueOtp({ mobile: MOBILE, ipHash: `ip${i}`, sessionHash: SESSION, ...windowAt(new Date()) }, (counts) =>
             counts.mobile < 5 ? otpAt(new Date()) : null,
           ),
         ),
@@ -783,19 +790,24 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(rows).toHaveLength(5);
     });
 
-    it('شمارش پنجره: شماره، IP و کل سایت، با قدیمی‌ترین و تازه‌ترین؛ بیرون از پنجره شمرده نمی‌شود', async () => {
+    it('شمارش پنجره: شماره، مرورگر، IP و کل سایت در یک ساعت و ۲۴ ساعت، با قدیمی‌ترین و تازه‌ترین؛ بیرون از پنجره شمرده نمی‌شود', async () => {
       await conn.db.delete(otpRequests);
       const auth = createAuthStore(conn);
       const now = Date.now();
       const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000);
-      const issue = (mobile: string, ipHash: string, createdAt: Date) =>
-        auth.issueOtp({ mobile, ipHash, sessionHash: SESSION, since: new Date(0) }, () => otpAt(createdAt));
+      const OTHER = 'c'.repeat(64);
+      const issue = (mobile: string, ipHash: string, createdAt: Date, sessionHash = SESSION) =>
+        auth.issueOtp({ mobile, ipHash, sessionHash, hourSince: new Date(0), daySince: new Date(0), readyUntil: new Date(0) }, () =>
+          otpAt(createdAt),
+        );
+      await issue(MOBILE, 'ip-a', at(25 * 60)); // بیرون از پنجرهٔ ۲۴ ساعته
+      await issue(MOBILE, 'ip-a', at(20 * 60), OTHER); // در ۲۴ ساعت، بیرون از ساعت
       await issue(MOBILE, 'ip-a', at(90)); // بیرون از پنجرهٔ یک ساعته
       await issue(MOBILE, 'ip-a', at(50));
-      await issue(MOBILE, 'ip-b', at(10));
+      await issue(MOBILE, 'ip-b', at(10), OTHER);
       await issue('09351234567', 'ip-a', at(5));
       let seen: unknown;
-      await auth.issueOtp({ mobile: MOBILE, ipHash: 'ip-a', sessionHash: SESSION, since: at(60) }, (counts) => {
+      await auth.issueOtp({ mobile: MOBILE, ipHash: 'ip-a', sessionHash: SESSION, ...windowAt(new Date(now)) }, (counts) => {
         seen = counts;
         return null;
       });
@@ -803,24 +815,62 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         mobile: 2,
         mobileOldest: at(50),
         mobileLatest: at(10),
+        mobileDay: 4,
+        mobileDayOldest: at(20 * 60),
+        session: 2,
+        sessionOldest: at(50),
         ip: 2,
         ipOldest: at(50),
         site: 3,
         siteOldest: at(50),
+        siteDay: 5,
+        siteDayOldest: at(20 * 60),
+        ready: true,
       });
+    });
+
+    it('دروازهٔ جزوه (برش ۷، ADR-049): فقط مرورگری که سند آماده، شمرده‌شده و زنده دارد', async () => {
+      const auth = createAuthStore(conn);
+      const readyOf = async (sessionHash: string, readyUntil: Date) => {
+        let ready: boolean | undefined;
+        await auth.issueOtp(
+          { mobile: MOBILE, ipHash: 'ip-g', sessionHash, hourSince: new Date(), daySince: new Date(), readyUntil },
+          (counts) => {
+            ready = counts.ready;
+            return null;
+          },
+        );
+        return ready;
+      };
+      const soon = new Date(Date.now() + 3_600_000);
+      expect(await readyOf(SESSION, soon)).toBe(true);
+      // مرورگر دیگر، بی سند.
+      expect(await readyOf('b'.repeat(64), soon)).toBe(false);
+      // سندی که تا یک ساعت دیگر پاک می‌شود دیگر زنده نیست (همان حاشیهٔ پرداخت).
+      expect(await readyOf(SESSION, new Date(Date.now() + 3 * 86_400_000))).toBe(false);
+      // سند پاک‌شده یا هنوز نیمه‌کاره: شاهد با همان مرورگر، که با برگرداندن سند دوباره آماده است.
+      const [doc] = docIds;
+      const others = docIds.slice(1);
+      await conn.db.update(documents).set({ status: 'failed' }).where(inArray(documents.id, others));
+      await conn.db.update(documents).set({ fileDeletedAt: new Date() }).where(eq(documents.id, doc!));
+      expect(await readyOf(SESSION, soon)).toBe(false);
+      await conn.db.update(documents).set({ fileDeletedAt: null, status: 'analyzing' }).where(eq(documents.id, doc!));
+      expect(await readyOf(SESSION, soon)).toBe(false);
+      await conn.db.update(documents).set({ status: 'ready' }).where(inArray(documents.id, docIds));
+      expect(await readyOf(SESSION, soon)).toBe(true);
     });
 
     it('فرصت کد اتمی: ده سنجش هم‌زمان، فقط سه؛ کد منقضی فرصتی ندارد', async () => {
       const auth = createAuthStore(conn);
       const issued = await auth.issueOtp(
-        { mobile: '09131234567', ipHash: 'ip', sessionHash: SESSION, since: new Date() },
+        { mobile: '09131234567', ipHash: 'ip', sessionHash: SESSION, ...windowAt(new Date()) },
         () => otpAt(new Date()),
       );
       const now = new Date();
       const claims = await Promise.all(Array.from({ length: 10 }, () => auth.claimOtpAttempt(issued!.id, now, 3)));
       expect(claims.filter((n) => n !== null).sort()).toEqual([1, 2, 3]);
       const expired = await auth.issueOtp(
-        { mobile: '09141234567', ipHash: 'ip', sessionHash: SESSION, since: new Date() },
+        { mobile: '09141234567', ipHash: 'ip', sessionHash: SESSION, ...windowAt(new Date()) },
         () => otpAt(new Date(Date.now() - 180_000)),
       );
       expect(await auth.claimOtpAttempt(expired!.id, new Date(), 3)).toBeNull();
@@ -829,7 +879,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('ورود یک بار: دو ورود هم‌زمان با یک کد، یک نشست؛ نشست باطل و منقضی پیدا نمی‌شود', async () => {
       const auth = createAuthStore(conn);
       const issued = await auth.issueOtp(
-        { mobile: '09151234567', ipHash: 'ip', sessionHash: SESSION, since: new Date() },
+        { mobile: '09151234567', ipHash: 'ip', sessionHash: SESSION, ...windowAt(new Date()) },
         () => otpAt(new Date()),
       );
       const now = new Date();
@@ -1026,6 +1076,266 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(details!.payments.map((p) => p.status).sort()).toEqual(['failed', 'pending', 'succeeded']);
     });
 
+    /* ── پیامک پرداخت از صف (برش ۷٫۱، ADR-049) ── */
+
+    const paidSmsOf = (phone = MOBILE) =>
+      conn.db
+        .select()
+        .from(smsMessages)
+        .where(and(eq(smsMessages.toMobile, phone), eq(smsMessages.purpose, 'order_paid')))
+        .orderBy(smsMessages.id);
+
+    /** سفارش با یک تلاش پرداخت در انتظار. */
+    async function pendingPayment() {
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder(await newOrder());
+      const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+      const payment = await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
+      return { store, order, authority, payment };
+    }
+
+    const succeed = (paidAt: Date, due: Date) => async () => ({
+      kind: 'succeeded' as const,
+      refId: '803114',
+      cardMask: null,
+      raw: null,
+      paidAt,
+      postHandoffDueAt: due,
+    });
+
+    it('پرداخت موفق پیامک پرداخت «منتظر» را در همان تراکنش می‌نویسد و وصل می‌کند؛ برگشت تکراری و ناموفق هیچ', async () => {
+      const before = (await paidSmsOf()).length;
+      const { store, order, authority } = await pendingPayment();
+      const paidAt = new Date();
+      const due = new Date(paidAt.getTime() + 2 * 86_400_000);
+      const settled = await store.settlePayment('mock', authority, succeed(paidAt, due));
+      expect(settled!.smsId).toEqual(expect.any(Number));
+      const rows = await paidSmsOf();
+      expect(rows).toHaveLength(before + 1);
+      const row = rows.at(-1)!;
+      const day = formatDeadlineDay(due);
+      expect(row).toMatchObject({
+        id: settled!.smsId,
+        provider: 'queued',
+        status: 'pending',
+        attempts: 0,
+        body: orderPaidText(order.orderNumber, day),
+        params: [String(order.orderNumber), day],
+        cost: null,
+      });
+      expect(settled!.payment.smsMessageId).toBe(settled!.smsId);
+      // برگشت تکراری پیامک دوم نمی‌سازد.
+      const again = await store.settlePayment('mock', authority, succeed(paidAt, due));
+      expect(again).toMatchObject({ settled: false, smsId: null });
+      expect(await paidSmsOf()).toHaveLength(before + 1);
+      // ناموفق پیامکی ندارد.
+      const other = await pendingPayment();
+      const failed = await other.store.settlePayment('mock', other.authority, async () => ({ kind: 'failed', code: 'cancelled', raw: null }));
+      expect(failed).toMatchObject({ settled: true, smsId: null, payment: { status: 'failed', smsMessageId: null } });
+      expect(await paidSmsOf()).toHaveLength(before + 1);
+    });
+
+    it('فرستادن پیامک پرداخت بعد از commit، یک بار؛ هزینهٔ sms.ir می‌ماند؛ «دوباره بفرست» فقط نرفته، و سفارش لغوشده نه', async () => {
+      const { store, order, authority } = await pendingPayment();
+      const paidAt = new Date();
+      const settled = await store.settlePayment('mock', authority, succeed(paidAt, new Date(paidAt.getTime() + 86_400_000)));
+      const smsId = settled!.smsId!;
+      const real: SmsTransport = { name: 'smsir', send: async () => ({ status: 'sent', providerMessageId: '880000123', cost: 2.5 }) };
+      const down: SmsTransport = { name: 'smsir', send: () => Promise.reject(new Error('down')) };
+      // اول نرفت: «نرفت» با علت؛ ردیف به همان پرداخت وصل می‌ماند.
+      const [first] = await deliverQueued({ outbox: createSmsOutbox(conn, 'smsir'), transport: down, log: () => {} }, [smsId]);
+      expect(first).toMatchObject({ outcome: 'failed', tag: 'unavailable' });
+      expect((await paidSmsOf()).find((r) => r.id === smsId)).toMatchObject({ status: 'failed', error: 'unavailable', attempts: 1 });
+      // دو «دوباره بفرست» هم‌زمان: یکی، با شناسه و هزینهٔ sms.ir.
+      const both = await Promise.all([
+        deliverQueued({ outbox: createSmsOutbox(conn, 'smsir'), transport: real }, [smsId], { mode: 'retry' }),
+        deliverQueued({ outbox: createSmsOutbox(conn, 'smsir'), transport: real }, [smsId], { mode: 'retry' }),
+      ]);
+      expect(both.map((d) => d[0]!.outcome).sort()).toEqual(['sent', 'skipped']);
+      expect((await paidSmsOf()).find((r) => r.id === smsId)).toMatchObject({
+        status: 'sent',
+        provider: 'smsir',
+        providerMessageId: '880000123',
+        cost: '2.5',
+        attempts: 2,
+        error: null,
+      });
+      // «رفت» پایان است.
+      expect((await deliverQueued({ outbox: createSmsOutbox(conn, 'smsir'), transport: real }, [smsId], { mode: 'retry' }))[0]!.outcome).toBe('skipped');
+
+      // سفارش لغوشده: پیامک پرداختش دیگر زنده نیست؛ نه فرستنده برش می‌دارد و نه پایگاه داده. شاهد: همان پس از برگرداندن لغو.
+      const second = await pendingPayment();
+      const paid = await second.store.settlePayment('mock', second.authority, succeed(paidAt, paidAt));
+      const secondSms = paid!.smsId!;
+      await conn.db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, second.order.id));
+      expect((await deliverQueued({ outbox: createSmsOutbox(conn, 'smsir'), transport: real }, [secondSms]))[0]!.outcome).toBe('skipped');
+      expect(
+        await rejectedConstraint(
+          conn.db.update(smsMessages).set({ status: 'sending', attempts: 1, attemptedAt: new Date() }).where(eq(smsMessages.id, secondSms)),
+        ),
+      ).toBe('sms_messages_live');
+      await conn.db.update(orders).set({ status: 'paid' }).where(eq(orders.id, second.order.id));
+      expect((await deliverQueued({ outbox: createSmsOutbox(conn, 'console'), transport: consoleTransport(() => {}) }, [secondSms]))[0]!.outcome).toBe('sent');
+      expect(order.id).not.toBe(second.order.id);
+    });
+
+    it('محافظ‌های پیامک پرداخت (0027، 0028)، هر کدام با شاهدش', async () => {
+      const { order, payment } = await pendingPayment();
+      const queued = (over: Partial<typeof smsMessages.$inferInsert> = {}) =>
+        conn.db
+          .insert(smsMessages)
+          .values({
+            provider: 'queued',
+            toMobile: MOBILE,
+            purpose: 'order_paid',
+            body: 'جزوه‌یار: سفارش',
+            params: ['1', 'شنبه'],
+            status: 'pending',
+            ...over,
+          })
+          .returning({ id: smsMessages.id })
+          .then((rows) => rows[0]!.id);
+      const succeedWith = (smsMessageId: number | null) =>
+        conn.db
+          .update(payments)
+          .set({ status: 'succeeded', refId: '1', verifiedAt: new Date(), smsMessageId })
+          .where(eq(payments.id, payment.id));
+
+      // `payments_sms`: تلاش تازه بی پیامک درج می‌شود (شاهد: همان درج بی پیامک، `insertPayment` بالا).
+      const loose = await queued();
+      expect(
+        await rejectedConstraint(
+          conn.db.insert(payments).values({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority: `X${randomUUID()}`, smsMessageId: loose }),
+        ),
+      ).toBe('payments_sms');
+      // «موفق» بی پیامک نه؛ پیامک رهگیری، شمارهٔ دیگر یا ردیفی که رفته هم نه.
+      expect(await rejectedConstraint(succeedWith(null))).toBe('payments_sms');
+      expect(await rejectedConstraint(succeedWith(await queued({ purpose: 'tracking', params: ['1', '1'.repeat(24)] })))).toBe('payments_sms');
+      expect(await rejectedConstraint(succeedWith(await queued({ toMobile: '09351234567' })))).toBe('payments_sms');
+      expect(await rejectedConstraint(succeedWith(await queued({ status: 'failed', provider: 'smsir' })))).toBe('payments_sms');
+      // شاهد: همان گذار با ردیف تازهٔ منتظر همین سفارش می‌نشیند.
+      await succeedWith(loose);
+      // پس از آن پیامک پرداخت عوض نمی‌شود، حتی به ردیف تازهٔ درست.
+      expect(await rejectedConstraint(conn.db.update(payments).set({ smsMessageId: await queued() }).where(eq(payments.id, payment.id)))).toBe(
+        'payments_sms',
+      );
+      // یک پیامک برای هر پرداخت: ردیف همین پرداخت به پرداخت موفق دیگری وصل نمی‌شود (شاخص یکتای `payments_sms`).
+      const other = await pendingPayment();
+      expect(
+        await rejectedConstraint(
+          conn.db
+            .update(payments)
+            .set({ status: 'succeeded', refId: '2', verifiedAt: new Date(), smsMessageId: loose })
+            .where(eq(payments.id, other.payment.id)),
+        ),
+      ).toBe('payments_sms');
+
+      // `sms_messages_queued`: منتظر فقط پرداخت و رهگیری، با متن (شاهد: `queued()` بالا).
+      expect(await rejectedConstraint(queued({ purpose: 'otp', provider: 'console', params: null }))).toBe('sms_messages_queued');
+      expect(await rejectedConstraint(queued({ body: null }))).toBe('sms_messages_queued');
+      // `sms_messages_otp_secret`: کد با پنل واقعی بی متن و پارامتر؛ کنسولی با متن (شاهد).
+      const otp = (over: Partial<typeof smsMessages.$inferInsert>) =>
+        conn.db.insert(smsMessages).values({ provider: 'smsir', toMobile: MOBILE, purpose: 'otp', body: null, status: 'sent', ...over });
+      expect(await rejectedConstraint(otp({ body: 'کد تأیید جزوه‌یار: 12345' }))).toBe('sms_messages_otp_secret');
+      expect(await rejectedConstraint(otp({ params: ['12345'] }))).toBe('sms_messages_otp_secret');
+      expect(await rejectedConstraint(otp({}))).toBeUndefined();
+      expect(await rejectedConstraint(otp({ provider: 'console', status: 'logged', body: 'کد تأیید جزوه‌یار: 12345' }))).toBeUndefined();
+      // `sms_messages_cost`: هزینهٔ منفی نه؛ صفر (شاهد).
+      expect(await rejectedConstraint(otp({ cost: '-1' }))).toBe('sms_messages_cost');
+      expect(await rejectedConstraint(otp({ cost: '0' }))).toBeUndefined();
+      // `sms_messages_frozen`: پیامک کد پس از درج عوض نمی‌شود.
+      const [sentOtp] = await conn.db.select({ id: smsMessages.id }).from(smsMessages).where(and(eq(smsMessages.purpose, 'otp'), eq(smsMessages.provider, 'smsir'))).limit(1);
+      expect(await rejectedConstraint(conn.db.update(smsMessages).set({ status: 'failed' }).where(eq(smsMessages.id, sentOtp!.id)))).toBe(
+        'sms_messages_frozen',
+      );
+      // `sms_messages_live`: ردیف منتظری که به هیچ پرداخت موفقی وصل نیست برداشته نمی‌شود (شاهد: همان ردیف وصل‌شده، بالا).
+      const orphan = await queued();
+      expect(
+        await rejectedConstraint(
+          conn.db.update(smsMessages).set({ status: 'sending', attempts: 1, attemptedAt: new Date() }).where(eq(smsMessages.id, orphan)),
+        ),
+      ).toBe('sms_messages_live');
+      // `sms_messages_flow`: برداشتن هزینه نمی‌گذارد (شاهد: همان برداشتن بی هزینه)؛ هزینه فقط با «رفت»؛ «نرفت» با هزینه نه (شاهد: «رفت» با هزینه).
+      expect(
+        await rejectedConstraint(
+          conn.db.update(smsMessages).set({ status: 'sending', attempts: 1, attemptedAt: new Date(), cost: '1' }).where(eq(smsMessages.id, loose)),
+        ),
+      ).toBe('sms_messages_flow');
+      await conn.db.update(smsMessages).set({ status: 'sending', attempts: 1, attemptedAt: new Date() }).where(eq(smsMessages.id, loose));
+      expect(
+        await rejectedConstraint(conn.db.update(smsMessages).set({ status: 'failed', cost: '1' }).where(eq(smsMessages.id, loose))),
+      ).toBe('sms_messages_flow');
+      expect(
+        await rejectedConstraint(conn.db.update(smsMessages).set({ status: 'sent', sentAt: new Date(), cost: '1' }).where(eq(smsMessages.id, loose))),
+      ).toBeUndefined();
+    });
+
+    it('پنل (۷٫۱): پیامک پرداخت در کارت پرداخت‌ها، «دوباره بفرست» با محدوده، و هشدار پیشخوان برای پیامکی که نرفت', async () => {
+      const { store, order, authority, payment } = await pendingPayment();
+      const paidAt = new Date();
+      const settled = await store.settlePayment('mock', authority, succeed(paidAt, new Date(paidAt.getTime() + 86_400_000)));
+      const panel = createPanelOrderStore(conn);
+      const details = await panel.details(ALL_ORDERS, order.orderNumber);
+      expect(details!.payments.map((p) => [p.id, p.status, p.sms?.id, p.sms?.status])).toEqual([[payment.id, 'succeeded', settled!.smsId, 'pending']]);
+      expect(await panel.paymentSms(ALL_ORDERS, payment.id)).toMatchObject({
+        orderNumber: order.orderNumber,
+        orderStatus: 'paid',
+        sms: { id: settled!.smsId, toMobile: MOBILE, status: 'pending' },
+      });
+      // بیرون از محدودهٔ چاپخانهٔ دیگر: همان «نیست».
+      expect(await panel.paymentSms({ kind: 'partner', partnerId: randomUUID() }, payment.id)).toBeNull();
+      expect(await panel.paymentSms(ALL_ORDERS, randomUUID())).toBeNull();
+
+      const clock = (at: Date) => ({
+        at,
+        staleBefore: new Date(at.getTime() + 3_600_000),
+        unreturnedBefore: new Date(at.getTime() - 30 * 60_000),
+        untrackedSince: new Date(at.getTime() - 45 * 86_400_000),
+      });
+      // منتظرِ تازه هشدار نیست؛ منتظری که ماند هست (فرستنده افتاد)؛ «نرفت» هست؛ «رفت» نه.
+      expect((await panel.alerts(ALL_ORDERS, clock(new Date()))).paidSmsFailed).not.toContain(order.orderNumber);
+      const later = new Date(Date.now() + SMS_STUCK_MS + 60_000);
+      expect((await panel.alerts(ALL_ORDERS, clock(later))).paidSmsFailed).toContain(order.orderNumber);
+      await deliverQueued(
+        { outbox: createSmsOutbox(conn, 'smsir'), transport: { name: 'smsir', send: () => Promise.reject(new Error('down')) }, log: () => {} },
+        [settled!.smsId!],
+      );
+      expect((await panel.alerts(ALL_ORDERS, clock(new Date()))).paidSmsFailed).toContain(order.orderNumber);
+      // سفارش لغوشده دیگر هشدار نیست (پیامک پرداختش هم دیگر زنده نیست).
+      await conn.db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, order.id));
+      expect((await panel.alerts(ALL_ORDERS, clock(new Date()))).paidSmsFailed).not.toContain(order.orderNumber);
+      await conn.db.update(orders).set({ status: 'paid' }).where(eq(orders.id, order.id));
+      await deliverQueued({ outbox: createSmsOutbox(conn, 'console'), transport: consoleTransport(() => {}) }, [settled!.smsId!], { mode: 'retry' });
+      expect((await panel.alerts(ALL_ORDERS, clock(new Date()))).paidSmsFailed).not.toContain(order.orderNumber);
+    });
+
+    it('آمار پیامک و کد برای پنل (۷٫۱): کد ساعت و ۲۴ ساعت، نخستین لحظهٔ پر شدن سقف امروز، و هزینهٔ پیامک‌های پذیرفته', async () => {
+      await conn.db.delete(otpRequests);
+      const stats = createSmsStats(conn);
+      const now = Date.now();
+      const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000);
+      const insert = (createdAt: Date) =>
+        conn.db.insert(otpRequests).values({ mobile: MOBILE, codeHash: 'f'.repeat(64), sessionHash: SESSION, ipHash: 'ip', createdAt, expiresAt: createdAt });
+      for (const minutes of [30 * 60, 20 * 60, 90, 50, 40, 10]) await insert(at(minutes));
+      expect(await stats.otpUsage(new Date(now))).toEqual({ hour: 3, day: 5, hourOldest: at(50), dayOldest: at(20 * 60) });
+      // سقف ساعتی ۳: کد ۴۰ دقیقه پیش سومین کد ساعت پیش از خودش بود (۹۰، ۵۰ و ۴۰)؛ ۲۴ ساعته ۵ با کد ۱۰ دقیقه پیش؛ ۴ و ۶ هرگز.
+      const since = at(24 * 60);
+      expect(await stats.otpCapReached({ since, hourLimit: 3, dayLimit: 5 })).toEqual({ hourAt: at(40), dayAt: at(10) });
+      expect(await stats.otpCapReached({ since, hourLimit: 4, dayLimit: 6 })).toEqual({ hourAt: null, dayAt: null });
+      // شاهد «از آغاز امروز»: همان پر شدن پیش از `since` شمرده نمی‌شود.
+      expect(await stats.otpCapReached({ since: at(5), hourLimit: 3, dayLimit: 5 })).toEqual({ hourAt: null, dayAt: null });
+
+      const before = await stats.smsCost(at(7 * 24 * 60));
+      await conn.db.insert(smsMessages).values([
+        { provider: 'smsir', toMobile: MOBILE, purpose: 'otp', status: 'sent', cost: '2.5', sentAt: at(60) },
+        { provider: 'smsir', toMobile: MOBILE, purpose: 'otp', status: 'sent', cost: '1.5', sentAt: at(8 * 24 * 60) },
+        { provider: 'smsir', toMobile: MOBILE, purpose: 'otp', status: 'failed' },
+        { provider: 'console', toMobile: MOBILE, purpose: 'otp', body: 'x', status: 'logged', sentAt: at(60) },
+      ]);
+      const after = await stats.smsCost(at(7 * 24 * 60));
+      expect([after.cost - before.cost, after.count - before.count]).toEqual([2.5, 1]);
+    });
+
     it('سفارش در انتظاری که فایلش رفت منقضی می‌شود؛ پرداخت‌شده نه', async () => {
       const store = createOrderStore(conn);
       const { order } = await store.createOrder(await newOrder());
@@ -1039,7 +1349,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('پیامک کنسولی با متن کامل در sms_messages می‌نشیند', async () => {
       await createSmsLog(conn).insert({ provider: 'console', toMobile: MOBILE, purpose: 'otp', body: 'کد تأیید جزوه‌یار: 04821', status: 'logged' });
-      const [row] = await conn.db.select().from(smsMessages).where(eq(smsMessages.toMobile, MOBILE));
+      // پرداخت‌های همین بخش پیامک پرداخت منتظر، و محافظ‌های ۷٫۱ پیامک کد، هم به همین شماره دارند.
+      const [row] = await conn.db
+        .select()
+        .from(smsMessages)
+        .where(and(eq(smsMessages.toMobile, MOBILE), eq(smsMessages.purpose, 'otp'), eq(smsMessages.body, 'کد تأیید جزوه‌یار: 04821')));
       expect(row).toMatchObject({ provider: 'console', purpose: 'otp', status: 'logged', body: 'کد تأیید جزوه‌یار: 04821' });
     });
 
@@ -1652,6 +1966,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         reviewRows: 0,
         untracked: [],
         smsFailed: [],
+        // پیامک پرداخت (۷٫۱) این سفارش‌ها منتظر ماند و هرگز فرستاده نشد (تست فرستنده ندارد): پس از ۵ دقیقه «نرفت» است. «شنبه» پس
+        // از «حالا»ی تست پرداخت شد، پس پیامکش هنوز در راه است.
+        paidSmsFailed: [num.late!, num.today2!, num.today1!, num.tomorrow!, num.wed!].sort((a, b) => a - b),
       });
       // نیم ساعت بعد، تلاش ۱۰ دقیقه‌ای هم بی برگشت است (شاهد مهلت تلاش).
       expect(
@@ -3413,7 +3730,15 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           unassigned: [bare.orderNumber],
           unreturned: [{ orderNumber: waiting.orderNumber, attempts: 1 }],
         });
-        expect(await panel.alerts(NOOR, clock)).toEqual({ failedPdf: [], unreturned: [], unassigned: [], reviewRows: 0, untracked: [], smsFailed: [] });
+        expect(await panel.alerts(NOOR, clock)).toEqual({
+          failedPdf: [],
+          unreturned: [],
+          unassigned: [],
+          reviewRows: 0,
+          untracked: [],
+          smsFailed: [],
+          paidSmsFailed: [],
+        });
         expect(await panel.counts(ALL_ORDERS, { search: null, clock })).toMatchObject({ open: 1, awaiting: 1, all: 2 });
         expect(await panel.counts(NOOR, { search: null, clock })).toEqual({ open: 0, handed: 0, cancelled: 0, awaiting: 0, abandoned: 0, all: 0 });
         for (const bucket of ['open', 'awaiting', 'all'] as const) {
@@ -4122,6 +4447,75 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(resolveServiceKey('PAYMENT_MERCHANT_ID', await store.read('PAYMENT_MERCHANT_ID'), {}, KEY, () => undefined)).toMatchObject({
         source: 'unreadable',
       });
+    });
+
+    it('دو کلید تازهٔ قالب (0027): پذیرفته، با جای مهروموم خودشان؛ شاهد: همان نام‌ها پیش از 0027 رد می‌شدند', async () => {
+      for (const name of ['SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE'] as const) {
+        const sealed = seal(KEY, '731058', serviceKeyContext(name));
+        expect(await rejectedConstraint(conn.db.insert(serviceSecrets).values({ name, sealed, updatedAt: NOW })), name).toBeUndefined();
+        expect(resolveServiceKey(name, await createSecretStore(conn).read(name), {}, KEY, () => undefined)).toMatchObject({ source: 'panel', value: '731058' });
+      }
+      expect(SERVICE_KEYS).toEqual(['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID']);
+      // CHECK همان پنج نام کد است، نه بیشتر: نام تازه‌ای که کد نمی‌شناسد در پایگاه داده هم جا ندارد.
+      const [check] = await conn.db.execute<{ def: string }>(
+        sql`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'service_secrets_name'`,
+      );
+      expect([...String(check!.def).matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]).sort()).toEqual([...SERVICE_KEYS].sort());
+      // شاهد: CHECK پیش از 0027 همین دو را نمی‌پذیرفت (همان شرط، در تراکنشی که برمی‌گردد).
+      const before = await conn.db
+        .transaction(async (tx) => {
+          await tx.execute(sql`ALTER TABLE service_secrets DROP CONSTRAINT service_secrets_name`);
+          await tx.execute(sql`DELETE FROM service_secrets WHERE name IN ('SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE')`);
+          await tx.execute(
+            sql`ALTER TABLE service_secrets ADD CONSTRAINT service_secrets_name CHECK (name IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'PAYMENT_MERCHANT_ID'))`,
+          );
+          await tx.insert(serviceSecrets).values({ name: 'SMS_PAID_TEMPLATE', sealed: seal(KEY, '1', serviceKeyContext('SMS_PAID_TEMPLATE')), updatedAt: NOW });
+        })
+        .then(() => undefined, (error: unknown) => (error as { cause?: { constraint_name?: string } }).cause?.constraint_name);
+      expect(before).toBe('service_secrets_name');
+      expect(await createSecretStore(conn).read('SMS_PAID_TEMPLATE')).not.toBeNull();
+    });
+
+    it('«آزمایش» کلید (۷٫۱): رویداد با نتیجه و بی مقدار؛ سقف زیر قفل دقیق است؛ آخرین حال هر کلید', async () => {
+      const store = createSecretStore(conn);
+      const since = new Date(NOW.getTime() - 3_600_000);
+      let calls = 0;
+      const test = (name: 'SMS_API_KEY' | 'SMS_OTP_TEMPLATE', subject: 'current' | 'new', from = since) =>
+        store.test({
+          name,
+          at: NOW,
+          actor: actor(),
+          since: from,
+          limit: 3,
+          run: async () => {
+            calls += 1;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return { outcome: 'ok' as const };
+          },
+          detail: (result) => ({ subject, outcome: result.outcome }),
+        });
+      // پنج آزمایش هم‌زمان با سقف ۳: سه، و `run` هم فقط سه بار (شاهد: بی قفل هر پنج از شمارش می‌گذشتند).
+      const results = await Promise.all([1, 2, 3, 4, 5].map(() => test('SMS_API_KEY', 'current')));
+      expect(results.filter((r) => r.ok)).toHaveLength(3);
+      expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'limited' }, { ok: false, reason: 'limited' }]);
+      expect(calls).toBe(3);
+      const log = await eventsOf(SERVICE_KEY_TARGET);
+      expect(log.map((e) => [e.action, e.targetId, e.detail])).toEqual(
+        [1, 2, 3].map(() => ['settings.key_test', 'SMS_API_KEY', { subject: 'current', outcome: 'ok', name: 'SMS_API_KEY' }]),
+      );
+      // آزمایش‌های بیرون از پنجره شمرده نمی‌شوند (رویداد عوض‌شدنی نیست، پس پنجره جلو می‌رود).
+      expect((await test('SMS_OTP_TEMPLATE', 'new', NOW)).ok).toBe(true);
+
+      // آخرین حال هر کلید: آزمایش مقدار امروز، گذاشتن یا برگرداندن؛ آزمایش مقدار تازه نه.
+      expect((await store.lastChecks()).map((c) => [c.name, c.action, c.detail.subject])).toEqual([['SMS_API_KEY', 'settings.key_test', 'current']]);
+      const sealed = seal(KEY, '482913', serviceKeyContext('SMS_OTP_TEMPLATE'));
+      await store.put({ name: 'SMS_OTP_TEMPLATE', sealed, verify: () => true, at: NOW, actor: actor(), detail: { from: 'empty', tested: 'ok' } });
+      const checks = await store.lastChecks();
+      expect(checks.map((c) => [c.name, c.action, c.adminName, c.detail.tested ?? null])).toEqual([
+        ['SMS_API_KEY', 'settings.key_test', 'سارا رضایی', null],
+        ['SMS_OTP_TEMPLATE', 'settings.key_set', 'سارا رضایی', 'ok'],
+      ]);
+      expect(JSON.stringify(await eventsOf(SERVICE_KEY_TARGET))).not.toContain('482913');
     });
   });
 
@@ -5579,7 +5973,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           'sms_messages_frozen',
         );
         // نتیجهٔ فرستنده‌ای که دیر رسید (ردیف دیگر «در حال فرستادن» نیست) هیچ نمی‌نویسد.
-        await outbox().finish(sent[0]!.id, NOW, { ok: false, provider: 'console', error: 'unavailable' });
+        await outbox().finish(sent[0]!.id, NOW, { ok: false, provider: 'console', error: 'unavailable', tag: 'unavailable' });
         expect((await smsOf(sent[0]!.id)).status).toBe('logged');
 
         // صفحهٔ سفارش و پنل: کدهای زنده با پیامکشان.
@@ -5657,7 +6051,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           [smsId!],
           { mode: 'retry' },
         );
-        expect(failed).toEqual({ id: smsId, outcome: 'failed', error: 'unavailable' });
+        expect(failed).toEqual({ id: smsId, outcome: 'failed', error: 'unavailable', tag: 'unavailable' });
         expect(await smsOf(smsId!)).toMatchObject({ status: 'failed', error: 'unavailable', attempts: 1, sentAt: null });
         // دو «دوباره بفرست» هم‌زمان: یکی.
         const [a, b] = await Promise.all([deliver([smsId!], 'retry', later), deliver([smsId!], 'retry', later)]);

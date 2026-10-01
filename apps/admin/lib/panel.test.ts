@@ -292,6 +292,15 @@ describe('رویدادها', () => {
       key('settings.key_set', { name: 'PAYMENT_MERCHANT_ID', from: 'env' }),
       key('settings.key_set', { name: 'SMS_OTP_TEMPLATE', from: 'empty' }),
       key('settings.key_revert', { name: 'SMS_API_KEY', to: 'env' }),
+      // ۷٫۱: آزمایش کلید و ذخیره با نتیجهٔ آزمایش؛ سقف ۲۴ ساعته و هشدار اعتبار.
+      key('settings.key_test', { name: 'SMS_API_KEY', subject: 'current', outcome: 'ok', credit: 184_200 }),
+      key('settings.key_test', { name: 'SMS_API_KEY', subject: 'new', outcome: 'rejected', http: 401 }),
+      key('settings.key_test', { name: 'SMS_PAID_TEMPLATE', subject: 'new', outcome: 'ok', mobile: '0912 ••• 6789' }),
+      key('settings.key_test', { name: 'SMS_TRACKING_TEMPLATE', subject: 'current', outcome: 'unavailable', mobile: '0912 ••• 6789' }),
+      key('settings.key_set', { name: 'SMS_PAID_TEMPLATE', from: 'empty', tested: 'ok' }),
+      key('settings.key_set', { name: 'SMS_API_KEY', from: 'env', tested: 'skipped' }),
+      setting('settings.update', { key: 'otp.site_daily_limit', from: 2000, to: 3000 }),
+      setting('settings.update', { key: 'sms.credit_alert_days', from: 7, to: 10 }),
     ]);
     expect(lines.map((l) => l.text)).toEqual([
       ['روز کاری تحویل به پست: ', { ltr: '2' }, ' ← ', { ltr: '3' }],
@@ -313,11 +322,31 @@ describe('رویدادها', () => {
       ['تعطیلی ', { ltr: '1406/04/01' }, ' افزوده شد: آزمایش'],
       ['تعطیلی ', { ltr: '1405/10/02' }, ' حذف شد: ولادت امام علی (ع) / روز پدر'],
       ['کلید «کد پذیرندهٔ زیبال» عوض شد'],
-      ['کلید «قالب کد پیامکی sms.ir» وارد شد'],
+      ['کلید «شناسهٔ قالب کد تأیید» وارد شد'],
       ['کلید «کلید API sms.ir» به ', { ltr: '.env' }, ' برگشت'],
+      ['کلید «کلید API sms.ir» آزمایش شد', ': ', 'درست'],
+      ['کلید «کلید API sms.ir» (مقدار تازه) آزمایش شد', ': ', 'رد شد (کد ', { ltr: '401' }, ')'],
+      ['کلید «شناسهٔ قالب پیامک پرداخت» (مقدار تازه) آزمایش شد', ' با پیامک به ', { ltr: '0912 ••• 6789' }, ': ', 'درست'],
+      ['کلید «شناسهٔ قالب پیامک رهگیری» آزمایش شد', ' با پیامک به ', { ltr: '0912 ••• 6789' }, ': ', 'sms.ir جواب نداد'],
+      ['کلید «شناسهٔ قالب پیامک پرداخت» پس از پیامک آزمایشی وارد شد'],
+      ['کلید «کلید API sms.ir»، بی آزمایش عوض شد'],
+      ['سقف کد پیامکی کل سایت در 24 ساعت: ', { ltr: '2,000' }, ' ← ', { ltr: '3,000' }],
+      ['هشدار اعتبار پیامک (روز مصرف): ', { ltr: '7' }, ' ← ', { ltr: '10' }],
     ]);
-    expect(EVENT_KINDS.map((k) => k.label)).toEqual(['همه', 'ورود', 'سفارش', 'ارسال', 'تعرفه', 'تنظیمات و کلیدها', 'چاپخانه‌ها', 'ادمین‌ها']);
-    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'shipments', 'tariff', 'settings', 'partners', 'admins']);
+    // هیچ سطری مقدار کلید ندارد: فقط نام، نتیجه و موبایل پوشیده.
+    expect(JSON.stringify(lines)).not.toMatch(/09\d{9}/);
+    expect(EVENT_KINDS.map((k) => k.label)).toEqual([
+      'همه',
+      'ورود',
+      'سفارش',
+      'پرداخت و بازپرداخت',
+      'ارسال',
+      'تعرفه',
+      'تنظیمات و کلیدها',
+      'چاپخانه‌ها',
+      'ادمین‌ها',
+    ]);
+    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'payments', 'shipments', 'tariff', 'settings', 'partners', 'admins']);
   });
 
   it('ارسال (۶٫۱): بارگذاری، ثبت با شمارها و سفارش‌هایی که تحویل پست شدند، دور انداختن، و برگرداندن با دلیل', () => {

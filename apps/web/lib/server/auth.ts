@@ -2,8 +2,10 @@
  * کد پیامکی و نشست (ADR-033): هویت فقط موقع پرداخت، بی رمز و ثبت‌نام.
  *
  * - **کد:** ۵ رقم، ۲ دقیقه اعتبار، ۳ فرصت، ارسال دوباره پس از ۹۰ ثانیه.
- * - **سقف ارسال:** ۵ کد در ساعت برای هر شماره، ۲۰ برای هر IP، و سقف ساعتی کل سایت (`settings`،
- *   پیش‌فرض ۳۰۰). شمارش از ردیف‌های `otp_requests`، زیر یک قفل پستگرس، نه Redis.
+ * - **سقف ارسال، لایه‌لایه** (برش ۷، ADR-049، سؤال ۱۱۷): کد فقط برای مرورگری که جزوهٔ آماده و زنده روی سرور دارد (دروازهٔ جزوه، همان
+ *   شرط «ادامه»)؛ ۵ کد در ساعت برای هر مرورگر؛ ۵ در ساعت و ۱۰ در ۲۴ ساعت برای هر شماره؛ ۲۰ در ساعت برای هر IP؛ و ترمز آخر کل
+ *   سایت، ساعتی و ۲۴ ساعته (`settings`، پیش‌فرض ۳۰۰ و ۲٬۰۰۰). پنجره‌ها لغزان‌اند (سؤال ۱۳۳). شمارش از ردیف‌های `otp_requests`، زیر یک
+ *   قفل پستگرس، نه Redis. مشتری واقعی همیشه جزوهٔ روی سرور دارد، پس دروازه و سقف مرورگر فقط ربات را می‌گیرند.
  * - **هش، نه متن:** `code_hash` و `ip_hash` هر دو HMAC با `SESSION_SECRET`اند؛ نشت پایگاه داده نه کد
  *   زنده‌ای لو می‌دهد و نه IP (فضای IPv4 کوچک است و هش بی‌کلید با شمردن برمی‌گشت).
  * - **همان مرورگر:** کد فقط در نشست ناشناسی (`jy_sid`) پذیرفته می‌شود که خواستش، و فقط آخرین کد آن
@@ -19,8 +21,8 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 import { otpRequestSchema, otpVerifySchema } from '@jozveyar/contracts/checkout';
-import type { AuthStore, OtpCounts, OtpRow } from '@jozveyar/db';
-import { otpText, type SmsProvider } from '@jozveyar/sms';
+import { FILE_MARGIN_MS, OTP_FIXED_LIMITS, type AuthStore, type OtpCounts, type OtpRow } from '@jozveyar/db';
+import { otpParams, otpText, type SmsProvider } from '@jozveyar/sms';
 import { toLatinDigits } from '@jozveyar/text';
 import { normalizeIranMobile } from '@jozveyar/text/input';
 
@@ -31,8 +33,13 @@ export const OTP_TTL_MS = 2 * 60_000;
 export const OTP_MAX_ATTEMPTS = 3;
 export const OTP_RESEND_MS = 90_000;
 export const OTP_WINDOW_MS = 60 * 60_000;
-export const OTP_PER_MOBILE = 5;
-export const OTP_PER_IP = 20;
+/** پنجرهٔ ۲۴ ساعتهٔ لغزان (برش ۷، سؤال ۱۳۳). */
+export const OTP_DAY_MS = 24 * 60 * 60_000;
+/** سقف‌های ثابت، یک منبع با «تنظیمات» پنل (`OTP_FIXED_LIMITS`): هر شماره در ساعت و از برش ۷ در ۲۴ ساعت، هر مرورگر (`jy_sid`) و هر IP. */
+export const OTP_PER_MOBILE = OTP_FIXED_LIMITS.mobileHour;
+export const OTP_PER_MOBILE_DAY = OTP_FIXED_LIMITS.mobileDay;
+export const OTP_PER_BROWSER = OTP_FIXED_LIMITS.browserHour;
+export const OTP_PER_IP = OTP_FIXED_LIMITS.ipHour;
 /** نشست بعد از کد: همان گوشی تا ۳۰ روز کد نمی‌خواهد. */
 export const AUTH_TTL_MS = 30 * 24 * 60 * 60_000;
 
@@ -48,6 +55,8 @@ export interface AuthServiceDeps {
   secret: string;
   /** سقف کد در ساعت برای کل سایت (`otp.site_hourly_limit`). */
   siteHourlyLimit: () => Promise<number>;
+  /** سقف کد در ۲۴ ساعت برای کل سایت (`otp.site_daily_limit`، برش ۷). */
+  siteDailyLimit: () => Promise<number>;
   now?: () => Date;
   log?: (message: string, error?: unknown) => void;
   /** کد تصادفی؛ فقط تست جایش را می‌گیرد. */
@@ -74,22 +83,30 @@ export function createAuthService(deps: AuthServiceDeps) {
     return x.length === y.length && timingSafeEqual(x, y);
   };
 
-  /** سقف پرشده، یا null. «چند ثانیهٔ دیگر» تا بیرون رفتن قدیمی‌ترین کد پنجره. */
-  function limitHit(counts: OtpCounts, at: Date, siteLimit: number): Failure | null {
+  /**
+   * سقف پرشده، یا null. «چند ثانیهٔ دیگر» تا بیرون رفتن قدیمی‌ترین کد همان پنجره. اول دروازهٔ جزوه (کد برای مرورگری که جزوه‌ای
+   * روی سرور ندارد اصلاً معنا ندارد)، بعد لایه‌ها از تنگ به گشاد، و ترمز کل سایت آخر.
+   */
+  function limitHit(counts: OtpCounts, at: Date, siteLimit: number, siteDayLimit: number): Failure | null {
     const wait = (from: Date | null, span: number) =>
       Math.max(1, Math.ceil(((from ?? at).getTime() + span - at.getTime()) / 1000));
+    const tooMany = (scope: string, from: Date | null, span: number) =>
+      fail(429, 'too_many_codes', { scope, retryAfterSeconds: wait(from, span) });
+    if (!counts.ready) return fail(409, 'otp_no_documents');
     if (counts.mobileLatest && at.getTime() - counts.mobileLatest.getTime() < OTP_RESEND_MS) {
       return fail(429, 'resend_too_soon', { retryAfterSeconds: wait(counts.mobileLatest, OTP_RESEND_MS) });
     }
-    if (counts.mobile >= OTP_PER_MOBILE) {
-      return fail(429, 'too_many_codes', { scope: 'mobile', retryAfterSeconds: wait(counts.mobileOldest, OTP_WINDOW_MS) });
-    }
-    if (counts.ip >= OTP_PER_IP) {
-      return fail(429, 'too_many_codes', { scope: 'ip', retryAfterSeconds: wait(counts.ipOldest, OTP_WINDOW_MS) });
-    }
+    if (counts.session >= OTP_PER_BROWSER) return tooMany('browser', counts.sessionOldest, OTP_WINDOW_MS);
+    if (counts.mobile >= OTP_PER_MOBILE) return tooMany('mobile', counts.mobileOldest, OTP_WINDOW_MS);
+    if (counts.mobileDay >= OTP_PER_MOBILE_DAY) return tooMany('mobile_day', counts.mobileDayOldest, OTP_DAY_MS);
+    if (counts.ip >= OTP_PER_IP) return tooMany('ip', counts.ipOldest, OTP_WINDOW_MS);
     if (counts.site >= siteLimit) {
       log(`✗ سقف ساعتی کد پیامکی کل سایت (${siteLimit}) پر شد.`);
-      return fail(429, 'too_many_codes', { scope: 'site', retryAfterSeconds: wait(counts.siteOldest, OTP_WINDOW_MS) });
+      return tooMany('site', counts.siteOldest, OTP_WINDOW_MS);
+    }
+    if (counts.siteDay >= siteDayLimit) {
+      log(`✗ سقف ۲۴ ساعتهٔ کد پیامکی کل سایت (${siteDayLimit}) پر شد.`);
+      return tooMany('site_day', counts.siteDayOldest, OTP_DAY_MS);
     }
     return null;
   }
@@ -115,13 +132,21 @@ export function createAuthService(deps: AuthServiceDeps) {
       if (!mobile) return fail(400, 'invalid_mobile');
 
       const at = now();
-      const siteLimit = await deps.siteHourlyLimit();
+      const [siteLimit, siteDayLimit] = await Promise.all([deps.siteHourlyLimit(), deps.siteDailyLimit()]);
       const code = newCode();
       const verdict: { refused: Failure | null } = { refused: null };
       const issued = await deps.store.issueOtp(
-        { mobile, ipHash: ipHash(ip || 'unknown'), sessionHash, since: new Date(at.getTime() - OTP_WINDOW_MS) },
+        {
+          mobile,
+          ipHash: ipHash(ip || 'unknown'),
+          sessionHash,
+          hourSince: new Date(at.getTime() - OTP_WINDOW_MS),
+          daySince: new Date(at.getTime() - OTP_DAY_MS),
+          // همان حاشیهٔ پرداخت: جزوه‌ای که تا یک ساعت دیگر پاک می‌شود سفارش نمی‌شود، پس کد هم نمی‌گیرد.
+          readyUntil: new Date(at.getTime() + FILE_MARGIN_MS),
+        },
         (counts) => {
-          verdict.refused = limitHit(counts, at, siteLimit);
+          verdict.refused = limitHit(counts, at, siteLimit, siteDayLimit);
           if (verdict.refused) return null;
           return { codeHash: codeHash(mobile, code), createdAt: at, expiresAt: new Date(at.getTime() + OTP_TTL_MS) };
         },
@@ -131,7 +156,7 @@ export function createAuthService(deps: AuthServiceDeps) {
       // بعد از درج، نه در همان تراکنش: پنل واقعی درخواست HTTP است. کدی که پیامکش نرسید در سقف
       // شمرده می‌ماند؛ ربات با پنل از کار افتاده هم نمی‌تواند بی‌حساب درخواست بفرستد.
       try {
-        await deps.sms.send({ to: mobile, purpose: 'otp', text: otpText(code) });
+        await deps.sms.send({ to: mobile, purpose: 'otp', text: otpText(code), params: otpParams(code) });
       } catch (error) {
         log('✗ پیامک کد فرستاده نشد:', error);
         return fail(503, 'sms_unavailable');

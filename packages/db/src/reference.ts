@@ -36,6 +36,15 @@ export const SLA_DAYS_SETTING = 'order.sla_days';
 export const HOLIDAYS_SETTING = 'calendar.holidays';
 /** سقف کد پیامکی کل سایت در ساعت (ADR-033). */
 export const OTP_SITE_LIMIT_SETTING = 'otp.site_hourly_limit';
+/** سقف کد پیامکی کل سایت در ۲۴ ساعت گذشته (برش ۷، ADR-049). */
+export const OTP_SITE_DAILY_SETTING = 'otp.site_daily_limit';
+/** هشدار اعتبار کم sms.ir، به روز مصرف (برش ۷، ADR-049، سؤال ۱۳۷). */
+export const SMS_CREDIT_ALERT_SETTING = 'sms.credit_alert_days';
+/**
+ * سقف‌های ثابت کد پیامکی، کنار دو سقف کل سایت که تنظیم‌اند (برش ۷، ADR-049، سؤال ۱۱۷): هر مرورگر و هر شماره در ساعت، هر شماره در ۲۴
+ * ساعت، و هر اینترنت در ساعت. یک منبع: وب با همین‌ها می‌سنجد و «تنظیمات» پنل همین‌ها را کنار سقف کل سایت نشان می‌دهد.
+ */
+export const OTP_FIXED_LIMITS = { browserHour: 5, mobileHour: 5, mobileDay: 10, ipHour: 20 } as const;
 /** سالی که تعطیلی‌ها تا پایانش با تقویم رسمی منتشرشده تطبیق داده شده‌اند (برش ۴٫۶). */
 export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
 /** فایل‌های سفارش چند روز پس از «تحویل پست شد» یا «لغو شد» پاک می‌شوند (برش ۵٫۱، ADR-044). */
@@ -58,12 +67,17 @@ export const REPORT_BANDS_SETTING = 'report.weight_bands';
  *
  * بازه‌های وزن گزارش ارسال همان بازه‌های کرایهٔ تعرفهٔ فعال‌اند (تصمیم ۱۰۱)، تا مالک از گزارش عوضشان کند؛ پیش‌فرض عدد نیست،
  * `'tariff'` است، تا گزارش با هر نسخهٔ تازهٔ تعرفه همراه شود.
+ *
+ * سقف کد در ۲۴ ساعت ۲٬۰۰۰ است (برش ۷، سؤال ۱۱۷): کمتر از هفت ساعت پشت‌سرهم با سقف ساعتی، پس روز شلوغ واقعی را نمی‌بندد، و
+ * بدترین هزینهٔ روزانهٔ کد را به ۲٬۰۰۰ تکه می‌بندد. هشدار اعتبار ۷ روز مصرف است (سؤال ۱۳۷): یک هفته برای شارژ.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
   [HOLIDAYS_SETTING]: OFFICIAL_HOLIDAYS,
   [OFFICIAL_THROUGH_SETTING]: 1405,
   [OTP_SITE_LIMIT_SETTING]: 300,
+  [OTP_SITE_DAILY_SETTING]: 2000,
+  [SMS_CREDIT_ALERT_SETTING]: 7,
   [FILES_RETENTION_SETTING]: 30,
   [REPORT_BANDS_SETTING]: 'tariff',
 };
