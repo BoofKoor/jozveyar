@@ -98,7 +98,7 @@ import { MISMATCH_ALERT_MS, type PanelScope } from './panel.js';
 import { bandsDecision, bandsSeen, createShippingReportStore, currentBands } from './report.js';
 import { readSetting, REPORT_BANDS_SETTING } from './reference.js';
 import { createZibalMock, type ZibalMock } from '@jozveyar/payments/mock';
-import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
+import { mockGateway, PaymentError, type PaymentGateway } from '@jozveyar/payments';
 import { zibalGateway } from '@jozveyar/payments/zibal';
 import { PAYMENT_ATTEMPT_TTL_MS } from './orders.js';
 import { providersOf, settleWith, watchHeld } from './payments.js';
@@ -3247,6 +3247,50 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         }
       });
 
+      it('قفل‌های ماشه به‌تنهایی، بی قفل کد: برگرداندن لغو و درج دوم همان پرداخت پشت درج باز می‌مانند', async () => {
+        // سرویس سطر سفارش را خودش `FOR UPDATE` می‌گیرد و همین تست بالا را سبز نگه می‌دارد؛ این‌جا درج خام است، پس فقط قفل ماشه می‌ماند.
+        const panel = createPanelOrderStore(conn);
+        /** درجی که باز می‌ماند تا `release`. */
+        const holding = (row: RefundInsert) => {
+          let release!: () => void;
+          const held = new Promise<void>((resolve) => (release = resolve));
+          let inserted!: () => void;
+          const ready = new Promise<void>((resolve) => (inserted = resolve));
+          const done = conn.db.transaction(async (tx) => {
+            await tx.insert(refunds).values(row);
+            inserted();
+            await held;
+          });
+          return { ready, release, done };
+        };
+        /** هنوز در انتظار پس از ۳۰۰ میلی‌ثانیه؛ کران‌دار، چون نسخهٔ بی قفل همان لحظه تمام می‌شود. */
+        const waiting = (promise: Promise<unknown>) =>
+          Promise.race([promise.then(() => false), new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 300))]);
+
+        // سفارش (`FOR SHARE`): برگرداندن لغو منتظر می‌ماند و پس از commit بازپرداخت را می‌بیند.
+        const first = await cancelledOrder();
+        const refund = holding(manualRow(first.order, first.payment.id));
+        await refund.ready;
+        const revert = panel.changeStatus(ALL_ORDERS, change(first.order, 'cancelled', 'paid', { reason: 'اشتباه' }));
+        // شکست همین‌جا بماند: درج باز اگر رها نشود، تست‌های بعدی پشت قفلش می‌مانند.
+        const revertWaited = await waiting(revert).finally(refund.release);
+        await refund.done;
+        expect(revertWaited).toBe(true);
+        expect(await revert).toMatchObject({ ok: false, refunded: true });
+        expect((await statusOf(first.order.id)).status).toBe('cancelled');
+
+        // پرداخت (`FOR UPDATE`): درج دوم منتظر می‌ماند و جمع را با اولی می‌سنجد.
+        const second = await cancelledOrder();
+        const one = holding(manualRow(second.order, second.payment.id));
+        await one.ready;
+        const two = rejectedConstraint(insert(manualRow(second.order, second.payment.id)));
+        const twoWaited = await waiting(two).finally(one.release);
+        await one.done;
+        expect(twoWaited).toBe(true);
+        expect(await two).toBe('refunds_within_payment');
+        expect(await refundsOf(second.order.id)).toHaveLength(1);
+      });
+
       it('از درگاه: درخواست با شناسهٔ ردیف، «در حال برگشت» و بعد استعلام «برگشت داده شد»؛ رد روشن «برنگشت»', async () => {
         const store = createRefundStore(conn);
         let at = new Date(NOW.getTime() + 5 * MINUTE);
@@ -3313,6 +3357,31 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           gatewayError: 'unconfigured',
           settledVia: 'request',
         });
+
+        // درگاهی که بازپرداخت دارد ولی کلیدش خوانده نشد: درخواست نرفت، پس همان «برنگشت».
+        const throwing = (code: 'unconfigured' | 'unavailable'): Record<string, PaymentGateway> => ({
+          mock: {
+            ...mockGateway(),
+            refunds: {
+              ...mockGateway().refunds!,
+              request: async () => {
+                throw new PaymentError(code);
+              },
+            },
+          },
+        });
+        const second = await cancelledOrder();
+        const unkeyed = await store.start(ALL_ORDERS, startInput(second.order, second.payment.id, { method: 'gateway' }));
+        expect(
+          await requestRefund({ ...deps, gateways: throwing('unconfigured') }, { refund: unkeyed.ok ? unkeyed.refund : (null as never), payment: second.payment, description: 'x' }),
+        ).toMatchObject({ status: 'failed', failureReason: 'unconfigured', gatewayError: 'unconfigured', settledVia: 'request' });
+
+        // بی جواب: شاید رسید، پس برچسب خطا و همان «در حال برگشت»، نه «برنگشت» (سؤال ۱۵۴).
+        const third = await cancelledOrder();
+        const lost = await store.start(ALL_ORDERS, startInput(third.order, third.payment.id, { method: 'gateway' }));
+        expect(
+          await requestRefund({ ...deps, gateways: throwing('unavailable') }, { refund: lost.ok ? lost.refund : (null as never), payment: third.payment, description: 'x' }),
+        ).toMatchObject({ status: 'pending', failureReason: null, gatewayError: 'unavailable', finishedAt: null, settledVia: null });
       });
 
       it('استعلام خودکار: فقط در جریان، پس از ۲ دقیقه و تا ۲۴ ساعت، قدیمی‌ترین پرسش اول؛ SKIP LOCKED', async () => {
