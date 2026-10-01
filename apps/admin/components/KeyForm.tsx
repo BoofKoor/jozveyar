@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useActionState } from 'react';
 
 import { keyAction, type KeyState } from '../app/[gate]/actions';
-import { messageOf } from '../lib/messages';
+import { keyUnavailableText, messageOf } from '../lib/messages';
 import { Alert } from './Alert';
 import { CodeField } from './CodeField';
 
@@ -18,8 +18,10 @@ interface Props {
   field: string;
   /** «پیش از ذخیره با خود sms.ir آزموده می‌شود…»، یا «آزمایش کد پذیرنده … با راه افتادن درگاه می‌آید.» */
   test: string;
-  /** کلید API sms.ir (۷٫۱): «آزمایش و ذخیره»، و پس از «در دسترس نیست» «بی آزمایش ذخیره کن». */
+  /** کلید API sms.ir (۷٫۱) و کد پذیرندهٔ زیبال (۷٫۲): «آزمایش و ذخیره»، و پس از «در دسترس نیست» «بی آزمایش ذخیره کن». */
   tested: boolean;
+  /** سرویس «آزمایش»، برای متن «رد شد» و «در دسترس نیست». */
+  service: 'smsir' | 'zibal';
   /** برگرداندن: آنچه از این لحظه به کار می‌رود، «••••3f9a» از `.env`، یا null اگر `.env` این کلید را ندارد. */
   envMask: string | null;
   /** نسخه‌ای که صفحه نشان داد. */
@@ -35,7 +37,46 @@ interface Props {
  * کلید API sms.ir (۷٫۱، ADR-049، سؤال ۱۳۸، طرح `m-key-edit` و `m-key-down`): «آزمایش و ذخیره»؛ «رد شد» با عدد پاسخ و بی ذخیره؛ «در
  * دسترس نیست» با «دوباره آزمایش و ذخیره» و «بی آزمایش ذخیره کن»، که رسید همان آزمایش را می‌فرستد و همان کلید را دوباره می‌خواهد.
  */
-export function KeyForm({ gate, name, mode, field, test, tested, envMask, seen, back }: Props) {
+/**
+ * «رد شد» کد پذیرنده (برش ۷٫۲، طرح `m-key-rejected`): ۱۱۵ IP سرور است و ۱۰۶ و ۱۴۰ نشانی برگشت، نه خود کد پذیرنده؛ بی نشانی برگشت
+ * آزموده نشد.
+ */
+function ZibalRejected({ code, unconfigured }: { code: number | null | undefined; unconfigured: boolean }) {
+  const env = (name: string) => <bdi className="ad-ltr">{name}</bdi>;
+  const n = (value: number) => <span className="num">{value}</span>;
+  if (unconfigured) {
+    return (
+      <>
+        <b>آزموده نشد:</b> نشانی برگشت ({env('PAYMENT_CALLBACK_URL')}) در {env('.env')} سرور نیست، پس کد پذیرندهٔ تازه آزموده و ذخیره نشد.
+        اول آن را در {env('.env')} بگذار.
+      </>
+    );
+  }
+  if (code === 115) {
+    return (
+      <>
+        <b>رد شد:</b> زیبال IP این سرور را نپذیرفت (کد {n(115)})، پس کد پذیرندهٔ تازه ذخیره نشد. IP سرور را در پنل زیبال، تنظیمات درگاه، ثبت
+        کن و دوباره بیازما؛ خود کد پذیرنده ممکن است درست باشد.
+      </>
+    );
+  }
+  if (code === 106 || code === 140) {
+    return (
+      <>
+        <b>رد شد:</b> زیبال نشانی برگشت را نپذیرفت (کد {n(code)})، پس کد پذیرندهٔ تازه ذخیره نشد. {env('PAYMENT_CALLBACK_URL')} در{' '}
+        {env('.env')} باید نشانی https همان دامنه‌ای باشد که در پنل زیبال ثبت شده؛ خود کد پذیرنده ممکن است درست باشد.
+      </>
+    );
+  }
+  return (
+    <>
+      <b>رد شد:</b> زیبال این کد پذیرنده را نپذیرفت
+      {typeof code === 'number' ? <> (کد {n(code)})</> : null}، پس ذخیره نشد. کد پذیرنده را از پنل زیبال دوباره بردار و بیازما.
+    </>
+  );
+}
+
+export function KeyForm({ gate, name, mode, field, test, tested, service, envMask, seen, back }: Props) {
   const [state, action, pending] = useActionState<KeyState, FormData>(keyAction, {});
   const codeError = state.error === 'wrong_code' || state.error === 'code_used' ? messageOf(state.error) : null;
   const valueError = state.error === 'invalid_key_value' || state.error === 'invalid_api_key' ? messageOf(state.error) : null;
@@ -67,7 +108,14 @@ export function KeyForm({ gate, name, mode, field, test, tested, envMask, seen, 
         <p className="jy-note jy-note--warning" role="alert" data-key-note="unavailable">
           <span className="jy-icon jy-icon-warning" aria-hidden="true" />
           <span>
-            <b>در دسترس نیست:</b> {messageOf('key_unavailable')}
+            <b>در دسترس نیست:</b> {keyUnavailableText(service === 'zibal' ? 'زیبال' : 'sms.ir')}
+          </span>
+        </p>
+      ) : state.error === 'key_rejected' && service === 'zibal' ? (
+        <p className="jy-note jy-note--error" role="alert" data-key-note="rejected">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            <ZibalRejected code={state.code} unconfigured={state.unconfigured === true} />
           </span>
         </p>
       ) : state.error === 'key_rejected' ? (

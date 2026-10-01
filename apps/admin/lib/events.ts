@@ -87,16 +87,40 @@ const SETTING_NAMES: Record<string, string> = {
  */
 function testOutcome(detail: Detail): Segment[] {
   const number = typeof detail.status === 'number' ? detail.status : typeof detail.http === 'number' ? detail.http : null;
+  // کد پذیرنده با زیبال (۷٫۲)؛ ۱۱۵ یعنی IP سرور، نه خود کد پذیرنده.
+  const zibal = detail.name === 'PAYMENT_MERCHANT_ID';
   switch (detail.outcome) {
     case 'ok':
       return ['درست'];
     case 'rejected':
+      if (zibal && number === 115) return ['رد شد، IP سرور (کد ', { ltr: '115' }, ')'];
       return number === null ? ['رد شد'] : ['رد شد (کد ', { ltr: String(number) }, ')'];
     case 'unconfigured':
-      return ['کلید API sms.ir خالی است'];
+      return zibal ? ['نشانی برگشت در ', { ltr: '.env' }, ' نیست'] : ['کلید API sms.ir خالی است'];
     default:
-      return ['sms.ir جواب نداد'];
+      return [zibal ? 'زیبال جواب نداد' : 'sms.ir جواب نداد'];
   }
+}
+
+/** نتیجهٔ «استعلام از درگاه» در رویدادها (۷٫۲). */
+const INQUIRY: Record<string, string> = {
+  succeeded: 'پرداخت تأیید شد',
+  failed: 'پرداخت انجام نشده بود',
+  pending: 'هنوز پرداخت نشده',
+  unanswered: 'درگاه جواب نداد',
+  closed: 'همین حالا جای دیگری بسته شده بود',
+  busy: 'استعلام دیگری همان لحظه در کار بود',
+  held: 'پول هنوز نزد درگاه است',
+  returned: 'پول به کارت برگشت',
+  verified: 'تأییدشده، و پولش خودکار برنمی‌گردد',
+};
+
+/** «زیبال شروع پرداخت سفارش 10046 را رد کرد: IP سرور (کد 115)» (۷٫۲، رویداد سیستم). */
+export function gatewayRejectedText(detail: Record<string, unknown>): Segment[] {
+  const result = typeof detail.result === 'number' ? detail.result : null;
+  const number = typeof detail.orderNumber === 'number' ? String(detail.orderNumber) : '';
+  const why = result === 115 ? 'IP سرور' : 'کد پذیرنده';
+  return [`${detail.provider === 'zibal' ? 'زیبال' : 'درگاه'} شروع پرداخت سفارش `, { ltr: number }, ` را رد کرد: ${why}`, ...(result !== null ? [' (کد ', { ltr: String(result) }, ')'] : [])];
 }
 
 /** عدد یا تاریخ، جدا از جملهٔ فارسی. */
@@ -346,6 +370,11 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         badge: null,
         text: ['پیامک رهگیری سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
       };
+    case 'payments.inquiry':
+      // «استعلام از درگاه» (۷٫۲) زیر چیپ «پرداخت و بازپرداخت» (سؤال ۱۴۱)، با نتیجه.
+      return { badge: null, text: ['سفارش ', ...orderRef(detail), `: استعلام از درگاه؛ ${INQUIRY[str(detail.outcome)] ?? str(detail.outcome)}`] };
+    case 'payments.gateway_rejected':
+      return { badge: null, text: gatewayRejectedText(detail) };
     case 'payments.sms_resend':
       // «دوباره بفرست» پیامک پرداخت (۷٫۱)، زیر چیپ «پرداخت و بازپرداخت» (سؤال ۱۴۱).
       return {
@@ -363,6 +392,7 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
 
 function whoOf(event: AdminEventView): string | null {
   if (event.displayName) return event.displayName;
+  if (event.adminUserId === null && event.action === 'payments.gateway_rejected') return 'سایت';
   return event.adminUserId === null && event.action.startsWith('admins.') ? 'سرور' : null;
 }
 

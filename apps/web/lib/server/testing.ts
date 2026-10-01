@@ -278,7 +278,10 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   /** پیامک‌های پرداخت منتظر و فرستاده (برش ۷٫۱)، و درگاه `deliverQueued` رویشان، مثل `createSmsOutbox`. */
   sms: Map<number, MemorySms>;
   smsOutbox: SmsOutbox;
+  /** رویدادهای سیستم «درگاه شروع را رد کرد» (برش ۷٫۲)، مثل `payments.gateway_rejected`. */
+  rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[];
 } {
+  const rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[] = [];
   const parcels = new Map<string, OrderDetails['parcels']>();
   const sms = new Map<number, MemorySms>();
   let nextSms = 1;
@@ -362,6 +365,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     assignments,
     parcels,
     sms,
+    rejections,
     // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامک پرداختی که سفارشش لغو نشده.
     smsOutbox: {
       async claim(id, _at, mode) {
@@ -472,8 +476,11 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       if (payments.some((p) => p.provider === payment.provider && p.authority === payment.authority)) {
         throw new Error('payments_provider_authority');
       }
+      const order = orders.find((o) => o.id === payment.orderId);
+      // همان `payments_amount_is_total` (0030).
+      if (!order || order.totalRials !== payment.amountRials) throw new Error('payments_amount_is_total');
       const row: PaymentRow = {
-        id: randomUUID(),
+        id: payment.id ?? randomUUID(),
         orderId: payment.orderId,
         provider: payment.provider,
         amountRials: payment.amountRials,
@@ -486,6 +493,14 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         createdAt: options.now(),
         verifiedAt: null,
         smsMessageId: null,
+        returnKey: payment.returnKey ?? randomUUID().replace(/-/g, ''),
+        gatewayOrderId: payment.gatewayOrderId ?? null,
+        verifiedAmountRials: null,
+        gatewayStatus: null,
+        gatewayError: null,
+        gatewayCheckedAt: null,
+        returnedAt: null,
+        settledVia: null,
       };
       payments.push(row);
       return { ...row };
@@ -503,16 +518,38 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       payment.raw = { decision, decidedAt: at.toISOString() };
       return true;
     },
-    async settlePayment(provider, authority, decide) {
-      const payment = payments.find((p) => p.provider === provider && p.authority === authority);
+    settlePayment(provider, authority, decide) {
+      return this.settle({ provider, authority }, decide) as Promise<Awaited<ReturnType<OrderStore['settlePayment']>>>;
+    },
+    async settle(lookup, decide, settleOptions = {}) {
+      const payment = payments.find((p) =>
+        'returnKey' in lookup
+          ? p.returnKey === lookup.returnKey && lookup.providers.includes(p.provider)
+          : 'paymentId' in lookup
+            ? p.id === lookup.paymentId && lookup.providers.includes(p.provider)
+            : p.provider === lookup.provider && p.authority === lookup.authority,
+      );
       if (!payment) return null;
       const order = orders.find((o) => o.id === payment.orderId)!;
       if (payment.status !== 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null };
       const outcome = await decide({ payment: { ...payment }, order: { ...order } });
+      if (settleOptions.returned && !payment.returnedAt) payment.returnedAt = settleOptions.returned;
+      const check = 'check' in outcome && outcome.check ? outcome.check : null;
+      if (check) Object.assign(payment, { gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at });
+      if (outcome.kind === 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null };
       if (outcome.kind === 'failed') {
-        Object.assign(payment, { status: 'failed', failureCode: outcome.code, raw: outcome.raw ?? null });
+        Object.assign(payment, {
+          status: 'failed',
+          failureCode: outcome.code,
+          raw: outcome.raw ?? null,
+          cardMask: outcome.cardMask ?? null,
+          verifiedAmountRials: outcome.verifiedAmountRials ?? null,
+          settledVia: settleOptions.via ?? null,
+        });
         return { payment: { ...payment }, order: { ...order }, settled: true, smsId: null };
       }
+      // همان `payments_success_amount` (0029).
+      if (outcome.verifiedAmountRials !== payment.amountRials) throw new Error('payments_success_amount');
       if (payments.some((p) => p.orderId === order.id && p.status === 'succeeded')) throw new Error('payments_one_success');
       if (order.status !== 'awaiting_payment') throw new Error(`سفارش ${order.orderNumber} در انتظار پرداخت نیست.`);
       // پیامک پرداخت منتظر، مثل `queuedPaidSms`، و پرداخت به آن وصل (`payments_sms`).
@@ -536,6 +573,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         cardMask: outcome.cardMask,
         raw: outcome.raw ?? null,
         verifiedAt: outcome.paidAt,
+        verifiedAmountRials: outcome.verifiedAmountRials,
+        settledVia: settleOptions.via ?? null,
         smsMessageId: smsId,
       });
       Object.assign(order, { status: 'paid', paidAt: outcome.paidAt, postHandoffDueAt: outcome.postHandoffDueAt });
@@ -544,7 +583,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         fromStatus: 'awaiting_payment',
         toStatus: 'paid',
         actor: 'gateway',
-        note: { paymentId: payment.id, provider, refId: outcome.refId },
+        note: { paymentId: payment.id, provider: payment.provider, refId: outcome.refId, ...(settleOptions.via ? { via: settleOptions.via } : {}) },
       });
       // چاپخانه، مثل `assignAtPayment`: فقط فعال‌ها؛ هیچ؟ بی چاپخانه.
       const chosen = choosePartner(
@@ -560,6 +599,40 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         if (!jobs.some((j) => j.orderId === order.id && j.kind === kind)) jobs.push({ kind, orderId: order.id });
       }
       return { payment: { ...payment }, order: { ...order }, settled: true, smsId };
+    },
+    async pendingAttempts({ providers, createdBefore, checkedBefore, limit }) {
+      return payments
+        .filter(
+          (p) =>
+            p.status === 'pending' &&
+            providers.includes(p.provider) &&
+            p.createdAt < createdBefore &&
+            (p.gatewayCheckedAt === null || p.gatewayCheckedAt < checkedBefore),
+        )
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .slice(0, limit)
+        .map((p) => p.id);
+    },
+    async heldAttempts({ providers, createdAfter, checkedBefore, limit }) {
+      return payments
+        .filter(
+          (p) =>
+            p.status === 'failed' &&
+            providers.includes(p.provider) &&
+            ['expired', 'order_not_payable', 'amount_mismatch'].includes(p.failureCode ?? '') &&
+            (p.gatewayStatus === null || p.gatewayStatus === 2 || p.gatewayStatus === 16) &&
+            p.createdAt > createdAfter &&
+            (p.gatewayCheckedAt === null || p.gatewayCheckedAt < checkedBefore),
+        )
+        .slice(0, limit)
+        .map((p) => ({ ...p }));
+    },
+    async recordGatewayCheck(paymentId, check) {
+      const payment = payments.find((p) => p.id === paymentId);
+      if (payment) Object.assign(payment, { gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at });
+    },
+    async recordGatewayRejection(input) {
+      rejections.push({ ...input });
     },
     async expireOrder(orderId, _at) {
       const order = orders.find((o) => o.id === orderId);

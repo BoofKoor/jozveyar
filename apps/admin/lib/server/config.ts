@@ -62,6 +62,19 @@ export function describeSms(env: Env): string {
     : '✓ پنل ادمین: پیامک کنسولی (در sms_messages)؛ SMS_PROVIDER=smsir نیست';
 }
 
+/**
+ * درگاه نمونه در پنل (برش ۷٫۲، ADR-050): «استعلام از درگاه» هر پرداخت با درگاه خود همان پرداخت؛ زیبال همیشه، و درگاه نمونه فقط با
+ * `CHECKOUT_MODE=mock`، همان دیوار وب (ADR-035): سایت زنده پرداخت درگاه نمونه ندارد.
+ */
+export const panelMockGateway = (env: Env) => env.CHECKOUT_MODE?.trim().toLowerCase() === 'mock';
+
+/** یک خط برای لاگ بالا آمدن: درگاه‌های «استعلام از درگاه» و «آزمایش» کد پذیرنده (۷٫۲)، نشانی پایه و اینکه نشانی برگشت هست؛ بی مقدار کلید. */
+export function describePayments(env: Env): string {
+  const base = env.ZIBAL_API_URL?.trim() ? 'ZIBAL_API_URL' : 'نشانی پیش‌فرض زیبال';
+  const callback = env.PAYMENT_CALLBACK_URL?.trim() ? 'PAYMENT_CALLBACK_URL هست' : 'PAYMENT_CALLBACK_URL نیست، پس «آزمایش» کد پذیرنده نه';
+  return `✓ پنل ادمین: درگاه زیبال (${base})${panelMockGateway(env) ? ' و درگاه نمونه' : ''} برای «استعلام از درگاه»؛ ${callback}`;
+}
+
 /** یک خط برای لاگ بالا آمدن؛ `deploy-bundle.sh` همین را می‌جوید. مسیر محرمانه هرگز در آن نیست. */
 export function describeConfig(env: Env): string {
   const problems = configProblems(env);

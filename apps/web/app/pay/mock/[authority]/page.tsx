@@ -19,8 +19,8 @@ export const metadata: Metadata = {
  * و هرگز روی jozveyar.com — همان دیوار مسیرهای خرید، از سرآیندهای همین درخواست. بیرون از آن، ۴۰۴ مثل هر نشانی
  * ناموجود. بی پوستهٔ سایت (نشانهٔ `data-gate`، checkout.css): پذیرنده، شمارهٔ سفارش و مبلغ، و سه تصمیم.
  *
- * تصمیم فقط ثبت می‌شود (`POST /api/checkout/mock-gateway/<Authority>`)؛ برگشت (`/pay/callback`) همان را
- * می‌سنجد، نه `Status` نشانی. در برش ۷ درگاه واقعی جای این صفحه می‌آید.
+ * تصمیم فقط ثبت می‌شود (`POST /api/checkout/mock-gateway/<Authority>`)؛ برگشت (`/pay/callback/<کلید>`، برش ۷٫۲) همان را با
+ * استعلام می‌خواند. در `live` صفحهٔ زیبال جای این صفحه است.
  */
 export default async function MockGatewayPage({ params }: { params: Promise<{ authority: string }> }) {
   const { authority } = await params;
@@ -28,7 +28,7 @@ export default async function MockGatewayPage({ params }: { params: Promise<{ au
   if (checkoutModeFor([request.get('host'), request.get('x-forwarded-host')]) !== 'mock') notFound();
   const result = await checkoutServices().checkout.mockGatewayView(authority);
   if (!result.ok) notFound();
-  const { merchant, orderNumber, amountRials, decided, payment } = result.value;
+  const { merchant, orderNumber, amountRials, decided, payment, returnUrl } = result.value;
 
   return (
     <main className="ck-gate" data-gate="">
@@ -58,7 +58,7 @@ export default async function MockGatewayPage({ params }: { params: Promise<{ au
               </dd>
             </div>
           </dl>
-          <GateActions authority={authority} decided={decided || payment !== 'pending'} />
+          <GateActions authority={authority} decided={decided || payment !== 'pending'} returnUrl={returnUrl} />
         </section>
       </div>
     </main>

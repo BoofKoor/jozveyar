@@ -153,7 +153,8 @@ describe('کلید', () => {
 });
 
 /** متن سادهٔ تکه‌ها، برای سنجش؛ عدد با نشان [..] تا جای `.num` هم سنجیده شود. */
-const plain = (segs: readonly Seg[]) => segs.map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? `[${seg.num}]` : '')).join('');
+const plain = (segs: readonly Seg[]) =>
+  segs.map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? `[${seg.num}]` : 'ltr' in seg ? `<${seg.ltr}>` : '')).join('');
 
 describe('آزمایش کلیدها، متن قالب و اعتبار (۷٫۱)', () => {
   it('متن قالب از همان یک منبع پیامک: سطرها، جای پارامتر #NAME#، و نام پارامترها به ترتیب', () => {
@@ -190,6 +191,22 @@ describe('آزمایش کلیدها، متن قالب و اعتبار (۷٫۱)',
     expect(view(check({ detail: { outcome: 'rejected', http: 401 } }))).toEqual({ tone: 'bad', text: 'رد شد · آزمایش امروز 10:52: sms.ir نپذیرفت (کد [401]).' });
     expect(view(check({ detail: { outcome: 'unavailable' } }))).toEqual({ tone: 'warn', text: 'در دسترس نیست · آزمایش امروز 10:52: sms.ir جواب نداد.' });
     expect(view(check({ name: 'SMS_PAID_TEMPLATE', detail: { outcome: 'unconfigured' } }))?.tone).toBe('warn');
+  });
+
+  it('کد پذیرنده با زیبال (۷٫۲، طرح `m-key-rejected`): ۱۱۵ یعنی IP سرور، کد دیگر خود زیبال، بی نشانی برگشت «آزموده نشد»', () => {
+    const view = (detail: Record<string, unknown>, action = 'settings.key_test') => {
+      const v = keyCheckView('PAYMENT_MERCHANT_ID', check({ name: 'PAYMENT_MERCHANT_ID', action, detail }), NOW);
+      return v && { tone: v.tone, text: plain(v.text) };
+    };
+    expect(view({ outcome: 'ok' })).toEqual({ tone: 'ok', text: 'درست · آزمایش امروز 10:52: زیبال پذیرفت.' });
+    expect(view({ outcome: 'rejected', status: 115 })).toEqual({ tone: 'bad', text: 'رد شد · آزمایش امروز 10:52: زیبال IP سرور را نپذیرفت (کد [115]).' });
+    expect(view({ outcome: 'rejected', status: 102 })?.text).toBe('رد شد · آزمایش امروز 10:52: زیبال نپذیرفت (کد [102]).');
+    expect(view({ outcome: 'unavailable', http: 502 })).toEqual({ tone: 'warn', text: 'در دسترس نیست · آزمایش امروز 10:52: زیبال جواب نداد.' });
+    expect(view({ outcome: 'unconfigured' })).toEqual({ tone: 'warn', text: 'آزموده نشد · امروز 10:52: نشانی برگشت (<PAYMENT_CALLBACK_URL>) در <.env> نیست.' });
+    expect(view({ from: 'env', tested: 'ok' }, 'settings.key_set')?.text).toBe('درست · پیش از ذخیرهٔ امروز 10:52 زیبال پذیرفت.');
+    expect(view({ tested: 'skipped' }, 'settings.key_set')?.text).toBe(
+      'آزموده نشد · امروز 10:52 بی آزمایش ذخیره شد، چون زیبال جواب نداد. با «آزمایش» بسنجش.',
+    );
   });
 
   it('خط پس از ذخیره: آزموده پیش از ذخیره درست، «بی آزمایش ذخیره شد» هشدار؛ بی آزمایش (پیش از ۷٫۱، کد پذیرنده) و برگرداندن بی خط', () => {

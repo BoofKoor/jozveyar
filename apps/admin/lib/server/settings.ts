@@ -22,7 +22,7 @@
  * می‌شود. قفل و تراکنش روی پستگرس در تست یکپارچگی `packages/db`.
  */
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { SETTING_SCHEMAS, type Holiday, type SettingKey, type SettingValue } from '@jozveyar/contracts';
 import {
@@ -43,6 +43,8 @@ import {
   type SettingsStore,
   type SmsStats,
 } from '@jozveyar/db';
+import { PaymentError, paymentErrorCode } from '@jozveyar/payments';
+import { isZibalMerchant, type ZibalClient } from '@jozveyar/payments/zibal';
 import { SMS_TEMPLATES, SmsError, smsErrorCode } from '@jozveyar/sms';
 import { isSmsIrApiKey, isSmsIrTemplateId, type SmsIrClient } from '@jozveyar/sms/smsir';
 import { tehranDayStart } from '@jozveyar/text';
@@ -80,6 +82,11 @@ export interface PanelSettingsDeps {
   secret: string;
   /** sms.ir (برش ۷٫۱): «آزمایش» کلیدها و اعتبار؛ نشانی پایه از `SMSIR_API_URL`. بی آن «آزمایش» نیست. */
   smsir?: SmsIrClient;
+  /**
+   * زیبال (برش ۷٫۲، ADR-050، سؤال ۱۳۸): «آزمایش» کد پذیرنده، یک `request` با نشانی برگشت `PAYMENT_CALLBACK_URL` (و کلید برگشتی که هیچ
+   * تلاشی ندارد)؛ نشانی پایه از `ZIBAL_API_URL`. بی آن کد پذیرنده «آزمایش» ندارد.
+   */
+  zibal?: { client: ZibalClient; callbackUrl: string | null };
   /** شمار کد و هزینهٔ پیامک: کارت «سقف کد پیامکی» و «اعتبار پیامک»، و هشدارهای پیشخوان. */
   smsStats?: SmsStats;
   /**
@@ -194,6 +201,13 @@ function effective<K extends SettingKey>(key: K, raw: unknown): SettingValue<K> 
   return (parsed?.success ? parsed.data : DEFAULT_SETTINGS[key]) as SettingValue<K>;
 }
 
+/** مبلغ «آزمایش» کد پذیرنده (برش ۷٫۲، طرح `m-key-rejected`): ۱٬۰۰۰ تومان، بیش از کمینهٔ زیبال (۱٬۰۰۰ ریال). */
+export const MERCHANT_TEST_RIALS = 10_000;
+
+/** کد خطای مقدار نادرست هر کلید. */
+const invalidValueOf = (name: ServiceKeyName) =>
+  KEY_INFO[name].kind === 'template' ? 'invalid_template_id' : name === 'SMS_API_KEY' ? 'invalid_api_key' : 'invalid_key_value';
+
 export function createPanelSettings(deps: PanelSettingsDeps) {
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((message: string, error?: unknown) => console.error(message, error ?? ''));
@@ -222,17 +236,53 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
   const currentValue = async (name: ServiceKeyName) =>
     resolveServiceKey(name, await deps.secrets.read(name), deps.env, deps.secretsKey, (message) => log(message)).value;
 
-  /** شکل مقدار تازهٔ هر کلید: شناسهٔ قالب عدد، کلید API شکل سرآیند؛ بقیه همان `readKeyValue`. */
+  /** شکل مقدار تازهٔ هر کلید: شناسهٔ قالب عدد، کلید API شکل سرآیند، کد پذیرنده شکل زیبال؛ بقیه همان `readKeyValue`. */
   function readValueFor(name: ServiceKeyName, input: unknown): string | null {
     const value = readKeyValue(input);
     if (value === null) return null;
     if (KEY_INFO[name].kind === 'template') return isSmsIrTemplateId(value) ? value : null;
     if (name === 'SMS_API_KEY') return isSmsIrApiKey(value) ? value : null;
+    if (name === 'PAYMENT_MERCHANT_ID') return isZibalMerchant(value) ? value : null;
     return value;
   }
 
-  /** یک آزمایش با خود sms.ir؛ هر شکست فقط کد و عدد پاسخ. قالب با کلید API امروز و پارامترهای نمونه. */
+  /** «آزمایش» این کلید ممکن است: کلیدی آزمودنی، و سرویسش در این پنل. */
+  const testerFor = (name: ServiceKeyName) => KEY_INFO[name].testable && (KEY_INFO[name].service === 'zibal' ? Boolean(deps.zibal) : Boolean(deps.smsir));
+
+  /**
+   * آزمایش کد پذیرنده با خود زیبال (برش ۷٫۲): یک `request` با مبلغ آزمایش و کلید برگشت تصادفی که هیچ تلاشی ندارد؛ کسی به صفحه‌اش
+   * نمی‌رود و زیبال تراکنش پرداخت‌نشده را خودش می‌بندد. ۱۰۰ درست؛ هر `result` دیگر «رد شد» با همان کد (۱۰۲ تا ۱۰۴ کد پذیرنده، ۱۰۶ و
+   * ۱۴۰ نشانی برگشت، ۱۱۵ IP سرور)؛ شبکه، سقف زمان یا ۵xx «در دسترس نیست». نشانی برگشت که نیست «آزموده نشد».
+   */
+  async function runZibalTest(value: string): Promise<KeyTestOutcome> {
+    const empty = { http: null, status: null, credit: null };
+    const zibal = deps.zibal!;
+    if (!zibal.callbackUrl) return { outcome: 'unconfigured', ...empty };
+    try {
+      await zibal.client.request({
+        merchant: value,
+        amountRials: MERCHANT_TEST_RIALS,
+        callbackUrl: `${zibal.callbackUrl.replace(/\/+$/, '')}/${randomBytes(16).toString('hex')}`,
+        orderId: `test-${randomBytes(4).toString('hex')}`,
+        description: 'آزمایش کد پذیرندهٔ جزوه‌یار',
+      });
+      return { outcome: 'ok', ...empty };
+    } catch (error) {
+      const code = paymentErrorCode(error);
+      const detail = error instanceof PaymentError ? error.detail : {};
+      return {
+        // شکل کد پذیرنده درست نیست (`unconfigured` آداپتور) هم «رد شد» است؛ پاسخ بدشکل «در دسترس نیست».
+        outcome: code === 'rejected' || code === 'unconfigured' ? 'rejected' : 'unavailable',
+        http: detail.http ?? null,
+        status: detail.result ?? null,
+        credit: null,
+      };
+    }
+  }
+
+  /** یک آزمایش با خود sms.ir، یا از ۷٫۲ زیبال؛ هر شکست فقط کد و عدد پاسخ. قالب با کلید API امروز و پارامترهای نمونه. */
   async function runTest(name: ServiceKeyName, value: string, mobile: string | null): Promise<KeyTestOutcome> {
+    if (KEY_INFO[name].service === 'zibal') return runZibalTest(value);
     const empty = { http: null, status: null, credit: null };
     const client = deps.smsir!;
     try {
@@ -627,11 +677,11 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
       if (!isServiceKeyName(input.name)) return fail(404, 'key_not_found');
       const name = input.name;
       const info = KEY_INFO[name];
-      if (!info.testable || !deps.smsir) return fail(409, 'key_not_testable', { name });
+      if (!testerFor(name)) return fail(409, 'key_not_testable', { name });
       const fresh = typeof input.value === 'string' && input.value.trim() !== '';
       const value = fresh ? readValueFor(name, input.value) : await currentValue(name);
       if (value === null) {
-        return fresh ? fail(400, info.kind === 'template' ? 'invalid_template_id' : 'invalid_api_key', { name }) : fail(409, 'key_empty', { name });
+        return fresh ? fail(400, invalidValueOf(name), { name }) : fail(409, 'key_empty', { name });
       }
       const mobile = info.kind === 'template' ? normalizeIranMobile(text(input.mobile)) : null;
       if (info.kind === 'template' && !mobile) return fail(400, 'invalid_test_mobile', { name });
@@ -668,16 +718,13 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
       const name = input.name;
       const info = KEY_INFO[name];
       const value = readValueFor(name, input.value);
-      if (value === null) {
-        const error = info.kind === 'template' ? 'invalid_template_id' : name === 'SMS_API_KEY' ? 'invalid_api_key' : 'invalid_key_value';
-        return fail(400, error, { name });
-      }
+      if (value === null) return fail(400, invalidValueOf(name), { name });
       const target = await seenRow(name, input.seen);
       if (!target.ok) return target;
       const { row, seen } = target.value;
 
       let tested: { tested?: 'ok' | 'skipped'; credit?: number } = {};
-      if (info.testable && deps.smsir) {
+      if (testerFor(name)) {
         if (info.kind === 'template' || text(input.skipTest) === '1') {
           const receipt = receiptFor(session, name, value, input);
           // «بی آزمایش ذخیره کن» کلید API فقط پس از «در دسترس نیست» همین مقدار.
@@ -697,8 +744,8 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
           if (!done.ok) return fail(429, 'key_test_limited', { name });
           const result = done.result;
           if (result.outcome === 'rejected' || result.outcome === 'unconfigured') {
-            // `status` خود Failure کد HTTP پنل است؛ کد بدنهٔ sms.ir جدا.
-            return fail(400, 'key_rejected', { name, http: result.http, smsStatus: result.status });
+            // `status` خود Failure کد HTTP پنل است؛ کد بدنهٔ sms.ir یا `result` زیبال جدا.
+            return fail(400, 'key_rejected', { name, http: result.http, serviceStatus: result.status, unconfigured: result.outcome === 'unconfigured' });
           }
           if (result.outcome === 'unavailable') return fail(503, 'key_unavailable', { name, receipt: receiptOf(session, name, value, 'unavailable', at) });
           tested = { tested: 'ok', ...(result.credit !== null ? { credit: result.credit } : {}) };

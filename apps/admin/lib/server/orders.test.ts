@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ALL_ORDERS,
   type AdminEventInput,
+  type OrderStore,
   type OrderStatus,
   type PanelDueSummary,
   type PanelJozveFile,
@@ -22,9 +23,12 @@ import {
   type PanelStatusEvent,
   type PanelTicketFile,
   type PanelVolumeFile,
+  type PaymentRow,
   type PaymentSmsRef,
+  type SettledPayment,
   type ShipmentSms,
 } from '@jozveyar/db';
+import type { PaymentGateway } from '@jozveyar/payments';
 import { SmsError, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { MemoryDriver } from '@jozveyar/storage';
 
@@ -93,6 +97,11 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       untracked: UNTRACKED,
       smsFailed: [10018],
       paidSmsFailed: [10027],
+      gatewayRejected: { at: NOW, orderNumber: 10046, provider: 'zibal', result: 115, stage: 'start' },
+      mismatched: [{ orderNumber: 10044, amountRials: 3_747_500, reportedRials: 374_750, createdAt: NOW }],
+      held: [{ orderNumber: 10047, failureCode: 'order_not_payable', createdAt: NOW }],
+      verifiedUnused: [{ orderNumber: 10048, failureCode: 'order_not_payable' }],
+      autoClosed: { failed: 2, succeeded: 1 },
     }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
@@ -102,6 +111,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     printVolume: record('printVolume', null),
     ticketFile: record('ticketFile', null),
     paymentSms: record('paymentSms', null),
+    paymentOf: record('paymentOf', null),
     requeue: async (scope, orderId, kind, event) => {
       calls.push({ method: 'requeue', args: [orderId, kind, event], scope });
       events.push(event);
@@ -213,7 +223,7 @@ describe('مجوز در سرور (ADR-038)', () => {
 });
 
 describe('پیشخوان', () => {
-  it('مرز روز تهران و دو حاشیه (یک ساعت فایل، نیم ساعت تلاش پرداخت) صریح به پایگاه داده می‌رسند', async () => {
+  it('مرز روز تهران و دو حاشیه (یک ساعت فایل، ده دقیقه تلاش پرداخت از ۷٫۲) صریح به پایگاه داده می‌رسند', async () => {
     const { orders, calls } = service({ setting: async () => 3 });
     const result = await orders.dashboard(session());
     expect(result.ok).toBe(true);
@@ -224,11 +234,13 @@ describe('پیشخوان', () => {
       dayAfterStart: new Date('2026-10-06T20:30:00Z'),
     });
     // «کد رهگیری ندارد» فقط تحویل‌های ۴۵ روز اخیر (تصمیم ۸۲).
+    // و از ۷٫۲ آغاز امروز تهران برای «از صبح استعلام خودکار …».
     const clock = {
       at: NOW,
       staleBefore: new Date(NOW.getTime() + 60 * MINUTE),
-      unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE),
+      unreturnedBefore: new Date(NOW.getTime() - 10 * MINUTE),
       untrackedSince: new Date(NOW.getTime() - 45 * 24 * 60 * MINUTE),
+      todayStart: new Date('2026-10-04T20:30:00Z'),
     };
     expect(find('alerts')).toEqual(clock);
     expect(find('list')).toEqual({ bucket: 'open', search: null, clock, limit: 5, offset: 0 });
@@ -257,13 +269,21 @@ describe('پیشخوان', () => {
     expect(noor.ok && [noor.value.alerts.reviewRows, days(noor.value.untracked)]).toEqual([0, [['2026-09-29T20:30:00.000Z', [10009, 10025]]]]);
   });
 
-  it('«پیامک پرداخت نرفت» (۷٫۱) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {
+  it('«پیامک پرداخت نرفت» (۷٫۱) و هشدارهای پول و درگاه (۷٫۲) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {
     const staff = await service().orders.dashboard(session(['orders.read', 'orders.money']));
-    expect(staff.ok && staff.value.alerts.paidSmsFailed).toEqual([10027]);
+    expect(staff.ok && staff.value.alerts).toMatchObject({
+      paidSmsFailed: [10027],
+      gatewayRejected: { orderNumber: 10046, result: 115 },
+      mismatched: [{ orderNumber: 10044 }],
+      held: [{ orderNumber: 10047 }],
+      verifiedUnused: [{ orderNumber: 10048 }],
+      autoClosed: { failed: 2, succeeded: 1 },
+    });
+    const none = { paidSmsFailed: [], gatewayRejected: null, mismatched: [], held: [], verifiedUnused: [], autoClosed: { failed: 0, succeeded: 0 } };
     const reader = await service().orders.dashboard(session(['orders.read']));
-    expect(reader.ok && reader.value.alerts.paidSmsFailed).toEqual([]);
+    expect(reader.ok && reader.value.alerts).toMatchObject(none);
     const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
-    expect(noor.ok && noor.value.alerts.paidSmsFailed).toEqual([]);
+    expect(noor.ok && noor.value.alerts).toMatchObject(none);
   });
 
   it('روز کاری تعهد: تنظیم خراب یا نبودنش یعنی پیش‌فرض ۲، و بلند در لاگ', async () => {
@@ -1273,5 +1293,174 @@ describe('«دوباره بفرست» پیامک پرداخت (۷٫۱، ADR-049)
     expect(await build(ref('failed', 'cancelled')).orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ error: 'paid_sms_closed' });
     expect(await build(null).orders.resendPaymentSms(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 404, error: 'payment_not_found' });
     expect(await build(ref()).orders.resendPaymentSms(session(OWNER), { payment: '../x' }, 'ip')).toMatchObject({ status: 404, error: 'payment_not_found' });
+  });
+});
+
+describe('«استعلام از درگاه» (۷٫۲، ADR-050)', () => {
+  const PAYMENT = '44444444-4444-4444-8444-444444444444';
+  const row = (over: Partial<PaymentRow> = {}): PaymentRow => ({
+    id: PAYMENT,
+    orderId: 'order-1',
+    provider: 'zibal',
+    amountRials: 3_747_500,
+    status: 'pending',
+    authority: '3715022987',
+    gatewayOrderId: '10030-44444444',
+    returnKey: 'a'.repeat(32),
+    refId: null,
+    cardMask: null,
+    failureCode: null,
+    raw: null,
+    createdAt: new Date(NOW.getTime() - 5 * MINUTE),
+    verifiedAt: null,
+    verifiedAmountRials: null,
+    gatewayStatus: null,
+    gatewayError: null,
+    gatewayCheckedAt: null,
+    returnedAt: null,
+    settledVia: null,
+    smsMessageId: null,
+    ...over,
+  });
+
+  /**
+   * درگاه و ذخیره‌گاه سفارش ساختگی: `settle` پاسخ از پیش گذاشته را می‌دهد (حکم و قفل مال `settleWith` و پستگرس است، در `packages/db`)؛
+   * استعلام تلاش بسته با درگاه.
+   */
+  function build(found: PaymentRow | null, settled: SettledPayment | 'busy' | null = null, inquired: number | Error = 2, gateways = ['zibal']) {
+    const fake = fakeStore({
+      paymentOf: async (scope, id) => (fake.calls.push({ method: 'paymentOf', args: [id], scope }), found ? { payment: found, orderId: 'order-1', orderNumber: 10030 } : null),
+    });
+    const settles: unknown[] = [];
+    const checks: unknown[] = [];
+    const sent: string[] = [];
+    const gateway: PaymentGateway = {
+      name: 'zibal',
+      start: async () => {
+        throw new Error('start');
+      },
+      inquire: async () => {
+        if (inquired instanceof Error) throw inquired;
+        return { status: inquired, amountRials: null, orderId: null, refId: null, cardMask: null, raw: {} };
+      },
+      verify: async () => {
+        throw new Error('verify');
+      },
+    };
+    const orderStore = {
+      setting: async () => undefined,
+      settle: async (lookup: unknown, _decide: unknown, options: unknown) => (settles.push({ lookup, options }), settled),
+      recordGatewayCheck: async (id: string, check: unknown) => {
+        checks.push({ id, check });
+      },
+    } as unknown as OrderStore;
+    const outbox: SmsOutbox = {
+      async claim(id) {
+        return { id, to: '09152345678', purpose: 'order_paid', body: 'x', params: ['10030', 'دوشنبه 6 مهر'] };
+      },
+      async finish() {},
+    };
+    const transport: SmsTransport = { name: 'console', send: async (message) => (sent.push(message.to), { status: 'sent', providerMessageId: null }) };
+    const orders = createPanelOrders({
+      store: fake.store,
+      storage: null,
+      secret: SECRET,
+      now: () => NOW,
+      log: () => {},
+      sms: { transport, outbox, log: () => {} },
+      payments: { orders: orderStore, gateways: Object.fromEntries(gateways.map((name) => [name, gateway])) },
+    });
+    return { orders, settles, checks, sent, ...fake };
+  }
+  const settledAs = (status: PaymentRow['status'], over: Partial<PaymentRow> = {}, settled = true, smsId: number | null = null): SettledPayment => ({
+    payment: row({ status, ...over }),
+    order: {} as never,
+    settled,
+    smsId,
+  });
+
+  it('تلاش باز: همان `settleWith` با `via: panel` و `SKIP LOCKED`؛ موفق یعنی پیامک پرداخت، با رویداد `payments.inquiry`', async () => {
+    const { orders, settles, events, sent, calls } = build(row(), settledAs('succeeded', { gatewayStatus: 1 }, true, 77));
+    expect(await orders.inquirePayment(session(OPERATOR), { payment: PAYMENT }, '1.2.3.4')).toEqual(ok({ orderNumber: 10030, outcome: 'succeeded' }));
+    expect(settles).toEqual([{ lookup: { paymentId: PAYMENT, providers: ['zibal'] }, options: { via: 'panel', skipLocked: true } }]);
+    expect(sent).toEqual(['09152345678']);
+    expect(calls.find((c) => c.method === 'paymentOf')?.scope).toEqual({ kind: 'all' });
+    expect(events).toEqual([
+      {
+        adminUserId: 'admin-1',
+        action: 'payments.inquiry',
+        targetType: 'order',
+        targetId: 'order-1',
+        ipHash,
+        at: NOW,
+        detail: { orderNumber: 10030, outcome: 'succeeded', status: 1 },
+      },
+    ]);
+  });
+
+  it('نتیجه‌ها: ناموفق، هنوز پرداخت نشده، بی جواب، همین حالا بسته، و استعلام دیگری در کار؛ هیچ‌کدام پیامک نه', async () => {
+    const cases: [SettledPayment | 'busy', string, Record<string, unknown>][] = [
+      [settledAs('failed', { gatewayStatus: 5, failureCode: 'declined' }), 'failed', { status: 5 }],
+      // بسته شد ولی پولش نزد درگاه است (پرداخت دوم)، یا تأییدشده و بی‌استفاده.
+      [settledAs('failed', { gatewayStatus: 2, failureCode: 'order_not_payable' }), 'held', { status: 2 }],
+      [settledAs('failed', { gatewayStatus: 1, failureCode: 'order_not_payable' }), 'verified', { status: 1 }],
+      [settledAs('pending', { gatewayStatus: -1 }, false), 'pending', { status: -1 }],
+      [settledAs('pending', { gatewayError: 'unavailable' }, false), 'unanswered', { error: 'unavailable' }],
+      [settledAs('succeeded', { gatewayStatus: 1 }, false), 'closed', { status: 1 }],
+      ['busy', 'busy', {}],
+    ];
+    for (const [settled, outcome, detail] of cases) {
+      const { orders, events, sent } = build(row(), settled);
+      expect(await orders.inquirePayment(session(OWNER), { payment: PAYMENT }, 'ip'), outcome).toEqual(ok({ orderNumber: 10030, outcome }));
+      expect(events[0]!.detail).toEqual({ orderNumber: 10030, outcome, ...detail });
+      expect(sent).toEqual([]);
+    }
+  });
+
+  it('تلاش بسته‌ای که پولش نزد درگاه است: فقط استعلام، هرگز `settle`؛ برگشت، هنوز نزد درگاه، تأییدشده، یا بی جواب', async () => {
+    const held = row({ status: 'failed', failureCode: 'order_not_payable', gatewayStatus: 2 });
+    for (const [inquired, outcome] of [
+      [18, 'returned'],
+      [2, 'held'],
+      [1, 'verified'],
+      [new Error('timeout'), 'unanswered'],
+    ] as const) {
+      const { orders, settles, checks, events } = build(held, null, inquired);
+      expect(await orders.inquirePayment(session(OWNER), { payment: PAYMENT }, 'ip')).toEqual(ok({ orderNumber: 10030, outcome }));
+      expect(settles).toEqual([]);
+      expect(checks).toHaveLength(1);
+      expect(events[0]!.detail).toMatchObject({ outcome });
+    }
+  });
+
+  it('بی `orders.money` ۴۰۳ پیش از هر خواندن؛ ناشناس ۴۰۴؛ بی درگاه همان پرداخت یا تلاش نهایی ۴۰۹', async () => {
+    const reader = build(row());
+    expect(await reader.orders.inquirePayment(session(['orders.read']), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+    expect(reader.calls.some((c) => c.method === 'paymentOf')).toBe(false);
+    expect(await build(null).orders.inquirePayment(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 404, error: 'payment_not_found' });
+    expect(await build(row()).orders.inquirePayment(session(OWNER), { payment: '../x' }, 'ip')).toMatchObject({ status: 404, error: 'payment_not_found' });
+    // درگاه نمونه فقط با `CHECKOUT_MODE=mock` در پنل است.
+    expect(await build(row({ provider: 'mock' })).orders.inquirePayment(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({
+      status: 409,
+      error: 'gateway_not_configured',
+      orderNumber: 10030,
+    });
+    for (const final of [
+      row({ status: 'succeeded', gatewayStatus: 1 }),
+      row({ status: 'failed', failureCode: 'cancelled', gatewayStatus: 3 }),
+      row({ status: 'failed', failureCode: 'order_not_payable', gatewayStatus: 18 }),
+    ]) {
+      const { orders, events } = build(final);
+      expect(await orders.inquirePayment(session(OWNER), { payment: PAYMENT }, 'ip')).toMatchObject({ status: 409, error: 'payment_final' });
+      expect(events).toEqual([]);
+    }
+  });
+
+  it('جزئیات سفارش: درگاه‌های «استعلام» فقط با `orders.money`', async () => {
+    const details = { ...failedDetails(), payments: [], events: [], statusEvents: [], assignments: [], shipments: [] };
+    const money = build(row());
+    money.store.details = async () => details as never;
+    expect(await money.orders.details(session(OWNER), '10031')).toMatchObject({ ok: true, value: { inquiryProviders: ['zibal'] } });
+    expect(await money.orders.details(session(['orders.read']), '10031')).toMatchObject({ ok: true, value: { inquiryProviders: [] } });
   });
 });

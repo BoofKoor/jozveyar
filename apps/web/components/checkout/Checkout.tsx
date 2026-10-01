@@ -142,6 +142,17 @@ function failureText(failure: ApiFailure, retry: string): ReactNode {
 /** فایل‌های جزوه دیگر روی سرور نیستند یا تا کمتر از یک ساعت دیگر نمی‌مانند (ADR-034): «دوباره بینداز». */
 const FILES_GONE: ReadonlySet<string> = new Set(['files_expiring', 'documents_not_found', 'documents_not_ready', 'order_expired']);
 
+/**
+ * درگاه پیش از رفتن (برش ۷٫۲، سؤال ۱۲۹): نامش روی دکمهٔ در حال کار و در یادداشت «خودکار برمی‌گردی»، و زیبال در خط امنیت زیر دکمه. درگاه
+ * نمونه فقط بیرون از سایت زنده است (ADR-035)، پس نامش در خط امنیت نمی‌آید.
+ */
+export type GatewayKind = 'zibal' | 'mock';
+
+const GATEWAY: Record<GatewayKind, { name: string; secure: string }> = {
+  zibal: { name: 'زیبال', secure: 'پرداخت امن با درگاه زیبال و همهٔ کارت‌های بانکی' },
+  mock: { name: 'نمونه', secure: 'پرداخت امن با همهٔ کارت‌های بانکی' },
+};
+
 function FilesGone({ onRestart }: { onRestart: () => void }) {
   return (
     <Note tone="error" testId="files-gone">
@@ -694,18 +705,22 @@ function ReviewStep({
   jozve,
   method,
   slaDays,
+  gateway,
   onDesk,
   onAddress,
   onRestart,
+  onPay,
 }: {
   state: CheckoutState;
   place: Place;
   jozve: Parameters<typeof RecapJozveValue>[0]['jozve'];
   method: string;
   slaDays: number;
+  gateway: GatewayKind;
   onDesk: () => void;
   onAddress: () => void;
   onRestart: () => void;
+  onPay: () => void;
 }) {
   const title = useFocusOnMount<HTMLHeadingElement>();
   const store = checkoutStore();
@@ -720,6 +735,14 @@ function ReviewStep({
       </h1>
       <p className="ck-sub">یک بار دیگر نگاه کن؛ بعد از پرداخت، جزوه به صف چاپ می‌رود.</p>
 
+      {state.busy === 'pay' ? (
+        <div className="ck-card-note">
+          <Note tone="info" testId="pay-going">
+            <b className="font-semibold">به درگاه پرداخت {GATEWAY[gateway].name} می‌روی.</b> بعد از پرداخت، خودکار به همین سایت برمی‌گردی و
+            سفارشت را می‌بینی.
+          </Note>
+        </div>
+      ) : null}
       {notice?.kind === 'price_changed' ? (
         <div className="ck-card-note">
           <p className="jy-note jy-note--warning" role="alert" data-testid="price-changed">
@@ -752,6 +775,23 @@ function ReviewStep({
               درگاه پرداخت الان جواب نمی‌دهد. سفارش{' '}
               <span className="num">{String((failure.body.order as { number?: number } | undefined)?.number ?? '')}</span> با
               همین قیمت نگه داشته شد؛ چند دقیقهٔ دیگر دوباره «پرداخت» را بزن.
+            </Note>
+          ) : failure.error === 'gateway_not_ready' ? (
+            // کد پذیرنده نیست یا زیبال IP سرور را نپذیرفت (۱۱۵، سؤال ۱۳۹): متن «متوقف» طرح، و جزوه و نشانی همین‌جا.
+            <Note tone="warning" testId="pay-failed">
+              <b className="font-semibold">ثبت سفارش موقتاً متوقف است.</b> جزوه، نشانی و انتخاب‌هایت همین‌جا می‌مانند؛ کمی بعد{' '}
+              <button type="button" className="jy-link" onClick={onPay}>
+                دوباره امتحان کن
+              </button>
+              .
+            </Note>
+          ) : failure.error === 'amount_over_gateway_limit' ? (
+            // سقف یک پرداخت درگاه (۱۱۳، سؤال ۱۴۸): مبلغ منجمد است، پس راه جلو سفارش کوچک‌تر است.
+            <Note tone="error" testId="pay-failed">
+              مبلغ این سفارش از سقف یک پرداخت درگاه بیشتر است. تعداد نسخه را کمتر کن و بقیه را سفارش جدا بده.{' '}
+              <button type="button" className="jy-link" onClick={onDesk}>
+                برگرد به جزوه و قیمت
+              </button>
             </Note>
           ) : failure.error === 'quote_warnings' ? (
             <Note tone="warning" testId="pay-failed">
@@ -876,9 +916,11 @@ interface Props {
   onAuth: (auth: { mobile: string } | null) => void;
   /** فایل‌ها دیگر روی سرور نیستند: «دوباره بینداز». */
   onRestart: () => void;
+  /** درگاه پرداخت این حالت (برش ۷٫۲، سؤال ۱۲۹): زیبال در `live`، درگاه نمونه در `mock`. */
+  gateway: GatewayKind;
 }
 
-export function Checkout({ step, go, items, view, config, priceList, slaDays, auth, onAuth, onRestart }: Props) {
+export function Checkout({ step, go, items, view, config, priceList, slaDays, auth, onAuth, onRestart, gateway }: Props) {
   const store = checkoutStore();
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const withPlace = step !== 'city';
@@ -929,6 +971,12 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
   if (fallback) return null;
 
   const otpClosed = state.otp ? (state.otp.closed ?? (now >= state.otp.expiresAt ? 'expired' : null)) : null;
+  const going = state.busy === 'pay';
+  const pay = () => {
+    void store.pay().then((back) => {
+      if (back) go(back);
+    });
+  };
   const action: NextAction | null =
     step === 'city'
       ? null
@@ -950,24 +998,23 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
                   disabled: now < state.otp!.resendAt,
                 }
               : { label: 'تأیید کد', short: 'تأیید کد', form: 'ck-code', busy: state.busy === 'verify' }
-            : {
-                label: breakdown ? (
-                  <>
-                    پرداخت <Tomans rials={breakdown.totalRials} /> تومان
-                  </>
-                ) : (
-                  'پرداخت'
-                ),
-                short: 'پرداخت',
-                name: breakdown ? `پرداخت ${formatTomans(breakdown.totalRials, false)} تومان` : 'پرداخت',
-                onClick: () => {
-                  void store.pay().then((back) => {
-                    if (back) go(back);
-                  });
-                },
-                busy: state.busy === 'pay' || state.busy === 'quote',
-                disabled: !quote,
-              };
+            : going
+              ? // تا هدایت به درگاه (سؤال ۱۲۹): دکمهٔ بسته‌ای که متنش وضعیت است.
+                { label: `در حال رفتن به درگاه ${GATEWAY[gateway].name}…`, short: 'پرداخت', name: `در حال رفتن به درگاه ${GATEWAY[gateway].name}`, busy: true }
+              : {
+                  label: breakdown ? (
+                    <>
+                      پرداخت <Tomans rials={breakdown.totalRials} /> تومان
+                    </>
+                  ) : (
+                    'پرداخت'
+                  ),
+                  short: 'پرداخت',
+                  name: breakdown ? `پرداخت ${formatTomans(breakdown.totalRials, false)} تومان` : 'پرداخت',
+                  onClick: pay,
+                  busy: state.busy === 'quote',
+                  disabled: !quote,
+                };
 
   const card =
     step === 'city' ? (
@@ -997,9 +1044,11 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
         jozve={{ files, pageCount: view.pageCount, print, bindingName, copies: config.copies }}
         method={method}
         slaDays={slaDays}
+        gateway={gateway}
         onDesk={() => go('desk')}
         onAddress={() => go('address')}
         onRestart={onRestart}
+        onPay={pay}
       />
     ) : stage === 'code' && state.otp ? (
       <CodeStep state={state} now={now} />
@@ -1083,7 +1132,7 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
             <>
               <p className="home-sum__secure">
                 <span className="jy-icon jy-icon-lock" aria-hidden="true" />
-                پرداخت امن با همهٔ کارت‌های بانکی
+                {GATEWAY[gateway].secure}
               </p>
               <p className="home-sum__terms">
                 با پرداخت،{' '}

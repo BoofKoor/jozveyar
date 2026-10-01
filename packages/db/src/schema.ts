@@ -985,13 +985,39 @@ export const payments = pgTable(
     authority: text('authority').notNull(),
     /** کد پیگیری بانک؛ فقط برای پرداخت موفق. */
     refId: text('ref_id'),
+    /** کارت پوشیده، همان شکلی که درگاه داد؛ برای پرداخت موفق، و از ۷٫۲ برای پرداخت دومی که پولش گرفته شد. */
     cardMask: text('card_mask'),
-    /** چرا ناموفق: `cancelled`، `declined`، `verify_failed`، `amount_mismatch`… */
+    /**
+     * چرا ناموفق (`PaymentFailureCode` در `@jozveyar/payments`): از وضعیت درگاه `cancelled`، `declined`، `bank_error` و `returned`؛ تصمیم
+     * ما `expired` (مهلت تلاش گذشت)، `order_not_payable` (پرداخت دوم) و `amount_mismatch`؛ `verify_failed` فقط پیش از ۷٫۲.
+     */
     failureCode: text('failure_code'),
-    /** پاسخ خام درگاه، برای روزی که بانک و ما دو چیز بگوییم. */
+    /** پاسخ خام درگاه (فقط فیلدهای شناخته، بی کد پذیرنده)، برای روزی که بانک و ما دو چیز بگوییم. */
     raw: jsonb('raw'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    /**
+     * کلید برگشت (برش ۷٫۲، سؤال ۱۴۵): تصادفی، ۱۲۸ بیت؛ نشانی برگشت `/pay/callback/<کلید>` است و برگشت فقط همین را می‌خواند، نه هیچ
+     * پارامتر درگاه. `trackId` زیبال راز نیست (در نشانی صفحهٔ پرداخت پیداست)، پس به توکن سفارش نمی‌رسد.
+     */
+    returnKey: text('return_key')
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+    /** شناسهٔ سفارش نزد درگاه: «شمارهٔ سفارش-۸ نویسهٔ اول شناسهٔ تلاش» (`10027-3f9c2a1b`، ADR-050)؛ برای زیبال اجباری و یکتا. */
+    gatewayOrderId: text('gateway_order_id'),
+    /** مبلغی که `verify` درگاه نهایی کرد؛ موفق یعنی برابر مبلغ (`payments_success_amount`). */
+    verifiedAmountRials: bigint('verified_amount_rials', { mode: 'number' }),
+    /**
+     * آخرین وضعیتی که درگاه گفت (کدهای زیبال، `@jozveyar/payments`)، زمان آخرین پرسش، و اگر جواب روشن نیامد علتش (`rejected:115`…).
+     * پس از «موفق» یا «ناموفق» هم عوض می‌شود: استعلام خودکار پول پرداخت دوم را تا «ریورس‌شده» می‌پاید.
+     */
+    gatewayStatus: smallint('gateway_status'),
+    gatewayError: text('gateway_error'),
+    gatewayCheckedAt: timestamp('gateway_checked_at', { withTimezone: true }),
+    /** نخستین برگشت مرورگر مشتری از درگاه به همین تلاش. */
+    returnedAt: timestamp('returned_at', { withTimezone: true }),
+    /** چه چیزی تلاش را بست: برگشت از درگاه (`callback`)، استعلام خودکار (`auto`) یا «استعلام از درگاه» پنل (`panel`). */
+    settledVia: text('settled_via'),
     /**
      * پیامک پرداخت (برش ۷، ADR-049): ردیف «منتظر» `sms_messages` که در همان تراکنش «موفق» نوشته شد و بعد از commit فرستاده می‌شود؛
      * فقط در همان گذار گذاشته می‌شود و دیگر عوض نمی‌شود (تریگر `payments_sms`، 0028). پرداخت پیش از برش ۷ پیامکش را بی ردیف منتظر
@@ -1001,7 +1027,12 @@ export const payments = pgTable(
   },
   (t) => [
     uniqueIndex('payments_provider_authority').on(t.provider, t.authority),
+    uniqueIndex('payments_return_key').on(t.returnKey),
+    /** یک شناسهٔ سفارش برای هر تلاش، نزد هر درگاه. */
+    uniqueIndex('payments_gateway_order').on(t.provider, t.gatewayOrderId),
     index('payments_order').on(t.orderId),
+    /** استعلام خودکار تلاش‌های باز. */
+    index('payments_pending').on(t.createdAt).where(sql`${t.status} = 'pending'`),
     /** یک پیامک برای هر پرداخت (سطر پیامک به پرداخت دیگری وصل نمی‌شود). */
     uniqueIndex('payments_sms').on(t.smsMessageId),
     /** یک سفارش، حداکثر یک پرداخت موفق: پول دوباره گرفته نمی‌شود، حتی اگر بانک دو بار برگرداند. */
@@ -1010,6 +1041,22 @@ export const payments = pgTable(
     check(
       'payments_success_has_ref',
       sql`${t.status} <> 'succeeded' OR (${t.refId} IS NOT NULL AND ${t.verifiedAt} IS NOT NULL)`,
+    ),
+    check('payments_return_key', sql`${t.returnKey} ~ '^[0-9a-f]{32}$'`),
+    check(
+      'payments_gateway_order_id',
+      sql`(${t.gatewayOrderId} IS NULL OR length(${t.gatewayOrderId}) BETWEEN 1 AND 64)
+       AND (${t.provider} <> 'zibal' OR ${t.gatewayOrderId} IS NOT NULL)`,
+    ),
+    /** موفق یعنی درگاه همان مبلغ را نهایی کرد (ADR-050). */
+    check('payments_success_amount', sql`${t.status} <> 'succeeded' OR coalesce(${t.verifiedAmountRials} = ${t.amountRials}, false)`),
+    check(
+      'payments_gateway_error',
+      sql`${t.gatewayError} IS NULL OR ${t.gatewayError} ~ '^(unavailable|rejected|malformed|unconfigured)(:-?[0-9]{1,9})?$'`,
+    ),
+    check(
+      'payments_settled_via',
+      sql`${t.settledVia} IS NULL OR (${t.settledVia} IN ('callback', 'auto', 'panel') AND ${t.status} <> 'pending')`,
     ),
   ],
 );

@@ -394,8 +394,10 @@ export interface KeyReceiptFields {
 export interface KeyState extends FormState {
   /** «در دسترس نیست» کلید API (۷٫۱): رسید، برای «بی آزمایش ذخیره کن». */
   receipt?: KeyReceiptFields;
-  /** «رد شد» (۷٫۱): عدد پاسخ sms.ir، کد بدنه یا HTTP. */
+  /** «رد شد» (۷٫۱): عدد پاسخ sms.ir، کد بدنه یا HTTP؛ از ۷٫۲ `result` زیبال. */
   code?: number | null;
+  /** کد پذیرنده آزموده نشد چون نشانی برگشت (`PAYMENT_CALLBACK_URL`) در `.env` نیست (۷٫۲). */
+  unconfigured?: boolean;
 }
 
 const receiptFields = (value: unknown): KeyReceiptFields | undefined => {
@@ -436,7 +438,9 @@ export async function keyAction(_state: KeyState, form: FormData): Promise<KeySt
     redirect(`${home}?e=${result.error}&${doneMark()}${anchor}`);
   }
   if (result.error === 'key_unavailable') return { error: result.error, receipt: receiptFields(result.receipt) };
-  if (result.error === 'key_rejected') return { error: result.error, code: numberOr(result.smsStatus, result.http) };
+  if (result.error === 'key_rejected') {
+    return { error: result.error, code: numberOr(result.serviceStatus, result.http), ...(result.unconfigured === true ? { unconfigured: true } : {}) };
+  }
   // «بی آزمایش ذخیره کن» با کد اشتباه: رسید همان می‌ماند تا بار دوم.
   if (intent === 'skip' && (result.error === 'wrong_code' || result.error === 'code_used' || result.error === 'invalid_api_key')) {
     return { ...failure(result), receipt: receiptFields({ outcome: field(form, 'tested'), at: field(form, 'testedAt'), mac: field(form, 'receipt') }) };
@@ -831,6 +835,20 @@ export async function resendPaymentSmsAction(form: FormData): Promise<void> {
       ? withQuery(back, `done=paid_sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
       : withQuery(back, `e=${result.error}&${doneMark()}`),
   );
+}
+
+/**
+ * «استعلام از درگاه» (۷٫۲، طرح `m-order-unpaid`؛ مالک و متصدی): از کارت «پرداخت‌ها» سفارش؛ برگشت به همان سفارش با نتیجه
+ * (`done=inquiry&r=…`) یا پیامش.
+ */
+export async function inquirePaymentAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await orders.inquirePayment(session, { payment: field(form, 'payment') }, await requestIp());
+  const number = result.ok ? String(result.value.orderNumber) : typeof result.orderNumber === 'number' ? String(result.orderNumber) : field(form, 'number');
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number.slice(0, 20))}`);
+  redirect(result.ok ? withQuery(back, `done=inquiry&r=${result.value.outcome}&${doneMark()}`) : withQuery(back, `e=${result.error}&${doneMark()}`));
 }
 
 /* ───────────────────────── گزارش ارسال (۶٫۴) ───────────────────────── */

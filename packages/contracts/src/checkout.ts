@@ -153,6 +153,12 @@ export type CheckoutErrorCode =
   | 'order_not_payable'
   | 'order_expired'
   | 'gateway_unavailable'
+  /** درگاه آماده نیست (برش ۷٫۲، سؤال ۱۳۹): IP سرور در پنل زیبال نیست (۱۱۵)، یا کد پذیرنده خالی است. */
+  | 'gateway_not_ready'
+  /** جمع سفارش از سقف یک پرداخت درگاه بیشتر است (برش ۷٫۲، سؤال ۱۴۸؛ زیبال ۱۱۳). */
+  | 'amount_over_gateway_limit'
+  /** پولی شاید گرفته شده و نتیجه‌اش هنوز نیامده (برش ۷٫۲): تلاش تازه نه، تا «پرداختت در حال بررسی است» روشن شود. */
+  | 'payment_checking'
   | 'unavailable';
 
 /** یک بخش جزوه در صفحهٔ سفارش: نام فایل و صفحه‌هایی که سرور شمرد. */
@@ -203,6 +209,9 @@ export interface OrderViewParcel {
   smsSent: boolean;
 }
 
+/** گروه علت پرداخت ناموفق برای مشتری (برش ۷٫۲، سؤال ۱۳۱)؛ همان `FailureGroup` در `@jozveyar/payments`. */
+export type PaymentFailureGroup = 'cancelled' | 'card' | 'bank' | 'paid_unverified' | 'returned';
+
 export interface OrderViewDetails {
   totalRials: number;
   breakdown: Breakdown;
@@ -210,9 +219,33 @@ export interface OrderViewDetails {
   paidAt: string | null;
   /** کد پیگیری بانک، بعد از پرداخت. */
   refId: string | null;
-  /** آخرین تلاش پرداخت، برای «پرداخت انجام نشد» بعد از برگشت از درگاه. */
-  lastPayment: { status: 'pending' | 'succeeded' | 'failed'; failureCode: string | null } | null;
-  /** «دوباره پرداخت کن»: سفارش در انتظار پرداخت و فایل‌هایش دست‌کم یک ساعت دیگر زنده. */
+  /**
+   * آخرین تلاش پرداخت، برای «پرداخت انجام نشد» بعد از برگشت از درگاه. از برش ۷٫۲ (ADR-050): آخرین وضعیتی که درگاه گفت (کدهای زیبال)،
+   * گروه علت برای مشتری (سؤال ۱۳۱)، و نام درگاه.
+   */
+  lastPayment: {
+    status: 'pending' | 'succeeded' | 'failed';
+    failureCode: string | null;
+    gatewayStatus: number | null;
+    /** فقط ناموفق: لغو، کارت، بانک، پرداخت‌شدهٔ تأییدنشده، یا برگشت‌خورده. */
+    failureGroup: PaymentFailureGroup | null;
+    /** فقط گروه کارت: «موجودی کارت کافی نبود»… */
+    cardReason: string | null;
+    /** مشتری از درگاه برگشت و درگاه گفت هنوز «در انتظار پرداخت» است (برگشت زودرس یا دست‌ساز): «پرداخت هنوز انجام نشده». */
+    unpaid: boolean;
+    gateway: string;
+  } | null;
+  /**
+   * «پرداختت در حال بررسی است» (برش ۷٫۲، سؤال ۱۳۰): تلاشی که پولش شاید گرفته شده و نتیجه‌اش نیامده؛ تا نتیجه نه «دوباره پرداخت کن» و
+   * نه تلاش تازه. `checkedAt` آخرین باری است که از درگاه پرسیدیم.
+   */
+  checking: { checkedAt: string | null } | null;
+  /**
+   * پرداخت دومی که پولش گرفته شد ولی تأیید نشد، چون سفارش پیش‌تر پرداخت شده بود (برش ۷٫۲، سؤال‌های ۱۲۱ و ۱۳۲): درگاه خودکار برش
+   * می‌گرداند؛ «سفارش ثبت شد» یادداشتش را دارد.
+   */
+  extraPayments: { amountRials: number; cardMask: string | null; gateway: string }[];
+  /** «دوباره پرداخت کن»: سفارش در انتظار پرداخت، فایل‌هایش دست‌کم یک ساعت دیگر زنده، و هیچ پرداختی در حال بررسی نیست. */
   canPay: boolean;
   items: OrderViewItem[];
   shipping: {

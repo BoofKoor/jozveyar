@@ -87,6 +87,9 @@ export type AdminErrorCode =
   /** «دوباره بفرست» پیامک پرداخت (۷٫۱). */
   | 'payment_not_found'
   | 'paid_sms_closed'
+  /** «استعلام از درگاه» (۷٫۲). */
+  | 'gateway_not_configured'
+  | 'payment_final'
   /** ارسال: ورود فایل پست (۶٫۱). */
   | 'post_file_required'
   | 'post_file_too_large'

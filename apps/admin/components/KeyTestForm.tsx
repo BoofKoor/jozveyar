@@ -7,8 +7,8 @@ import { testKeyAction, type FormState } from '../app/[gate]/actions';
 import { messageOf } from '../lib/messages';
 
 /**
- * «آزمایش» مقدار امروز کلید API sms.ir (۷٫۱، سؤال ۱۳۸): یک دکمه در ردیف کلید، بی کد؛ اعتبار حساب، بی پیامک. نتیجه کنار همان کلید و
- * در پیام بالای کارت (به صفحه با `done=key_test`).
+ * «آزمایش» مقدار امروز کلید API sms.ir (۷٫۱، سؤال ۱۳۸): یک دکمه در ردیف کلید، بی کد؛ اعتبار حساب، بی پیامک. از ۷٫۲ کد پذیرندهٔ زیبال هم:
+ * یک درخواست پرداخت آزمایشی. نتیجه کنار همان کلید و در پیام بالای کارت (به صفحه با `done=key_test`).
  */
 export function KeyTestButton({ gate, name }: { gate: string; name: string }) {
   const [, action, pending] = useActionState<FormState, FormData>(testKeyAction, {});

@@ -5,11 +5,11 @@ import type { MockDecision } from '@jozveyar/contracts/checkout';
 import { checkoutApi } from '../../lib/checkout/api';
 
 /**
- * سه تصمیم درگاه نمونه (ADR-035): موفق، ناموفق، انصراف. تصمیم به سرور می‌رود و بعد برگشت از درگاه، به همان
- * شکل زرین‌پال (`/pay/callback?Authority=…&Status=…`). تصمیمی که یک بار ثبت شد عوض نمی‌شود؛ آن‌وقت فقط
- * «برگشت به جزوه‌یار».
+ * سه تصمیم درگاه نمونه (ADR-035): موفق، ناموفق، انصراف. تصمیم به سرور می‌رود و بعد برگشت از درگاه به نشانی کلیددار همین تلاش
+ * (`/pay/callback/<کلید>`، برش ۷٫۲)، که تصمیم را با استعلام می‌خواند. تصمیمی که یک بار ثبت شد عوض نمی‌شود؛ آن‌وقت فقط «برگشت به
+ * جزوه‌یار».
  */
-export function GateActions({ authority, decided }: { authority: string; decided: boolean }) {
+export function GateActions({ authority, decided, returnUrl }: { authority: string; decided: boolean; returnUrl: string }) {
   const [busy, setBusy] = useState<MockDecision | null>(null);
   const [failed, setFailed] = useState(false);
   // «برگشت» مرورگر از صفحهٔ سفارش به این صفحه، از حافظهٔ مرورگر: دکمه‌ها دیگر در حال کار نیستند.
@@ -28,7 +28,7 @@ export function GateActions({ authority, decided }: { authority: string; decided
         <div className="ck-gate__actions">
           <a
             className="jy-btn jy-btn--primary jy-btn--lg jy-btn--block"
-            href={`/pay/callback?Authority=${encodeURIComponent(authority)}&Status=NOK`}
+            href={returnUrl}
           >
             برگشت به جزوه‌یار
           </a>

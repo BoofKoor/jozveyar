@@ -77,8 +77,8 @@ async function printingOrder(name: string, phone: string): Promise<Seeded> {
     await tx`INSERT INTO print_rules (order_item_id, seq, page_ranges, color_mode, paper_type_id)
              VALUES (${item!.id}, 1, ${tx.json(rules[0]!.pageRanges)}, 'bw', 'tahrir80')`;
     const [payment] = await tx<{ id: string }[]>`
-      INSERT INTO payments (order_id, provider, amount_rials, status, authority, ref_id, verified_at, created_at)
-      VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, 'succeeded', ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`},
+      INSERT INTO payments (order_id, provider, amount_rials, verified_amount_rials, status, authority, ref_id, verified_at, created_at)
+      VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, ${breakdown.totalRials}, 'succeeded', ${`MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`},
               '803114', ${paidAt}, ${new Date(paidAt.getTime() - MINUTE)})
       RETURNING id`;
     await tx`UPDATE orders SET status = 'paid', paid_at = ${paidAt}, post_handoff_due_at = ${tehranDayStart(paidAt, 3)} WHERE id = ${row!.id}`;
@@ -280,7 +280,8 @@ test.describe.serial('پیامک رهگیری', () => {
     await expect(links.first()).toHaveAttribute('href', `https://tracking.post.ir/search.aspx?id=${code(1)}`);
     await expect(links.first()).toHaveAttribute('target', '_blank');
     await expect(links.first()).toHaveAttribute('rel', 'noopener noreferrer');
-    await expect(page.locator('meta[name="referrer"]')).toHaveAttribute('content', 'no-referrer');
+    // از ۷٫۲ فقط مبدأ (سؤال ۱۲۲): صفحهٔ پرداخت زیبال Referer دامنه را می‌خواهد؛ توکن سفارش هرگز، و پیوند پست همچنان بی Referer.
+    await expect(page.locator('meta[name="referrer"]')).toHaveAttribute('content', 'strict-origin');
     expect(seen).toEqual([]);
     await mine.close();
 

@@ -657,46 +657,119 @@ describe('جزئیات سفارش', () => {
     expect(printReady({ ...printed, order: { ...printed.order, filesDeletedAt: NOW } })).toBe(false);
   });
 
-  it('پرداخت‌ها: موفق با کد پیگیری، ناموفق با دلیل، بی برگشت بعد از نیم ساعت، و هنوز در درگاه', () => {
+  it('پرداخت‌ها (۷٫۲، طرح `m-order` و `m-order-unpaid`): شناسهٔ زیبال، کارت و کد پیگیری، وضعیت درگاه، علت هر ناموفق، و «استعلام از درگاه»', () => {
     const payment = (over: Partial<PaymentRow>): PaymentRow => ({
       id: 'p',
       orderId: 'o1',
       provider: 'zibal',
       amountRials: 3_747_500,
       status: 'pending',
-      authority: 'a',
+      authority: '3715022987',
+      gatewayOrderId: '10030-aaaaaaaa',
+      returnKey: 'a'.repeat(32),
       refId: null,
       cardMask: null,
       failureCode: null,
       raw: null,
       createdAt: NOW,
       verifiedAt: null,
+      verifiedAmountRials: null,
+      gatewayStatus: null,
+      gatewayError: null,
+      gatewayCheckedAt: null,
+      returnedAt: null,
+      settledVia: null,
       smsMessageId: null,
       ...over,
     });
+    const at = (hhmm: string) => tehran(`2026-10-05 ${hhmm}`);
     const view = (p: PaymentRow) => {
       const v = paymentView(p, NOW);
-      return [v.kind, text(v.meta)];
+      return [v.kind, text(v.meta), v.inquirable];
     };
-    expect(view(payment({ status: 'succeeded', refId: '803114', cardMask: '6037-99**-****-1234', verifiedAt: NOW }))).toEqual([
-      'succeeded',
-      'زیبال · کد پیگیری 803114 · کارت 6037-99**-****-1234',
+    const card = '6037\u00a099••\u00a0••••\u00a01234';
+    expect(
+      view(payment({ status: 'succeeded', authority: '3714562809', refId: '803114', cardMask: '603799******1234', gatewayStatus: 1, verifiedAt: NOW })),
+    ).toEqual(['succeeded', `شناسهٔ زیبال 3714562809 · کارت ${card} · کد پیگیری 803114 · درگاه: پرداخت‌شده، تأییدشده`, false]);
+    // علت کارت از خود زیبال؛ لغو با درگاه نمونه.
+    expect(view(payment({ status: 'failed', authority: '3714559120', failureCode: 'declined', gatewayStatus: 5 }))).toEqual([
+      'failed',
+      'شناسهٔ زیبال 3714559120 · موجودی کارت کافی نبود',
+      false,
     ]);
-    expect(view(payment({ status: 'failed', failureCode: 'declined' }))).toEqual(['failed', 'زیبال · بانک پرداخت را نپذیرفت']);
-    expect(view(payment({ status: 'failed', provider: 'mock', failureCode: 'cancelled' }))).toEqual([
+    expect(view(payment({ status: 'failed', provider: 'mock', failureCode: 'cancelled', gatewayStatus: 3 }))).toEqual([
       'failed',
       'درگاه نمونه · مشتری در درگاه انصراف داد',
+      false,
     ]);
-    // مرز همان برگشت سایت: تا خود نیم ساعت هنوز پذیرفته می‌شود، یک میلی‌ثانیه بعد «بی برگشت».
-    expect(view(payment({ createdAt: new Date(NOW.getTime() - 30 * MINUTE) }))).toEqual([
+    // برنگشت و مهلت گذشت، با استعلام خودکار (طرح).
+    expect(
+      view(payment({ status: 'failed', authority: '3715020114', failureCode: 'expired', gatewayStatus: -1, gatewayCheckedAt: at('11:14'), settledVia: 'auto' })),
+    ).toEqual([
+      'failed',
+      'شناسهٔ زیبال 3715020114 · مشتری به درگاه رفت و برنگشت؛ استعلام خودکار 11:14: پرداخت نشده (درگاه: در انتظار پرداخت)، و مهلت 10 دقیقه گذشته بود.',
+      // پولی گرفته نشد: استعلام لازم نیست؛ همان بی پاسخ درگاه (`null`) چرا.
+      false,
+    ]);
+    expect(view(payment({ status: 'failed', failureCode: 'expired', gatewayCheckedAt: at('11:14'), settledVia: 'auto' }))).toEqual([
+      'failed',
+      'شناسهٔ زیبال 3715022987 · مشتری به درگاه رفت و برنگشت؛ استعلام خودکار 11:14: زیبال جواب روشن نداد، و مهلت 10 دقیقه گذشته بود.',
+      true,
+    ]);
+    // پرداخت دوم: پول نزد درگاه («استعلام از درگاه»)، و بعد «برگشت خورد».
+    const second = { status: 'failed' as const, authority: '3714563311', failureCode: 'order_not_payable', cardMask: '603799******1234', settledVia: 'auto' };
+    expect(view(payment({ ...second, gatewayStatus: 2, gatewayCheckedAt: at('11:10') }))).toEqual([
+      'failed',
+      `شناسهٔ زیبال 3714563311 · کارت ${card} · پرداخت دوم: سفارش پیش‌تر پرداخت شده بود، پس تأیید نشد؛ زیبال پولش را خودکار به کارت برمی‌گرداند (درگاه: پرداخت‌شده، تأییدنشده) · استعلام خودکار 11:10`,
+      true,
+    ]);
+    expect(view(payment({ ...second, gatewayStatus: 18, gatewayCheckedAt: at('11:19') }))).toEqual([
+      'returned',
+      `شناسهٔ زیبال 3714563311 · کارت ${card} · پرداخت دوم: سفارش پیش‌تر پرداخت شده بود، پس تأیید نشد؛ زیبال پولش را به کارت برگرداند (درگاه: ریورس‌شده) · استعلام خودکار 11:19`,
+      false,
+    ]);
+    // تأییدشده و بی‌استفاده: خودکار برنمی‌گردد.
+    expect(text(paymentView(payment({ ...second, gatewayStatus: 1 }), NOW).meta)).toContain('زیبال آن را تأییدشده می‌گوید، پس پولش خودکار برنمی‌گردد: دستی برش گردان');
+    // مبلغ ناهمخوان: آنچه استعلام پیش از `verify` گفت.
+    expect(
+      view(payment({ status: 'failed', failureCode: 'amount_mismatch', gatewayStatus: 2, raw: { amount: 374_750 }, settledVia: 'callback', gatewayCheckedAt: at('11:00') })),
+    ).toEqual([
+      'failed',
+      'شناسهٔ زیبال 3715022987 · مبلغ با سفارش نخواند: زیبال 37,475 تومان گفت، نه 374,750؛ زیبال پولش را خودکار به کارت برمی‌گرداند (درگاه: پرداخت‌شده، تأییدنشده) · برگشت مشتری 11:00',
+      true,
+    ]);
+    // در حال بررسی: مشتری برگشت و زیبال جواب نداد (طرح)، یا پرداخت‌شده و `verify` هنوز نه.
+    const created = at('11:14');
+    expect(view(payment({ createdAt: created, returnedAt: at('11:16'), gatewayError: 'unavailable', gatewayCheckedAt: at('11:18') }))).toEqual([
+      'checking',
+      'شناسهٔ زیبال 3715022987 · مشتری 11:16 برگشت ولی زیبال جواب نداد. استعلام خودکار هر دقیقه، آخرین 11:18؛ برگشتش تا 11:24 پذیرفته می‌شود.',
+      true,
+    ]);
+    expect(view(payment({ createdAt: created, gatewayStatus: 2, gatewayError: 'unavailable:502', gatewayCheckedAt: at('11:18') }))[1]).toBe(
+      'شناسهٔ زیبال 3715022987 · زیبال می‌گوید پرداخت شده، ولی تأییدش هنوز نهایی نشده؛ زیبال جواب نداد (HTTP 502). استعلام خودکار هر دقیقه، آخرین 11:18؛ برگشتش تا 11:24 پذیرفته می‌شود.',
+    );
+    expect(view(payment({ createdAt: created, returnedAt: at('11:16'), gatewayError: 'rejected:115', gatewayCheckedAt: at('11:18') }))[1]).toContain(
+      'برگشت ولی زیبال IP سرور را نپذیرفت (کد 115).',
+    );
+    // مرز همان برگشت سایت: تا خود ده دقیقه هنوز پذیرفته می‌شود، یک میلی‌ثانیه بعد «بی برگشت».
+    expect(view(payment({ createdAt: new Date(NOW.getTime() - 10 * MINUTE) }))).toEqual([
       'pending',
-      'زیبال · مشتری در درگاه است؛ برگشتش تا ساعت 11:20 پذیرفته می‌شود.',
+      'شناسهٔ زیبال 3715022987 · مشتری در درگاه است؛ برگشتش تا ساعت 11:20 پذیرفته می‌شود.',
+      true,
     ]);
-    expect(view(payment({ createdAt: new Date(NOW.getTime() - 30 * MINUTE - 1) }))[0]).toBe('unreturned');
-    expect(view(payment({ createdAt: new Date(NOW.getTime() - 40 * MINUTE) }))).toEqual([
+    expect(view(payment({ createdAt: new Date(NOW.getTime() - 10 * MINUTE - 1) }))).toEqual([
       'unreturned',
-      'زیبال · مشتری به درگاه رفت و برنگشت. بعد از 30 دقیقه، برگشت دیرش هم پذیرفته نمی‌شود.',
+      'شناسهٔ زیبال 3715022987 · مشتری به درگاه رفت و برنگشت؛ هنوز از درگاه پرسیده نشده.',
+      true,
     ]);
+    expect(view(payment({ createdAt: new Date(NOW.getTime() - 40 * MINUTE), gatewayError: 'unavailable', gatewayCheckedAt: at('11:19') }))).toEqual([
+      'unreturned',
+      'شناسهٔ زیبال 3715022987 · مشتری به درگاه رفت و برنگشت، و زیبال جواب نداد. استعلام خودکار هر دقیقه دوباره می‌پرسد، آخرین 11:19.',
+      true,
+    ]);
+    expect(view(payment({ provider: 'mock', createdAt: new Date(NOW.getTime() - 40 * MINUTE) }))[1]).toBe(
+      'درگاه نمونه · مشتری به درگاه رفت و برنگشت؛ هنوز از درگاه پرسیده نشده.',
+    );
   });
 
   it('رویدادهای سفارش به ترتیب زمان: ساخته شد، پرداخت شد، PDF و فایل چاپ، و کار ادمین‌ها؛ روز فقط در اولین سطر هر روز', () => {

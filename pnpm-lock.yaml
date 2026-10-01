@@ -32,6 +32,9 @@ importers:
       '@jozveyar/geo':
         specifier: workspace:*
         version: link:../../packages/geo
+      '@jozveyar/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing
@@ -105,6 +108,9 @@ importers:
       '@jozveyar/geo':
         specifier: workspace:*
         version: link:../../packages/geo
+      '@jozveyar/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing
@@ -175,6 +181,9 @@ importers:
       '@jozveyar/geo':
         specifier: workspace:*
         version: link:../geo
+      '@jozveyar/payments':
+        specifier: workspace:*
+        version: link:../payments
       '@jozveyar/sms':
         specifier: workspace:*
         version: link:../sms
@@ -210,6 +219,12 @@ importers:
       '@jozveyar/pricing':
         specifier: workspace:*
         version: link:../pricing
+
+  packages/payments:
+    devDependencies:
+      '@types/node':
+        specifier: 22.13.1
+        version: 22.13.1
 
   packages/pricing:
     dependencies:

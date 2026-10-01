@@ -22,6 +22,7 @@ const config: NextConfig = {
     '@jozveyar/contracts',
     '@jozveyar/db',
     '@jozveyar/geo',
+    '@jozveyar/payments',
     '@jozveyar/pricing',
     '@jozveyar/sms',
     '@jozveyar/storage',

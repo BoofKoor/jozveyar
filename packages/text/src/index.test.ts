@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatCardMask,
   bytesParts,
   extractOrderCodeFromRecipient,
   formatBytes,
@@ -195,6 +196,14 @@ describe('پول — ریال ذخیره، تومان نمایش', () => {
   it('هیچ رقم فارسی در خروجی نیست', () => {
     expect(formatTomans(4_179_500)).not.toMatch(/[۰-۹]/);
     expect(formatNumber(147)).toBe('147');
+  });
+});
+
+describe('formatCardMask (برش ۷٫۲)', () => {
+  it('شانزده نویسه در چهار گروه با «•»؛ هر طول دیگر فقط «•»', () => {
+    expect(formatCardMask('603799******1234')).toBe('6037 99•• •••• 1234');
+    expect(formatCardMask('6037-99xx-XXXX-1234')).toBe('6037 99•• •••• 1234');
+    expect(formatCardMask('603799***1234')).toBe('603799•••1234');
   });
 });
 
