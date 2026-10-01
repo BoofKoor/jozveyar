@@ -1061,6 +1061,99 @@ export const payments = pgTable(
   ],
 );
 
+/* ──────────────────────────── بازپرداخت (برش ۷٫۳، ADR-051) ──────────────────────────── */
+
+/**
+ * بازپرداخت سفارش لغوشده: کل مبلغ پرداخت موفقش، از درگاه یا ثبت دستی، فقط با مالک و کد تازه. فقط افزودنی: ردیف پاک نمی‌شود، و پس از
+ * «برگشت داده شد» یا «برنگشت» دیگر عوض نمی‌شود (`refunds_guard`، 0032).
+ *
+ * - **از درگاه** (`method = 'gateway'`): ردیف «در حال برگشت» پیش از درخواست ساخته می‌شود و شناسه‌اش با درخواست می‌رود (سؤال ۱۵۴)؛ پاسخ
+ *   درگاه، یا استعلام خودکار و «استعلام از درگاه»، آن را «برگشت داده شد» یا «برنگشت» می‌کند. کارمزد درگاه از کیف پول ما (سؤال ۱۳۶).
+ * - **دستی** (`method = 'manual'`): پول از راه دیگری برگشته؛ همان لحظه «برگشت داده شد»، با روز و کد پیگیری بانک، و «چطور برگشت» فقط
+ *   برای پنل.
+ * - **محافظ‌ها** در 0032، هر کدام با نام محدودیت: فقط پرداخت موفق همان سفارش و فقط سفارش «لغو شد»؛ جمع بازپرداخت‌های زنده ≤ مبلغ پرداخت؛ و
+ *   سفارشی که بازپرداخت زنده دارد از «لغو شد» برنمی‌گردد (`orders_status_flow`). یکی در جریان برای هر پرداخت همین‌جاست
+ *   (`refunds_one_pending`).
+ */
+export const refundStatus = pgEnum('refund_status', ['pending', 'succeeded', 'failed']);
+
+export const refunds = pgTable(
+  'refunds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id),
+    paymentId: uuid('payment_id')
+      .notNull()
+      .references(() => payments.id),
+    amountRials: bigint('amount_rials', { mode: 'number' }).notNull(),
+    /** کارمزد درگاه، از کیف پول ما؛ فقط راه درگاه. */
+    feeRials: bigint('fee_rials', { mode: 'number' }),
+    /** `gateway` یا `manual`. */
+    method: text('method').notNull(),
+    status: refundStatus('status').notNull().default('pending'),
+    /** شناسهٔ بازپرداخت نزد درگاه، وقتی درخواست جواب گرفت. */
+    gatewayRef: text('gateway_ref'),
+    /** کد پیگیری بانک: دستی همیشه؛ درگاه اگر داد. */
+    reference: text('reference'),
+    /** روز برگشت دستی، آغاز همان روز به وقت تهران (مشتری فقط روز را می‌بیند، سؤال ۱۵۷). */
+    refundedOn: timestamp('refunded_on', { withTimezone: true }),
+    /** «چطور برگشت» دستی؛ فقط پنل، مشتری نمی‌بیند. */
+    note: text('note'),
+    /** آخرین وضعیت عددی درگاه، زمان آخرین پرسش، و اگر جواب روشن نیامد علتش (`unavailable`…)، مثل `payments`. */
+    gatewayStatus: smallint('gateway_status'),
+    gatewayError: text('gateway_error'),
+    gatewayCheckedAt: timestamp('gateway_checked_at', { withTimezone: true }),
+    /** چرا «برنگشت» (`RefundRejection` در `@jozveyar/payments`). */
+    failureReason: text('failure_reason'),
+    /** چه چیزی راه درگاه را بست: پاسخ خود درخواست (`request`)، استعلام خودکار (`auto`) یا «استعلام از درگاه» (`panel`). */
+    settledVia: text('settled_via'),
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => adminUsers.id),
+    /** پاسخ درگاه، فقط فیلدهای شناخته (بی کلید). */
+    raw: jsonb('raw'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('refunds_order').on(t.orderId, t.createdAt),
+    index('refunds_payment').on(t.paymentId, t.createdAt),
+    /** یکی در جریان برای هر پرداخت: دو کلیک هم‌زمان دو درخواست به درگاه نمی‌فرستند. */
+    uniqueIndex('refunds_one_pending').on(t.paymentId).where(sql`${t.status} = 'pending'`),
+    /** استعلام خودکار. */
+    index('refunds_pending').on(t.createdAt).where(sql`${t.status} = 'pending'`),
+    check('refunds_amount_positive', sql`${t.amountRials} > 0`),
+    check(
+      'refunds_method',
+      sql`(${t.method} = 'gateway' AND ${t.feeRials} IS NOT NULL AND ${t.feeRials} >= 0 AND ${t.refundedOn} IS NULL AND ${t.note} IS NULL)
+       OR (${t.method} = 'manual' AND ${t.feeRials} IS NULL AND ${t.status} = 'succeeded' AND ${t.reference} IS NOT NULL
+           AND ${t.refundedOn} IS NOT NULL AND ${t.gatewayRef} IS NULL AND ${t.gatewayStatus} IS NULL AND ${t.gatewayError} IS NULL
+           AND ${t.gatewayCheckedAt} IS NULL AND ${t.settledVia} IS NULL AND ${t.raw} IS NULL)`,
+    ),
+    check(
+      'refunds_finished',
+      sql`(${t.status} = 'pending') = (${t.finishedAt} IS NULL)
+       AND (${t.status} = 'failed') = (${t.failureReason} IS NOT NULL)
+       AND (${t.settledVia} IS NULL OR (${t.settledVia} IN ('request', 'auto', 'panel') AND ${t.status} <> 'pending'))
+       AND (${t.method} = 'manual' OR ${t.status} = 'pending' OR ${t.settledVia} IS NOT NULL)`,
+    ),
+    check(
+      'refunds_failure_reason',
+      sql`${t.failureReason} IS NULL OR ${t.failureReason} IN ('balance', 'ip', 'token', 'unconfigured', 'not_found', 'other')`,
+    ),
+    check('refunds_reference', sql`${t.reference} IS NULL OR ${t.reference} ~ '^[0-9A-Za-z-]{3,40}$'`),
+    check('refunds_gateway_ref', sql`${t.gatewayRef} IS NULL OR ${t.gatewayRef} ~ '^[0-9A-Za-z_-]{1,64}$'`),
+    check('refunds_note', sql`${t.note} IS NULL OR length(btrim(${t.note})) BETWEEN 1 AND 200`),
+    check('refunds_refunded_on', sql`${t.refundedOn} IS NULL OR ${t.refundedOn} <= ${t.createdAt}`),
+    check(
+      'refunds_gateway_error',
+      sql`${t.gatewayError} IS NULL OR ${t.gatewayError} ~ '^(unavailable|rejected|malformed|unconfigured)(:-?[0-9]{1,9})?$'`,
+    ),
+  ],
+);
+
 /* ──────────────────────────── پیامک (ADR-008) ──────────────────────────── */
 
 /**

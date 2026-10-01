@@ -9,9 +9,10 @@
  */
 
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
-import { formatNumber } from '@jozveyar/text';
+import { formatNumber, formatTomans } from '@jozveyar/text';
 
 import { tehranDay } from './format';
+import { REFUND_INQUIRY_TEXT, viaGateway } from './refunds';
 import { ROLE_NAMES } from './messages';
 import { boundsText } from './report';
 import { KEY_INFO } from './settings';
@@ -151,6 +152,10 @@ function orderRef(detail: Detail): Segment[] {
   const item = typeof detail.item === 'number' && detail.item > 1 ? [' (جزوهٔ ', { ltr: String(detail.item) }, ')'] : [];
   return [{ ltr: number }, ...item];
 }
+
+/** «462,500 تومان»، عدد جدا از جملهٔ فارسی. */
+const tomansOf = (value: unknown): Segment[] =>
+  typeof value === 'number' && Number.isSafeInteger(value) ? [{ ltr: formatTomans(value, false) }, ' تومان'] : [];
 
 /** «10013 و 10017»، «10013، 10017 و 10021»: هر شماره جدا از جملهٔ فارسی. */
 function numbersOf(value: unknown): Segment[] {
@@ -375,6 +380,29 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: ['سفارش ', ...orderRef(detail), `: استعلام از درگاه؛ ${INQUIRY[str(detail.outcome)] ?? str(detail.outcome)}`] };
     case 'payments.gateway_rejected':
       return { badge: null, text: gatewayRejectedText(detail) };
+    case 'orders.refund':
+      // بازپرداخت سفارش لغوشده (۷٫۳، طرح «رویدادها»)، زیر چیپ «پرداخت و بازپرداخت» (سؤال ۱۵۹).
+      return detail.method === 'manual'
+        ? {
+            badge: null,
+            text: ['سفارش ', ...orderRef(detail), ': بازپرداخت دستی ', ...tomansOf(detail.amountRials), ' ثبت شد، کد پیگیری ', ltrOf(detail.reference)],
+          }
+        : {
+            badge: null,
+            text: [
+              'سفارش ',
+              ...orderRef(detail),
+              ': بازپرداخت ',
+              ...tomansOf(detail.amountRials),
+              ` از ${viaGateway(str(detail.provider))} درخواست شد`,
+              ...(typeof detail.feeRials === 'number' ? ['؛ کارمزد ', ...tomansOf(detail.feeRials)] : []),
+            ],
+          };
+    case 'orders.refund_inquiry':
+      return {
+        badge: null,
+        text: ['سفارش ', ...orderRef(detail), `: استعلام بازپرداخت از درگاه؛ ${REFUND_INQUIRY_TEXT[str(detail.outcome)] ?? str(detail.outcome)}`],
+      };
     case 'payments.sms_resend':
       // «دوباره بفرست» پیامک پرداخت (۷٫۱)، زیر چیپ «پرداخت و بازپرداخت» (سؤال ۱۴۱).
       return {

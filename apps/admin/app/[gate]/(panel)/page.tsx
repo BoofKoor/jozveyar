@@ -8,7 +8,7 @@ import { formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } fro
 import { DueBadge } from '../../../components/OrderBadges';
 import { OrderRows } from '../../../components/OrderRows';
 import { Segments } from '../../../components/Segments';
-import { whenText } from '../../../lib/format';
+import { dayText, whenText } from '../../../lib/format';
 import { panelPath } from '../../../lib/gate';
 import { statsSegs } from '../../../lib/orders';
 import { can } from '../../../lib/server/auth';
@@ -157,6 +157,8 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
       alerts.reviewRows > 0 ||
       alerts.smsFailed.length > 0 ||
       alerts.paidSmsFailed.length > 0 ||
+      alerts.unrefunded.length > 0 ||
+      alerts.refunding.length > 0 ||
       untracked.length > 0 ||
       cap ||
       low ? (
@@ -262,6 +264,47 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
                   </>
                 ) : null}
                 . شارژ کن؛ بی اعتبار کد تأیید نمی‌رود و کسی نمی‌تواند سفارش بدهد.
+              </span>
+            </p>
+          ) : null}
+          {alerts.unrefunded.length === 1 ? (
+            // پول سفارش لغوشده (۷٫۳، سؤال ۱۵۸؛ طرح `m-dash-alerts`): از لغو تا «برگشت داده شد»، فقط مالک و متصدی.
+            <p className="jy-note jy-note--warning" data-alert="unrefunded">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                پول{' '}
+                <Link className="jy-link" href={panelPath(gate, `/orders/${alerts.unrefunded[0]!.orderNumber}`)}>
+                  سفارش لغوشدهٔ <span className="num">{alerts.unrefunded[0]!.orderNumber}</span>
+                </Link>{' '}
+                هنوز برنگشته
+                {alerts.unrefunded[0]!.cancelledAt ? (
+                  <>
+                    {' '}
+                    (لغو {dayText(alerts.unrefunded[0]!.cancelledAt, now)}، <span className="num">{formatTehranTime(alerts.unrefunded[0]!.cancelledAt)}</span>)
+                  </>
+                ) : null}
+                . از صفحهٔ سفارش برش گردان.
+              </span>
+            </p>
+          ) : alerts.unrefunded.length > 1 ? (
+            <p className="jy-note jy-note--warning" data-alert="unrefunded">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                پول سفارش‌های لغوشدهٔ <OrderLinks gate={gate} numbers={alerts.unrefunded.map((row) => row.orderNumber)} /> هنوز برنگشته. از صفحهٔ
+                هر کدام برش گردان.
+              </span>
+            </p>
+          ) : null}
+          {alerts.refunding.length > 0 ? (
+            // بازپرداختی که دو ساعت پس از درخواست هنوز بسته نشده (۷٫۳، سؤال ۱۵۸).
+            <p className="jy-note jy-note--warning" data-alert="refunding">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                <b>بازپرداخت هنوز در حال برگشت:</b> {alerts.refunding.length === 1 ? 'سفارش ' : 'سفارش‌های '}
+                <OrderLinks gate={gate} numbers={alerts.refunding.map((row) => row.orderNumber)} />؛ بیش از دو ساعت از درخواست گذشته و درگاه هنوز
+                «برگشت داده شد» نگفته
+                {alerts.refunding.some((row) => row.unknown) ? '، و درخواستی هم جواب روشن نگرفته' : ''}. از صفحهٔ سفارش «استعلام از درگاه» بزن؛ اگر
+                همان ماند، از پشتیبانی درگاه بپرس.
               </span>
             </p>
           ) : null}

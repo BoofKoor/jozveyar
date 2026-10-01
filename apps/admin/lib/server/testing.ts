@@ -6,6 +6,7 @@
 import {
   ADMIN_ROLES,
   PARTNER_ROLE,
+  inEventKind,
   isAdminRole,
   type AdminEventInput,
   type AdminEventRow,
@@ -362,7 +363,7 @@ export function memoryAdminStore(): AdminStore & {
     async listEvents(query) {
       return events
         .filter((e) => (query.beforeId ? e.id < query.beforeId : true))
-        .filter((e) => (query.actionPrefix ? e.action.startsWith(`${query.actionPrefix}.`) : true))
+        .filter((e) => (query.actionPrefix ? inEventKind(e.action, query.actionPrefix) : true))
         .sort((a, b) => b.id - a.id)
         .slice(0, query.limit)
         .map((e) => {

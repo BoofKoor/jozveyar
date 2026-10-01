@@ -851,6 +851,74 @@ export async function inquirePaymentAction(form: FormData): Promise<void> {
   redirect(result.ok ? withQuery(back, `done=inquiry&r=${result.value.outcome}&${doneMark()}`) : withQuery(back, `e=${result.error}&${doneMark()}`));
 }
 
+/* ───────────────────────── بازپرداخت سفارش لغوشده (۷٫۳) ───────────────────────── */
+
+/** خطاهایی که فرم بازپرداخت همین‌جا نشان می‌دهد؛ بقیه به صفحهٔ سفارش با پیامشان، که حالت تازهٔ کارت را نشان می‌دهد. */
+const REFUND_FORM_ERRORS: readonly AdminErrorCode[] = ['wrong_code', 'code_used', 'account_locked', 'unavailable', 'refund_precheck_failed'];
+const MANUAL_FIELD_ERRORS: readonly AdminErrorCode[] = [
+  'refund_day_invalid',
+  'refund_day_future',
+  'refund_day_early',
+  'refund_reference_invalid',
+  'refund_note_too_long',
+];
+
+function refundBack(gate: string, result: { ok: boolean; orderNumber?: unknown }, number: string) {
+  const known = typeof result.orderNumber === 'number' ? String(result.orderNumber) : number;
+  return panelPath(gate, `/orders/${encodeURIComponent(known.slice(0, 20))}`);
+}
+
+/**
+ * «X تومان را برگردان» (برش ۷٫۳، طرح `m-refund`؛ فقط مالک، کد تازه): موفق به صفحهٔ سفارش با نتیجه (`done=refund`)؛ خطای کد و
+ * پیش‌استعلامی که جواب نداد همین‌جا؛ بقیه (همین حالا جای دیگری عوض شد، درگاه می‌گوید پولش برگشته) به صفحهٔ سفارش با پیامش.
+ */
+export async function refundGatewayAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const result = await orders.refundFromGateway(
+    session,
+    number,
+    { payment: field(form, 'payment'), seen: field(form, 'seen'), code: form.get('code') },
+    await requestIp(),
+  );
+  if (result.ok) redirect(withQuery(refundBack(gate, { ok: true, orderNumber: result.value.orderNumber }, number), `done=refund&r=${result.value.outcome}&${doneMark()}`));
+  if (REFUND_FORM_ERRORS.includes(result.error)) return failure(result);
+  redirect(withQuery(refundBack(gate, result, number), `e=${result.error}&${doneMark()}`));
+}
+
+/**
+ * «ثبت بازپرداخت دستی» (برش ۷٫۳، طرح `m-refund-manual`؛ فقط مالک، کد تازه): خطای هر فیلد و کد همین‌جا با نوشته‌ها (هرگز کد)؛ موفق
+ * به صفحهٔ سفارش با «برگشت داده شد».
+ */
+export async function refundManualAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const values = { day: field(form, 'day').slice(0, 40), reference: field(form, 'reference').slice(0, 80), note: field(form, 'note').slice(0, 400) };
+  const result = await orders.refundManual(
+    session,
+    number,
+    { payment: field(form, 'payment'), seen: field(form, 'seen'), code: form.get('code'), ...values },
+    await requestIp(),
+  );
+  if (result.ok) redirect(withQuery(refundBack(gate, { ok: true, orderNumber: result.value.orderNumber }, number), `done=refund&r=refunded&${doneMark()}`));
+  if (REFUND_FORM_ERRORS.includes(result.error) || MANUAL_FIELD_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(refundBack(gate, result, number), `e=${result.error}&${doneMark()}`));
+}
+
+/** «استعلام از درگاه» یک بازپرداخت «در حال برگشت» (برش ۷٫۳؛ مالک و متصدی): برگشت به همان سفارش با نتیجه. */
+export async function inquireRefundAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await orders.inquireRefund(session, { refund: field(form, 'refund') }, await requestIp());
+  const back = refundBack(gate, result.ok ? { ok: true, orderNumber: result.value.orderNumber } : result, field(form, 'number'));
+  redirect(result.ok ? withQuery(back, `done=refund_inquiry&r=${result.value.outcome}&${doneMark()}`) : withQuery(back, `e=${result.error}&${doneMark()}`));
+}
+
 /* ───────────────────────── گزارش ارسال (۶٫۴) ───────────────────────── */
 
 export interface BandsState {

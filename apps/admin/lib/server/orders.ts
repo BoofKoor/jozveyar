@@ -33,8 +33,14 @@ import {
   PREPARE_TICKET_JOB,
   TRACKING_ALERT_DAYS,
   TRACKING_GRACE_WORKDAYS,
+  inquireRefund as inquireRefundRow,
+  isLiveRefund,
   isPaidStatus,
+  inquirePendingRefunds,
   readSetting,
+  refundProviders,
+  refundUnknown,
+  requestRefund,
   settleWith,
   watchHeld,
   type AdminEventInput,
@@ -50,8 +56,10 @@ import {
   type PanelPartnerOption,
   type PanelSearch,
   type OrderStore,
+  type RefundRow,
+  type RefundStore,
 } from '@jozveyar/db';
-import type { PaymentGateway } from '@jozveyar/payments';
+import { gatewayName, isRefundedStatus, paymentErrorTag, type PaymentGateway } from '@jozveyar/payments';
 import { deliverQueued, resendable, smsState, type SmsErrorCode, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import type { StorageDriver } from '@jozveyar/storage';
 import { postHandoffDue, tehranDayStart } from '@jozveyar/text';
@@ -86,6 +94,7 @@ import {
   type Seg,
   type StatusAction,
 } from '../orders';
+import { REFUND_SLOW_MS, readManualRefund, refundAskable, refundCard, viaGateway, type RefundCard, type RefundState } from '../refunds';
 import { monthKey, monthLabel, monthRange, parseMonthKey } from '../report';
 import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
@@ -113,6 +122,12 @@ export interface PanelOrdersDeps {
    * بی آن، یا بی درگاه همان پرداخت، «استعلام» نیست.
    */
   payments?: { orders: OrderStore; gateways: Readonly<Record<string, PaymentGateway>> };
+  /**
+   * بازپرداخت سفارش لغوشده (برش ۷٫۳، ADR-051): ذخیره‌گاه `refunds`، با درگاه‌های همان `payments`. بی آن کارت «بازپرداخت» فقط می‌خواند.
+   */
+  refunds?: { store: RefundStore };
+  /** کد تازهٔ برنامهٔ تأیید (همان `AdminAuth.stepUp`)؛ بازپرداخت پول جابه‌جا می‌کند. بی آن بازپرداخت بسته است. */
+  stepUp?: (session: AdminSession, code: unknown, ip: string) => Promise<Result<true>>;
   now?: () => Date;
   log?: (message: string, error?: unknown) => void;
 }
@@ -198,7 +213,52 @@ export interface OrderDetailsView {
   inquiryProviders: string[];
   /** از چشم چاپخانه (۵٫۳): بی کارت چاپخانه و بی یادداشت‌های درونی؛ لغوشده «چاپ نمی‌شود» می‌گوید. */
   partnerView: boolean;
+  /**
+   * کارت «بازپرداخت» (برش ۷٫۳، ADR-051): فقط سفارش «لغو شد» با پرداخت موفق، و فقط برای مالک و متصدی (`orders.money`)؛ null یعنی کارتی
+   * نیست.
+   */
+  refund: RefundView | null;
+  /**
+   * هشدار فرم لغو (۷٫۳): نام درگاهی که پول این سفارش را پس از لغو از همین پنل برمی‌گرداند، یا null یعنی فقط «ثبت بازپرداخت دستی».
+   */
+  refundBy: string | null;
 }
+
+export interface RefundView extends RefundCard {
+  /** «X تومان را برگردان» و «ثبت بازپرداخت دستی»: فقط مالک (`orders.refund`)، با کد تازه. */
+  canRefund: boolean;
+  /** بازپرداخت از درگاه خود پرداخت، و کارمزدش از کیف پول ما؛ null یعنی درگاه این پرداخت در این پنل بازپرداخت ندارد (فقط دستی). */
+  gateway: { provider: string; name: string; feeRials: number } | null;
+  /** «استعلام از درگاه» همان «در حال برگشت»: مالک و متصدی، و درخواستش دیگر در راه نیست. */
+  canInquire: boolean;
+}
+
+/** فرم بازپرداخت: پرداخت و آخرین بازپرداختی که ادمین دید («همان که دیده شد»)، و کد تازه. */
+export interface RefundForm {
+  payment: unknown;
+  seen: unknown;
+  code: unknown;
+}
+
+/** فرم «ثبت بازپرداخت دستی»: همان، به‌علاوهٔ روز، کد پیگیری بانک و «چطور برگشت». */
+export interface ManualRefundForm extends RefundForm {
+  day: unknown;
+  reference: unknown;
+  note: unknown;
+}
+
+/** نتیجهٔ بازپرداخت یا استعلامش، همان حالت کارت؛ `busy` یعنی استعلام دیگری همین حالا روی آن است. */
+export type RefundOutcome = Exclude<RefundState, 'none'> | 'busy';
+
+/** حالت کارت یک ردیف بازپرداخت. */
+export const refundOutcomeOf = (refund: RefundRow): Exclude<RefundState, 'none'> =>
+  refund.status === 'succeeded'
+    ? 'refunded'
+    : refund.status === 'failed'
+      ? 'failed'
+      : refundUnknown(refund)
+        ? 'unknown'
+        : 'refunding';
 
 /** فرم لغو یا برگرداندن: کار، وضعیتی که ادمین دید، و دلیل. «شروع چاپ» چاپخانه‌ای را هم دارد که ادمین دید (۵٫۲). */
 export interface StatusForm {
@@ -289,10 +349,18 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
           reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
           smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
           paidSmsFailed: can(session, 'orders.money') ? alerts.paidSmsFailed : [],
-          // پول و درگاه (۷٫۲، سؤال ۱۴۰): فقط مالک و متصدی.
+          // پول و درگاه (۷٫۲، سؤال ۱۴۰) و بازپرداخت (۷٫۳، سؤال ۱۵۸): فقط مالک و متصدی. «هنوز در حال برگشت» فقط پس از `REFUND_SLOW_MS`.
           ...(can(session, 'orders.money')
-            ? {}
-            : { gatewayRejected: null, mismatched: [], held: [], verifiedUnused: [], autoClosed: { failed: 0, succeeded: 0 } }),
+            ? { refunding: alerts.refunding.filter((row) => row.createdAt.getTime() <= at.getTime() - REFUND_SLOW_MS) }
+            : {
+                gatewayRejected: null,
+                mismatched: [],
+                held: [],
+                verifiedUnused: [],
+                autoClosed: { failed: 0, succeeded: 0 },
+                unrefunded: [],
+                refunding: [],
+              }),
         },
         untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
@@ -355,13 +423,15 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         can(session, 'orders.assign') && status === 'paid'
           ? (await store.partnerOptions(scope)).filter((partner) => partner.id !== details.order.printPartnerId)
           : [];
+      // پولی که برگشته یا در راه برگشت است، لغو را نهایی می‌کند (۷٫۳)؛ پایگاه داده هم (`orders_status_flow`).
+      const refunded = found.refunds.some(isLiveRefund);
       return ok({
         bounds: dayBounds(now()),
         details,
         canDownload: can(session, 'files.download'),
         canStatus: can(session, 'orders.status'),
         canCancel: can(session, 'orders.cancel'),
-        canRevert: can(session, 'orders.revert') && revertTo !== null && !live,
+        canRevert: can(session, 'orders.revert') && revertTo !== null && !live && !refunded,
         revertTo,
         revertBlockedBy: can(session, 'orders.revert') && live && revertTo !== null ? { importId: live.importId, filename: live.filename } : null,
         canEditRecipient: can(session, 'orders.address') && (RECIPIENT_EDITABLE as readonly OrderStatus[]).includes(status),
@@ -370,6 +440,8 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         canMoney,
         inquiryProviders: canMoney && deps.payments ? Object.keys(deps.payments.gateways) : [],
         partnerView: scope.kind === 'partner',
+        refund: canMoney ? refundView(session, details) : null,
+        refundBy: refundByOf(details),
       });
     },
 
@@ -402,6 +474,8 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (details.order.filesDeletedAt) return fail(409, 'files_deleted');
       // کد رهگیری یعنی «تحویل پست شد» (ADR-046): تا ورودش برنگشته، سفارش برنمی‌گردد. پایگاه داده هم در COMMIT (`hasShipment`).
       if (action === 'revert' && details.shipments.some((shipment) => shipment.voidedAt === null)) return fail(409, 'order_has_shipment');
+      // پولش برگشته یا در راه برگشت است (۷٫۳، ADR-051): لغو نهایی است. پایگاه داده هم (`orders_status_flow`).
+      if (action === 'revert' && details.refunds.some(isLiveRefund)) return fail(409, 'order_refunded');
       // «شروع چاپ» فقط با چاپخانه (۵٫۲)، و از همان که ادمین دید: جابه‌جایی هم‌زمان و «شروع چاپ» فقط یکی می‌شوند.
       const partner = action === 'start_print' ? partnerIdOf(form.partner) : undefined;
       if (action === 'start_print' && !details.order.printPartnerId) return fail(409, 'print_needs_partner');
@@ -434,6 +508,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (written.filesDeleted) return fail(409, 'files_deleted');
       if (written.partnerChanged) return fail(409, 'order_partner_changed');
       if (written.hasShipment) return fail(409, 'order_has_shipment');
+      if (written.refunded) return fail(409, 'order_refunded');
       return written.current === to ? ok({ status: to }) : fail(409, 'status_changed', { current: written.current });
     },
 
@@ -745,7 +820,233 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       });
       return ok({ orderNumber: found.orderNumber, outcome: delivery.outcome, error: delivery.error ?? null });
     },
+
+    /**
+     * «X تومان را برگردان» (برش ۷٫۳، ADR-051؛ طرح `m-refund`): فقط مالک (`orders.refund`)، فقط سفارش «لغو شد» با پرداخت موفق، کل مبلغ به
+     * همان کارت، با درگاه خود همان پرداخت. ترتیب: مجوز، «همان که دیده شد» (پرداخت و آخرین بازپرداختش)، درگاه بازپرداخت دارد، استعلام خود
+     * پرداخت (وضعیت «استردادشده» یا «در حال استرداد» یعنی درخواست نمی‌رود؛ استعلامی که جواب نداد هم نمی‌گذارد، سؤال ۱۵۴)، و فقط بعد کد
+     * تازه. ردیف «در حال برگشت» با رویداد `orders.refund` در یک تراکنش، پیش از درخواست؛ بعد درخواست با شناسهٔ همان ردیف، و پاسخ روی آن.
+     * پاسخی که نیامد ردیف را «در حال برگشت» می‌گذارد تا استعلام، نه بازپرداخت دوم.
+     */
+    async refundFromGateway(
+      session: AdminSession,
+      numberParam: string,
+      form: RefundForm,
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: RefundOutcome }>> {
+      if (!can(session, 'orders.refund')) return fail(403, 'forbidden');
+      const target = await refundTarget(session, numberParam, form);
+      if (!target.ok) return target;
+      const { details, card } = target.value;
+      const { orderNumber } = details.order;
+      const gateway = deps.payments?.gateways[card.payment.provider];
+      if (!deps.refunds || !deps.stepUp || !gateway?.refunds) return fail(409, 'refund_gateway_unavailable', { orderNumber });
+
+      // پیش‌استعلام (سؤال ۱۵۴): پولی که همین حالا نزد درگاه برگشته یا در راه برگشت است، درخواست دوم نمی‌گیرد.
+      let status: number | null;
+      try {
+        status = (await gateway.inquire({
+          authority: card.payment.authority,
+          amountRials: card.payment.amountRials,
+          orderId: card.payment.gatewayOrderId,
+          raw: card.payment.raw,
+        })).status;
+      } catch (error) {
+        log(`✗ استعلام پرداخت سفارش ${orderNumber} پیش از بازپرداخت جواب نداد:`, paymentErrorTag(error));
+        return fail(503, 'refund_precheck_failed', { orderNumber });
+      }
+      if (isRefundedStatus(status)) return fail(409, 'refund_already_at_gateway', { orderNumber, status });
+
+      const stepped = await deps.stepUp(session, form.code, ip);
+      if (!stepped.ok) return stepped;
+      const at = now();
+      const amountRials = card.payment.amountRials;
+      const feeRials = gateway.refunds.feeRials(amountRials);
+      const started = await deps.refunds.store.start(scopeOf(session), {
+        orderId: details.order.id,
+        paymentId: card.payment.id,
+        seen: card.seen || null,
+        method: 'gateway',
+        amountRials,
+        feeRials,
+        reference: null,
+        refundedOn: null,
+        note: null,
+        adminUserId: session.userId,
+        at,
+        event: refundEvent(session, details.order.id, ip, at, { orderNumber, method: 'gateway', amountRials, feeRials, provider: card.payment.provider }),
+      });
+      if (!started.ok) return startFailure(started.reason, orderNumber);
+      const row = await requestRefund(
+        { store: deps.refunds.store, gateways: deps.payments!.gateways, now, log },
+        { refund: started.refund, payment: card.payment, description: `بازپرداخت سفارش ${orderNumber} جزوه‌یار` },
+      );
+      return ok({ orderNumber, outcome: refundOutcomeOf(row) });
+    },
+
+    /**
+     * «ثبت بازپرداخت دستی» (برش ۷٫۳؛ طرح `m-refund-manual`): پولی که بیرون از درگاه برگشت (کارت به کارت، درگاه بانک)، فقط مالک، با روز
+     * (از روز پرداخت تا امروز)، کد پیگیری بانک و «چطور برگشت» اختیاری که فقط در پنل است؛ همان قاعدهٔ «همان که دیده شد» و کد تازه. همان
+     * لحظه «برگشت داده شد»، با رویداد در همان تراکنش. کارمزدی نیست: درگاه پولی جابه‌جا نکرد.
+     */
+    async refundManual(
+      session: AdminSession,
+      numberParam: string,
+      form: ManualRefundForm,
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: RefundOutcome }>> {
+      if (!can(session, 'orders.refund')) return fail(403, 'forbidden');
+      const target = await refundTarget(session, numberParam, form);
+      if (!target.ok) return target;
+      const { details, card } = target.value;
+      const { orderNumber } = details.order;
+      if (!deps.refunds || !deps.stepUp) return fail(503, 'unavailable');
+      const read = readManualRefund(form, { paidAt: card.payment.verifiedAt ?? card.payment.createdAt, at: now() });
+      if (!read.ok) return fail(400, read.error, { field: read.field, orderNumber });
+
+      const stepped = await deps.stepUp(session, form.code, ip);
+      if (!stepped.ok) return stepped;
+      const at = now();
+      const amountRials = card.payment.amountRials;
+      const started = await deps.refunds.store.start(scopeOf(session), {
+        orderId: details.order.id,
+        paymentId: card.payment.id,
+        seen: card.seen || null,
+        method: 'manual',
+        amountRials,
+        feeRials: null,
+        reference: read.value.reference,
+        refundedOn: read.value.refundedOn,
+        note: read.value.note,
+        adminUserId: session.userId,
+        at,
+        event: refundEvent(session, details.order.id, ip, at, { orderNumber, method: 'manual', amountRials, reference: read.value.reference }),
+      });
+      if (!started.ok) return startFailure(started.reason, orderNumber);
+      return ok({ orderNumber, outcome: 'refunded' });
+    },
+
+    /**
+     * «استعلام از درگاه» یک بازپرداخت «در حال برگشت» (برش ۷٫۳، سؤال ۱۵۳؛ طرح `m-refunding`): مالک و متصدی (`orders.money`)، بی کد تازه
+     * چون پولی جابه‌جا نمی‌کند؛ زیر قفل ردیف (`SKIP LOCKED`، همان قفل استعلام خودکار)، و فقط ردیفی که درخواستش دیگر در راه نیست. رویداد
+     * `orders.refund_inquiry` با نتیجه.
+     */
+    async inquireRefund(
+      session: AdminSession,
+      form: { refund: unknown },
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: RefundOutcome }>> {
+      if (!can(session, 'orders.money')) return fail(403, 'forbidden');
+      const refundId = typeof form.refund === 'string' && UUID.test(form.refund) ? form.refund : null;
+      const found = refundId && deps.refunds ? await deps.refunds.store.refundOf(scopeOf(session), refundId) : null;
+      if (!found) return fail(404, 'refund_not_found');
+      const { refund, orderId, orderNumber } = found;
+      if (!deps.payments || !deps.refunds) return fail(409, 'refund_gateway_unavailable', { orderNumber });
+      const provider = (await store.details(scopeOf(session), orderNumber))?.payments.find((payment) => payment.id === refund.paymentId)?.provider;
+      if (!provider || !deps.payments.gateways[provider]?.refunds) return fail(409, 'refund_gateway_unavailable', { orderNumber });
+      if (!refundAskable({ ...refund, adminName: null }, now())) return fail(409, 'refund_not_inquirable', { orderNumber });
+
+      const result = await inquireRefundRow({ store: deps.refunds.store, gateways: deps.payments.gateways, now, log }, refund.id, {
+        via: 'panel',
+        skipLocked: true,
+      });
+      if (result === null) return fail(404, 'refund_not_found');
+      if (result === 'not_inquirable') return fail(409, 'refund_not_inquirable', { orderNumber });
+      const outcome: RefundOutcome = result === 'busy' ? 'busy' : refundOutcomeOf(result.refund);
+      const row = result === 'busy' ? null : result.refund;
+      await store.logEvent({
+        adminUserId: session.userId,
+        action: 'orders.refund_inquiry',
+        targetType: 'order',
+        targetId: orderId,
+        ipHash: ipHashOf(deps.secret, ip),
+        at: now(),
+        detail: {
+          orderNumber,
+          refundId: refund.id,
+          outcome,
+          ...(row?.gatewayStatus != null ? { status: row.gatewayStatus } : {}),
+          ...(row?.gatewayError ? { error: row.gatewayError } : {}),
+        },
+      });
+      return ok({ orderNumber, outcome });
+    },
+
+    /** استعلام خودکار هست: ذخیره‌گاه بازپرداخت و دست‌کم یک درگاه این پنل که بازپرداخت دارد (امروز فقط درگاه نمونه). */
+    refundAutoEnabled(): boolean {
+      return deps.refunds !== undefined && deps.payments !== undefined && refundProviders(deps.payments.gateways).length > 0;
+    },
+
+    /**
+     * یک دور استعلام خودکار بازپرداخت‌های «در حال برگشت» (برش ۷٫۳، سؤال ۱۵۳): هر ردیف نخستین بار دو دقیقه پس از درخواست و بعد هر دو
+     * دقیقه، تا ۲۴ ساعت؛ `SKIP LOCKED`، پس «استعلام از درگاه» هم‌زمان یا نود دیگر همان را دوباره نمی‌پرسد. فقط درگاه‌هایی که همین پنل
+     * بازپرداختشان را دارد؛ بی رویداد ادمین (کار سرور است)، و هر بستن در سطر بازپرداخت با `settled_via = 'auto'` می‌ماند.
+     */
+    async autoRefundInquiry(): Promise<{ checked: number; closed: number }> {
+      if (!deps.refunds || !deps.payments) return { checked: 0, closed: 0 };
+      return inquirePendingRefunds({ store: deps.refunds.store, gateways: deps.payments.gateways, now, log });
+    },
   };
+
+  /** درگاه پرداخت موفق این سفارش، اگر همین پنل بازپرداختش را دارد. */
+  function refundByOf(details: PanelOrderDetails): string | null {
+    const paid = details.payments.find((payment) => payment.status === 'succeeded');
+    return paid && deps.payments?.gateways[paid.provider]?.refunds ? viaGateway(paid.provider) : null;
+  }
+
+  /** کارت «بازپرداخت» برای این نشست: مجوزها، درگاه و کارمزدش، و «استعلام از درگاه». */
+  function refundView(session: AdminSession, details: PanelOrderDetails): RefundView | null {
+    const card = refundCard(details);
+    if (!card) return null;
+    const refunds = deps.payments?.gateways[card.payment.provider]?.refunds;
+    return {
+      ...card,
+      canRefund: can(session, 'orders.refund') && deps.refunds !== undefined && deps.stepUp !== undefined,
+      gateway: refunds
+        ? { provider: card.payment.provider, name: gatewayName(card.payment.provider), feeRials: refunds.feeRials(card.payment.amountRials) }
+        : null,
+      canInquire: refunds !== undefined && deps.refunds !== undefined && refundAskable(card.latest, now()),
+    };
+  }
+
+  /**
+   * سفارش و کارت بازپرداختش، و «همان که دیده شد»: هنوز «لغو شد» با همان پرداخت موفق، آخرین بازپرداختش همان که فرم دید، و هیچ
+   * بازپرداخت زنده‌ای نیست (بازپرداخت دوم فقط پس از «برنگشت»).
+   */
+  async function refundTarget(
+    session: AdminSession,
+    numberParam: string,
+    form: { payment: unknown; seen: unknown },
+  ): Promise<Result<{ details: PanelOrderDetails; card: RefundCard }>> {
+    const orderNumber = orderNumberOf(numberParam);
+    const details = orderNumber === null ? null : await store.details(scopeOf(session), orderNumber);
+    if (!details) return fail(404, 'order_not_found');
+    const card = refundCard(details);
+    if (!card) return fail(409, 'refund_closed', { orderNumber: details.order.orderNumber, current: details.order.status });
+    if (form.payment !== card.payment.id || text(form.seen) !== card.seen || (card.state !== 'none' && card.state !== 'failed')) {
+      return fail(409, 'refund_changed', { orderNumber: details.order.orderNumber });
+    }
+    return ok({ details, card });
+  }
+
+  function refundEvent(session: AdminSession, orderId: string, ip: string, at: Date, detail: Record<string, unknown>): AdminEventInput {
+    return {
+      adminUserId: session.userId,
+      action: 'orders.refund',
+      targetType: 'order',
+      targetId: orderId,
+      ipHash: ipHashOf(deps.secret, ip),
+      detail,
+      at,
+    };
+  }
+
+  /** ساختن ردیف زیر قفل نشد: سفارش جای دیگری رفت، یا کلیک دیگری همین حالا بازپرداخت را ساخت. */
+  function startFailure(reason: 'not_found' | 'not_cancelled' | 'payment_changed' | 'changed', orderNumber: number) {
+    if (reason === 'not_found') return fail(404, 'order_not_found');
+    if (reason === 'not_cancelled') return fail(409, 'refund_closed', { orderNumber });
+    return fail(409, 'refund_changed', { orderNumber });
+  }
 
   /**
    * یک فایل سفارش از استوریج، جریانی. رویداد (اگر هست) پیش از جریان؛ بی رویداد، بی فایل، و اتصال بازِ استوریج بسته می‌شود

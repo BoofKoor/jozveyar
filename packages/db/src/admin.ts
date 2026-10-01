@@ -49,6 +49,11 @@ export const ADMIN_PERMISSIONS = {
   'orders.assign': 'جابه‌جایی چاپخانهٔ سفارش',
   /** مبلغ و پرداخت‌های سفارش (برش ۵٫۳، ADR-042): مالک و متصدی؛ چاپخانه چاپ و ارسال را بی مبلغ می‌کند. */
   'orders.money': 'دیدن مبلغ و پرداخت‌ها',
+  /**
+   * بازپرداخت سفارش لغوشده، از درگاه یا ثبت دستی، با کد تازه (برش ۷٫۳، ADR-051): فقط مالک؛ پول جابه‌جا می‌کند. «استعلام» بازپرداخت در
+   * جریان با `orders.money` است.
+   */
+  'orders.refund': 'بازپرداخت سفارش لغوشده',
   'files.download': 'دانلود PDF جزوه',
   'tariff.read': 'دیدن تعرفه',
   'tariff.edit': 'ساختن و فعال کردن تعرفه',
@@ -79,7 +84,7 @@ export type AdminPermission = keyof typeof ADMIN_PERMISSIONS;
 const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
 
 /**
- * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز، از ۶٫۴ گزارش ارسال هم؛ متصدی سفارش، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه (۵٫۲)،
+ * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز، از ۶٫۴ گزارش ارسال و از ۷٫۳ بازپرداخت هم؛ متصدی سفارش، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه (۵٫۲)،
  * مبلغ، دانلود، دیدن تعرفه، و از ۶٫۱ ورود فایل پست و از ۶٫۲ صف تأیید.
  * «چاپخانه» (برش ۵٫۳، ADR-042) فقط دیدن، «شروع چاپ» و «تحویل پست شد»، و دانلود و «دوباره بساز» فایل‌ها، همه فقط روی سفارش‌هایی
  * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش. از ۶٫۲ فایل پست
@@ -275,6 +280,28 @@ export interface AdminStore {
   revokeInvites(userId: string, at: Date, event: AdminEventInput): Promise<number>;
   logEvent(event: AdminEventInput): Promise<void>;
   listEvents(query: { limit: number; beforeId?: number; actionPrefix?: string }): Promise<AdminEventView[]>;
+}
+
+/**
+ * بازپرداخت (برش ۷٫۳، سؤال ۱۵۹) کار روی سفارش است (`orders.refund`، `orders.refund_inquiry`) ولی زیر چیپ «پرداخت و بازپرداخت»، نه
+ * «سفارش».
+ */
+export const REFUND_EVENT_PREFIX = 'orders.refund';
+
+/** رویدادی که زیر چیپ `kind` صفحهٔ رویدادها می‌آید؛ همان شرط `listEvents`. */
+export function inEventKind(action: string, kind: string): boolean {
+  const refund = action.startsWith(REFUND_EVENT_PREFIX);
+  if (kind === 'payments') return action.startsWith('payments.') || refund;
+  if (kind === 'orders') return action.startsWith('orders.') && !refund;
+  return action.startsWith(`${kind}.`);
+}
+
+/** شرط چیپ در کوئری. */
+function eventKindWhere(kind: string) {
+  const refund = sql`${adminEvents.action} LIKE ${`${REFUND_EVENT_PREFIX}%`}`;
+  if (kind === 'payments') return sql`(${adminEvents.action} LIKE 'payments.%' OR ${refund})`;
+  if (kind === 'orders') return sql`(${adminEvents.action} LIKE 'orders.%' AND NOT ${refund})`;
+  return sql`${adminEvents.action} LIKE ${`${kind}.%`}`;
 }
 
 /** ردیف `admin_events` از یک رویداد؛ سفارش‌های پنل (`panel.ts`) هم رویدادشان را با همین می‌نویسند. */
@@ -676,7 +703,7 @@ export function createAdminStore({ db }: Database): AdminStore {
     async listEvents(query) {
       const where = and(
         query.beforeId ? lt(adminEvents.id, query.beforeId) : undefined,
-        query.actionPrefix ? sql`${adminEvents.action} LIKE ${`${query.actionPrefix}.%`}` : undefined,
+        query.actionPrefix ? eventKindWhere(query.actionPrefix) : undefined,
       );
       const rows = await db
         .select({ event: adminEvents, username: adminUsers.username, displayName: adminUsers.displayName })

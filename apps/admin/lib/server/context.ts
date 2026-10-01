@@ -8,10 +8,12 @@ import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
 import {
+  REFUND_AUTO_EVERY_MS,
   createAdminStore,
   createOrderStore,
   createPanelOrderStore,
   createPartnerStore,
+  createRefundStore,
   createSecretStore,
   createSettingsStore,
   createShipmentStore,
@@ -88,6 +90,9 @@ function build(config: AdminConfig): Panel {
       secret: config.secret,
       sms,
       payments: { orders: createOrderStore(getDb()), gateways },
+      // بازپرداخت (۷٫۳، ADR-051): پول جابه‌جا می‌کند، پس همان کد تازهٔ ورود، با همان سقف اشتباه و قفل.
+      refunds: { store: createRefundStore(getDb()) },
+      stepUp: auth.stepUp,
     }),
     // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
     tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
@@ -125,6 +130,31 @@ export function panel(): Panel | null {
   const config = adminConfig(process.env);
   cached = config ? build(config) : null;
   return cached;
+}
+
+/**
+ * استعلام خودکار بازپرداخت (برش ۷٫۳، سؤال ۱۵۳): هر دو دقیقه در خود پنل، فقط وقتی درگاهی از این پنل بازپرداخت دارد (امروز فقط درگاه نمونه
+ * با `CHECKOUT_MODE=mock`)؛ سایت زنده هیچ حلقه‌ای ندارد و هیچ درخواستی نمی‌دهد. یک دور در هر زمان؛ شکست فقط لاگ است.
+ */
+export function startRefundInquiry(log: (message: string, error?: unknown) => void = console.error): (() => void) | null {
+  const ready = panel();
+  if (!ready || !ready.orders.refundAutoEnabled()) return null;
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    ready.orders
+      .autoRefundInquiry()
+      .then((done) => {
+        if (done.closed > 0) console.log(`✓ استعلام خودکار بازپرداخت: ${done.closed} بازپرداخت بسته شد.`);
+      })
+      .catch((error) => log('✗ استعلام خودکار بازپرداخت‌ها:', error))
+      .finally(() => {
+        running = false;
+      });
+  }, REFUND_AUTO_EVERY_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 /** پنل آماده و همان مسیر محرمانه، وگرنه ۴۰۴؛ دیوار دوم پس از `middleware.ts`. */

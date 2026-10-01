@@ -23,6 +23,7 @@ import {
   type CheckoutQuote,
   type OrderSummary,
   type OrderView,
+  type OrderViewRefund,
   type Place,
   type PlacedOrder,
   type Recipient,
@@ -58,7 +59,7 @@ import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } 
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { deliverQueued, smsState, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
-import { formatDeadlineDay, formatJalaliWeekday } from '@jozveyar/text';
+import { formatDeadlineDay, formatJalaliWeekday, formatTehranTime } from '@jozveyar/text';
 import { checkRecipient } from '@jozveyar/text/input';
 
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -207,12 +208,13 @@ export async function orderView(
   const last = found.payments[0];
   const group = last?.status === 'failed' ? failureGroup(last.failureCode, last.gatewayStatus) : null;
   const held = found.payments.find(isChecking);
+  const succeeded = found.payments.find((p) => p.status === 'succeeded');
   view.details = {
     totalRials: order.totalRials,
     breakdown: order.priceBreakdown as Breakdown,
     createdAt: order.createdAt.toISOString(),
     paidAt: order.paidAt?.toISOString() ?? null,
-    refId: found.payments.find((p) => p.status === 'succeeded')?.refId ?? null,
+    refId: succeeded?.refId ?? null,
     lastPayment: last
       ? {
           status: last.status,
@@ -264,8 +266,31 @@ export async function orderView(
       postalCode: order.postalCode,
     },
     parcels,
+    refund: order.status === 'cancelled' && succeeded ? refundView(found.refunds.find((r) => r.paymentId === succeeded.id), succeeded.cardMask) : null,
   };
   return ok(view);
+}
+
+/**
+ * بازپرداخت برای صاحب سفارش (برش ۷٫۳، سؤال ۱۵۷): آخرین بازپرداخت پرداخت موفق. «در حال برگشت» فقط وقتی درگاه پذیرفت (شناسه یا وضعیتی
+ * داد)؛ درخواستی که جواب روشن نگرفت و «برنگشت» همان null است و صفحه «برمی‌گردد» لغو را می‌گوید. ثبت دستی فقط روز، بی ساعت و بی کارت.
+ */
+function refundView(refund: OrderDetails['refunds'][number] | undefined, cardMask: string | null): OrderViewRefund | null {
+  if (!refund) return null;
+  if (refund.status === 'pending') {
+    return refund.gatewayRef === null && refund.gatewayStatus === null ? null : { state: 'refunding', amountRials: refund.amountRials, cardMask };
+  }
+  if (refund.status !== 'succeeded') return null;
+  const manual = refund.method === 'manual';
+  const at = manual ? refund.refundedOn! : refund.finishedAt!;
+  return {
+    state: 'refunded',
+    amountRials: refund.amountRials,
+    cardMask: manual ? null : cardMask,
+    day: formatJalaliWeekday(at),
+    time: manual ? null : formatTehranTime(at),
+    reference: refund.reference,
+  };
 }
 
 /** «دوباره پرداخت کن»: در انتظار پرداخت، و همهٔ فایل‌ها دست‌کم یک ساعت دیگر زنده. */

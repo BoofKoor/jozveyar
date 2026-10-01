@@ -3,6 +3,7 @@
  *
  * - **آداپتور** (`PaymentGateway`): شروع (`start`: شناسهٔ تلاش نزد درگاه و نشانی صفحهٔ پرداخت)، استعلام (`inquire`) و تأیید (`verify`). درگاه
  *   نمونه (`mockGateway`، ADR-035) اینجاست و زیبال در `@jozveyar/payments/zibal`؛ هر دو همان کدهای وضعیت زیبال را می‌گویند (`status.ts`).
+ *   بازپرداخت (`refunds`، برش ۷٫۳، `refund.ts`) اختیاری است: درگاه نمونه دارد، زیبال تا مستند API بازپرداخت نه.
  * - **حکم برگشت** (`judge`، `settle.ts`): استعلام پیش از `verify`، و `verify` فقط برای «پرداخت‌شده، تأییدنشده» با مبلغ و شناسهٔ همان تلاش
  *   (سؤال‌های ۱۴۴ تا ۱۴۷). وب (برگشت از درگاه و استعلام خودکار) و پنل («استعلام از درگاه») هر دو همین را زیر قفل `settlePayment` صدا می‌زنند.
  * - **هیچ مقدار کلیدی در خطا:** هر شکست `PaymentError` است با کد خودش و فقط عدد پاسخ (کد HTTP و `result` درگاه)؛ نه متن پاسخ، نه سرآیند، نه
@@ -13,8 +14,10 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 
+import { refundFeeRials, STATUS_REFUNDING, type GatewayRefund, type GatewayRefunds } from './refund';
 import { STATUS_PAID, STATUS_VERIFIED, STATUS_WAITING } from './status';
 
+export * from './refund';
 export * from './status';
 export { judge, type AttemptSnapshot, type FailedVerdict, type GatewayCheck, type JudgeInput, type Verdict } from './settle';
 
@@ -116,6 +119,8 @@ export interface PaymentGateway {
   start(input: GatewayStart): Promise<GatewayStarted>;
   inquire(attempt: GatewayAttempt): Promise<GatewayInquiry>;
   verify(attempt: GatewayAttempt): Promise<GatewayVerified>;
+  /** بازپرداخت (برش ۷٫۳، ADR-051)؛ بی آن، پنل فقط «ثبت بازپرداخت دستی» دارد. */
+  readonly refunds?: GatewayRefunds;
 }
 
 /** نام درگاه برای مشتری و پنل. */
@@ -130,7 +135,67 @@ export const MOCK_AUTHORITY = /^MOCK[0-9A-F]{32}$/;
 /** تصمیم صفحهٔ درگاه نمونه، در `payments.raw`. */
 export type MockDecision = 'success' | 'failure' | 'cancel';
 
-const mockRaw = (raw: unknown) => (raw !== null && typeof raw === 'object' ? (raw as { decision?: unknown; verified?: unknown; refId?: unknown }) : {});
+const mockRaw = (raw: unknown) =>
+  raw !== null && typeof raw === 'object' ? (raw as { decision?: unknown; verified?: unknown; refId?: unknown; refund?: unknown }) : {};
+
+/**
+ * بازپرداخت درگاه نمونه (برش ۷٫۳) بی پول و بی حالت: رفتارش را `refund` در `payments.raw` همان پرداخت می‌گوید، که فقط تست می‌گذارد؛
+ * پرداخت مسیر خرید نمونه آن را ندارد و همان راه عادی را می‌رود.
+ * - بی آن: درخواست «در حال استرداد» (۱۶)، و اولین استعلام «استردادشده» (۱۵) با کد پیگیری؛
+ * - `balance`: درخواست رد می‌شود، «موجودی کیف پول کافی نیست»؛
+ * - `lost`: پاسخ درخواست گم می‌شود ولی درخواست رسیده، پس استعلام «استردادشده» می‌گوید؛
+ * - `dropped`: پاسخ گم می‌شود و درخواست نرسیده: استعلام «چنین بازپرداختی نیست»؛
+ * - `slow`: استعلام همیشه «در حال استرداد»؛
+ * - `already`: استعلام خود پرداخت «در حال استرداد» می‌گوید، پس درخواست نمی‌رود.
+ */
+export type MockRefundPlan = 'balance' | 'lost' | 'dropped' | 'slow' | 'already';
+
+/** شناسهٔ بازپرداخت درگاه نمونه، از شناسهٔ ما؛ با هیچ درگاه واقعی قاطی نمی‌شود. */
+export const mockRefundRef = (refundId: string) => `MOCKRF${refundId.replace(/-/g, '').toUpperCase()}`;
+
+/** کد پیگیری بازپرداخت درگاه نمونه: شش رقم، همیشه همان برای همان بازپرداخت. */
+export const mockRefundReference = (refundId: string) => String(100_000 + (parseInt(refundId.replace(/-/g, '').slice(0, 8), 16) % 900_000));
+
+function mockRefunds(): GatewayRefunds {
+  const plan = (raw: unknown) => mockRaw(raw).refund;
+  const pending = (refundId: string): GatewayRefund => ({
+    state: 'pending',
+    gatewayRef: mockRefundRef(refundId),
+    reference: null,
+    status: STATUS_REFUNDING,
+    reason: null,
+    result: null,
+    raw: { status: STATUS_REFUNDING },
+  });
+  return {
+    feeRials: refundFeeRials,
+
+    async request(input) {
+      const wanted = plan(input.payment.raw);
+      if (wanted === 'balance') {
+        return { state: 'failed', gatewayRef: null, reference: null, status: null, reason: 'balance', result: null, raw: { reason: 'balance' } };
+      }
+      if (wanted === 'lost' || wanted === 'dropped') throw new PaymentError('unavailable');
+      return pending(input.refundId);
+    },
+
+    async inquire(input) {
+      const wanted = plan(input.payment.raw);
+      if (wanted === 'dropped') return null;
+      if (wanted === 'slow') return pending(input.refundId);
+      const reference = mockRefundReference(input.refundId);
+      return {
+        state: 'succeeded',
+        gatewayRef: input.gatewayRef ?? mockRefundRef(input.refundId),
+        reference,
+        status: 15,
+        reason: null,
+        result: null,
+        raw: { status: 15, refNumber: reference },
+      };
+    },
+  };
+}
 
 /**
  * درگاه نمونه (ADR-035): صفحه‌اش (`/pay/mock/<authority>`) تصمیم را در `payments.raw` می‌نشاند و استعلام همان را می‌خواند، به زبان وضعیت‌های
@@ -151,7 +216,17 @@ export function mockGateway(options: { newRefId?: () => string } = {}): PaymentG
       const raw = mockRaw(attempt.raw);
       const verified = raw.verified === true;
       const status =
-        raw.decision === 'success' ? (verified ? STATUS_VERIFIED : STATUS_PAID) : raw.decision === 'failure' ? 5 : raw.decision === 'cancel' ? 3 : STATUS_WAITING;
+        raw.decision === 'success'
+          ? verified
+            ? raw.refund === 'already'
+              ? STATUS_REFUNDING
+              : STATUS_VERIFIED
+            : STATUS_PAID
+          : raw.decision === 'failure'
+            ? 5
+            : raw.decision === 'cancel'
+              ? 3
+              : STATUS_WAITING;
       return {
         status,
         amountRials: attempt.amountRials,
@@ -176,5 +251,7 @@ export function mockGateway(options: { newRefId?: () => string } = {}): PaymentG
         raw: { ...raw, verified: true, refId },
       };
     },
+
+    refunds: mockRefunds(),
   };
 }

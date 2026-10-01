@@ -991,6 +991,87 @@ describe('مسیر خرید روی سرور', () => {
       expect(await service.orderView(order.token, SARA)).toMatchObject({ value: { trackingSent: true, details: { parcels: [{ smsSent: true }] } } });
     });
 
+    it('بازپرداخت (۷٫۳، سؤال ۱۵۷): «در حال برگشت» با کارت؛ «برگشت داده شد» با روز و ساعت درگاه، یا فقط روز دستی؛ رد و «معلوم نیست» هیچ', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      const row = orders.orders[0]!;
+      const paid = orders.payments[0]!;
+      Object.assign(paid, { cardMask: '603799******1234' });
+      Object.assign(row, { status: 'cancelled' });
+      const refundOf = async () => {
+        const result = await service.orderView(order.token, SARA);
+        if (!result.ok) throw new Error(result.error);
+        return result.value.details!.refund;
+      };
+      const base = {
+        id: randomUUID(),
+        orderId: row.id,
+        paymentId: paid.id,
+        amountRials: paid.amountRials,
+        feeRials: 15_000,
+        method: 'gateway' as const,
+        status: 'pending' as const,
+        gatewayRef: null,
+        reference: null,
+        refundedOn: null,
+        note: 'کارت‌به‌کارت از حساب سارا',
+        gatewayStatus: null,
+        gatewayError: null,
+        gatewayCheckedAt: null,
+        failureReason: null,
+        settledVia: null,
+        adminUserId: randomUUID(),
+        raw: null,
+        createdAt: new Date('2026-10-06T07:56:00.000Z'),
+        finishedAt: null,
+      };
+      // هنوز هیچ: همان «برمی‌گردد».
+      expect(await refundOf()).toBeNull();
+      // درخواست رفت و جواب روشن نیامد: «معلوم نیست»؛ مشتری چیزی نمی‌بیند که نمی‌دانیم.
+      orders.refunds.set(row.id, [{ ...base, gatewayError: 'unavailable' }]);
+      expect(await refundOf()).toBeNull();
+      orders.refunds.set(row.id, [{ ...base, gatewayRef: 'MOCKRF1', gatewayStatus: 16 }]);
+      expect(await refundOf()).toEqual({ state: 'refunding', amountRials: paid.amountRials, cardMask: '603799******1234' });
+      orders.refunds.set(row.id, [
+        { ...base, status: 'succeeded', gatewayRef: 'MOCKRF1', gatewayStatus: 15, reference: '552190', finishedAt: new Date('2026-10-06T08:11:00.000Z'), settledVia: 'auto' },
+      ]);
+      expect(await refundOf()).toEqual({
+        state: 'refunded',
+        amountRials: paid.amountRials,
+        cardMask: '603799******1234',
+        day: 'سه‌شنبه 14 مهر',
+        time: '11:41',
+        reference: '552190',
+      });
+      // دستی: فقط روز، بی ساعت و بی کارت؛ یادداشت هرگز.
+      orders.refunds.set(row.id, [
+        {
+          ...base,
+          method: 'manual',
+          status: 'succeeded',
+          feeRials: null,
+          reference: '91822',
+          refundedOn: new Date('2026-10-05T20:30:00.000Z'),
+          finishedAt: base.createdAt,
+          settledVia: null,
+        },
+      ]);
+      const manual = await service.orderView(order.token, SARA);
+      expect(manual.ok && manual.value.details!.refund).toEqual({
+        state: 'refunded',
+        amountRials: paid.amountRials,
+        cardMask: null,
+        day: 'سه‌شنبه 14 مهر',
+        time: null,
+        reference: '91822',
+      });
+      expect(JSON.stringify(manual)).not.toContain('کارت‌به‌کارت');
+      // درگاه رد کرد: همان «برمی‌گردد»؛ غریبه هیچ.
+      orders.refunds.set(row.id, [{ ...base, status: 'failed', failureReason: 'balance', finishedAt: base.createdAt, settledVia: 'request' }]);
+      expect(await refundOf()).toBeNull();
+      expect(await service.orderView(order.token, REZA)).toMatchObject({ value: { details: null } });
+    });
+
     it('پرداخت‌شده در هر وضعیت پنل: «دوباره پرداخت کن» و همان کلید «پرداخت» درگاه باز نمی‌کنند', async () => {
       const checkoutKey = randomUUID();
       const { order, payment } = await placed([doc(10)], { checkoutKey });

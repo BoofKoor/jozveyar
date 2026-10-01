@@ -335,6 +335,9 @@ jobs:
       # درگاه زیبال (برش ۷٫۲، ADR-050، `payments.spec.ts`): زیبال ساختگی روی ۳۴۰۰ (`ZIBAL_API_URL`) با کد پذیرندهٔ تصادفی که پنل از `.env`
       # دارد؛ «استعلام از درگاه»، پرداخت دوم تا «برگشت خورد»، مبلغ ناهمخوان، و «آزمایش» کد پذیرنده با هشدار ۱۱۵. کد پذیرنده هم در لاگ‌ها
       # جسته می‌شود.
+      # بازپرداخت (برش ۷٫۳، ADR-051، `refunds.spec.ts`): پنل سوم روی ۳۲۰۲ با `CHECKOUT_MODE=mock`، چون فقط درگاه نمونه بازپرداخت دارد (سؤال
+      # ۱۵۲)؛ از درگاه تا «برگشت داده شد»، رد کیف پول و ثبت دستی، پاسخ گم‌شده، پیش‌استعلام، و صفحهٔ مشتری روی وب ۳۱۰۱. اجرای اصلی بی آن است و
+      # این فایل خودش را رد می‌کند.
       - name: پنل، سرتاسری
         env:
           DATABASE_URL: postgresql://jozveyar:jozveyar@127.0.0.1:5432/jy_admin
@@ -379,7 +382,7 @@ jobs:
           if grep -F "$ADMIN_BASE_PATH" "$RUNNER_TEMP/admin.log"; then echo 'مسیر محرمانه در لاگ پنل آمد' >&2; exit 1; fi
           timeout 30 sh -c 'until grep -qF "✓ پنل ادمین: کلیدهای سرویس‌ها — SMS_API_KEY از .env" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin.log"
           grep -F '✓ پنل ادمین: پیامک کنسولی (در sms_messages)' "$RUNNER_TEMP/admin.log"
-          grep -F '✓ پنل ادمین: درگاه زیبال (ZIBAL_API_URL) برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL هست' "$RUNNER_TEMP/admin.log"
+          grep -F '✓ پنل ادمین: درگاه زیبال (ZIBAL_API_URL) برای «استعلام از درگاه»؛ PAYMENT_CALLBACK_URL هست؛ بازپرداخت فقط ثبت دستی' "$RUNNER_TEMP/admin.log"
           cd apps/admin
           pnpm exec playwright test
           # پیامک با sms.ir (۷٫۱): همان build، پنل دوم روی ۳۲۰۱ با SMS_PROVIDER=smsir؛ پنل اول می‌ماند و کاری با آن نیست.
@@ -388,8 +391,16 @@ jobs:
           timeout 120 sh -c 'until curl -sf http://127.0.0.1:3201/api/health > /dev/null; do sleep 1; done'
           timeout 30 sh -c 'until grep -qF "✓ پنل ادمین: پیامک sms.ir (SMS_PROVIDER=smsir)" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin-smsir.log"
           ADMIN_ORIGIN=http://127.0.0.1:3201 E2E_ADMIN_BASE_URL=http://127.0.0.1:3201 pnpm exec playwright test tests/smsir.spec.ts
+          # بازپرداخت (۷٫۳، ADR-051): همان build، پنل سوم روی ۳۲۰۲ با CHECKOUT_MODE=mock، که فقط درگاه نمونه را با بازپرداخت دارد (سؤال ۱۵۲)،
+          # و فقط `refunds.spec.ts`؛ صفحهٔ مشتری همان وب ۳۱۰۱. هیچ درخواستی به زیبال واقعی نمی‌رود و پولی جابه‌جا نمی‌شود.
+          unset SMS_PROVIDER
+          export CHECKOUT_MODE=mock
+          ADMIN_ORIGIN=http://127.0.0.1:3202 node scripts/serve-standalone.mjs 3202 > "$RUNNER_TEMP/admin-refunds.log" 2>&1 &
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:3202/api/health > /dev/null; do sleep 1; done'
+          timeout 30 sh -c 'until grep -qF "بازپرداخت از درگاه نمونه، با استعلام خودکار" "$0"; do sleep 1; done' "$RUNNER_TEMP/admin-refunds.log"
+          ADMIN_ORIGIN=http://127.0.0.1:3202 E2E_ADMIN_BASE_URL=http://127.0.0.1:3202 pnpm exec playwright test tests/refunds.spec.ts
           for secret in "$SMS_API_KEY" "$E2E_KEY_PROBE" "$PAYMENT_MERCHANT_ID"; do
-            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/admin-smsir.log" "$RUNNER_TEMP/web-admin.log" "$RUNNER_TEMP/smsir.log" "$RUNNER_TEMP/zibal.log"; do
+            for log in "$RUNNER_TEMP/admin.log" "$RUNNER_TEMP/admin-smsir.log" "$RUNNER_TEMP/admin-refunds.log" "$RUNNER_TEMP/web-admin.log" "$RUNNER_TEMP/smsir.log" "$RUNNER_TEMP/zibal.log"; do
               if grep -qF "$secret" "$log"; then echo "مقدار کلید در $(basename "$log") آمد" >&2; exit 1; fi
             done
           done
@@ -400,6 +411,7 @@ jobs:
           cat "$RUNNER_TEMP/web-admin.log" || true
           cat "$RUNNER_TEMP/admin.log" || true
           cat "$RUNNER_TEMP/admin-smsir.log" || true
+          cat "$RUNNER_TEMP/admin-refunds.log" || true
           cat "$RUNNER_TEMP/smsir.log" || true
           cat "$RUNNER_TEMP/zibal.log" || true
           docker logs docworker-admin || true

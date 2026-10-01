@@ -5,8 +5,8 @@ import { notFound } from 'next/navigation';
 import { Fragment } from 'react';
 
 import { FILE_MARGIN_MS, IRAN_POST, isChecking, isPaidStatus, voidKept, type PanelOrderDetails, type PanelOrderItem, type VoidKept } from '@jozveyar/db';
-import { GATEWAY_NAMES } from '@jozveyar/payments';
-import { bytesParts, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
+import { GATEWAY_NAMES, gatewayName } from '@jozveyar/payments';
+import { bytesParts, formatCardMask, formatJalaliNumeric, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { Alert } from '../../../../../components/Alert';
 import { AssignForm } from '../../../../../components/AssignForm';
@@ -15,17 +15,20 @@ import { NoAccess } from '../../../../../components/NoAccess';
 import { InquiryForm } from '../../../../../components/InquiryForm';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { ReasonForm } from '../../../../../components/ReasonForm';
+import { RefundGatewayForm, RefundManualForm } from '../../../../../components/RefundForms';
+import { RefundInquiryForm } from '../../../../../components/RefundInquiryForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
 import { ResendPaymentSmsForm } from '../../../../../components/ResendPaymentSmsForm';
 import { ResendSmsForm } from '../../../../../components/ResendSmsForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
 import { VoidShipmentForm } from '../../../../../components/VoidShipmentForm';
-import { dayHeading, tehranDay, whenText } from '../../../../../lib/format';
+import { dayHeading, dayText, tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
+import { REFUND_NOTE_MAX, rejectionNow, rejectionResult, viaGateway } from '../../../../../lib/refunds';
 import { paymentSmsView, smsView } from '../../../../../lib/sms';
 import {
   REASON_MAX,
@@ -59,7 +62,7 @@ import {
 } from '../../../../../lib/orders';
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
-import type { InquiryOutcome, OrderDetailsView } from '../../../../../lib/server/orders';
+import type { InquiryOutcome, OrderDetailsView, RefundOutcome, RefundView } from '../../../../../lib/server/orders';
 import { advanceOrderAction, rebuildPdfAction } from '../../../actions';
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
@@ -96,19 +99,28 @@ const PAGE_ERRORS = new Set([
   'gateway_not_configured',
   'payment_final',
   'unavailable',
+  'order_refunded',
+  'refund_closed',
+  'refund_changed',
+  'refund_gateway_unavailable',
+  'refund_already_at_gateway',
+  'refund_not_found',
+  'refund_not_inquirable',
 ]);
 
 /**
- * فرم باز ستون کنار یا کارت‌ها (`?do=`): لغو، برگرداندن، ویرایش گیرنده، جابه‌جایی چاپخانه (۵٫۲)، یا کنار گذاشتن یک کد رهگیری (۶٫۲،
- * با `code`)؛ هر چیز دیگر یعنی هیچ.
+ * فرم باز ستون کنار یا کارت‌ها (`?do=`): لغو، برگرداندن، ویرایش گیرنده، جابه‌جایی چاپخانه (۵٫۲)، کنار گذاشتن یک کد رهگیری (۶٫۲،
+ * با `code`)، یا بازپرداخت از درگاه و ثبت دستی (۷٫۳)؛ هر چیز دیگر یعنی هیچ.
  */
-type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | 'void' | null;
-const modeOf = (value: unknown): Mode =>
-  value === 'cancel' || value === 'revert' || value === 'edit' || value === 'assign' || value === 'void' ? value : null;
+type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | 'void' | 'refund' | 'refund-manual' | null;
+const MODES: readonly Exclude<Mode, null>[] = ['cancel', 'revert', 'edit', 'assign', 'void', 'refund', 'refund-manual'];
+const modeOf = (value: unknown): Mode => MODES.find((mode) => mode === value) ?? null;
 
 /** هر فرم، با مجوزی که می‌خواهد؛ کاربر چاپخانه (۵٫۳) هیچ‌کدام را ندارد و به جای سفارش «این بخش برای چاپخانه باز نیست» می‌بیند. */
 const modeAllowed = (mode: Exclude<Mode, null>, view: OrderDetailsView, canVoid: boolean): boolean =>
-  mode === 'cancel'
+  mode === 'refund' || mode === 'refund-manual'
+    ? refundFormOpen(mode, view.refund)
+    : mode === 'cancel'
     ? view.canCancel
     : mode === 'revert'
       ? view.canRevert
@@ -401,6 +413,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
       fromLabel={STATUS_LABELS[order.status]}
       toLabel={STATUS_LABELS[to]}
       amount={formatTomans(order.totalRials, false)}
+      refundBy={view.refundBy}
       maxLength={REASON_MAX}
       back={self}
     />
@@ -887,6 +900,280 @@ function PaymentSmsRow({
   );
 }
 
+/** فرم بازپرداخت (۷٫۳) فقط برای مالک، فقط وقتی «پول برنگشته» یا «برنگشت»؛ از درگاه فقط اگر درگاه این پرداخت در این پنل بازپرداخت دارد. */
+function refundFormOpen(mode: 'refund' | 'refund-manual', refund: RefundView | null): boolean {
+  if (!refund?.canRefund || (refund.state !== 'none' && refund.state !== 'failed')) return false;
+  return mode === 'refund-manual' || refund.gateway !== null;
+}
+
+/**
+ * کارت «بازپرداخت» سفارش لغوشده (برش ۷٫۳، ADR-051؛ طرح `m-refund` تا `m-refund-failed`): «پول برنگشته»، «در حال برگشت» (یا «معلوم
+ * نیست» وقتی درخواست جواب روشن نگرفت)، «برگشت داده شد» یا «برنگشت». کارها فقط برای مالک؛ متصدی می‌بیند و «استعلام از درگاه» دارد.
+ */
+function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView; mode: Mode }) {
+  const refund = view.refund;
+  if (!refund) return null;
+  const { order } = view.details;
+  const now = view.bounds.at;
+  const self = panelPath(gate, `/orders/${order.orderNumber}`);
+  const { payment, latest, state } = refund;
+  const amount = formatTomans(payment.amountRials, false);
+  const provider = gatewayName(payment.provider);
+  // کارت پوشیده یک تکه می‌ماند، همان کارت «پرداخت‌ها».
+  const card = payment.cardMask ? formatCardMask(payment.cardMask).replace(/ /g, '\u00a0') : null;
+  const target = { gate, orderNumber: order.orderNumber, paymentId: payment.id, seen: refund.seen, amount, back: self };
+
+  if (mode === 'refund' && refundFormOpen('refund', refund) && refund.gateway) {
+    return (
+      <RefundGatewayForm
+        target={target}
+        card={card}
+        gatewayName={refund.gateway.name}
+        fee={formatTomans(refund.gateway.feeRials, false)}
+        total={formatTomans(payment.amountRials + refund.gateway.feeRials, false)}
+      />
+    );
+  }
+  if (mode === 'refund-manual' && refundFormOpen('refund-manual', refund)) {
+    return <RefundManualForm target={target} today={formatJalaliNumeric(now)} noteMax={REFUND_NOTE_MAX} />;
+  }
+
+  const toCard = card ? (
+    <>
+      کارت <span className="num nw">{card}</span>
+    </>
+  ) : (
+    'همان کارت'
+  );
+  const actions = (again: boolean) =>
+    refund.canRefund ? (
+      <div className="ad-status__actions">
+        {refund.gateway ? (
+          <Link href={`${self}?do=refund`} className="jy-btn jy-btn--primary jy-btn--block" scroll={false}>
+            {again ? 'دوباره از درگاه…' : 'بازپرداخت از درگاه…'}
+          </Link>
+        ) : null}
+        <Link
+          href={`${self}?do=refund-manual`}
+          className={`jy-btn ${refund.gateway ? 'jy-btn--text' : 'jy-btn--primary'} jy-btn--block`}
+          scroll={false}
+        >
+          ثبت بازپرداخت دستی…
+        </Link>
+        {again ? null : refund.gateway ? (
+          <p className="ad-hint">
+            از درگاه: {refund.gateway.name} به همان کارت برمی‌گرداند، معمولاً <span className="num">5</span> تا <span className="num">30</span>{' '}
+            دقیقه. دستی: وقتی پول را از راه دیگری برگرداندی.
+          </p>
+        ) : (
+          <p className="ad-hint">
+            بازپرداخت از {viaGateway(payment.provider)} هنوز در پنل نیست؛ پول را از پنل {provider} یا راه دیگری برگردان و اینجا ثبتش کن.
+          </p>
+        )}
+      </div>
+    ) : (
+      <p className="jy-note ad-gap">بازپرداخت با مالک است؛ پیشخوان تا برگشت پول یادآوری می‌کند.</p>
+    );
+  const head = (badge: React.ReactNode) => (
+    <>
+      <h2 id="t-rf" className="jy-card__title">
+        بازپرداخت
+      </h2>
+      <div className="ad-status__badges">{badge}</div>
+      <p className="ad-refund__sum">
+        <span className="num">{amount}</span> تومان
+      </p>
+    </>
+  );
+
+  if (state === 'none' || !latest) {
+    return (
+      <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund="none">
+        {head(
+          <span className="jy-badge jy-badge--warning">
+            <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+            پول برنگشته
+          </span>,
+        )}
+        <p className="ad-meta">
+          پرداخت {dayText(payment.verifiedAt ?? payment.createdAt, now)} با {provider}
+          {card ? (
+            <>
+              ، کارت <span className="num nw">{card}</span>
+            </>
+          ) : null}
+        </p>
+        {actions(false)}
+      </section>
+    );
+  }
+
+  if (state === 'refunding' || state === 'unknown') {
+    const unknown = state === 'unknown';
+    const checked = latest.gatewayCheckedAt;
+    return (
+      <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund={state}>
+        {head(
+          unknown ? (
+            <span className="jy-badge jy-badge--warning">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              معلوم نیست
+            </span>
+          ) : (
+            <span className="jy-badge jy-badge--info">
+              <span className="jy-icon jy-icon-info" aria-hidden="true" />
+              در حال برگشت
+            </span>
+          ),
+        )}
+        <p className="ad-meta">
+          از درگاه، {byWhom(latest.createdAt, now, latest.adminName)} · به {toCard}
+        </p>
+        {unknown ? (
+          <p className="jy-note jy-note--warning ad-gap">
+            <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+            <span>
+              درخواست به {provider} رفت ولی جواب روشنی نیامد؛ معلوم نیست رسید یا نه. تا استعلام روشنش نکند «دوباره» نیست، و مشتری هنوز «لغو
+              شد» می‌بیند. استعلام خودکار هر <span className="num">2</span> دقیقه می‌پرسد
+              {checked ? (
+                <>
+                  ، آخرین <span className="num">{formatTehranTime(checked)}</span>
+                </>
+              ) : null}
+              .
+            </span>
+          </p>
+        ) : (
+          <p className="jy-note ad-gap">
+            {provider} معمولاً <span className="num">5</span> تا <span className="num">30</span> دقیقه؛ استعلام خودکار هر{' '}
+            <span className="num">2</span> دقیقه
+            {checked ? (
+              <>
+                ، آخرین <span className="num">{formatTehranTime(checked)}</span>
+              </>
+            ) : null}
+            . مشتری «در حال برگشت» را می‌بیند.
+          </p>
+        )}
+        {refund.canInquire ? (
+          <div className="ad-status__actions">
+            <RefundInquiryForm gate={gate} refundId={latest.id} orderNumber={order.orderNumber} />
+          </div>
+        ) : refund.gateway ? (
+          <p className="ad-hint ad-gap">درخواست همین حالا رفت؛ «استعلام از درگاه» چند ثانیهٔ دیگر.</p>
+        ) : null}
+      </section>
+    );
+  }
+
+  if (state === 'refunded') {
+    const manual = latest.method === 'manual';
+    return (
+      <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund="refunded">
+        {head(
+          <span className="jy-badge jy-badge--success">
+            <span className="jy-icon jy-icon-success" aria-hidden="true" />
+            برگشت داده شد
+          </span>,
+        )}
+        <dl className="ad-facts">
+          <div>
+            <dt>کی</dt>
+            <dd>
+              {manual ? (
+                <>
+                  {dayText(latest.refundedOn!, now)} · ثبت {byWhom(latest.createdAt, now, latest.adminName)}
+                </>
+              ) : (
+                <>
+                  {whenText(latest.finishedAt!, now)} · درخواست{' '}
+                  {tehranDay(latest.createdAt) === tehranDay(latest.finishedAt!) ? formatTehranTime(latest.createdAt) : whenText(latest.createdAt, now)}
+                  {latest.adminName ? `، ${latest.adminName}` : ''}
+                </>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>راه</dt>
+            <dd>
+              {manual ? (
+                latest.note ? (
+                  <>دستی: {latest.note}</>
+                ) : (
+                  'دستی'
+                )
+              ) : (
+                <>
+                  از {viaGateway(payment.provider)}، به {toCard}
+                  {latest.feeRials !== null ? (
+                    <>
+                      {' '}
+                      · کارمزد <span className="num">{formatTomans(latest.feeRials, false)}</span> تومان
+                    </>
+                  ) : null}
+                </>
+              )}
+            </dd>
+          </div>
+          {latest.reference ? (
+            <div>
+              <dt>کد پیگیری</dt>
+              <dd>
+                <span className="num">{latest.reference}</span>
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+        <p className="ad-hint ad-gap">لغو این سفارش دیگر برنمی‌گردد: پولش برگشته است.</p>
+      </section>
+    );
+  }
+
+  // «برنگشت»: درگاه نپذیرفت، یا درخواست هرگز نرسید؛ پولی جابه‌جا نشد.
+  const reason = latest.failureReason;
+  const why = rejectionNow(reason, payment.provider, rejectionResult(latest.gatewayError));
+  const unsent = reason === 'unconfigured' || reason === 'not_found';
+  return (
+    <section className="jy-card ad-refund" aria-labelledby="t-rf" data-refund="failed">
+      {head(
+        <span className="jy-badge jy-badge--error">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          برنگشت
+        </span>,
+      )}
+      <p className="jy-note jy-note--error ad-gap">
+        <span className="jy-icon jy-icon-error" aria-hidden="true" />
+        <span>
+          {unsent ? `درخواست بازپرداخت به ${provider} نرسید` : `${provider} بازپرداخت را نپذیرفت`}: {why} ({whenText(latest.finishedAt ?? latest.createdAt, now)}).
+          پولی جابه‌جا نشد؛ {reason === 'balance' ? 'کیف پول را شارژ کن و دوباره بزن' : 'دوباره بزن'}، یا پول را از راه دیگری برگردان و
+          ثبتش کن.
+        </span>
+      </p>
+      {actions(true)}
+    </section>
+  );
+}
+
+/** نتیجهٔ بازپرداخت و استعلامش (۷٫۳) بالای صفحه؛ جزئیاتش در کارت «بازپرداخت». */
+const REFUND_DONE: Record<RefundOutcome, { tone: 'success' | 'info' | 'warning' | 'error'; text: string }> = {
+  refunding: { tone: 'info', text: 'درگاه بازپرداخت را پذیرفت و پول در راه کارت مشتری است؛ مشتری «در حال برگشت» را می‌بیند.' },
+  unknown: {
+    tone: 'warning',
+    text: 'درخواست بازپرداخت رفت ولی درگاه جواب روشن نداد؛ معلوم نیست رسید یا نه. استعلام خودکار روشنش می‌کند؛ «دوباره» نزن.',
+  },
+  refunded: { tone: 'success', text: 'بازپرداخت ثبت شد و مشتری «برگشت داده شد» را با کد پیگیری می‌بیند.' },
+  failed: { tone: 'error', text: 'بازپرداخت برنگشت و پولی جابه‌جا نشد؛ علتش در کارت «بازپرداخت» است.' },
+  busy: { tone: 'info', text: 'همین حالا استعلام دیگری روی همین بازپرداخت در کار است؛ چند ثانیهٔ دیگر صفحه را تازه کن.' },
+};
+
+/** «استعلام از درگاه» بازپرداخت: همان حالت‌ها، با متن استعلام. */
+const REFUND_INQUIRY_DONE: Record<RefundOutcome, { tone: 'success' | 'info' | 'warning' | 'error'; text: string }> = {
+  ...REFUND_DONE,
+  refunding: { tone: 'info', text: 'درگاه گفت بازپرداخت هنوز در راه است؛ استعلام خودکار دوباره می‌پرسد.' },
+  unknown: { tone: 'warning', text: 'درگاه باز جواب روشن نداد؛ چیزی عوض نشد. استعلام خودکار دوباره می‌پرسد.' },
+  refunded: { tone: 'success', text: 'درگاه گفت پول به کارت مشتری برگشت؛ کد پیگیری در کارت «بازپرداخت» است.' },
+};
+
 /** نتیجهٔ «استعلام از درگاه» (برش ۷٫۲) بالای صفحه؛ جزئیاتش در خود کارت «پرداخت‌ها». */
 const INQUIRY_DONE: Record<InquiryOutcome, { tone: 'success' | 'info' | 'warning' | 'error'; text: string }> = {
   succeeded: { tone: 'success', text: 'درگاه پرداخت را تأیید کرد و سفارش «در صف چاپ» رفت؛ پیامک پرداخت به مشتری می‌رود.' },
@@ -976,6 +1263,12 @@ export default async function OrderPage({
       {query.done === 'inquiry' && typeof query.r === 'string' && query.r in INQUIRY_DONE ? (
         <Alert tone={INQUIRY_DONE[query.r as InquiryOutcome].tone}>{INQUIRY_DONE[query.r as InquiryOutcome].text}</Alert>
       ) : null}
+      {query.done === 'refund' && typeof query.r === 'string' && query.r in REFUND_DONE ? (
+        <Alert tone={REFUND_DONE[query.r as RefundOutcome].tone}>{REFUND_DONE[query.r as RefundOutcome].text}</Alert>
+      ) : null}
+      {query.done === 'refund_inquiry' && typeof query.r === 'string' && query.r in REFUND_INQUIRY_DONE ? (
+        <Alert tone={REFUND_INQUIRY_DONE[query.r as RefundOutcome].tone}>{REFUND_INQUIRY_DONE[query.r as RefundOutcome].text}</Alert>
+      ) : null}
       {query.done === 'void' ? (
         <Alert tone="success">
           کد رهگیری کنار رفت و سطرش به صف تأیید برگشت
@@ -986,6 +1279,7 @@ export default async function OrderPage({
       <div className="ad-grid">
         <aside className="ad-side" aria-label="وضعیت و کار بعدی">
           <StatusCard gate={gate} view={view} stale={stale} mode={mode} />
+          <RefundCard gate={gate} view={view} mode={mode} />
           {mode === 'assign' && view.canAssign ? (
             <AssignForm
               gate={gate}

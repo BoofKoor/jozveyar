@@ -629,11 +629,26 @@
   .ad-status__actions form {
     display: contents;
   }
-  .ad-status .ad-facts {
+  .ad-status .ad-facts,
+  .ad-refund .ad-facts {
     margin-block-start: 8px;
   }
-  .ad-status .ad-facts > div {
+  .ad-status .ad-facts > div,
+  .ad-refund .ad-facts > div {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /*
+   * بازپرداخت سفارش لغوشده (۷٫۳، ADR-051؛ طرح `m-refund`): مبلغ درشت، و مبلغ و کارت و کارمزد پیش از کد تازه. کارت جدا از کارت وضعیت
+   * (`.ad-status`) است، با همان نشان‌ها و دکمه‌ها.
+   */
+  .ad-refund__sum {
+    margin-block-start: 8px;
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ad-refund .ad-changes {
+    margin-block-start: 8px;
   }
   .ad-facts > div {
     display: grid;

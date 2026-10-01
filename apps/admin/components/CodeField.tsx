@@ -1,5 +1,8 @@
-/** «کد برنامهٔ تأیید تو» برای کار حساس، با خطای خودش (سه نشانه: لبه، آیکون، پیام). */
-export function CodeField({ error }: { error: string | null }) {
+/**
+ * «کد برنامهٔ تأیید تو» برای کار حساس، با خطای خودش (سه نشانه: لبه، آیکون، پیام). راهنما پیش‌فرض همان کد تازه است؛ بازپرداخت (۷٫۳)
+ * می‌گوید چرا: «پول جابه‌جا می‌شود».
+ */
+export function CodeField({ error, hint }: { error: string | null; hint?: string }) {
   return (
     <div className="jy-field">
       <label className="jy-label" htmlFor="step-code">
@@ -23,7 +26,7 @@ export function CodeField({ error }: { error: string | null }) {
         </p>
       ) : null}
       <p id="step-code-hint" className="jy-hint">
-        کار حساس کد تازه می‌خواهد؛ کدی که با آن وارد شدی دوباره پذیرفته نیست.
+        {hint ?? 'کار حساس کد تازه می‌خواهد؛ کدی که با آن وارد شدی دوباره پذیرفته نیست.'}
       </p>
     </div>
   );

@@ -90,6 +90,20 @@ export type AdminErrorCode =
   /** «استعلام از درگاه» (۷٫۲). */
   | 'gateway_not_configured'
   | 'payment_final'
+  /** بازپرداخت سفارش لغوشده (۷٫۳). */
+  | 'refund_closed'
+  | 'refund_changed'
+  | 'refund_gateway_unavailable'
+  | 'refund_already_at_gateway'
+  | 'refund_precheck_failed'
+  | 'refund_day_invalid'
+  | 'refund_day_future'
+  | 'refund_day_early'
+  | 'refund_reference_invalid'
+  | 'refund_note_too_long'
+  | 'refund_not_found'
+  | 'refund_not_inquirable'
+  | 'order_refunded'
   /** ارسال: ورود فایل پست (۶٫۱). */
   | 'post_file_required'
   | 'post_file_too_large'

@@ -31,7 +31,8 @@ export const metadata: Metadata = {
  *
  * - **پرداخت‌شده:** «سفارش ثبت شد»، چهار گام بعد، و روز تحویل به پست (ADR-013).
  * - **وضعیت‌های پنل** (برش ۴٫۳، طرح `admin.html`، سؤال ۲۷): «جزوه‌ات در حال چاپ است»، «جزوه‌ات به پست رسید» با
- *   روزش، و «سفارش لغو شد … مبلغ پرداختی برمی‌گردد». دلیل لغو فقط در پنل است. پیامکی با تغییر وضعیت نیست (سؤال ۱۸).
+ *   روزش، و «سفارش لغو شد … مبلغ پرداختی برمی‌گردد». دلیل لغو فقط در پنل است. پیامکی با تغییر وضعیت نیست (سؤال ۱۸). از ۷٫۳
+ *   (ADR-051، سؤال ۱۵۷): «در حال برگشت» با کارت، و «برگشت داده شد» با روز و کد پیگیری؛ رد درگاه همان «برمی‌گردد».
  * - **در انتظار پرداخت:** اگر آخرین تلاش ناموفق بود «پرداخت انجام نشد»؛ همان مرور، با همان قیمت منجمد، و
  *   «دوباره پرداخت کن». سفارش ساخته شده، پس مرور پیوند ویرایش ندارد. از برش ۷٫۲ (طرح `checkout.html`، سؤال‌های ۱۳۰ تا ۱۳۲): علت
  *   ناموفق در پنج گروه، «پرداخت هنوز انجام نشده» (برگشت زودرس)، و «پرداختت در حال بررسی است» بی «دوباره پرداخت کن»، با جزیرهٔ
@@ -258,6 +259,9 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
   );
 
   if (view.status === 'cancelled') {
+    // بازپرداخت (برش ۷٫۳، طرح `checkout.html`): «در حال برگشت» و «برگشت داده شد» با کد پیگیری؛ تا آن موقع (و اگر درگاه نپذیرفت) همان
+    // «برمی‌گردد» (سؤال ۱۵۷). بی پیامک.
+    const refund = details.refund;
     return (
       <section className="jy-card" aria-labelledby="order-title" data-testid="order-cancelled">
         <span className="jy-icon jy-icon-error ck-done__icon ck-done__icon--error" aria-hidden="true" />
@@ -265,9 +269,54 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
           سفارش لغو شد
         </h1>
         <p className="ck-sub">
-          سفارش <span className="num">{view.number}</span> لغو شد و چاپ نمی‌شود. مبلغ پرداختی، <Tomans rials={details.totalRials} /> تومان،
-          برمی‌گردد.
+          سفارش <span className="num">{view.number}</span> لغو شد و چاپ نمی‌شود.
+          {refund ? null : (
+            <>
+              {' '}
+              مبلغ پرداختی، <Tomans rials={details.totalRials} /> تومان، برمی‌گردد.
+            </>
+          )}
         </p>
+        {refund?.state === 'refunding' ? (
+          <p className="jy-note jy-note--info ck-card-note" role="status" data-testid="order-refunding">
+            <span className="jy-icon jy-icon-info" aria-hidden="true" />
+            <span>
+              <b>در حال برگشت:</b> <Tomans rials={refund.amountRials} /> تومان به همان کارتی که با آن پرداختی
+              {refund.cardMask ? (
+                <>
+                  {' '}
+                  (<span className="num nw">{formatCardMask(refund.cardMask)}</span>)
+                </>
+              ) : null}{' '}
+              برمی‌گردد؛ معمولاً تا نیم ساعت.
+            </span>
+          </p>
+        ) : refund?.state === 'refunded' ? (
+          <p className="jy-note jy-note--success ck-card-note" role="status" data-testid="order-refunded">
+            <span className="jy-icon jy-icon-success" aria-hidden="true" />
+            <span>
+              <b>برگشت داده شد:</b> <Tomans rials={refund.amountRials} /> تومان <Inline text={refund.day} />
+              {refund.time ? (
+                <>
+                  ، ساعت <span className="num">{refund.time}</span>
+                </>
+              ) : null}
+              {refund.cardMask ? (
+                <>
+                  {' '}
+                  به کارتت (<span className="num nw">{formatCardMask(refund.cardMask)}</span>)
+                </>
+              ) : null}{' '}
+              برگشت.
+              {refund.reference ? (
+                <>
+                  {' '}
+                  کد پیگیری <span className="num">{refund.reference}</span>.
+                </>
+              ) : null}
+            </span>
+          </p>
+        ) : null}
         <div className="ck-done__actions">{another}</div>
       </section>
     );
@@ -608,8 +657,18 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
               }
             />
             <div className="home-sum__total">
-              {/* لغوشده: همان مبلغ پرداخت‌شده برمی‌گردد (سؤال ۲۷). */}
-              <span className="home-sum__label">{view.status === 'cancelled' ? 'برمی‌گردد' : paid ? 'پرداخت شد' : 'جمع'}</span>
+              {/* لغوشده: همان مبلغ پرداخت‌شده برمی‌گردد (سؤال ۲۷)؛ از ۷٫۳ «در حال برگشت» و «برگشت داده شد». */}
+              <span className="home-sum__label">
+                {view.status === 'cancelled'
+                  ? details.refund?.state === 'refunded'
+                    ? 'برگشت داده شد'
+                    : details.refund?.state === 'refunding'
+                      ? 'در حال برگشت'
+                      : 'برمی‌گردد'
+                  : paid
+                    ? 'پرداخت شد'
+                    : 'جمع'}
+              </span>
               <SumValue rials={details.totalRials} testId="summary-total" />
             </div>
             <ShipLine view={view} />

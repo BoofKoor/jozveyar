@@ -25,16 +25,22 @@ import {
   type PanelVolumeFile,
   type PaymentRow,
   type PaymentSmsRef,
+  type RefundRow,
+  type RefundStart,
+  type RefundStartResult,
+  type RefundStore,
+  type RefundUpdate,
   type SettledPayment,
   type ShipmentSms,
+  refundChanges,
 } from '@jozveyar/db';
-import type { PaymentGateway } from '@jozveyar/payments';
+import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
 import { SmsError, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { MemoryDriver } from '@jozveyar/storage';
 
 import type { AdminSession } from './auth';
 import { createPanelOrders } from './orders';
-import { ok } from './result';
+import { ok, type Result } from './result';
 
 /** «حالا»ی طرح پنل: دوشنبه 13 مهر 1405، ساعت 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -102,6 +108,11 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       held: [{ orderNumber: 10047, failureCode: 'order_not_payable', createdAt: NOW }],
       verifiedUnused: [{ orderNumber: 10048, failureCode: 'order_not_payable' }],
       autoClosed: { failed: 2, succeeded: 1 },
+      unrefunded: [{ orderNumber: 10026, cancelledAt: NOW }],
+      refunding: [
+        { orderNumber: 10049, createdAt: new Date(NOW.getTime() - 3 * 3_600_000), unknown: false },
+        { orderNumber: 10050, createdAt: new Date(NOW.getTime() - 10 * 60_000), unknown: false },
+      ],
     }),
     list: record('list', []),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
@@ -191,6 +202,7 @@ function failedDetails(
     partner: null,
     assignments: [],
     shipments: [],
+    refunds: [],
   } as unknown as PanelOrderDetails;
 }
 
@@ -269,7 +281,7 @@ describe('پیشخوان', () => {
     expect(noor.ok && [noor.value.alerts.reviewRows, days(noor.value.untracked)]).toEqual([0, [['2026-09-29T20:30:00.000Z', [10009, 10025]]]]);
   });
 
-  it('«پیامک پرداخت نرفت» (۷٫۱) و هشدارهای پول و درگاه (۷٫۲) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {
+  it('«پیامک پرداخت نرفت» (۷٫۱)، هشدارهای پول و درگاه (۷٫۲) و بازپرداخت (۷٫۳) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {
     const staff = await service().orders.dashboard(session(['orders.read', 'orders.money']));
     expect(staff.ok && staff.value.alerts).toMatchObject({
       paidSmsFailed: [10027],
@@ -278,8 +290,21 @@ describe('پیشخوان', () => {
       held: [{ orderNumber: 10047 }],
       verifiedUnused: [{ orderNumber: 10048 }],
       autoClosed: { failed: 2, succeeded: 1 },
+      // بازپرداخت (۷٫۳، سؤال ۱۵۸): لغوشدهٔ پول‌برنگشته از همان لغو، و «هنوز در حال برگشت» فقط پس از دو ساعت.
+      unrefunded: [{ orderNumber: 10026, cancelledAt: NOW }],
+      refunding: [{ orderNumber: 10049 }],
     });
-    const none = { paidSmsFailed: [], gatewayRejected: null, mismatched: [], held: [], verifiedUnused: [], autoClosed: { failed: 0, succeeded: 0 } };
+    expect(staff.ok && staff.value.alerts.refunding).toHaveLength(1);
+    const none = {
+      paidSmsFailed: [],
+      gatewayRejected: null,
+      mismatched: [],
+      held: [],
+      verifiedUnused: [],
+      autoClosed: { failed: 0, succeeded: 0 },
+      unrefunded: [],
+      refunding: [],
+    };
     const reader = await service().orders.dashboard(session(['orders.read']));
     expect(reader.ok && reader.value.alerts).toMatchObject(none);
     const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
@@ -509,6 +534,7 @@ function orderDetails(
     shipments: [],
     events: [],
     payments: [],
+    refunds: [],
     order: {
       id: 'order-1',
       orderNumber: 10027,
@@ -1462,5 +1488,322 @@ describe('«استعلام از درگاه» (۷٫۲، ADR-050)', () => {
     money.store.details = async () => details as never;
     expect(await money.orders.details(session(OWNER), '10031')).toMatchObject({ ok: true, value: { inquiryProviders: ['zibal'] } });
     expect(await money.orders.details(session(['orders.read']), '10031')).toMatchObject({ ok: true, value: { inquiryProviders: [] } });
+  });
+});
+
+describe('بازپرداخت سفارش لغوشده (۷٫۳، ADR-051)', () => {
+  const PAYMENT = '55555555-5555-4555-8555-555555555555';
+  const REFUND = '66666666-6666-4666-8666-666666666666';
+  const AMOUNT = 3_747_500;
+  /** مالک با مجوز بازپرداخت؛ متصدی همان بی آن. */
+  const REFUNDER = [...OWNER, 'orders.refund'];
+
+  const paid = (over: Partial<PaymentRow> = {}): PaymentRow & { sms: null } => ({
+    id: PAYMENT,
+    orderId: 'order-1',
+    provider: 'mock',
+    amountRials: AMOUNT,
+    status: 'succeeded',
+    authority: `MOCK${'A'.repeat(32)}`,
+    gatewayOrderId: '10026-55555555',
+    returnKey: 'a'.repeat(32),
+    refId: '803114',
+    cardMask: '603799******1234',
+    failureCode: null,
+    raw: { decision: 'success', verified: true },
+    createdAt: new Date(NOW.getTime() - 26 * 3_600_000),
+    verifiedAt: new Date(NOW.getTime() - 26 * 3_600_000 + MINUTE),
+    verifiedAmountRials: AMOUNT,
+    gatewayStatus: 1,
+    gatewayError: null,
+    gatewayCheckedAt: null,
+    returnedAt: null,
+    settledVia: 'return',
+    smsMessageId: null,
+    sms: null,
+    ...over,
+  });
+  const refundRow = (over: Partial<RefundRow> = {}): RefundRow & { adminName: string | null } => ({
+    id: REFUND,
+    orderId: 'order-1',
+    paymentId: PAYMENT,
+    amountRials: AMOUNT,
+    feeRials: 15_000,
+    method: 'gateway',
+    status: 'pending',
+    gatewayRef: null,
+    reference: null,
+    refundedOn: null,
+    note: null,
+    gatewayStatus: null,
+    gatewayError: null,
+    gatewayCheckedAt: null,
+    failureReason: null,
+    settledVia: null,
+    adminUserId: 'admin-1',
+    raw: null,
+    createdAt: new Date(NOW.getTime() - 10 * MINUTE),
+    finishedAt: null,
+    adminName: 'سارا',
+    ...over,
+  });
+
+  /** سفارش 10026 «لغو شد» با پرداخت موفق درگاه نمونه، و بازپرداخت‌هایش (تازه‌ترین اول). */
+  function cancelled(refunds: ReturnType<typeof refundRow>[] = [], payment = paid(), status: OrderStatus = 'cancelled') {
+    return {
+      ...orderDetails(status),
+      order: { ...orderDetails(status).order, orderNumber: 10026 },
+      payments: [payment],
+      refunds,
+      statusEvents: [{ fromStatus: 'paid', toStatus: 'cancelled', at: new Date(NOW.getTime() - 3_600_000), adminName: 'سارا', note: { reason: 'مشتری خواست' } }],
+    } as unknown as PanelOrderDetails;
+  }
+
+  /** ذخیره‌گاه بازپرداخت ساختگی: `start` و `record` ثبت می‌شوند؛ حکم زیر قفل و محافظ‌ها مال پستگرس است (`packages/db`). */
+  function build(
+    details: PanelOrderDetails | null,
+    options: { start?: RefundStartResult; stepUp?: Result<true>; gateways?: Record<string, PaymentGateway>; inquired?: RefundRow | null } = {},
+  ) {
+    const fake = fakeStore({
+      details: async (scope, number) => (fake.calls.push({ method: 'details', args: [number], scope }), details),
+    });
+    const starts: RefundStart[] = [];
+    const records: { id: string; update: RefundUpdate; via: string }[] = [];
+    const inquiries: { id: string; options: unknown }[] = [];
+    const steps: unknown[] = [];
+    const refunds: RefundStore = {
+      start: async (scope, input) => {
+        starts.push(input);
+        fake.calls.push({ method: 'refundStart', args: [input.method], scope });
+        return options.start ?? { ok: true, refund: refundRow({ method: input.method, feeRials: input.feeRials, createdAt: input.at, adminName: undefined } as never) };
+      },
+      record: async (id, update, at, via) => {
+        records.push({ id, update, via });
+        const base = refundRow({ createdAt: NOW });
+        return { ...base, ...refundChanges(base, update, at, via) } as RefundRow;
+      },
+      inquire: async (id, ask, opts) => {
+        inquiries.push({ id, options: { via: opts.via, skipLocked: opts.skipLocked } });
+        const found = options.inquired;
+        if (!found) return null;
+        const update = await ask(found, paid());
+        return { refund: { ...found, ...refundChanges(found, update, opts.at(), opts.via) } as RefundRow, before: found, orderNumber: 10026 };
+      },
+      autoInquiry: async () => [REFUND],
+      refundOf: async (scope, id) => (options.inquired && id === REFUND ? { refund: options.inquired, orderId: 'order-1', orderNumber: 10026 } : null),
+    };
+    const orders = createPanelOrders({
+      store: fake.store,
+      storage: null,
+      secret: SECRET,
+      now: () => NOW,
+      log: () => {},
+      payments: { orders: {} as OrderStore, gateways: options.gateways ?? { mock: mockGateway() } },
+      refunds: { store: refunds },
+      stepUp: async (who, code) => (steps.push(code), options.stepUp ?? ok<true>(true)),
+    });
+    return { orders, starts, records, inquiries, steps, ...fake };
+  }
+  const form = (over: Record<string, unknown> = {}) => ({ payment: PAYMENT, seen: '', code: '123456', ...over });
+
+  it('از درگاه: پیش‌استعلام، بعد کد تازه، بعد ردیف «در حال برگشت» با رویداد و کارمزد، بعد درخواست با شناسهٔ همان ردیف', async () => {
+    const { orders, starts, records, steps } = build(cancelled());
+    expect(await orders.refundFromGateway(session(REFUNDER), '10026', form(), '1.2.3.4')).toEqual(ok({ orderNumber: 10026, outcome: 'refunding' }));
+    expect(steps).toEqual(['123456']);
+    // کارمزد 0.1٪ = 3,750 ریال، کمتر از کمینهٔ 1,500 تومان (سؤال ۱۵۵).
+    expect(starts).toEqual([
+      {
+        orderId: 'order-1',
+        paymentId: PAYMENT,
+        seen: null,
+        method: 'gateway',
+        amountRials: AMOUNT,
+        feeRials: 15_000,
+        reference: null,
+        refundedOn: null,
+        note: null,
+        adminUserId: 'admin-1',
+        at: NOW,
+        event: {
+          adminUserId: 'admin-1',
+          action: 'orders.refund',
+          targetType: 'order',
+          targetId: 'order-1',
+          ipHash,
+          at: NOW,
+          detail: { orderNumber: 10026, method: 'gateway', amountRials: AMOUNT, feeRials: 15_000, provider: 'mock' },
+        },
+      },
+    ]);
+    expect(records).toMatchObject([{ id: REFUND, via: 'request', update: { kind: 'answer', answer: { state: 'pending', status: 16 } } }]);
+  });
+
+  it('پاسخ گم‌شده «معلوم نیست» می‌ماند، نه بازپرداخت دوم؛ رد کیف پول «برنگشت»؛ پس از «برنگشت» دوباره', async () => {
+    const lost = build(cancelled([], paid({ raw: { decision: 'success', verified: true, refund: 'lost' } })));
+    expect(await lost.orders.refundFromGateway(session(REFUNDER), '10026', form(), 'ip')).toEqual(ok({ orderNumber: 10026, outcome: 'unknown' }));
+    expect(lost.records).toEqual([{ id: REFUND, update: { kind: 'error', tag: 'unavailable' }, via: 'request' }]);
+
+    const balance = build(cancelled([], paid({ raw: { decision: 'success', verified: true, refund: 'balance' } })));
+    expect(await balance.orders.refundFromGateway(session(REFUNDER), '10026', form(), 'ip')).toEqual(ok({ orderNumber: 10026, outcome: 'failed' }));
+
+    const failed = refundRow({ status: 'failed', failureReason: 'balance', finishedAt: NOW, settledVia: 'request' });
+    const again = build(cancelled([failed]));
+    expect(await again.orders.refundFromGateway(session(REFUNDER), '10026', form({ seen: REFUND }), 'ip')).toMatchObject({ ok: true });
+    expect(again.starts[0]!.seen).toBe(REFUND);
+  });
+
+  it('ترتیب سنجش‌ها: مجوز پیش از هر خواندن، «همان که دیده شد»، درگاه بازپرداخت‌دار و پیش‌استعلام، همه پیش از کد تازه', async () => {
+    // بی `orders.refund` (متصدی): ۴۰۳، بی هیچ خواندنی.
+    const operator = build(cancelled());
+    expect(await operator.orders.refundFromGateway(session(OPERATOR), '10026', form(), 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+    expect(await operator.orders.refundManual(session(OPERATOR), '10026', { ...form(), day: '1405/07/13', reference: '552190', note: '' }, 'ip')).toMatchObject({
+      status: 403,
+    });
+    expect(operator.calls).toEqual([]);
+
+    const cases: [ReturnType<typeof build>, ReturnType<typeof form>, Record<string, unknown>][] = [
+      [build(null), form(), { status: 404, error: 'order_not_found' }],
+      [build(cancelled([], paid(), 'paid')), form(), { status: 409, error: 'refund_closed', orderNumber: 10026 }],
+      [build(cancelled()), form({ seen: REFUND }), { status: 409, error: 'refund_changed' }],
+      [build(cancelled()), form({ payment: '77777777-7777-4777-8777-777777777777' }), { status: 409, error: 'refund_changed' }],
+      [build(cancelled([refundRow({ gatewayRef: 'MOCKRF1', gatewayStatus: 16 })])), form({ seen: REFUND }), { status: 409, error: 'refund_changed' }],
+      [build(cancelled([refundRow({ status: 'succeeded', method: 'manual', reference: '552190', refundedOn: NOW, finishedAt: NOW, feeRials: null })])), form({ seen: REFUND }), { status: 409, error: 'refund_changed' }],
+      // زیبال تا مستند API بازپرداخت فقط دستی (سؤال ۱۵۲).
+      [build(cancelled([], paid({ provider: 'zibal' })), { gateways: { mock: mockGateway(), zibal: { ...mockGateway(), name: 'zibal', refunds: undefined } } }), form(), { status: 409, error: 'refund_gateway_unavailable' }],
+      // پیش‌استعلام: پول همین حالا نزد درگاه برگشته یا در راه برگشت است (سؤال ۱۵۴).
+      [build(cancelled([], paid({ raw: { decision: 'success', verified: true, refund: 'already' } }))), form(), { status: 409, error: 'refund_already_at_gateway', status_: undefined }],
+    ];
+    for (const [built, input, expected] of cases) {
+      const { status_: _, ...want } = expected as Record<string, unknown> & { status_?: unknown };
+      expect(await built.orders.refundFromGateway(session(REFUNDER), '10026', input, 'ip')).toMatchObject(want);
+      expect(built.steps).toEqual([]);
+      expect(built.starts).toEqual([]);
+    }
+
+    // پیش‌استعلامی که جواب نداد: درخواست نمی‌رود.
+    const silent = { ...mockGateway(), inquire: async () => Promise.reject(new Error('timeout')) } as PaymentGateway;
+    const unanswered = build(cancelled(), { gateways: { mock: silent } });
+    expect(await unanswered.orders.refundFromGateway(session(REFUNDER), '10026', form(), 'ip')).toMatchObject({ status: 503, error: 'refund_precheck_failed' });
+    expect(unanswered.steps).toEqual([]);
+
+    // کد اشتباه: همان نتیجهٔ کد تازه، بی ردیف.
+    const wrong = build(cancelled(), { stepUp: { ok: false, status: 400, error: 'wrong_code' } });
+    expect(await wrong.orders.refundFromGateway(session(REFUNDER), '10026', form(), 'ip')).toMatchObject({ status: 400, error: 'wrong_code' });
+    expect(wrong.starts).toEqual([]);
+  });
+
+  it('ساختن زیر قفل نشد: هم‌زمان جای دیگری ساخته شد یا سفارش دیگر لغوشده نیست؛ هیچ درخواستی به درگاه', async () => {
+    for (const [start, error] of [
+      [{ ok: false, reason: 'changed', latest: null }, 'refund_changed'],
+      [{ ok: false, reason: 'payment_changed' }, 'refund_changed'],
+      [{ ok: false, reason: 'not_cancelled' }, 'refund_closed'],
+      [{ ok: false, reason: 'not_found' }, 'order_not_found'],
+    ] as const) {
+      const built = build(cancelled(), { start: start as RefundStartResult });
+      expect(await built.orders.refundFromGateway(session(REFUNDER), '10026', form(), 'ip')).toMatchObject({ ok: false, error });
+      expect(built.records).toEqual([]);
+    }
+  });
+
+  it('ثبت دستی: روز و کد پیگیری و «چطور برگشت» پیش از کد تازه؛ ردیف «برگشت داده شد» بی کارمزد، با رویداد', async () => {
+    const manual = (over: Record<string, unknown>) => ({ ...form(), day: '1405/07/13', reference: '552190', note: 'کارت‌به‌کارت به همان کارت', ...over });
+    for (const [over, error] of [
+      [{ day: '13/07/1405' }, 'refund_day_invalid'],
+      [{ day: '1405/07/14' }, 'refund_day_future'],
+      [{ day: '1405/07/10' }, 'refund_day_early'],
+      [{ reference: '۵۵' }, 'refund_reference_invalid'],
+      [{ note: 'ی'.repeat(201) }, 'refund_note_too_long'],
+    ] as const) {
+      const built = build(cancelled());
+      expect(await built.orders.refundManual(session(REFUNDER), '10026', manual(over), 'ip'), error).toMatchObject({ status: 400, error });
+      expect(built.steps).toEqual([]);
+    }
+    const built = build(cancelled());
+    expect(await built.orders.refundManual(session(REFUNDER), '10026', manual({ day: '۱۴۰۵/۰۷/۱۳', reference: '55 21 90' }), '1.2.3.4')).toEqual(
+      ok({ orderNumber: 10026, outcome: 'refunded' }),
+    );
+    expect(built.steps).toEqual(['123456']);
+    expect(built.starts).toMatchObject([
+      {
+        method: 'manual',
+        feeRials: null,
+        reference: '552190',
+        refundedOn: new Date('2026-10-04T20:30:00Z'),
+        note: 'کارت‌به‌کارت به همان کارت',
+        event: { action: 'orders.refund', detail: { orderNumber: 10026, method: 'manual', amountRials: AMOUNT, reference: '552190' } },
+      },
+    ]);
+    // دستی هیچ درخواستی به درگاه ندارد.
+    expect(built.records).toEqual([]);
+  });
+
+  it('«استعلام از درگاه»: مالک و متصدی، زیر قفل ردیف (`SKIP LOCKED`)، فقط پس از درخواست، با رویداد `orders.refund_inquiry`', async () => {
+    const asked = refundRow({ gatewayRef: 'MOCKRF1', gatewayStatus: 16, gatewayCheckedAt: NOW });
+    const { orders, inquiries, events } = build(cancelled([asked]), { inquired: asked });
+    expect(await orders.inquireRefund(session(OPERATOR), { refund: REFUND }, '1.2.3.4')).toEqual(ok({ orderNumber: 10026, outcome: 'refunded' }));
+    expect(inquiries).toEqual([{ id: REFUND, options: { via: 'panel', skipLocked: true } }]);
+    expect(events.at(-1)).toEqual({
+      adminUserId: 'admin-1',
+      action: 'orders.refund_inquiry',
+      targetType: 'order',
+      targetId: 'order-1',
+      ipHash,
+      at: NOW,
+      detail: { orderNumber: 10026, refundId: REFUND, outcome: 'refunded', status: 15 },
+    });
+
+    expect(await build(cancelled()).orders.inquireRefund(session(['orders.read']), { refund: REFUND }, 'ip')).toMatchObject({ status: 403 });
+    expect(await build(cancelled()).orders.inquireRefund(session(OWNER), { refund: REFUND }, 'ip')).toMatchObject({ status: 404, error: 'refund_not_found' });
+    // درخواستی که همین حالا رفت و هنوز در راه است: نه.
+    const fresh = refundRow({ createdAt: new Date(NOW.getTime() - 10_000) });
+    const inFlight = build(cancelled([fresh]), { inquired: fresh });
+    expect(await inFlight.orders.inquireRefund(session(OWNER), { refund: REFUND }, 'ip')).toMatchObject({ status: 409, error: 'refund_not_inquirable' });
+    expect(inFlight.inquiries).toEqual([]);
+  });
+
+  it('جزئیات: کارت بازپرداخت فقط با پول؛ «برگردان» فقط مالک؛ کارمزد پیش از کد؛ لغوی که پولش برگشته برنمی‌گردد', async () => {
+    const none = build(cancelled());
+    const owner = await none.orders.details(session(REFUNDER), '10026');
+    expect(owner).toMatchObject({
+      ok: true,
+      value: { refund: { state: 'none', seen: '', canRefund: true, gateway: { provider: 'mock', feeRials: 15_000 }, canInquire: false }, refundBy: 'درگاه نمونه', canRevert: true },
+    });
+    expect(await none.orders.details(session(OPERATOR), '10026')).toMatchObject({ ok: true, value: { refund: { canRefund: false } } });
+    expect(await none.orders.details(session(['orders.read']), '10026')).toMatchObject({ ok: true, value: { refund: null } });
+
+    const refunding = build(cancelled([refundRow({ gatewayRef: 'MOCKRF1', gatewayStatus: 16 })]));
+    expect(await refunding.orders.details(session(REFUNDER), '10026')).toMatchObject({
+      ok: true,
+      value: { refund: { state: 'refunding', seen: REFUND, canInquire: true }, canRevert: false },
+    });
+    // بی درگاه بازپرداخت‌دار (زیبال امروز): فقط دستی.
+    const zibal = build(cancelled([], paid({ provider: 'zibal' })), { gateways: { zibal: { ...mockGateway(), name: 'zibal', refunds: undefined } } });
+    expect(await zibal.orders.details(session(REFUNDER), '10026')).toMatchObject({ ok: true, value: { refund: { gateway: null }, refundBy: null } });
+  });
+
+  it('برگرداندن لغوی که پولش برگشته یا در راه است: ۴۰۹ پیش از نوشتن؛ و همان از پایگاه داده', async () => {
+    const live = build(cancelled([refundRow({ gatewayRef: 'MOCKRF1', gatewayStatus: 16 })]));
+    expect(await live.orders.changeStatus(session(OWNER), '10026', { action: 'revert', from: 'cancelled', reason: 'اشتباه بود' }, 'ip')).toMatchObject({
+      status: 409,
+      error: 'order_refunded',
+    });
+    expect(live.calls.some((c) => c.method === 'changeStatus')).toBe(false);
+
+    const raced = build(cancelled());
+    raced.store.changeStatus = async () => ({ ok: false, current: 'cancelled', refunded: true });
+    expect(await raced.orders.changeStatus(session(OWNER), '10026', { action: 'revert', from: 'cancelled', reason: 'اشتباه بود' }, 'ip')).toMatchObject({
+      status: 409,
+      error: 'order_refunded',
+    });
+  });
+
+  it('استعلام خودکار: فقط با درگاه بازپرداخت‌دار؛ هر ردیف `SKIP LOCKED` و `via: auto`', async () => {
+    const asked = refundRow({ gatewayRef: 'MOCKRF1', gatewayStatus: 16, gatewayCheckedAt: new Date(NOW.getTime() - 3 * MINUTE) });
+    const built = build(cancelled([asked]), { inquired: asked });
+    expect(built.orders.refundAutoEnabled()).toBe(true);
+    expect(await built.orders.autoRefundInquiry()).toEqual({ checked: 1, closed: 1 });
+    expect(built.inquiries).toEqual([{ id: REFUND, options: { via: 'auto', skipLocked: true } }]);
+    const zibalOnly = build(cancelled(), { gateways: { zibal: { ...mockGateway(), name: 'zibal', refunds: undefined } } });
+    expect(zibalOnly.orders.refundAutoEnabled()).toBe(false);
   });
 });
