@@ -72,7 +72,7 @@ export const panelMockGateway = (env: Env) => env.CHECKOUT_MODE?.trim().toLowerC
 export function describePayments(env: Env): string {
   const base = env.ZIBAL_API_URL?.trim() ? 'ZIBAL_API_URL' : 'نشانی پیش‌فرض زیبال';
   const callback = env.PAYMENT_CALLBACK_URL?.trim() ? 'PAYMENT_CALLBACK_URL هست' : 'PAYMENT_CALLBACK_URL نیست، پس «آزمایش» کد پذیرنده نه';
-  // بازپرداخت (۷٫۳، ADR-051): از درگاه فقط درگاهی که بازپرداخت دارد (امروز درگاه نمونه)؛ زیبال تا مستند API بازپرداخت فقط ثبت دستی.
+  // بازپرداخت (۷٫۳، ADR-051): از درگاه فقط درگاهی که بازپرداخت دارد (درگاه نمونه)؛ زیبال فقط ثبت دستی، چون API بازپرداخت ندارد (۱۴۰۵/۰۷/۱۰).
   const refunds = panelMockGateway(env) ? 'بازپرداخت از درگاه نمونه، با استعلام خودکار' : 'بازپرداخت فقط ثبت دستی';
   return `✓ پنل ادمین: درگاه زیبال (${base})${panelMockGateway(env) ? ' و درگاه نمونه' : ''} برای «استعلام از درگاه»؛ ${callback}؛ ${refunds}`;
 }

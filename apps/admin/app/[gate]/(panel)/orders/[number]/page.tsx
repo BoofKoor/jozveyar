@@ -967,7 +967,7 @@ function RefundCard({ gate, view, mode }: { gate: string; view: OrderDetailsView
           </p>
         ) : (
           <p className="ad-hint">
-            بازپرداخت از {viaGateway(payment.provider)} هنوز در پنل نیست؛ پول را از پنل {provider} یا راه دیگری برگردان و اینجا ثبتش کن.
+            بازپرداخت از {viaGateway(payment.provider)} در پنل نیست؛ پول را از پنل {provider} یا راه دیگری برگردان و اینجا ثبتش کن.
           </p>
         )}
       </div>
