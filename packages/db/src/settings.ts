@@ -14,7 +14,7 @@
  * هر خواندن از خود پایگاه داده است، بی کش در حافظه: سایت و پنل، روی هر چند نود، تغییر را با درخواست بعدی می‌بینند.
  */
 
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, max, sql } from 'drizzle-orm';
 
 import { adminEventRow } from './admin.js';
 import type { Database } from './index.js';
@@ -56,6 +56,20 @@ export interface SettingsStore {
     at: Date;
     actor: SettingsActor;
   }): Promise<SettingChangeResult>;
+}
+
+/**
+ * آخرین تغییر این تنظیم‌ها (`updated_at`)، یا null اگر هیچ‌کدام ردیف ندارد (برش ۷٫۴). صفحه‌های قوانین و حریم خصوصی سایت روز
+ * کاری تحویل به پست و نگهداری فایل‌ها را از `settings` می‌خوانند، پس «به‌روز شده»شان دیرترینِ این و تاریخ خود متن است. «همان» در
+ * `change` نمی‌نویسد، پس ذخیرهٔ بی تغییر این تاریخ را جلو نمی‌برد.
+ */
+export async function settingsChangedAt({ db }: Database, keys: readonly string[]): Promise<Date | null> {
+  if (keys.length === 0) return null;
+  const [row] = await db
+    .select({ at: max(settings.updatedAt) })
+    .from(settings)
+    .where(inArray(settings.key, [...keys]));
+  return row?.at ?? null;
 }
 
 export function createSettingsStore({ db }: Database): SettingsStore {

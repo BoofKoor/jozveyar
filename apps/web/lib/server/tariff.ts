@@ -13,8 +13,8 @@ import { createOrderStore, getDb, readSetting, type OrderStore } from '@jozveyar
 
 import { SEED_TARIFF, type SiteTariff } from '../tariff';
 
-/** فاز build نکست؛ در کارگرهای build هم هست. */
-const BUILD_PHASE = 'phase-production-build';
+/** فاز build نکست؛ در کارگرهای build هم هست. صفحه‌های ثابت (`siteFacts.ts`) هم همین را می‌سنجند. */
+export const BUILD_PHASE = 'phase-production-build';
 
 type TariffSource = Pick<OrderStore, 'activePriceList' | 'setting'>;
 

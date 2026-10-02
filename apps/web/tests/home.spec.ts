@@ -10,6 +10,8 @@ import {
 } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans, toLatinDigits } from '@jozveyar/text';
 
+import { footerGroups } from '../lib/staticPages';
+
 /**
  * صفحهٔ اصلی پیش از فایل (docs/UI.md، ۴الف): طرح ز روی سایت. قهرمان با کارت بارگذاری، سه قدم،
  * تعرفه و سؤال‌ها؛ و اینکه پس از فایل همه کنار می‌روند و با «فایل دیگری بینداز» برمی‌گردند.
@@ -175,12 +177,14 @@ test.describe('کارت بارگذاری', () => {
 });
 
 test.describe('دسترس‌پذیری پیش از فایل', () => {
-  test('ترتیب Tab: لوگو، سه پیوند، کارت بارگذاری، ریز تعرفه، سؤال‌ها و نشان اینماد', async ({ page }) => {
+  test('ترتیب Tab: لوگو، سه پیوند، کارت بارگذاری، ریز تعرفه، سؤال‌ها، پیوندهای پاورقی و نشان اینماد', async ({ page }) => {
     await page.goto('/');
     const questions = await page.locator('#faq summary').allTextContents();
     expect(questions).toHaveLength(6);
     const order: string[] = [];
-    for (let i = 0; i < 7 + questions.length; i++) {
+    // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد.
+    const footer = footerGroups().flatMap(({ pages }) => pages.map(({ label }) => label));
+    for (let i = 0; i < 7 + questions.length + footer.length; i++) {
       await page.keyboard.press('Tab');
       order.push(
         await page.evaluate(() => {
@@ -197,6 +201,7 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
       'jozve-file',
       'بر اساس تعداد برگ',
       ...questions.map((q) => q.trim()),
+      ...footer,
       'نماد اعتماد الکترونیکی',
     ]);
   });

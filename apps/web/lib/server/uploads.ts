@@ -41,6 +41,13 @@ export const MAX_BROWSER_ANALYSIS_PAGES = 1500;
 /** پیش‌فرض‌های `settings` — همان اعدادی که ARCHITECTURE فهرست کرده. */
 export const DEFAULT_MAX_BYTES = 1_610_612_736;
 export const DEFAULT_RETENTION_DAYS = 2;
+/** روزهایی که فایل آپلود می‌ماند: قاعدهٔ سنی باکت و `file_expires_at`؛ صفحه‌های قوانین و حریم خصوصی هم همین را می‌گویند (۷٫۴). */
+export const UPLOAD_RETENTION_SETTING = 'file.retention_days';
+
+/** تنظیم عددی آپلود (`file.*`، بیرون از `SETTING_SCHEMAS`): عدد مثبت متناهی، وگرنه پیش‌فرض. */
+export function positiveSetting(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 type SourceKind = DocumentRow['sourceKind'];
 
@@ -168,8 +175,7 @@ export function createUploadService(deps: UploadServiceDeps) {
   const log = deps.log ?? ((message, error) => console.error(message, error ?? ''));
 
   async function numberSetting(key: string, fallback: number): Promise<number> {
-    const value = await deps.store.setting(key);
-    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+    return positiveSetting(await deps.store.setting(key), fallback);
   }
 
   /**
@@ -189,7 +195,7 @@ export function createUploadService(deps: UploadServiceDeps) {
     bucketFailedAt = 0;
     bucketReady = (async () => {
       try {
-        const retentionDays = await numberSetting('file.retention_days', DEFAULT_RETENTION_DAYS);
+        const retentionDays = await numberSetting(UPLOAD_RETENTION_SETTING, DEFAULT_RETENTION_DAYS);
         await deps.storage.putLifecycleRules([
           {
             id: 'uploads-retention',
@@ -431,7 +437,7 @@ export function createUploadService(deps: UploadServiceDeps) {
 
       const key = doc.storageKey!;
       const at = now();
-      const retentionDays = await numberSetting('file.retention_days', DEFAULT_RETENTION_DAYS);
+      const retentionDays = await numberSetting(UPLOAD_RETENTION_SETTING, DEFAULT_RETENTION_DAYS);
       // همان لحظه در صف کارگر، در همان تراکنش: PDF مستقیم تحلیل (ADR-025)، بقیه
       // اول تبدیل و بعد همان تحلیل (ADR-028). نوع از پسوند است؛ کارگر محتوا را
       // می‌سنجد و اگر مثلاً «docx» در واقع PDF باشد، همان را تحلیل می‌کند.

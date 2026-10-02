@@ -1,6 +1,8 @@
 import { jalaliYear } from '@jozveyar/text';
 import { Logo } from '@jozveyar/ui';
 
+import { footerGroups } from '../lib/staticPages';
+
 /** شناسه و کد نشان اینماد جزوه‌یار، از کدی که اینماد داده (۱۴۰۵/۰۷/۰۳). */
 const ENAMAD_ID = '7896821';
 const ENAMAD_CODE = 'pyzBITp0WBebVFYdP4CZIvGX69k9oy6R';
@@ -33,11 +35,42 @@ function EnamadSeal() {
 }
 
 /**
+ * پیوند صفحه‌های ثابت در دو گروه طرح (برش ۷٫۴، قدم ۵؛ «تماس» فقط با اطلاعات تماس واقعی، `lib/staticPages.ts`).
+ *
+ * در حالت سفارش (جزوه‌ای در کار، در صفحهٔ اصلی یا صفحهٔ سفارش) پیوند در زبانهٔ تازه باز می‌شود تا جزوهٔ نیمه‌کاره و صفحهٔ
+ * سفارش پاک نشوند؛ بی جزوه همان زبانه. `target` را CSS عوض نمی‌کند، پس هر پیوند دو بار هست و همان `site-idle` و
+ * `site-ordering` سربرگ یکی را نشان می‌دهند (globals.css). `display: none` از درخت دسترسی هم بیرون است، پس صفحه‌خوان هر
+ * پیوند را یک بار می‌خواند. بی JS.
+ */
+function FooterNav() {
+  return (
+    <nav className="site-foot__nav" aria-label="پیوندهای پاورقی">
+      {footerGroups().map(({ heading, pages }) => (
+        <div key={heading}>
+          <h2>{heading}</h2>
+          <ul>
+            {pages.flatMap(({ path, label }) => [
+              <li key={`${path}:idle`} className="site-idle">
+                <a href={path}>{label}</a>
+              </li>,
+              <li key={`${path}:ordering`} className="site-ordering">
+                <a href={path} target="_blank" rel="noopener">
+                  {label}
+                </a>
+              </li>,
+            ])}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/**
  * پاورقی سایت، از طرح ز (docs/UI.md، قدم ۳). کامپوننت سرور، بی JS.
  *
- * پیوند صفحه‌های ثابت (دربارهٔ ما، تماس، قوانین، حریم خصوصی) در قدم ۵ با خود صفحه‌ها می‌آید.
- * سال شمسی موقع ساخت صفحه حساب می‌شود؛ صفحه‌ها ایستا ساخته می‌شوند، پس «©» تا استقرار بعدی
- * همان سال ساخت را دارد.
+ * معرفی، پیوند صفحه‌های ثابت (قدم ۵، برش ۷٫۴) و نشان اینماد. سال شمسی موقع ساخت صفحه حساب می‌شود؛ صفحه‌ها ایستا ساخته
+ * می‌شوند، پس «©» تا استقرار بعدی همان سال ساخت را دارد.
  */
 export function SiteFooter() {
   return (
@@ -48,6 +81,7 @@ export function SiteFooter() {
             <Logo height={64} loading="lazy" />
             <p>چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
           </div>
+          <FooterNav />
           <EnamadSeal />
         </div>
         <div className="site-foot__legal">

@@ -2,9 +2,12 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { CONTACT } from '../lib/contact';
+
 /**
  * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک، آیکون گوشی،
- * manifest، تصویر اشتراک، ۴۰۴، و اینماد (فایل تأیید دامنه و نشان پاورقی، ADR-032).
+ * manifest، تصویر اشتراک، ۴۰۴، اینماد (فایل تأیید دامنه و نشان پاورقی، ADR-032)، و صفحه‌های ثابت با پیوندهای پاورقی
+ * و نقشهٔ سایت (قدم ۵، برش ۷٫۴).
  *
  * مثل flow.spec.ts روی build تولیدی و بی استوریج. سربرگ و پاورقی کامپوننت سرورند و JS ندارند؛
  * حالت سفارش را CSS با `:has()` از نشانهٔ جزیرهٔ سفارش می‌گیرد، پس اینجا در مرورگر سنجیده می‌شود.
@@ -169,6 +172,7 @@ test.describe('اینماد', () => {
     { name: 'صفحهٔ اصلی', path: '/', order: false },
     { name: 'حالت سفارش', path: '/', order: true },
     { name: '۴۰۴', path: '/no-such-page', order: false },
+    { name: 'قوانین', path: '/terms', order: false },
   ]) {
     test(`نشان در پاورقی، عین کد اینماد و با نام پیوند: ${name}`, async ({ page }) => {
       await page.goto(path);
@@ -314,6 +318,144 @@ test.describe('۴۰۴', () => {
   });
 });
 
+/**
+ * صفحه‌های ثابت (قدم ۵، برش ۷٫۴؛ طرح `checkout.html`، سؤال ۱۴۲)، به ترتیب پاورقی. «تماس» فقط با اطلاعات تماس واقعی
+ * (`lib/contact.ts`): اطلاعات ساختگی روی سایت زنده نمی‌رود، پس تا آن موقع ۴۰۴ است و در پاورقی و نقشهٔ سایت نیست. با رسیدن
+ * اطلاعات، همین فهرست و تست‌ها خودشان صفحهٔ تماس را هم می‌سنجند.
+ */
+const STATIC_PAGES = [
+  { path: '/about', label: 'دربارهٔ ما', heading: 'دربارهٔ جزوه‌یار' },
+  ...(CONTACT ? [{ path: '/contact', label: 'تماس', heading: 'تماس با جزوه‌یار' }] : []),
+  { path: '/terms', label: 'قوانین و مقررات', heading: 'قوانین جزوه‌یار' },
+  { path: '/privacy', label: 'حریم خصوصی', heading: 'حریم خصوصی' },
+];
+const footerNav = (page: Page) => footer(page).getByRole('navigation', { name: 'پیوندهای پاورقی' });
+
+test.describe('صفحه‌های ثابت', () => {
+  for (const { path, label, heading } of STATIC_PAGES) {
+    test(`${label}: ۲۰۰، فارسی و راست‌به‌چپ، عنوان و canonical خودش، تصویر اشتراک، سربرگ و پاورقی`, async ({ page, request }) => {
+      const response = await request.get(path);
+      expect(response.status()).toBe(200);
+      const html = await response.text();
+      expect(html).toContain(`<title>${label} | جزوه‌یار</title>`);
+      expect(html).toMatch(/<html[^>]+lang="fa"/);
+      expect(html).toMatch(/<html[^>]+dir="rtl"/);
+      expect(html).toMatch(/<meta name="robots" content="index, follow"/);
+      // canonical خود صفحه، نه canonical صفحهٔ اصلی از layout؛ و openGraph صفحه تصویر اشتراک سایت را گم نکرده باشد.
+      const canonical = /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
+      expect(new URL(canonical!).pathname).toBe(path);
+      expect(/<meta property="og:url" content="([^"]+)"/.exec(html)?.[1]).toBe(canonical);
+      expect(/<meta property="og:image" content="([^"]+)"/.exec(html)?.[1]).toMatch(/\/opengraph-image\.png/);
+      expect(/<meta name="twitter:card" content="([^"]+)"/.exec(html)?.[1]).toBe('summary_large_image');
+
+      await page.goto(path);
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading);
+      await expect(homeLink(page)).toBeVisible();
+      await expect(nav(page)).toBeVisible();
+      await expect(footerNav(page).getByRole('link', { name: label })).toHaveAttribute('href', path);
+    });
+  }
+
+  test('قوانین و حریم خصوصی: عددها همان پیش‌فرض‌های سایت، «به‌روز شده» شمسی، و بازپرداخت بی وعدهٔ «همان کارت»', async ({ page }) => {
+    // این مرحله پایگاه داده ندارد، پس عددها پیش‌فرض‌اند: روز کاری تحویل ۲، آپلود ۲ روز، فایل‌های سفارش ۳۰ روز
+    // (`lib/server/siteFacts.ts`؛ خواندن از settings در تست واحد).
+    await page.goto('/terms');
+    const terms = page.getByRole('article');
+    await expect(page.getByText(/^به‌روز شده در \d{4}\/\d{2}\/\d{2}$/)).toBeVisible();
+    await expect(terms).toContainText('جزوه تا 2 روز کاری بعد از پرداخت به پست تحویل می‌شود.');
+    await expect(terms).toContainText('فایلی که می‌اندازی 2 روز بعد خودکار از سرور پاک می‌شود');
+    await expect(terms).toContainText('30 روز پس از تحویل به پست یا لغو سفارش');
+    // بازپرداخت سفارش لغوشده امروز دستی است (۷٫۳)؛ متن «به همان کارت» نمی‌گوید، فقط پرداخت تأییدنشده را.
+    const refund = terms.getByRole('heading', { level: 2, name: 'لغو و بازپرداخت' }).locator('xpath=following-sibling::*[1]');
+    await expect(refund).toHaveText('اگر سفارشی پیش از تحویل به پست لغو شود، مبلغ کاملش برمی‌گردد، و وضعیت برگشت در صفحهٔ سفارش دیده می‌شود.');
+    await expect(refund).not.toContainText('کارت');
+
+    await page.goto('/privacy');
+    const privacy = page.getByRole('article');
+    await expect(page.getByText(/^به‌روز شده در \d{4}\/\d{2}\/\d{2}$/)).toBeVisible();
+    await expect(privacy).toContainText('2 روز بعد خودکار پاک می‌شود');
+    await expect(privacy).toContainText('30 روز پس از تحویل به پست');
+    await expect(privacy).toContainText('(30 روز)');
+  });
+
+  test('تماس فقط با اطلاعات واقعی: تا آن موقع ۴۰۴، نه در پاورقی و نه در نقشهٔ سایت', async ({ page, request }) => {
+    const response = await request.get('/contact');
+    const sitemap = await (await request.get('/sitemap.xml')).text();
+    await page.goto('/');
+    if (!CONTACT) {
+      expect(response.status()).toBe(404);
+      expect(await response.text()).toContain('این صفحه پیدا نشد');
+      await expect(footer(page).getByRole('link', { name: 'تماس' })).toHaveCount(0);
+      expect(sitemap).not.toContain('/contact');
+      return;
+    }
+    expect(response.status()).toBe(200);
+    await expect(footerNav(page).getByRole('link', { name: 'تماس' })).toHaveAttribute('href', '/contact');
+    expect(sitemap).toContain('/contact');
+    await page.goto('/contact');
+    for (const value of Object.values(CONTACT).filter((value) => value !== undefined)) {
+      await expect(page.getByRole('article')).toContainText(value);
+    }
+  });
+
+  test('نقشهٔ سایت: صفحهٔ اصلی و صفحه‌های ثابت، به ترتیب پاورقی', async ({ request }) => {
+    const xml = await (await request.get('/sitemap.xml')).text();
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => new URL(loc!).pathname);
+    expect(locs).toEqual(['/', ...STATIC_PAGES.map(({ path }) => path)]);
+  });
+
+  test('پاورقی: دو گروه طرح با همهٔ صفحه‌ها؛ بی جزوه همان زبانه', async ({ page }) => {
+    await page.goto('/');
+    await expect(footerNav(page).getByRole('heading', { level: 2 })).toHaveText(['جزوه‌یار', 'قوانین']);
+    // هر پیوند یک بار در درخت دسترسی است، هرچند در HTML دو بار است (حالت عادی و حالت سفارش).
+    await expect(footerNav(page).getByRole('link')).toHaveText(STATIC_PAGES.map(({ label }) => label));
+    for (const { label } of STATIC_PAGES) {
+      await expect(footerNav(page).getByRole('link', { name: label })).not.toHaveAttribute('target', /.+/);
+    }
+
+    let popups = 0;
+    page.on('popup', () => popups++);
+    await footerNav(page).getByRole('link', { name: 'قوانین و مقررات' }).click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('قوانین جزوه‌یار');
+    expect(popups).toBe(0);
+  });
+
+  test('در حالت سفارش پیوندها زبانهٔ تازه باز می‌کنند و جزوهٔ نیمه‌کاره سر جایش می‌ماند', async ({ page }) => {
+    await page.goto('/');
+    await dropFile(page);
+    await expect(footerNav(page).getByRole('link')).toHaveText(STATIC_PAGES.map(({ label }) => label));
+    for (const { label } of STATIC_PAGES) {
+      const link = footerNav(page).getByRole('link', { name: label });
+      await expect(link).toHaveAttribute('target', '_blank');
+      await expect(link).toHaveAttribute('rel', 'noopener');
+    }
+
+    const [popup] = await Promise.all([
+      page.waitForEvent('popup'),
+      footerNav(page).getByRole('link', { name: 'حریم خصوصی' }).click(),
+    ]);
+    await expect(popup).toHaveURL(/\/privacy$/);
+    await expect(popup.getByRole('heading', { level: 1 })).toHaveText('حریم خصوصی');
+    await popup.close();
+    await expect(price(page)).toContainText('61,000');
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test.describe('موبایل', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('پیوندهای پاورقی هر کدام دست‌کم ۴۴ پیکسل', async ({ page }) => {
+      await page.goto('/terms');
+      for (const { label } of STATIC_PAGES) {
+        const box = (await footerNav(page).getByRole('link', { name: label }).boundingBox())!;
+        expect(box.height, label).toBeGreaterThanOrEqual(44);
+        expect(box.width, label).toBeGreaterThanOrEqual(44);
+      }
+    });
+  });
+});
+
 for (const width of [320, 390, 1280]) {
   test.describe(`تنها منبع بیرونی نشان اینماد، و بی اسکرول افقی در ${width} پیکسل`, () => {
     test.use({ viewport: { width, height: width < 1000 ? 844 : 800 } });
@@ -322,6 +464,7 @@ for (const width of [320, 390, 1280]) {
       { name: 'صفحهٔ اصلی', path: '/', order: false },
       { name: 'حالت سفارش', path: '/', order: true },
       { name: '۴۰۴', path: '/no-such-page', order: false },
+      ...STATIC_PAGES.map(({ label, path }) => ({ name: label, path, order: false })),
     ];
 
     for (const { name, path, order } of pages) {

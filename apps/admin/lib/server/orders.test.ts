@@ -1668,7 +1668,7 @@ describe('بازپرداخت سفارش لغوشده (۷٫۳، ADR-051)', () => 
       [build(cancelled()), form({ payment: '77777777-7777-4777-8777-777777777777' }), { status: 409, error: 'refund_changed' }],
       [build(cancelled([refundRow({ gatewayRef: 'MOCKRF1', gatewayStatus: 16 })])), form({ seen: REFUND }), { status: 409, error: 'refund_changed' }],
       [build(cancelled([refundRow({ status: 'succeeded', method: 'manual', reference: '552190', refundedOn: NOW, finishedAt: NOW, feeRials: null })])), form({ seen: REFUND }), { status: 409, error: 'refund_changed' }],
-      // زیبال تا مستند API بازپرداخت فقط دستی (سؤال ۱۵۲).
+      // زیبال فقط دستی: API بازپرداخت ندارد (سؤال ۱۵۲؛ ۱۴۰۵/۰۷/۱۰).
       [build(cancelled([], paid({ provider: 'zibal' })), { gateways: { mock: mockGateway(), zibal: { ...mockGateway(), name: 'zibal', refunds: undefined } } }), form(), { status: 409, error: 'refund_gateway_unavailable' }],
       // پیش‌استعلام: پول همین حالا نزد درگاه برگشته یا در راه برگشت است (سؤال ۱۵۴).
       [build(cancelled([], paid({ raw: { decision: 'success', verified: true, refund: 'already' } }))), form(), { status: 409, error: 'refund_already_at_gateway', status_: undefined }],

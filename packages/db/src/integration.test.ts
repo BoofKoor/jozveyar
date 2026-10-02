@@ -82,7 +82,7 @@ import {
   shippingMethods,
 } from './schema.js';
 import { createTariffStore, type TariffActor } from './tariff.js';
-import { createSettingsStore, SETTING_TARGET, type SettingsActor } from './settings.js';
+import { createSettingsStore, settingsChangedAt, SETTING_TARGET, type SettingsActor } from './settings.js';
 import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TARGET, SERVICE_KEYS } from './secrets.js';
 import { seal } from './sealed.js';
 import { serviceSecrets } from './schema.js';
@@ -5296,6 +5296,42 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       ]);
       expect(await store.read(SLA_DAYS_SETTING)).toBe(3);
       expect(await store.read('no.such.setting')).toBeUndefined();
+    });
+
+    it('«به‌روز شده» صفحه‌های ثابت (۷٫۴): دیرترین `updated_at` همین کلیدها؛ «همان» و کلید دیگر جلویش نمی‌برند، بی ردیف null', async () => {
+      const store = createSettingsStore(conn);
+      const keys = [SLA_DAYS_SETTING, FILES_RETENTION_SETTING];
+      const [retention] = await conn.db.select({ value: settings.value }).from(settings).where(eq(settings.key, FILES_RETENTION_SETTING));
+      // مقدارها همان می‌مانند (۲ از beforeEach، نگهداری از دادهٔ پایه)؛ فقط زمان نوشتن عوض می‌شود، با زمان صریح، نه now().
+      const write = (key: string, value: unknown, at: Date, kind: 'write' | 'same' = 'write') =>
+        store.change({
+          key,
+          action: 'settings.update',
+          decide: () => (kind === 'write' ? { kind, value, detail: { key } } : { kind }),
+          at,
+          actor: actor(),
+        });
+      const T0 = new Date('2026-10-01T00:00:00Z');
+      await conn.db.update(settings).set({ updatedAt: T0 }).where(inArray(settings.key, keys));
+      expect(await settingsChangedAt(conn, keys)).toEqual(T0);
+
+      await write(SLA_DAYS_SETTING, 2, new Date('2026-10-06T08:00:00Z'));
+      expect(await settingsChangedAt(conn, keys)).toEqual(new Date('2026-10-06T08:00:00Z'));
+      await write(FILES_RETENTION_SETTING, retention!.value, new Date('2026-10-07T08:00:00Z'));
+      expect(await settingsChangedAt(conn, keys)).toEqual(new Date('2026-10-07T08:00:00Z'));
+      // دیرترین، نه آخرین نوشته: کلید اول با زمان زودتر دوباره نوشته می‌شود و حکم همان می‌ماند.
+      await write(SLA_DAYS_SETTING, 2, new Date('2026-10-06T09:00:00Z'));
+      expect(await settingsChangedAt(conn, keys)).toEqual(new Date('2026-10-07T08:00:00Z'));
+      expect(await settingsChangedAt(conn, [SLA_DAYS_SETTING])).toEqual(new Date('2026-10-06T09:00:00Z'));
+
+      expect(await write(SLA_DAYS_SETTING, 2, new Date('2026-10-08T08:00:00Z'), 'same')).toEqual({ ok: true, written: false });
+      await write(OTP_SITE_LIMIT_SETTING, 300, new Date('2026-10-09T08:00:00Z'));
+      expect(await settingsChangedAt(conn, keys)).toEqual(new Date('2026-10-07T08:00:00Z'));
+
+      expect(await settingsChangedAt(conn, ['no.such.setting'])).toBeNull();
+      expect(await settingsChangedAt(conn, [])).toBeNull();
+      expect(await valueOf(SLA_DAYS_SETTING)).toBe(2);
+      expect(await valueOf(FILES_RETENTION_SETTING)).toEqual(retention!.value);
     });
 
     it('تنظیمی که ردیفش نیست با اولین نوشتن ساخته می‌شود', async () => {

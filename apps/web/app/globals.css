@@ -9,6 +9,8 @@
 @import './home.css';
 /* مسیر خرید، صفحهٔ سفارش و درگاه نمونه، از طرح docs/ui/mockups/checkout.html (برش ۳ج). */
 @import './checkout.css';
+/* صفحه‌های ثابت (قوانین، حریم خصوصی، دربارهٔ ما، تماس)، از همان طرح، قدم ۵ (برش ۷٫۴). */
+@import './pages.css';
 
 /*
  * وزیرمتن، فقط دو وزن، لوکال.
@@ -168,6 +170,31 @@
     height: 104px;
     object-fit: contain;
   }
+  /*
+   * پیوند صفحه‌های ثابت (برش ۷٫۴، طرح قدم ۵): دو گروه، بین معرفی و نشان؛ هر پیوند هدف لمسی ۴۴. در حالت سفارش پیوندهای
+   * زبانهٔ تازه جای همان پیوندها می‌نشینند (`site-idle` و `site-ordering` بالا؛ SiteFooter.tsx).
+   */
+  .site-foot__nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, max-content));
+    gap: 4px 48px;
+  }
+  .site-foot__nav h2 {
+    font-size: var(--text-small);
+    font-weight: 600;
+    line-height: 1.8;
+  }
+  .site-foot__nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--color-muted);
+    text-decoration: none;
+  }
+  .site-foot__nav a:hover {
+    color: var(--color-ink);
+    text-decoration: underline;
+  }
   .site-foot__legal {
     display: flex;
     flex-wrap: wrap;
@@ -208,6 +235,9 @@
     }
     .site-foot {
       margin-block-start: 0;
+    }
+    .site-foot__nav {
+      column-gap: 32px;
     }
   }
 }

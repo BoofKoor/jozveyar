@@ -53,7 +53,8 @@ function siteOrigin(): string | undefined {
  * «این مرورگر» است. کوکی httpOnly است و در پایگاه داده فقط هشش می‌نشیند.
  */
 export const SESSION_COOKIE = 'jy_sid';
-const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
+/** ثانیه؛ صفحهٔ حریم خصوصی همین را به روز می‌گوید (۷٫۴). */
+export const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
 
 const hash = (token: string) => createHash('sha256').update(token).digest('hex');
 

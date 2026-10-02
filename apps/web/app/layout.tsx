@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { BAND_COLOR } from '@jozveyar/ui/tokens';
 import { SiteFooter } from '../components/SiteFooter';
 import { SiteHeader } from '../components/SiteHeader';
+import { SITE_OPEN_GRAPH } from '../lib/staticPages';
 import './globals.css';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jozveyar.com';
@@ -16,10 +17,9 @@ export const metadata: Metadata = {
     'فایل جزوه‌ات را بینداز، قیمت را فوری ببین. چاپ و صحافی جزوه با ارسال به سراسر ایران، بدون ثبت‌نام و بدون پر کردن فرم.',
   applicationName: 'جزوه‌یار',
   keywords: ['چاپ جزوه', 'صحافی جزوه', 'چاپ آنلاین', 'طلق و سیم', 'چاپ پایان‌نامه'],
+  // صفحه‌های ثابت openGraph خودشان را دارند (`pageMetadata`)؛ پایه‌اش یک منبع است.
   openGraph: {
-    type: 'website',
-    locale: 'fa_IR',
-    siteName: 'جزوه‌یار',
+    ...SITE_OPEN_GRAPH,
     title: 'جزوه‌یار — چاپ و صحافی آنلاین جزوه',
     description: 'فایل را بینداز، قیمت را فوری ببین. بدون ثبت‌نام.',
   },
