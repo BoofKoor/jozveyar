@@ -3,10 +3,10 @@ import { randomInt } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-import { formatJalaliNumeric, tehranDayStart } from '@jozveyar/text';
+import { formatJalaliNumeric } from '@jozveyar/text';
 
 import { draftLabel } from '../lib/tariff';
-import { alertOf, at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { alertOf, at, awayFromMidnight, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
  * تعرفه در پنل، سرتاسری (برش ۴٫۵؛ طرح `docs/ui/mockups/admin.html` حالت‌های `m-tariff*`، ADR-040 و ADR-022): نسخه‌ها و
@@ -88,10 +88,8 @@ test.describe.serial('تعرفه در پنل', () => {
   let first = 0;
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(180_000);
     // «امروز 10:48» و نام ماه پیش‌نویس: نزدیک نیمه‌شب تهران، تست تا روز تازه صبر می‌کند.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 3 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(180_000, 3 * MINUTE);
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     await restoreBase();
     eventsBefore = Number((await sql<{ id: string | null }[]>`SELECT max(id) AS id FROM admin_events`)[0]!.id ?? 0);

@@ -10,7 +10,7 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { S3Driver } from '@jozveyar/storage';
 import { formatTomans, tehranDayStart } from '@jozveyar/text';
 
-import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { alertOf, assignAtPayment, at, awayFromMidnight, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
  * وضعیت سفارش در پنل، سرتاسری (برش ۴٫۳؛ طرح `docs/ui/mockups/admin.html`، ADR-039): «شروع چاپ» (بسته تا فایل چاپ ساخته
@@ -124,10 +124,8 @@ test.describe.serial('وضعیت سفارش در پنل', () => {
   const o = {} as Record<'A' | 'B' | 'C' | 'D', Seeded>;
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(240_000);
     // مهلت «امروز» تا نیمه‌شب تهران است؛ نزدیک نیمه‌شب، تست تا روز تازه صبر می‌کند تا کاشی‌ها وسط تست جابه‌جا نشوند.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 3 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(240_000, 3 * MINUTE);
 
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     s3 = new S3Driver({

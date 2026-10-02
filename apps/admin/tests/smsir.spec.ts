@@ -7,11 +7,12 @@ import { barcodeOf, parcel } from '@jozveyar/db/postfile.fixtures';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { orderPaidText, trackingText } from '@jozveyar/sms';
-import { formatJalaliNumeric, tehranDayStart } from '@jozveyar/text';
+import { formatJalaliNumeric, formatTehranTime, tehranDayStart } from '@jozveyar/text';
 
 import {
   assignAtPayment,
   at,
+  awayFromMidnight,
   BASE,
   enroll,
   GATE,
@@ -58,7 +59,6 @@ const TEMPLATES = { [TPL.otp]: ['CODE'], [TPL.paid]: ['ORDER', 'DAY'], [TPL.trac
 /** اعتبار sms.ir ساختگی و هزینهٔ هر پیامک؛ هفت کد تأیید هفتهٔ گذشته با همین هزینه، پس «برای حدود 2 روز». */
 const CREDIT = 250;
 const COST = 100;
-const TODAY = 'امروز \\d\\d:\\d\\d';
 let sql: postgres.Sql;
 
 interface Seeded {
@@ -67,6 +67,8 @@ interface Seeded {
   phone: string;
   grams: number;
   paymentId: string;
+  /** پیامک پرداختی که نرفت (`paidSms`): زمان ساختنش، ده دقیقه پیش. */
+  smsAt?: Date;
 }
 
 /**
@@ -109,15 +111,17 @@ async function paidOrder(name: string, phone: string, { printing = true, paidSms
              VALUES (${item!.id}, 1, ${tx.json(rules[0]!.pageRanges)}, 'bw', 'tahrir80')`;
     const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
     let paymentId: string;
+    let smsAt: Date | undefined;
     if (paidSms) {
       const [payment] = await tx<{ id: string }[]>`
         INSERT INTO payments (order_id, provider, amount_rials, authority, created_at)
         VALUES (${row!.id}, 'mock', ${breakdown.totalRials}, ${authority}, ${new Date(paidAt.getTime() - MINUTE)}) RETURNING id`;
       const day = 'دوشنبه 6 مهر';
+      smsAt = new Date(Date.now() - 10 * MINUTE);
       const [sms] = await tx<{ id: number }[]>`
         INSERT INTO sms_messages (provider, to_mobile, purpose, body, params, status, created_at)
         VALUES ('queued', ${phone}, 'order_paid', ${orderPaidText(row!.order_number, day)}, ${tx.json([String(row!.order_number), day])},
-                'pending', ${new Date(Date.now() - 10 * MINUTE)})
+                'pending', ${smsAt})
         RETURNING id`;
       await tx`UPDATE payments SET status = 'succeeded', ref_id = '803114', verified_at = ${paidAt}, verified_amount_rials = amount_rials,
                sms_message_id = ${sms!.id} WHERE id = ${payment!.id}`;
@@ -138,7 +142,7 @@ async function paidOrder(name: string, phone: string, { printing = true, paidSms
       await tx`INSERT INTO order_status_events (order_id, from_status, to_status, at, actor)
                VALUES (${row!.id}, 'paid', 'printing', ${new Date(paidAt.getTime() + 10 * MINUTE)}, 'system')`;
     }
-    return { id: row!.id, number: row!.order_number, phone, grams: breakdown.estWeightGrams, paymentId };
+    return { id: row!.id, number: row!.order_number, phone, grams: breakdown.estWeightGrams, paymentId, smsAt };
   });
 }
 
@@ -165,10 +169,8 @@ test.describe.serial('پیامک با sms.ir', () => {
   let hourLimit: unknown = null;
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(180_000);
     // «امروز» فایل پست تا نیمه‌شب تهران است؛ نزدیک نیمه‌شب، تست تا روز تازه صبر می‌کند.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 5 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(180_000, 5 * MINUTE);
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     // پیش از اولین خواندن اعتبار (ورود = پیشخوان): sms.ir ساختگی و هزینهٔ هفتهٔ گذشته.
     await smsirMock.configure({ keys: [env.SMS_API_KEY!.trim()], templates: TEMPLATES, credit: CREDIT, cost: COST, fail: null, drop: 0 });
@@ -301,7 +303,10 @@ test.describe.serial('پیامک با sms.ir', () => {
     const sms = page.locator('.ad-paysms');
     await expect(sms).toHaveAttribute('data-paysms', 'failed');
     await expect(sms.locator('b')).toHaveText('پیامک پرداخت');
-    await expect(sms.locator('.ad-paysms__fail')).toHaveText(new RegExp(`^نرفت: فرستادنش نیمه‌کاره ماند، ${TODAY}$`));
+    // زمان همان ساختن پیامک، ده دقیقه پیش؛ در ده دقیقهٔ اول روز تهران «دیروز» است (اجرای ۰۰:۰۹ تهران همین را دید). نیمه‌شب وسط تست
+    // نمی‌افتد (`awayFromMidnight`)، پس روز حالا همان روز صفحه است.
+    const created = `${o.C.smsAt! >= tehranDayStart(new Date()) ? 'امروز' : 'دیروز'} ${formatTehranTime(o.C.smsAt!)}`;
+    await expect(sms.locator('.ad-paysms__fail')).toHaveText(`نرفت: فرستادنش نیمه‌کاره ماند، ${created}`);
     await sms.getByRole('button', { name: 'دوباره بفرست' }).click();
     await expect(page.getByText('پیامک پرداخت دوباره فرستاده شد و رفت.')).toBeVisible();
     await expect(page.locator('.ad-paysms')).toHaveAttribute('data-paysms', 'sent');
