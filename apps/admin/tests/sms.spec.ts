@@ -9,7 +9,20 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { trackingText } from '@jozveyar/sms';
 import { formatJalaliNumeric, tehranDayStart } from '@jozveyar/text';
 
-import { assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, postFile, serverInvite, uploadPostFile as upload, watch } from './helpers';
+import {
+  assignAtPayment,
+  at,
+  awayFromMidnight,
+  BASE,
+  enroll,
+  GATE,
+  layoutProblems,
+  newContext,
+  postFile,
+  serverInvite,
+  uploadPostFile as upload,
+  watch,
+} from './helpers';
 
 /**
  * پیامک رهگیری، سرتاسری (برش ۶٫۳؛ طرح `docs/ui/mockups/admin.html`: `m-ship-preview`، `m-ship-done`، `m-ship-revert`،
@@ -146,10 +159,8 @@ test.describe.serial('پیامک رهگیری', () => {
   const phone = (n: number) => `0914${String(RUN).slice(1)}3${String(n).padStart(3, '0')}`;
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(180_000);
     // «امروز» فایل تا نیمه‌شب تهران است؛ نزدیک نیمه‌شب، تست تا روز تازه صبر می‌کند.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 5 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(180_000, 5 * MINUTE);
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     o.A = await printingOrder('مهسا طاهری', phone(1));
     o.B = await printingOrder('امید شریفی', phone(2));

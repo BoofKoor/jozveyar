@@ -12,6 +12,7 @@ import {
   alertOf,
   assignAtPayment,
   at,
+  awayFromMidnight,
   BASE,
   codeFor,
   enroll,
@@ -173,10 +174,8 @@ test.describe.serial('گزارش ارسال', () => {
   const FARE = { a1: 1_295_000, a2: 1_295_000, b: 1_900_000, e: 1_295_000, p: 1_295_000 };
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(240_000);
     // «امروز» فایل تا نیمه‌شب تهران است، و ماه جاری با همان روز؛ نزدیک نیمه‌شب، تست تا روز تازه صبر می‌کند.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 5 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(240_000, 5 * MINUTE);
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     // پایگاه دادهٔ دورریختنی، مثل `review.spec.ts`: گزارش فقط سفارش‌های همین اجرا.
     await sql`DELETE FROM payments`;

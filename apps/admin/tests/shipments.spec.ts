@@ -8,7 +8,21 @@ import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { formatJalaliNumeric, formatJalaliWeekday, tehranDayStart } from '@jozveyar/text';
 
-import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, postFile, serverInvite, uploadPostFile as upload, watch } from './helpers';
+import {
+  alertOf,
+  assignAtPayment,
+  at,
+  awayFromMidnight,
+  BASE,
+  enroll,
+  GATE,
+  layoutProblems,
+  newContext,
+  postFile,
+  serverInvite,
+  uploadPostFile as upload,
+  watch,
+} from './helpers';
 
 /**
  * ارسال در پنل، سرتاسری (برش ۶٫۱؛ طرح `docs/ui/mockups/admin.html`، ADR-045 و ADR-046): بارگذاری فایل پست (جدول HTML با پسوند
@@ -114,10 +128,8 @@ test.describe.serial('ارسال در پنل', () => {
   let overlapId = '';
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(180_000);
     // «امروز» فایل تا نیمه‌شب تهران است؛ نزدیک نیمه‌شب، تست تا روز تازه صبر می‌کند تا روز فایل وسط تست کهنه نشود.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 3 * MINUTE) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(180_000, 3 * MINUTE);
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     const phone = (n: number) => `0912${String(RUN).slice(1)}6${String(n).repeat(3)}`;
     o.A = await paidOrder('مهسا طاهری', phone(1));

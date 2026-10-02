@@ -8,10 +8,11 @@ import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { join } from 'node:path';
 
-import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type postgres from 'postgres';
 
 import { POST_HEADERS, totalRow } from '@jozveyar/db/postfile.fixtures';
+import { tehranDayStart } from '@jozveyar/text';
 
 import { base32Decode, hotp, totpStep } from '../lib/server/totp';
 
@@ -20,6 +21,18 @@ export const GATE = process.env.ADMIN_BASE_PATH?.trim();
 
 export const at = (path = '') => `${GATE}${path}`;
 export const PASSWORD = 'یک جملهٔ کوتاه و امن';
+
+/**
+ * «امروز» پنل تا نیمه‌شب تهران است: اگر تا نیمه‌شب کمتر از `margin` مانده، `beforeAll` تا روز تازه صبر می‌کند تا روزها وسط تست
+ * جابه‌جا نشوند. سقف زمان همان قلاب (`timeout`) همان‌قدر بیشتر می‌شود: `test.setTimeout` در `beforeAll` سقف خود قلاب است و صبر هم
+ * جزئش، پس صبر پنج‌دقیقه‌ای قلاب سه‌دقیقه‌ای را می‌انداخت («"beforeAll" hook timeout … exceeded»).
+ */
+export async function awayFromMidnight(timeout: number, margin: number): Promise<void> {
+  const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
+  const wait = toMidnight < margin ? toMidnight + 5_000 : 0;
+  test.setTimeout(timeout + wait);
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+}
 
 /** دستور سرور، همان که `infra/admin-invite.sh` درون کانتینر می‌زند. */
 export function serverInvite(username: string, ...args: string[]): string {

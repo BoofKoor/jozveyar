@@ -3,10 +3,10 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-import { formatJalaliNumeric, jalaliYear, tehranDayStart, toPersianDigits } from '@jozveyar/text';
+import { formatJalaliNumeric, jalaliYear, toPersianDigits } from '@jozveyar/text';
 
 import { holidaysView } from '../lib/settings';
-import { alertOf, at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, SMSIR, smsirMock, watch } from './helpers';
+import { alertOf, at, awayFromMidnight, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, SMSIR, smsirMock, watch } from './helpers';
 
 /**
  * تنظیمات و کلیدها در پنل، سرتاسری (برش ۴٫۶؛ طرح `docs/ui/mockups/admin.html` حالت‌های `m-settings` و `m-key-edit`، ADR-041):
@@ -109,10 +109,8 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
   let operatorPage: Page;
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(180_000);
     // «امروز» و روزهای آینده به روز تهران: نزدیک نیمه‌شب تهران، تست تا روز تازه صبر می‌کند.
-    const toMidnight = tehranDayStart(new Date(), 1).getTime() - Date.now();
-    if (toMidnight < 5 * 60_000) await new Promise((resolve) => setTimeout(resolve, toMidnight + 5_000));
+    await awayFromMidnight(180_000, 5 * 60_000);
     sql = postgres(env.DATABASE_URL!, { max: 2, onnotice: () => undefined });
     await sql`DELETE FROM service_secrets`;
     // اجرای قبلی که وسط کار افتاد: پیش‌فرض‌های عددی دوباره (تعطیلی‌ها همان که هست).
