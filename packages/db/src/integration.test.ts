@@ -114,10 +114,12 @@ import {
 } from './refunds.js';
 import { refunds } from './schema.js';
 import {
+  CHECKOUT_AUDIENCE_EVENT,
   CHECKOUT_PREVIEW_EVENT,
   checkoutAudience,
   createCheckoutPreviewStore,
   gatewayRejection,
+  lastAudienceChange,
 } from './checkout.js';
 import { CHECKOUT_AUDIENCE_SETTING, DEFAULT_SETTINGS } from './reference.js';
 import { checkoutPreviews } from './schema.js';
@@ -7603,6 +7605,61 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       await Promise.all(Array.from({ length: 8 }, () => conn.db.execute(sql`SELECT pg_sleep(0.02)`)));
       const opened = await Promise.all(Array.from({ length: 8 }, () => previews().open({ tokenHash: token, cookieHash: hash(), at })));
       expect(opened.filter(Boolean)).toHaveLength(1);
+    });
+
+    it('آخرین تغییر مخاطب («از امروز 10:40، سارا»): تازه‌ترین رویداد خودش با نام کننده؛ پیوند پیش‌نمایش و تنظیم دیگر نه؛ دستور سرور بی نام', async () => {
+      expect(await lastAudienceChange(conn)).toBeNull();
+      const store = createSettingsStore(conn);
+      const move = (to: string, fresh: boolean, at: Date) =>
+        store.change({
+          key: CHECKOUT_AUDIENCE_SETTING,
+          action: CHECKOUT_AUDIENCE_EVENT,
+          at,
+          actor: { adminUserId: owner, ipHash: 'ip-hash' },
+          decide: (raw) => (raw === to ? { kind: 'same' } : { kind: 'write', value: to, detail: { from: raw, to, fresh } }),
+        });
+      const first = await tick();
+      expect(await move('everyone', true, first)).toEqual({ ok: true, written: true });
+      expect(await lastAudienceChange(conn)).toEqual({ at: first, by: 'سارا رضایی', from: 'preview', to: 'everyone', fresh: true });
+      // رویدادهای دیگر همان هدف (پیوند پیش‌نمایش) و تنظیم دیگر جای آخرین تغییر مخاطب را نمی‌گیرند.
+      await previews().create({ tokenHash: hash(), at: await tick(), actor: actor() }).catch(() => null);
+      await conn.db.insert(adminEvents).values({
+        adminUserId: owner,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        targetType: SETTING_TARGET,
+        targetId: 'order.sla_days',
+        detail: { from: 'x', to: 'y' },
+        at: await tick(),
+      });
+      expect(await lastAudienceChange(conn)).toMatchObject({ at: first, to: 'everyone' });
+      // مقصد یکسان رویداد نمی‌نویسد؛ پلهٔ پایین بی کد؛ دستور روی سرور بی نام کننده.
+      expect(await move('everyone', true, await tick())).toEqual({ ok: true, written: false });
+      // دستور روی سرور، بی ادمین: همان ردیف و همان رویداد، بی نام کننده.
+      const down = await tick();
+      await conn.db.execute(sql`UPDATE settings SET value = '"paused"'::jsonb WHERE key = ${CHECKOUT_AUDIENCE_SETTING}`);
+      await conn.db.insert(adminEvents).values({
+        adminUserId: null,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        targetType: SETTING_TARGET,
+        targetId: CHECKOUT_AUDIENCE_SETTING,
+        detail: { from: 'everyone', to: 'paused', fresh: false },
+        at: down,
+      });
+      expect(await lastAudienceChange(conn)).toEqual({ at: down, by: null, from: 'everyone', to: 'paused', fresh: false });
+      // دو رویداد در یک لحظه: تازه‌تر به شناسه.
+      await move('preview', true, down);
+      expect(await lastAudienceChange(conn)).toMatchObject({ at: down, from: 'paused', to: 'preview', by: 'سارا رضایی' });
+      // جزئیات خراب: بی از و به، نه ترکیدن.
+      const broken = await tick();
+      await conn.db.insert(adminEvents).values({
+        adminUserId: owner,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        targetType: SETTING_TARGET,
+        targetId: CHECKOUT_AUDIENCE_SETTING,
+        detail: { from: 7, fresh: 'yes' },
+        at: broken,
+      });
+      expect(await lastAudienceChange(conn)).toEqual({ at: broken, by: 'سارا رضایی', from: null, to: null, fresh: false });
     });
 
     it('دو پیوند هم‌زمان: هر دو ساخته می‌شوند، پشت‌سرهم، و یک پیوند باز می‌ماند', async () => {
