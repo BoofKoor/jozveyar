@@ -233,6 +233,8 @@ test.describe.serial('سفارش کامل', () => {
     await expect(page.getByTestId('recap-address')).toContainText('کد پستی 9189914365');
     await expect(page.getByTestId('recap-mobile')).toContainText(`${mobile.slice(0, 4)} ${mobile.slice(4, 7)} ${mobile.slice(7)}`);
     await expect(page.getByTestId('recap-mobile')).toContainText('تأیید شد');
+    // پیش‌نیاز `live` (ADR-052): مرور به `/terms` پیوند می‌دهد، و خود صفحه ۲۰۰ است (`site.spec.ts`).
+    await expect(page.getByRole('link', { name: 'قوانین جزوه‌یار' })).toHaveAttribute('href', '/terms');
     await expect(page.getByRole('link', { name: 'قوانین جزوه‌یار' })).toHaveAttribute('target', '_blank');
     await plainNumbers(page, 8);
 

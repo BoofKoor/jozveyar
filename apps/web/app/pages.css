@@ -1,0 +1,104 @@
+/*
+ * ===== صفحه‌های ثابت (`/about`، `/contact`، `/terms`، `/privacy`)، از طرح تأییدشدهٔ docs/ui/mockups/checkout.html، قدم ۵ (برش ۷٫۴) =====
+ * یک ستون متن با تیترهای بی شماره (سؤال ۱۴۲)، با پوستهٔ عادی سایت؛ پیشوند `pg-` مثل `home-` و `ck-`. رنگ فقط توکن. فقط logical
+ * properties. اندازه‌ها همان طرح، و نقطهٔ شکست کوچک کیت (۵۲۰ پیکسل).
+ */
+@layer components {
+  .pg {
+    padding-block: 40px 64px;
+  }
+  .pg-body {
+    max-width: 42rem;
+  }
+  .pg-title {
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .pg-meta {
+    margin-block-start: 4px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .pg-lead {
+    margin-block-start: 16px;
+    line-height: 1.9;
+    color: var(--color-muted);
+  }
+  .pg-body h2 {
+    margin-block-start: 32px;
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .pg-body p {
+    line-height: 1.9;
+  }
+  .pg-body h2 + p,
+  .pg-body h2 + ul {
+    margin-block-start: 8px;
+  }
+  .pg-body p + p,
+  .pg-body ul + p {
+    margin-block-start: 12px;
+  }
+  .pg-body ul {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-block-start: 8px;
+  }
+  .pg-body ul li {
+    position: relative;
+    padding-inline-start: 18px;
+    line-height: 1.9;
+  }
+  .pg-body ul li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 2px;
+    inset-block-start: 0.85em;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-green-600);
+  }
+
+  /* تماس: هر راه یک ردیف؛ پیوند tel و mailto با هدف لمسی ۴۴. */
+  .pg-contact {
+    margin-block-start: 24px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .pg-contact > div {
+    display: grid;
+    grid-template-columns: 10rem minmax(0, 1fr);
+    column-gap: 16px;
+    row-gap: 2px;
+    align-items: baseline;
+    padding-block: 14px;
+    border-block-end: 1px solid var(--color-green-100);
+  }
+  .pg-contact dt {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .pg-contact dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .pg-contact a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-block: -10px;
+  }
+
+  @media (max-width: 520px) {
+    .pg {
+      padding-block: 24px 48px;
+    }
+    .pg-contact > div {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+}
