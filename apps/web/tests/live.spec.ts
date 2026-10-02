@@ -298,6 +298,18 @@ test.describe.serial('مسیر خرید live', () => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
     await expect(visibleButton(page, 'ثبت سفارش موقتاً متوقف است')).toBeVisible({ timeout: 90_000 });
+    // ۳۲۰ تا ۱۲۸۰: «متوقف» در خلاصه یا نوار موبایل (نامش همان جمله)، بسته ولی در ترتیب Tab، و صفحه بی سرریز افقی.
+    for (const width of [320, 390, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      const stopped = visibleButton(page, 'ثبت سفارش موقتاً متوقف است');
+      await expect(stopped, `${width}`).toHaveAttribute('aria-disabled', 'true');
+      // `aria-disabled`، نه `disabled`: فوکوس می‌گیرد، مثل «به‌زودی».
+      await stopped.focus();
+      await expect(stopped, `${width}`).toBeFocused();
+      await expect(stopped, `${width}`).toHaveText(width < 1024 ? /متوقف/ : 'ثبت سفارش موقتاً متوقف است');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${width}`).toBeLessThanOrEqual(0);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     // دوباره «همه»: همان مرورگر مرور، همان «پرداخت»، بی دوباره انداختن جزوه.
     await audience('everyone');

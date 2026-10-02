@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-import { at, BASE, codeFor, enroll, GATE, newContext, serverInvite, watch } from './helpers';
+import { at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
 /**
  * کارت «مسیر خرید روی سایت»، سرتاسری (برش ۷٫۵، ADR-052، سؤال‌های ۱۶۱ تا ۱۷۱؛ طرح `docs/ui/mockups/admin.html`: `st-live-*` و
@@ -59,6 +59,28 @@ async function shopper(browser: Browser): Promise<BrowserContext> {
 /** حالتی که سایت به این مرورگر می‌گوید (`/api/checkout`). */
 const siteMode = async (context: BrowserContext) => ((await (await context.request.get('/api/checkout')).json()) as { mode: string }).mode;
 
+/** پنل در ۳۲۰، ۳۹۰ و ۱۲۸۰ پیکسل: بی سرریز افقی، هدف لمسی دست‌کم ۴۴ و آیکون‌هایی که شکل دارند (`layoutProblems`)؛ بعد همان ۱۲۸۰. */
+async function fits(page: Page, what: string) {
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    const { overflow, small, blank } = await layoutProblems(page);
+    expect(overflow, `${what} در ${width}`).toBeLessThanOrEqual(0);
+    expect(small, `${what} در ${width}`).toEqual([]);
+    expect(blank, `${what} در ${width}`).toEqual([]);
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+}
+
+/** سایت در ۳۲۰، ۳۹۰ و ۱۲۸۰ پیکسل: بی سرریز افقی (مثل `flow.spec.ts`)؛ بعد همان ۱۲۸۰. */
+async function siteFits(tab: Page, what: string) {
+  for (const width of [320, 390, 1280]) {
+    await tab.setViewportSize({ width, height: 800 });
+    const overflow = await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `${what} در ${width}`).toBeLessThanOrEqual(0);
+  }
+  await tab.setViewportSize({ width: 1280, height: 800 });
+}
+
 /** «پلهٔ بالا» از صفحهٔ کد تازه: کد، و دکمه. */
 async function raise(page: Page, secret: string, submit: 'باز کن' | 'برگردان') {
   await page.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(secret));
@@ -110,6 +132,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
       'پیش‌نمایش مالک حالافقط مرورگری که پیوند پیش‌نمایش را باز کرد؛ بقیه «ثبت سفارش آنلاین به‌زودی» می‌بینند. پیش‌فرض پس از استقرار.',
     );
     await expect(card(page).locator('.ad-live__aud > li')).toHaveCount(3);
+    await fits(page, 'کارت «پیش‌نمایش مالک»');
 
     // مهروموم به شکل درست ولی با کلید دیگر (مثل `.env`ی که بی پشتیبان از نو ساخته شد): پنل بر `.env` مقدم است، پس «خوانده نشد».
     const sealed = `v1.${randomBytes(12).toString('base64url')}.${randomBytes(40).toString('base64url')}`;
@@ -127,6 +150,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
       );
       await expect(card(page).getByRole('button')).toHaveCount(0);
       await expect(card(page).getByRole('link')).toHaveCount(0);
+      await fits(page, 'کارت «خاموش»');
       // صفحهٔ «باز کردن» هم به کارت برمی‌گردد، با علت.
       await page.goto(at('/settings/checkout?to=everyone'));
       await expect(page).toHaveURL(/\/settings\?ce=checkout_not_ready#checkout$/);
@@ -141,6 +165,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
         'مسیر خرید خاموش است: در .env «live» خواسته شد، ولی «شناسهٔ قالب پیامک رهگیری» پنل با SECRETS_KEY امروز خوانده نشد. چه کم است.',
       );
       await expect(page.locator('.ad-alerts > *').first()).toHaveAttribute('data-alert', 'checkout');
+      await fits(page, 'پیشخوان با «مسیر خرید خاموش است»');
       // سایت همان لحظه خاموش است، با هر مخاطبی.
       const site = await shopper(browser);
       expect(await siteMode(site)).toBe('off');
@@ -170,6 +195,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     await card(page).getByRole('button', { name: 'پیوند پیش‌نمایش بساز' }).click();
     const box = card(page).locator('[data-preview-link]');
     await expect(box).toBeVisible();
+    await fits(page, 'کارت با پیوند پیش‌نمایش');
     await expect(box.locator('.jy-note--warning')).toContainText(new RegExp(`^فقط یک بار و تا ساعت ${TIME} کار می‌کند، و دوباره نشان داده نمی‌شود.`));
     const link = await box.getByLabel('پیوند پیش‌نمایش').inputValue();
     // مبدأ همان `PAYMENT_CALLBACK_URL`، یعنی همان سایت.
@@ -191,6 +217,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     const tab = await preview.newPage();
     await tab.goto(link);
     await expect(tab.getByRole('heading', { level: 1, name: 'پیش‌نمایش مالک' })).toBeVisible();
+    await siteFits(tab, 'صفحهٔ پیوند پیش‌نمایش');
     await tab.reload();
     await tab.getByRole('button', { name: 'باز کردن پیش‌نمایش در این مرورگر' }).click();
     await tab.waitForURL(`${WEB}/`);
@@ -200,6 +227,14 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     const cookies = await preview.cookies();
     expect(cookies.find((c) => c.name === 'jy_preview')).toMatchObject({ httpOnly: true });
     expect(cookies.find((c) => c.name === 'jy_pv')).toMatchObject({ httpOnly: false });
+    // نوار در ۳۲۰ تا ۱۲۸۰: صفحه بی سرریز افقی، آیکون نوار شکل دارد، و «خروج» دست‌کم ۴۴ پیکسل.
+    await siteFits(tab, 'صفحهٔ اصلی با نوار پیش‌نمایش');
+    for (const width of [320, 390, 1280]) {
+      await tab.setViewportSize({ width, height: 800 });
+      expect(await bar.locator('.jy-icon').evaluate((el) => getComputedStyle(el).getPropertyValue('mask-image').startsWith('url(')), `${width}`).toBe(true);
+      expect((await bar.getByRole('button', { name: 'خروج از پیش‌نمایش' }).boundingBox())!.height, `${width}`).toBeGreaterThanOrEqual(44);
+    }
+    await tab.setViewportSize({ width: 1280, height: 800 });
     await tab.setInputFiles('#jozve-file', FIXTURE);
     await expect(tab.getByRole('button', { name: 'ادامه — آدرس و تحویل' }).filter({ visible: true }).first()).toBeEnabled({ timeout: 90_000 });
 
@@ -245,6 +280,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     await expect(form.locator('.jy-note--info')).toHaveText(
       'از همین لحظه هر مشتری سفارش می‌دهد و پول واقعی جابه‌جا می‌شود. برای بستن، «توقف» در همین «تنظیمات» بی کد و همان لحظه است.',
     );
+    await fits(page, 'صفحهٔ «باز کردن مسیر خرید برای همه»');
 
     await form.getByLabel('کد برنامهٔ تأیید تو').fill('000000');
     await form.getByRole('button', { name: 'باز کن', exact: true }).click();
@@ -257,6 +293,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     await expect(card(page)).toHaveAttribute('data-audience', 'everyone');
     await expect(current(page)).toHaveText(new RegExp(`^همه حالاهمهٔ مشتری‌ها؛ از امروز ${TIME}، ${OWNER}، با کد تازه\\.$`));
     await expect(card(page).getByRole('button', { name: 'توقف مسیر خرید' })).toBeVisible();
+    await fits(page, 'کارت «همه»');
     expect(await audienceNow()).toBe('everyone');
 
     const site = await shopper(browser);
@@ -282,6 +319,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     );
     await expect(card(page).getByRole('link', { name: 'برگرداندن به پیش‌نمایش…' })).toBeVisible();
     await expect(card(page).getByRole('link', { name: 'باز برای همه…' })).toBeVisible();
+    await fits(page, 'کارت «متوقف»');
     expect(await audienceNow()).toBe('paused');
 
     const site = await shopper(browser);
@@ -293,6 +331,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     await expect(liveLine(page)).toHaveAttribute('data-live', 'paused');
     await expect(liveLine(page)).toHaveClass(/jy-note--warning/);
     await expect(liveLine(page)).toHaveText(new RegExp(`^${line} باز کردن\\.$`));
+    await fits(page, 'پیشخوان با «مسیر خرید متوقف است»');
     // متصدی (`orders.money`) سطر را می‌بیند، بی پیوند؛ «تنظیمات» و صفحهٔ «باز کردن» فقط برای مالک.
     await operatorPage.goto(at('/'));
     await expect(liveLine(operatorPage)).toHaveText(new RegExp(`^${line}$`));
@@ -322,6 +361,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
       /^پیامککد، پرداخت و رهگیری با sms\.ir، فقط برای مرورگر پیش‌نمایش(؛ اعتبار [\d,]+)?$/,
     ]);
     await expect(form.locator('.ad-hint')).toHaveCount(0);
+    await fits(page, 'صفحهٔ «برگرداندن به پیش‌نمایش»');
     await raise(page, ownerSecret, 'برگردان');
     await expect(page).toHaveURL(/\/settings\?done=audience&a=preview&n=[0-9a-z]+(#checkout)?$/);
     await expect(success(page)).toHaveText(
