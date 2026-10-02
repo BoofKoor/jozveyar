@@ -148,7 +148,8 @@ export interface LiveHandoff {
 
 async function decide(page: Page, button: 'پرداخت موفق' | 'موجودی ناکافی' | 'انصراف') {
   await page.getByRole('button', { name: button }).click();
-  await page.waitForURL(/\/order\/[0-9a-f-]{36}$/);
+  // برگشت از درگاه تا صفحهٔ سفارش چند ثانیه است؛ برگشتی که بسته شده باشد (۴۰۴) زود و روشن بیفتد، نه با سقف کل تست.
+  await page.waitForURL(/\/order\/[0-9a-f-]{36}$/, { timeout: 30_000 });
 }
 
 test.describe.serial('مسیر خرید live', () => {
@@ -261,7 +262,7 @@ test.describe.serial('مسیر خرید live', () => {
     expect(again.status()).toBe(409);
     // همان برگشت دوباره (مثل بار شدن دوبارهٔ صفحهٔ برگشت): استعلام، verify، و «ثبت شد».
     await page.goto(`/pay/callback/${row!.return_key}?trackId=${trackId}&success=1&status=2&orderId=${row!.order_number}`);
-    await page.waitForURL(`**/order/${row!.public_token}`);
+    await page.waitForURL(`**/order/${row!.public_token}`, { timeout: 30_000 });
     await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
     await context.close();
   });

@@ -75,7 +75,7 @@ test.describe.serial('پول در راه پس از off', () => {
     await page.goto(customer!.startUrl, { referer: `${new URL(BASE!).origin}/` });
     await expect(page.getByRole('heading', { level: 1, name: 'درگاه پرداخت زیبال (ساختگی)' })).toBeVisible();
     await page.getByRole('button', { name: 'پرداخت موفق' }).click();
-    await page.waitForURL(`**/order/${customer!.token}`);
+    await page.waitForURL(`**/order/${customer!.token}`, { timeout: 30_000 });
     await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
     await expect(page.getByTestId('order-paid')).toContainText(`سفارش ${customer!.number} ·`);
     expect(await paymentOf(customer!.trackId)).toMatchObject({ status: 'succeeded', settled_via: 'callback', gateway_status: 1, order_status: 'paid' });
