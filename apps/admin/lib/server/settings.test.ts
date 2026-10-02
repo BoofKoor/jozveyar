@@ -1047,9 +1047,16 @@ describe('مسیر خرید روی سایت (۷٫۵، ADR-052)', () => {
   });
 
   it('صفحهٔ «باز کردن»: کارت با اعتبار sms.ir اگر خوانده شد؛ فقط مالک', async () => {
-    const { panel } = live();
+    const { panel, secrets } = live();
     const card = await panel.checkoutCard(OWNER);
     expect(card).toMatchObject({ ok: true, value: { audience: 'preview', credit: null } });
     expect(await panel.checkoutCard(OPERATOR)).toMatchObject({ status: 403 });
+    // همان خواندن کارت «اعتبار پیامک»: «آزمایش» درست کلید API با اعتبار، عددش روی کارت؛ «آزمایش» ردشدهٔ بعدی، دوباره هیچ.
+    const keyTest = (detail: Record<string, unknown>, at: Date) =>
+      secrets.events.push({ adminUserId: 'admin-1', action: 'settings.key_test', targetType: 'service_key', targetId: 'SMS_API_KEY', detail: { name: 'SMS_API_KEY', subject: 'current', ...detail }, at });
+    keyTest({ outcome: 'ok', credit: 184_200 }, new Date(NOW.getTime() - 60_000));
+    expect(await panel.checkoutCard(OWNER)).toMatchObject({ ok: true, value: { audience: 'preview', credit: 184_200 } });
+    keyTest({ outcome: 'rejected', http: 401 }, NOW);
+    expect(await panel.checkoutCard(OWNER)).toMatchObject({ ok: true, value: { credit: null } });
   });
 });

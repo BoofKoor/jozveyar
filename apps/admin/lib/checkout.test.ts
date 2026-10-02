@@ -155,6 +155,12 @@ describe('سطر وضعیت پیشخوان (سؤال ۱۴۰)', () => {
     expect([off.kind, off.tone, off.link]).toEqual(['off', 'error', 'چه کم است']);
     expect(off.head + flat(off.text)).toBe('مسیر خرید خاموش است: در .env «live» خواسته شد، ولی «شناسهٔ قالب پیامک رهگیری» خالی است.');
     expect(off.text[1]).toEqual({ ltr: '.env' });
+    // «خاموش» بر «پیش‌نمایش» و «متوقف» هم مقدم است: سایتی که آماده نیست برای هیچ مخاطبی سفارش نمی‌گیرد.
+    for (const audience of ['preview', 'paused'] as const) {
+      const gap = liveAlert(view({ readiness: ready({ SMS_TRACKING_TEMPLATE: '' }), audience, since: change() }), NOW)!;
+      expect([gap.kind, gap.tone, gap.link], audience).toEqual(['off', 'error', 'چه کم است']);
+      expect(gap.head + flat(gap.text), audience).toBe(off.head + flat(off.text));
+    }
 
     const preview = liveAlert(view(), NOW)!;
     expect([preview.kind, preview.tone, preview.link]).toEqual(['preview', 'info', 'باز برای همه']);

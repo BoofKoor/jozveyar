@@ -7571,6 +7571,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const at = new Date('2026-10-05T07:00:00Z');
       const token = hash();
       await previews().create({ tokenHash: token, at, actor: actor() });
+      // صفحهٔ پیوند (GET، بی مصرف) همان مرز را دارد: یک میلی‌ثانیه پیش از انقضا هنوز باز می‌شود، درست در لحظهٔ انقضا «دیگر کار نمی‌کند».
+      expect(await previews().link(token, new Date(at.getTime() + 15 * MIN - 1))).toEqual({ linkExpiresAt: new Date(at.getTime() + 15 * MIN) });
+      expect(await previews().link(token, new Date(at.getTime() + 15 * MIN))).toBeNull();
       // درست در لحظهٔ انقضا دیگر باز نمی‌شود.
       expect(await previews().open({ tokenHash: token, cookieHash: hash(), at: new Date(at.getTime() + 15 * MIN) })).toBeNull();
       const cookie = hash();
@@ -7794,15 +7797,19 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await gatewayRejection(conn, new Date(at.getTime() - MIN))).toEqual({ at, orderNumber: null, provider: 'zibal', result: 115, stage: 'start' });
       // بیرون از پنجره نه.
       expect(await gatewayRejection(conn, at)).toBeNull();
-      // «آزمایش» درست کد پذیرنده پس از آن: آماده.
-      await conn.db.insert(adminEvents).values({
-        adminUserId: owner,
-        action: 'settings.key_test',
-        targetType: SERVICE_KEY_TARGET,
-        targetId: 'PAYMENT_MERCHANT_ID',
-        detail: { name: 'PAYMENT_MERCHANT_ID', subject: 'current', outcome: 'ok' },
-        at: await tick(),
-      });
+      const merchantTest = async (outcome: 'ok' | 'rejected') =>
+        conn.db.insert(adminEvents).values({
+          adminUserId: owner,
+          action: 'settings.key_test',
+          targetType: SERVICE_KEY_TARGET,
+          targetId: 'PAYMENT_MERCHANT_ID',
+          detail: { name: 'PAYMENT_MERCHANT_ID', subject: 'current', outcome, ...(outcome === 'rejected' ? { status: 115 } : {}) },
+          at: await tick(),
+        });
+      // «آزمایش» ردشدهٔ کد پذیرنده آماده‌اش نمی‌کند؛ «آزمایش» درست پس از آن می‌کند.
+      await merchantTest('rejected');
+      expect(await gatewayRejection(conn, new Date(at.getTime() - MIN))).toMatchObject({ at, result: 115, stage: 'start' });
+      await merchantTest('ok');
       expect(await gatewayRejection(conn, new Date(at.getTime() - MIN))).toBeNull();
     });
   });
