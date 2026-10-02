@@ -5,6 +5,8 @@ import { quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
+import { footerGroups } from '../lib/staticPages';
+
 /**
  * صفحهٔ اصلی پس از فایل (docs/UI.md، ۴ب): قدم‌های سفارش، «تنظیمات چاپ» با کاشی‌های رادیو و اثر هر
  * گزینه روی قیمت، کلید جهت، خلاصهٔ سفارش که قیمت را همیشه روی صفحه نگه می‌دارد، ترتیب Tab و هدف
@@ -264,7 +266,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
     { width: 390, height: 844 },
     { width: 1280, height: 800 },
   ]) {
-    test(`ترتیب Tab در ${viewport.width}: ✕، افزودن فایل، رنگ، دورو، شمارنده، «ادامه»، سؤال‌ها و نشان اینماد`, async ({ page }) => {
+    test(`ترتیب Tab در ${viewport.width}: ✕، افزودن فایل، رنگ، دورو، شمارنده، «ادامه»، سؤال‌ها، پیوندهای پاورقی و نشان اینماد`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await dropReady(page);
@@ -272,7 +274,9 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
       expect(questions).toHaveLength(6);
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       const order: string[] = [];
-      for (let i = 0; i < 9 + questions.length; i++) {
+      // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد؛ در حالت سفارش همان نام‌ها، در زبانهٔ تازه (`site.spec.ts`).
+      const footer = footerGroups().flatMap(({ pages }) => pages.map(({ label }) => label));
+      for (let i = 0; i < 9 + questions.length + footer.length; i++) {
         await page.keyboard.press('Tab');
         order.push(await focused(page));
       }
@@ -286,6 +290,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
         'یکی بیشتر',
         SOON,
         ...questions.map((q) => q.trim()),
+        ...footer,
         'نماد اعتماد الکترونیکی',
       ]);
 
