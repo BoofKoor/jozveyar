@@ -92,9 +92,15 @@ export type MockDecision = z.infer<typeof mockDecisionSchema>['decision'];
 
 /* ──────────────────────────── پاسخ‌ها ──────────────────────────── */
 
+/**
+ * حال مسیر خرید برای همین مرورگر در `GET /api/checkout`: یکی از `CheckoutMode`، یا `paused` (برش ۷٫۵، ADR-052، سؤال‌های ۱۶۵ و ۱۶۶):
+ * مالک مسیر خرید را «متوقف» کرده، یا درگاه آماده نیست (۱۱۵)؛ «ثبت سفارش موقتاً متوقف است» جای «ادامه».
+ */
+export type CheckoutStatusMode = CheckoutMode | 'paused';
+
 /** `GET /api/checkout`: مرورگر بعد از اولین قیمت می‌پرسد. */
 export interface CheckoutStatus {
-  mode: CheckoutMode;
+  mode: CheckoutStatusMode;
   /** موبایلی که همین مرورگر تأیید کرده (کوکی `jy_auth`)؛ آن‌وقت قدم کد لازم نیست. */
   auth: { mobile: string } | null;
 }
@@ -119,6 +125,21 @@ export interface OrderSummary {
   status: OrderStatus;
   totalRials: number;
 }
+
+/**
+ * `GET /api/checkout/preview` (برش ۷٫۵، سؤال ۱۶۸): پیش‌نمایش مالک در همین مرورگر باز است و تا کی. نوار بالای صفحه همین را می‌خواند؛
+ * `active: false` یعنی کوکی‌ها پاک شدند.
+ */
+export type CheckoutPreviewStatus =
+  | {
+      active: true;
+      /** پایان کوکی، ISO. */
+      until: string;
+      /** همان، برای نوار: روز هفته («سه‌شنبه») و ساعت تهران («11:20»). */
+      untilDay: string;
+      untilTime: string;
+    }
+  | { active: false };
 
 export interface PlacedOrder {
   order: OrderSummary;
@@ -159,6 +180,8 @@ export type CheckoutErrorCode =
   | 'amount_over_gateway_limit'
   /** پولی شاید گرفته شده و نتیجه‌اش هنوز نیامده (برش ۷٫۲): تلاش تازه نه، تا «پرداختت در حال بررسی است» روشن شود. */
   | 'payment_checking'
+  /** مالک مسیر خرید را «متوقف» کرده (برش ۷٫۵، ADR-052، سؤال ۱۶۵): قیمت، کد، سفارش تازه و «دوباره پرداخت کن» ۵۰۳؛ برگشت و استعلام نه. */
+  | 'checkout_paused'
   | 'unavailable';
 
 /** یک بخش جزوه در صفحهٔ سفارش: نام فایل و صفحه‌هایی که سرور شمرد. */

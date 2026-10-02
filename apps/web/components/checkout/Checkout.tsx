@@ -126,6 +126,13 @@ function failureText(failure: ApiFailure, retry: string): ReactNode {
           return <>برای این شماره در یک ساعت گذشته کد زیادی خواسته شده. {when} دوباره امتحان کن.</>;
       }
     }
+    case 'checkout_paused':
+      return (
+        <>
+          <b className="font-semibold">ثبت سفارش موقتاً متوقف است.</b> جزوه، نشانی و انتخاب‌هایت همین‌جا می‌مانند؛ کمی بعد دوباره «{retry}» را
+          بزن.
+        </>
+      );
     case 'otp_no_documents':
       return 'کد نفرستادیم: فایل‌های این جزوه دیگر روی سرور نمی‌مانند. جزوه را دوباره بینداز تا با فایل تازه سفارش بدهی.';
     case 'sms_unavailable':
@@ -141,6 +148,23 @@ function failureText(failure: ApiFailure, retry: string): ReactNode {
 
 /** فایل‌های جزوه دیگر روی سرور نیستند یا تا کمتر از یک ساعت دیگر نمی‌مانند (ADR-034): «دوباره بینداز». */
 const FILES_GONE: ReadonlySet<string> = new Set(['files_expiring', 'documents_not_found', 'documents_not_ready', 'order_expired']);
+
+/** مالک مسیر خرید را وسط راه «متوقف» کرد (برش ۷٫۵، سؤال ۱۶۵)؛ پاسخ ۵۰۳ `checkout_paused`. */
+const isPaused = (failure: ApiFailure | null | undefined) => failure?.error === 'checkout_paused';
+
+/**
+ * «ثبت سفارش موقتاً متوقف است» وسط مسیر (برش ۷٫۵، طرح `st-paused`، سؤال ۱۳۴): یادداشت کارت، نه خطای فیلد؛ جزوه، نشانی و انتخاب‌ها
+ * همین‌جا می‌مانند، و کار بعدی همان دکمهٔ این قدم است.
+ */
+function PausedNote({ failure, retry }: { failure: ApiFailure; retry: string }) {
+  return (
+    <div className="ck-card-note" role="alert">
+      <Note tone="warning" testId="checkout-paused">
+        {failureText(failure, retry)}
+      </Note>
+    </div>
+  );
+}
 
 /**
  * درگاه پیش از رفتن (برش ۷٫۲، سؤال ۱۲۹): نامش روی دکمهٔ در حال کار و در یادداشت «خودکار برمی‌گردی»، و زیبال در خط امنیت زیر دکمه. درگاه
@@ -330,7 +354,9 @@ function CityStep({ state, quote, onChosen }: { state: CheckoutState; quote: Che
         </div>
       )}
 
-      {state.placeError ? (
+      {isPaused(state.placeError) ? (
+        <PausedNote failure={state.placeError!} retry="شهر" />
+      ) : state.placeError ? (
         <div className="ck-card-note">
           <Note tone="error" testId="place-error">
             {failureText(state.placeError, 'شهر')}
@@ -501,10 +527,11 @@ function MobileStep({ state }: { state: CheckoutState }) {
   const error = state.mobileError;
   // دروازهٔ جزوه (برش ۷): خطای شماره نیست؛ یادداشت کارت، و کار بعدی «دوباره بینداز».
   const gone = error?.kind === 'failure' && error.failure.error === 'otp_no_documents';
+  const paused = error?.kind === 'failure' && isPaused(error.failure);
   const fieldError =
     error?.kind === 'invalid'
       ? 'شمارهٔ موبایل درست نیست؛ 11 رقم است و با 09 شروع می‌شود.'
-      : error?.kind === 'failure' && !gone
+      : error?.kind === 'failure' && !gone && !paused
         ? failureText(error.failure, 'ارسال کد')
         : null;
 
@@ -526,6 +553,8 @@ function MobileStep({ state }: { state: CheckoutState }) {
             {failureText(error.failure, 'ارسال کد')}
           </Note>
         </div>
+      ) : paused ? (
+        <PausedNote failure={error.failure} retry="ارسال کد" />
       ) : null}
       <form
         id="ck-mobile"
@@ -579,7 +608,7 @@ function CodeStep({ state, now }: { state: CheckoutState; now: number }) {
       <>
         کد درست نیست. دوباره نگاه کن و بزن؛ <span className="num">{formatNumber(error.attemptsLeft)}</span> بار دیگر فرصت هست.
       </>
-    ) : error?.kind === 'failure' ? (
+    ) : error?.kind === 'failure' && !isPaused(error.failure) ? (
       failureText(error.failure, 'تأیید کد')
     ) : null;
   const number = <span className="num">{formatMobile(otp.mobile)}</span>;
@@ -614,6 +643,8 @@ function CodeStep({ state, now }: { state: CheckoutState; now: number }) {
             </span>
           </p>
         </div>
+      ) : error?.kind === 'failure' && isPaused(error.failure) ? (
+        <PausedNote failure={error.failure} retry="تأیید کد" />
       ) : state.otpReused ? (
         <div className="ck-card-note">
           <Note tone="info" testId="code-reused">
@@ -686,7 +717,9 @@ function CodeStep({ state, now }: { state: CheckoutState; now: number }) {
           </p>
         </div>
       )}
-      {state.resendError ? (
+      {isPaused(state.resendError) ? (
+        <PausedNote failure={state.resendError!} retry={closed ? 'ارسال کد تازه' : 'ارسال دوباره'} />
+      ) : state.resendError ? (
         <div className="ck-card-note">
           <Note tone="error" testId="resend-error">
             {failureText(state.resendError, closed ? 'ارسال کد تازه' : 'ارسال دوباره')}
@@ -776,8 +809,9 @@ function ReviewStep({
               <span className="num">{String((failure.body.order as { number?: number } | undefined)?.number ?? '')}</span> با
               همین قیمت نگه داشته شد؛ چند دقیقهٔ دیگر دوباره «پرداخت» را بزن.
             </Note>
-          ) : failure.error === 'gateway_not_ready' ? (
-            // کد پذیرنده نیست یا زیبال IP سرور را نپذیرفت (۱۱۵، سؤال ۱۳۹): متن «متوقف» طرح، و جزوه و نشانی همین‌جا.
+          ) : failure.error === 'gateway_not_ready' || failure.error === 'checkout_paused' ? (
+            // کد پذیرنده نیست یا زیبال IP سرور را نپذیرفت (۱۱۵، سؤال ۱۳۹)، یا مالک «متوقف» کرد (۷٫۵، سؤال ۱۶۵): متن «متوقف» طرح، و
+            // جزوه و نشانی همین‌جا.
             <Note tone="warning" testId="pay-failed">
               <b className="font-semibold">ثبت سفارش موقتاً متوقف است.</b> جزوه، نشانی و انتخاب‌هایت همین‌جا می‌مانند؛ کمی بعد{' '}
               <button type="button" className="jy-link" onClick={onPay}>
@@ -1083,6 +1117,8 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
         {step !== 'pay' && state.quoteError ? (
           FILES_GONE.has(state.quoteError.error) ? (
             <FilesGone onRestart={onRestart} />
+          ) : isPaused(state.quoteError) ? (
+            <PausedNote failure={state.quoteError} retry="ادامه" />
           ) : (
             <Note tone="error" testId="quote-error">
               قیمت سرور نرسید. {failureText(state.quoteError, 'ادامه')}

@@ -5,10 +5,17 @@ import { noStore } from '../../../../lib/server/context';
 
 export const dynamic = 'force-dynamic';
 
-/** «عوض کن» در مرور (ADR-033): نشست باطل و کوکی `jy_auth` پاک می‌شود؛ فایل‌ها (`jy_sid`) می‌مانند. */
+/**
+ * «عوض کن» در مرور (ADR-033): نشست باطل و کوکی `jy_auth` پاک می‌شود؛ فایل‌ها (`jy_sid`) می‌مانند. در «متوقف» هم (برش ۷٫۵، سؤال ۱۶۵):
+ * خروج فقط دسترسی کم می‌کند.
+ */
 export function DELETE(request: NextRequest) {
-  return withCheckout(request, async ({ auth }) => {
-    await auth.logout(authTokenOf(request));
-    return clearAuthCookie(NextResponse.json({ loggedOut: true }, { headers: noStore }), request);
-  });
+  return withCheckout(
+    request,
+    async ({ auth }) => {
+      await auth.logout(authTokenOf(request));
+      return clearAuthCookie(NextResponse.json({ loggedOut: true }, { headers: noStore }), request);
+    },
+    { whenPaused: 'run' },
+  );
 }

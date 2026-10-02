@@ -12,6 +12,7 @@
  * مثل بقیهٔ این پکیج فقط خواندن و نوشتن است؛ مجوز، کد تازه و متن‌ها در وب و پنل.
  */
 
+import { createHash, randomBytes } from 'node:crypto';
 import { and, desc, eq, gt, isNull, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { isZibalMerchant } from '@jozveyar/payments/zibal';
@@ -220,6 +221,15 @@ export const PREVIEW_COOKIE_TTL_MS = 24 * 60 * 60_000;
 /** هدف رویداد پیوند پیش‌نمایش در `admin_events`، و نام رویدادهای ۷٫۵ (سؤال ۱۶۹، چیپ «تنظیمات و کلیدها»). */
 export const CHECKOUT_AUDIENCE_EVENT = 'settings.checkout_audience';
 export const CHECKOUT_PREVIEW_EVENT = 'settings.checkout_preview';
+
+/** توکن پیوند یا کوکی پیش‌نمایش: ۳۲ بایت تصادفی، base64url (۴۳ نویسه). پنل پیوند را می‌سازد و وب کوکی را. */
+export const newPreviewToken = (): string => randomBytes(32).toString('base64url');
+
+/** شکل توکن پیوند و کوکی؛ هر چیز دیگر بی پرس‌وجو رد می‌شود. */
+export const PREVIEW_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+/** هشی که `checkout_previews` نگه می‌دارد (sha256، ۶۴ رقم hex کوچک)؛ پنل و وب هر دو همین را می‌سازند. */
+export const previewHash = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 export interface CheckoutPreviewStore {
   /**

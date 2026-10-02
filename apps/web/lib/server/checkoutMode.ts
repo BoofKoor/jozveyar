@@ -8,22 +8,23 @@
  *     حتی با `.env` اشتباه. دامنه از `Host` خود درخواست خوانده می‌شود، نه از `.env`. پشت Nginx سایت
  *     زنده، وب فقط همین دامنه را می‌بیند: هر میزبان دیگری به بلوک پیش‌فرض می‌رسد و هدایت می‌شود.
  *
- * `live` (برش ۷) درگاه و پنل پیامک واقعی می‌خواهد؛ تا ساخته نشده‌اند، `live` هم خاموش است. درگاه
- * نمونه هیچ‌وقت پشت `live` نمی‌نشیند.
+ * `live` (برش ۷٫۵، ADR-052): `.env` توانایی را می‌گوید و پنل مخاطب را. آمادگی زمان اجرا (`checkoutReadiness`، پایگاه داده) جای ثابت
+ * `LIVE_ADAPTERS_READY` را گرفت؛ مخاطب (`checkout.audience`) «متوقف»، «پیش‌نمایش مالک» یا «همه» است. تصمیم هر درخواست همین‌جاست
+ * (`accessOf`)؛ خواندن آمادگی، مخاطب و کوکی پیش‌نمایش در `checkoutContext.ts`. درگاه نمونه هیچ‌وقت پشت `live` نمی‌نشیند.
  *
  * خالص است، بی I/O: تست بی سرور همهٔ حالت‌ها را می‌سنجد.
  */
 
 import type { CheckoutMode } from '@jozveyar/contracts/checkout';
+import type { CheckoutAudience } from '@jozveyar/contracts';
 
 /** دامنهٔ سایت زنده؛ درگاه نمونه روی آن و زیردامنه‌هایش هرگز. */
 export const LIVE_DOMAIN = 'jozveyar.com';
 
-/** درگاه و پنل پیامک واقعی (برش ۷). تا آن موقع `live` خاموش می‌ماند. */
-export const LIVE_ADAPTERS_READY = false;
-
 /** `SESSION_SECRET` کوتاه‌تر از این کلید HMAC کد پیامکی نمی‌شود؛ `bootstrap.sh` ۶۴ رقم hex می‌سازد. */
 export const MIN_SECRET_LENGTH = 32;
+
+type Env = Readonly<Record<string, string | undefined>>;
 
 /** رمز نشست، اگر به‌اندازه است؛ بی آن مسیر خرید خاموش است. */
 export function sessionSecretOf(value: string | undefined): string | null {
@@ -50,47 +51,108 @@ export function isLiveHost(host: string | null | undefined): boolean {
 }
 
 /**
- * حالتی که این درخواست واقعاً دارد. `hosts` هر نامی است که درخواست برای میزبانش آورده (`Host`،
- * `X-Forwarded-Host`، نشانی)؛ اگر **هر کدام** سایت زنده باشد، درگاه نمونه خاموش است.
+ * حالت `.env` برای این درخواست، پیش از آمادگی و مخاطب. `hosts` هر نامی است که درخواست برای میزبانش آورده (`Host`،
+ * `X-Forwarded-Host`، نشانی)؛ اگر **هر کدام** سایت زنده باشد، درگاه نمونه خاموش است. `live` اینجا فقط «خواسته شده» است.
  */
-export function effectiveMode(
-  configured: CheckoutMode,
-  hosts: readonly (string | null | undefined)[],
-  liveReady = LIVE_ADAPTERS_READY,
-): CheckoutMode {
+export function effectiveMode(configured: CheckoutMode, hosts: readonly (string | null | undefined)[]): CheckoutMode {
   if (configured === 'mock') return hosts.some(isLiveHost) ? 'off' : 'mock';
-  if (configured === 'live') return liveReady ? 'live' : 'off';
-  return 'off';
+  return configured;
 }
 
 /**
- * پیامک وب در این حالت (برش ۷٫۱، ADR-049، سؤال ۱۱۴)، یک خط برای لاگ بالا آمدن: منبع، هرگز مقدار. `off` پیامکی نمی‌فرستد.
+ * دسترسی این درخواست به مسیر خرید (برش ۷٫۵، سؤال‌های ۱۶۳ و ۱۶۵):
+ * - `off`: همهٔ مسیرهای خرید ۴۰۴، و «ثبت سفارش آنلاین به‌زودی».
+ * - `paused`: مالک «متوقف» کرده؛ قیمت، کد، سفارش تازه و «دوباره پرداخت کن» ۵۰۳ `checkout_paused`، و خروج باز.
+ * - `open`: باز؛ `preview` یعنی فقط با کوکی پیش‌نمایش همین مرورگر.
+ * برگشت از درگاه و استعلام از این دسترسی نمی‌گذرند (`withPayments`): همیشه باز، با درگاه‌هایی که هست (سؤال ۱۶۴).
  */
-export function describeSms(configured: CheckoutMode): string | null {
-  if (configured === 'off') return null;
-  return configured === 'live' ? '✓ پیامک وب: sms.ir (کلید و قالب‌ها از «تنظیمات» یا .env)' : '✓ پیامک وب: کنسولی (در sms_messages)';
+export type CheckoutAccess = { kind: 'off' } | { kind: 'paused' } | { kind: 'open'; mode: 'mock' | 'live'; preview: boolean };
+
+export const ACCESS_OFF: CheckoutAccess = { kind: 'off' };
+
+export interface AccessFacts {
+  /** حالت `.env` همین درخواست (`effectiveMode`). */
+  mode: CheckoutMode;
+  /** پایگاه داده و `SESSION_SECRET` هست؛ بی هر کدام مسیر خرید خاموش است (کد پیامکی بی کلید HMAC ساخته نمی‌شود). */
+  services: boolean;
+  /** فقط `live`: همهٔ تکه‌های آمادگی درست‌اند (`checkoutReadiness`). */
+  ready: boolean;
+  /** فقط `live`: مخاطب پنل. */
+  audience: CheckoutAudience;
+  /** فقط `live` و مخاطب «پیش‌نمایش»: این مرورگر کوکی پیش‌نمایش زنده دارد. */
+  preview: boolean;
 }
 
 /**
- * درگاه وب در این حالت (برش ۷٫۲، ADR-050)، یک خط برای لاگ بالا آمدن: منبع، هرگز مقدار. `off` درگاهی ندارد و به هیچ درگاهی درخواست
- * نمی‌دهد، استعلام خودکار هم نه.
+ * حکم دسترسی (سؤال ۱۶۳): مخاطب فقط برای `live`؛ `mock` همان امروز. `live` آماده‌نشده `off` است، و مخاطب «پیش‌نمایش» بی کوکی هم
+ * (سؤال ۱۶۵)، تا مشتری تازه همان «به‌زودی» را ببیند.
  */
-export function describePayments(configured: CheckoutMode): string | null {
-  if (configured === 'off') return null;
-  return configured === 'live'
-    ? '✓ درگاه وب: زیبال (کد پذیرنده از «تنظیمات» یا .env، نشانی برگشت PAYMENT_CALLBACK_URL)؛ استعلام خودکار هر دقیقه'
-    : '✓ درگاه وب: درگاه نمونه؛ استعلام خودکار هر دقیقه';
+export function accessOf(facts: AccessFacts): CheckoutAccess {
+  if (facts.mode === 'off' || !facts.services) return ACCESS_OFF;
+  if (facts.mode === 'mock') return { kind: 'open', mode: 'mock', preview: false };
+  if (!facts.ready) return ACCESS_OFF;
+  if (facts.audience === 'paused') return { kind: 'paused' };
+  if (facts.audience === 'preview') return facts.preview ? { kind: 'open', mode: 'live', preview: true } : ACCESS_OFF;
+  return { kind: 'open', mode: 'live', preview: false };
 }
 
-/** یک خط برای لاگ بالا آمدن سرور؛ صاحب پروژه بعد از استقرار همین را می‌جوید. */
-export function describeMode(configured: CheckoutMode, secretOk: boolean): string {
+/* ────────────────────────── درگاه و پیامک وب ────────────────────────── */
+
+export type WebGateway = 'zibal' | 'mock';
+
+/**
+ * درگاه‌های وب (برش ۷٫۵، سؤال ۱۶۴)، مستقل از اینکه مسیر خرید روشن است: زیبال فقط با `PAYMENT_PROVIDER=zibal`، و درگاه نمونه فقط در
+ * `mock` و هرگز روی jozveyar.com (`liveHost`). برگشت و استعلام خودکار هر پرداختی که در پایگاه داده هست با درگاه خود آن، در هر حالت؛
+ * پرداخت درگاهی که اینجا نیست انگار نیست. سرور بی هیچ‌کدام (وب ۳۱۰۱ CI، سایت زنده با `PAYMENT_PROVIDER=mock`) هیچ درخواستی به هیچ
+ * درگاهی نمی‌دهد، استعلام خودکار هم نه.
+ */
+export function webGatewayNames(env: Env, liveHost = false): WebGateway[] {
+  const names: WebGateway[] = [];
+  if (env.PAYMENT_PROVIDER?.trim().toLowerCase() === 'zibal') names.push('zibal');
+  if (configuredMode(env.CHECKOUT_MODE) === 'mock' && !liveHost) names.push('mock');
+  return names;
+}
+
+/** درگاه شروع پرداخت در این حالت: زیبال در `live` (آمادگی `PAYMENT_PROVIDER=zibal` را می‌خواهد)، درگاه نمونه در `mock`، و `off` هیچ. */
+export function startGatewayOf(mode: CheckoutMode): WebGateway | null {
+  return mode === 'live' ? 'zibal' : mode === 'mock' ? 'mock' : null;
+}
+
+/** پیامک وب (سؤال ۱۶۴): در `mock` همیشه کنسولی (ADR-035)؛ وگرنه `SMS_PROVIDER`، که `live` آماده‌اش sms.ir است. */
+export function webSmsProvider(env: Env): 'smsir' | 'console' {
+  if (configuredMode(env.CHECKOUT_MODE) === 'mock') return 'console';
+  return env.SMS_PROVIDER?.trim().toLowerCase() === 'smsir' ? 'smsir' : 'console';
+}
+
+/**
+ * پیامک وب در این حالت (برش ۷٫۱، ADR-049؛ از ۷٫۵ سؤال ۱۶۴)، یک خط برای لاگ بالا آمدن: منبع، هرگز مقدار. سروری که نه مسیر خرید
+ * دارد نه درگاهی، پیامکی نمی‌فرستد و خطی هم ندارد.
+ */
+export function describeSms(env: Env): string | null {
+  if (configuredMode(env.CHECKOUT_MODE) === 'off' && webGatewayNames(env).length === 0) return null;
+  return webSmsProvider(env) === 'smsir' ? '✓ پیامک وب: sms.ir (کلید و قالب‌ها از «تنظیمات» یا .env)' : '✓ پیامک وب: کنسولی (در sms_messages)';
+}
+
+/**
+ * درگاه وب (برش ۷٫۲، ADR-050؛ از ۷٫۵ سؤال ۱۶۴)، یک خط برای لاگ بالا آمدن: منبع، هرگز مقدار. سرور بی درگاه خطی ندارد: به هیچ درگاهی
+ * درخواست نمی‌دهد، استعلام خودکار هم نه.
+ */
+export function describePayments(env: Env): string | null {
+  const names = webGatewayNames(env);
+  if (names.length === 0) return null;
+  const parts = names.map((name) =>
+    name === 'zibal' ? 'زیبال (کد پذیرنده از «تنظیمات» یا .env، نشانی برگشت PAYMENT_CALLBACK_URL)' : 'درگاه نمونه',
+  );
+  const startsHere = configuredMode(env.CHECKOUT_MODE) !== 'off';
+  return `✓ درگاه وب: ${parts.join(' و ')}؛ ${startsHere ? '' : 'فقط برگشت و استعلام (مسیر خرید off)؛ '}استعلام خودکار هر دقیقه`;
+}
+
+/**
+ * یک خط برای لاگ بالا آمدن سرور؛ صاحب پروژه بعد از استقرار همین را می‌جوید. `live` اینجا نیست: خطش آمادگی است (`describeReadiness`)،
+ * که بعد از مهاجرت از پایگاه داده خوانده می‌شود.
+ */
+export function describeMode(configured: Exclude<CheckoutMode, 'live'>, secretOk: boolean): string {
   if (configured === 'off') return '✓ مسیر خرید: off (ثبت سفارش آنلاین به‌زودی)';
   if (!secretOk) return `✗ مسیر خرید: ${configured} خواسته شد ولی SESSION_SECRET نیست یا کوتاه است — خاموش`;
-  if (configured === 'live' && !LIVE_ADAPTERS_READY) {
-    return '✗ مسیر خرید: live هنوز درگاه و پنل پیامک واقعی ندارد (برش ۷) — خاموش';
-  }
-  if (configured === 'mock') {
-    return `⚠ مسیر خرید: mock — درگاه نمونه و پیامک کنسولی؛ روی ${LIVE_DOMAIN} همیشه خاموش`;
-  }
-  return '✓ مسیر خرید: live';
+  return `⚠ مسیر خرید: mock — درگاه نمونه و پیامک کنسولی؛ روی ${LIVE_DOMAIN} همیشه خاموش`;
 }

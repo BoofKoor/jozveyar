@@ -54,7 +54,8 @@ async function restoredStep(items: CheckoutItem[] | null): Promise<HistoryMark |
 async function openStep(mark: HistoryMark, desk: HistoryMark, items: CheckoutItem[]): Promise<HistoryMark> {
   try {
     const status = await fetchStatus();
-    if (!status || status.mode === 'off') return desk;
+    // «متوقف» (برش ۷٫۵): قدم خرید باز نمی‌شود؛ «جزوه و قیمت» با دکمهٔ «ثبت سفارش موقتاً متوقف است».
+    if (!status || status.mode === 'off' || status.mode === 'paused') return desk;
     const started = await (await loadCheckout()).checkoutStore().start(items);
     return started.ok ? mark : desk;
   } catch {

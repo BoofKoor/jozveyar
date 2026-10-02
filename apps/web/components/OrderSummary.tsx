@@ -13,17 +13,19 @@ import { SumValue, SummaryLines, printLabel } from './checkout/parts';
  * - `checking`: بررسی مرورگر تمام نشده، یا هنوز نمی‌دانیم ثبت سفارش باز است (`GET /api/checkout`).
  * - `blocked`: فایلی خوانده نشد؛ جزوه‌ای که یک فصلش کم است بی‌صدا سفارش داده نمی‌شود (ADR-030).
  * - `soon`: ثبت سفارش آنلاین هنوز باز نیست (`CHECKOUT_MODE=off`، سایت زنده تا برش ۷؛ ADR-035).
+ * - `paused`: مالک ثبت سفارش را «متوقف» کرده، یا درگاه آماده نیست (برش ۷٫۵، ADR-052، سؤال‌های ۱۳۴ و ۱۶۶).
  * - `sending`: فایلی هنوز به سرور نرسیده یا سرور بررسی‌اش می‌کند؛ سفارش با شمارش سرور است (ADR-034).
  * - `stuck`: فایلی به سرور نرسید؛ یادداشت خلاصه راه جلو را می‌گوید.
  * - `busy`: «ادامه» زده شد و قیمت سرور در راه است.
  * - `waiting`: جزوه بعد از رفرش برگشت و فایلی منتظر انتخاب دوباره است (۳د، ADR-036).
  */
-export type DeskAction = 'checking' | 'blocked' | 'soon' | 'sending' | 'stuck' | 'busy' | 'waiting' | 'go';
+export type DeskAction = 'checking' | 'blocked' | 'soon' | 'paused' | 'sending' | 'stuck' | 'busy' | 'waiting' | 'go';
 
 const LABEL: Record<DeskAction, string> = {
   checking: 'در حال بررسی…',
   blocked: 'اول تکلیف فایل خوانده‌نشده را روشن کن',
   soon: 'ثبت سفارش آنلاین به‌زودی',
+  paused: 'ثبت سفارش موقتاً متوقف است',
   sending: 'در حال ارسال فایل…',
   stuck: 'ادامه — آدرس و تحویل',
   busy: 'ادامه — آدرس و تحویل',
@@ -36,6 +38,7 @@ const SHORT: Record<DeskAction, string> = {
   checking: 'بررسی…',
   blocked: 'ادامه',
   soon: 'به‌زودی',
+  paused: 'متوقف',
   sending: 'ارسال…',
   stuck: 'ادامه',
   busy: 'ادامه',
@@ -46,6 +49,7 @@ const SHORT: Record<DeskAction, string> = {
 const NAME: Partial<Record<DeskAction, string>> = {
   blocked: 'ادامه — اول تکلیف فایل خوانده‌نشده را روشن کن',
   soon: 'ثبت سفارش آنلاین به‌زودی',
+  paused: 'ثبت سفارش موقتاً متوقف است',
   sending: 'ادامه — در حال ارسال فایل',
   stuck: 'ادامه — اول فایل باید به سرور برسد',
   waiting: 'ادامه — اول همان فایل را دوباره انتخاب کن',
@@ -63,11 +67,11 @@ interface ActionProps {
 }
 
 /**
- * دکمهٔ «ادامه»، در خلاصه و در نوار موبایل. «به‌زودی» بسته است ولی در ترتیب Tab می‌ماند (`aria-disabled`)،
- * تا صفحه‌خوان هم بشنود چرا؛ متنش وضعیت است و خواندنی (`is-status`). بقیهٔ حالت‌های بسته، مثل ۴ب، `disabled`.
+ * دکمهٔ «ادامه»، در خلاصه و در نوار موبایل. «به‌زودی» و «متوقف» بسته‌اند ولی در ترتیب Tab می‌مانند (`aria-disabled`)،
+ * تا صفحه‌خوان هم بشنود چرا؛ متنشان وضعیت است و خواندنی (`is-status`). بقیهٔ حالت‌های بسته، مثل ۴ب، `disabled`.
  */
 function ContinueButton({ action, onContinue, onIntent, short }: ActionProps & { short: boolean }) {
-  const soon = action === 'soon';
+  const soon = action === 'soon' || action === 'paused';
   const loading = LOADING.has(action);
   const open = action === 'go';
   return (

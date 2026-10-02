@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { withCheckout } from '../../../../lib/server/checkoutContext';
+import { withPayments } from '../../../../lib/server/checkoutContext';
 import { noStore, respond } from '../../../../lib/server/context';
 
 export const dynamic = 'force-dynamic';
@@ -14,9 +14,12 @@ type Params = { params: Promise<{ key: string }> };
  * صفحهٔ سفارش (۳ج): موفق، «در حال بررسی»، یا «پرداخت انجام نشد» با «دوباره پرداخت کن».
  *
  * `Location` نسبی است: پشت Nginx نشانی درخواست `http` است، و نشانی کامل ساختن از آن کاربر را از https بیرون می‌برد.
+ *
+ * همیشه باز (برش ۷٫۵، ADR-052، سؤال‌های ۱۶۴ و ۱۶۵): در `off` و «متوقف» هم، با درگاه‌هایی که این سرور دارد؛ ترمز برای سفارش تازه است،
+ * نه پولی که در راه است. فقط پایگاه داده می‌خواهد (`withPayments`).
  */
 export function GET(request: NextRequest, { params }: Params) {
-  return withCheckout(request, async ({ checkout }) => {
+  return withPayments(request, async (checkout) => {
     const result = await checkout.settle((await params).key);
     if (!result.ok) return respond(result);
     return new NextResponse(null, {
@@ -31,7 +34,7 @@ export function GET(request: NextRequest, { params }: Params) {
  * هر دو، با همان کلید و همان سنجش. پاسخ بی هدایت و بی توکن سفارش.
  */
 export function POST(request: NextRequest, { params }: Params) {
-  return withCheckout(request, async ({ checkout }) => {
+  return withPayments(request, async (checkout) => {
     const result = await checkout.settle((await params).key);
     if (!result.ok) return respond(result);
     return NextResponse.json({ ok: true, payment: result.value.payment }, { headers: noStore });

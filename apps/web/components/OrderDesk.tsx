@@ -359,7 +359,9 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
         ? 'blocked'
         : mode === 'off'
           ? 'soon'
-          : gate.kind === 'sending'
+          : mode === 'paused'
+            ? 'paused'
+            : gate.kind === 'sending'
             ? 'sending'
             : gate.kind === 'stuck'
               ? 'stuck'
@@ -375,7 +377,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       if (status === 'error') {
         const fresh = await fetchStatus();
         setStatus(fresh ?? 'error');
-        if (!fresh || fresh.mode === 'off') {
+        if (!fresh || fresh.mode === 'off' || fresh.mode === 'paused') {
           if (!fresh) setFailure({ ok: false, status: 0, error: 'network', body: {} });
           return;
         }
@@ -383,6 +385,12 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       const checkout = await loadCheckout();
       const started = await checkout.checkoutStore().start(gate.items);
       if (!started.ok) {
+        // مالک همین حالا «متوقف» کرد (برش ۷٫۵، سؤال ۱۶۵): «ادامه» همان دکمهٔ «ثبت سفارش موقتاً متوقف است» می‌شود.
+        if (started.error === 'checkout_paused') {
+          if (statusCache) statusCache = { ...statusCache, mode: 'paused' };
+          setStatus((previous) => (previous && previous !== 'error' ? { ...previous, mode: 'paused' } : { mode: 'paused', auth: null }));
+          return;
+        }
         setFailure(started);
         return;
       }
