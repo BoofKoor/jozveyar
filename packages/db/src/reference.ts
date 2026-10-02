@@ -51,6 +51,8 @@ export const OFFICIAL_THROUGH_SETTING = 'calendar.official_through';
 export const FILES_RETENTION_SETTING = 'order.files_retention_days';
 /** بازه‌های وزن گزارش ارسال (برش ۶٫۴، ADR-048): مرزها به گرم، یا `'tariff'` یعنی همان بازه‌های کرایهٔ تعرفهٔ فعال. */
 export const REPORT_BANDS_SETTING = 'report.weight_bands';
+/** مخاطب مسیر خرید در `live` (برش ۷٫۵، ADR-052): `paused`، `preview` یا `everyone`. */
+export const CHECKOUT_AUDIENCE_SETTING = 'checkout.audience';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -68,6 +70,9 @@ export const REPORT_BANDS_SETTING = 'report.weight_bands';
  * بازه‌های وزن گزارش ارسال همان بازه‌های کرایهٔ تعرفهٔ فعال‌اند (تصمیم ۱۰۱)، تا مالک از گزارش عوضشان کند؛ پیش‌فرض عدد نیست،
  * `'tariff'` است، تا گزارش با هر نسخهٔ تازهٔ تعرفه همراه شود.
  *
+ * مخاطب مسیر خرید پس از استقرار «پیش‌نمایش مالک» است (برش ۷٫۵، ADR-052): با `CHECKOUT_MODE=live` در `.env`، مردم همچنان «ثبت سفارش
+ * آنلاین به‌زودی» می‌بینند تا مالک با پیوند پیش‌نمایش یک سفارش واقعی کوچک بدهد و بعد «همه» را با کد تازه بزند.
+ *
  * سقف کد در ۲۴ ساعت ۲٬۰۰۰ است (برش ۷، سؤال ۱۱۷): کمتر از هفت ساعت پشت‌سرهم با سقف ساعتی، پس روز شلوغ واقعی را نمی‌بندد، و
  * بدترین هزینهٔ روزانهٔ کد را به ۲٬۰۰۰ تکه می‌بندد. هشدار اعتبار ۷ روز مصرف است (سؤال ۱۳۷): یک هفته برای شارژ.
  */
@@ -80,6 +85,7 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [SMS_CREDIT_ALERT_SETTING]: 7,
   [FILES_RETENTION_SETTING]: 30,
   [REPORT_BANDS_SETTING]: 'tariff',
+  [CHECKOUT_AUDIENCE_SETTING]: 'preview',
 };
 
 /**

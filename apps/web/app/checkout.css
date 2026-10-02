@@ -500,4 +500,30 @@
     text-align: center;
     color: var(--color-muted);
   }
+
+  /* ===== نوار پیش‌نمایش مالک (برش ۷٫۵، ADR-052، طرح `st-preview`): بالای سربرگ همهٔ صفحه‌های همان مرورگر (`lib/previewBar.ts`) ===== */
+  .ck-preview {
+    background: var(--color-warning-bg);
+    border-block-end: 1px solid var(--color-warning-border);
+  }
+  .ck-preview__in {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    padding-block: 6px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .ck-preview__in > .jy-icon {
+    color: var(--color-warning-text);
+  }
+  .ck-preview__text {
+    flex: 1;
+    min-width: 14rem;
+  }
+  .ck-preview__in .jy-btn {
+    margin-inline-end: -12px;
+    font-size: var(--text-small);
+  }
 }

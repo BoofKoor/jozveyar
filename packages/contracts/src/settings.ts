@@ -27,6 +27,10 @@ const reportBoundsSchema = z
   .max(REPORT_BOUNDS_MAX)
   .refine((bounds) => bounds.every((grams, i) => i === 0 || grams > bounds[i - 1]!), { message: 'مرزها صعودی نیستند' });
 
+/** مخاطب مسیر خرید در `live` (برش ۷٫۵، ADR-052)، به ترتیب نردبان: متوقف ← پیش‌نمایش مالک ← همه. */
+export const CHECKOUT_AUDIENCES = ['paused', 'preview', 'everyone'] as const;
+export type CheckoutAudience = (typeof CHECKOUT_AUDIENCES)[number];
+
 export const SETTING_SCHEMAS = {
   /** روز کاری تا تحویل به پست (ADR-013). */
   'order.sla_days': z.number().int().min(1).max(30),
@@ -61,6 +65,12 @@ export const SETTING_SCHEMAS = {
    * تعرفهٔ فعال، که با هر نسخهٔ تازه همراه می‌شود. فقط گزارش را می‌چیند: قیمت، کرایه و تعرفه را دست نمی‌زند (قاعدهٔ ۶).
    */
   'report.weight_bands': z.union([z.literal('tariff'), reportBoundsSchema]),
+  /**
+   * مخاطب مسیر خرید وقتی `.env` سرور `CHECKOUT_MODE=live` می‌خواهد (برش ۷٫۵، ADR-052): `paused` (متوقف: سفارش تازه نه؛ برگشت از درگاه و
+   * استعلام کار می‌کنند)، `preview` (فقط مرورگری که پیوند پیش‌نمایش مالک را باز کرد) یا `everyone`. `.env` توانایی را می‌گوید و این مخاطب را؛
+   * در `off` و `mock` خوانده نمی‌شود. فقط مالک از «تنظیمات» عوضش می‌کند: بالا بردن با کد تازه، پایین آوردن بی کد و همان لحظه.
+   */
+  'checkout.audience': z.enum(CHECKOUT_AUDIENCES),
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { BAND_COLOR } from '@jozveyar/ui/tokens';
 import { SiteFooter } from '../components/SiteFooter';
 import { SiteHeader } from '../components/SiteHeader';
+import { PREVIEW_BAR_SCRIPT } from '../lib/previewBar';
 import { SITE_OPEN_GRAPH } from '../lib/staticPages';
 import './globals.css';
 
@@ -37,6 +38,9 @@ export const viewport: Viewport = {
 /**
  * سربرگ و پاورقی در همهٔ صفحه‌ها، از جمله ۴۰۴؛ هر دو کامپوننت سرورند و JS ندارند. بدنه ظرف
  * `site-grow` دارد تا پاورقی در صفحهٔ کوتاه هم ته صفحه بنشیند.
+ *
+ * نوار پیش‌نمایش مالک (برش ۷٫۵، `lib/previewBar.ts`): اسکریپت کوچک درون HTML، ته بدنه، که فقط با کوکی نشانهٔ `jy_pv` می‌پرسد و نوار را
+ * اول بدنه می‌گذارد؛ باندل اولیه همان می‌ماند.
  */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -46,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SiteHeader />
         <div className="site-grow">{children}</div>
         <SiteFooter />
+        <script dangerouslySetInnerHTML={{ __html: PREVIEW_BAR_SCRIPT }} />
       </body>
     </html>
   );

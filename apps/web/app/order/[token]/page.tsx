@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { cookies, headers } from 'next/headers';
+import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { OrderView, OrderViewDetails } from '@jozveyar/contracts/checkout';
 import { formatCardMask, formatNumber } from '@jozveyar/text';
@@ -10,7 +10,8 @@ import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../..
 import { FlowNav, SumValue, SummaryLines, Tomans, printLabel } from '../../../components/checkout/parts';
 import { JozveBrief, Recap, RecapAddress, RecapDelivery, RecapJozveValue } from '../../../components/checkout/recap';
 import { formatMobile } from '../../../lib/checkout/format';
-import { AUTH_COOKIE, authTokenFrom, checkoutModeFor, orderViewOf } from '../../../lib/server/checkoutContext';
+import { AUTH_COOKIE, authTokenFrom, orderViewOf } from '../../../lib/server/checkoutContext';
+import { configuredMode } from '../../../lib/server/checkoutMode';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,9 +58,8 @@ export default async function OrderPage({ params }: { params: Promise<{ token: s
   if (view.status === 'expired' || (view.status === 'awaiting_payment' && !view.details.canPay && !view.details.checking)) {
     return <Expired view={view} />;
   }
-  const requestHeaders = await headers();
-  const mode = checkoutModeFor([requestHeaders.get('host'), requestHeaders.get('x-forwarded-host')]);
-  return <Owner token={token.toLowerCase()} view={view} details={view.details} zibal={mode === 'live'} />;
+  // «دوباره پرداخت کن» با درگاه همین حالت (برش ۷٫۵، سؤال ۱۶۴): زیبال در `live`؛ درگاه نمونه فقط در `mock`.
+  return <Owner token={token.toLowerCase()} view={view} details={view.details} zibal={configuredMode(process.env.CHECKOUT_MODE) === 'live'} />;
 }
 
 /** نشانهٔ حالت سفارش: صفحه green-50، سربرگ بی ناوبری و لوگو بی پیوند (globals.css)، و شبکهٔ سفارش (home.css). */

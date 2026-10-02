@@ -68,6 +68,10 @@ export type AdminErrorCode =
   | 'setting_not_found'
   | 'invalid_setting'
   | 'setting_changed'
+  /** مسیر خرید روی سایت (برش ۷٫۵، ADR-052): آماده نیست؛ مخاطبش عوض شد؛ پیوند پیش‌نمایش فقط در «پیش‌نمایش مالک». */
+  | 'checkout_not_ready'
+  | 'checkout_changed'
+  | 'checkout_not_preview'
   | 'invalid_holiday'
   | 'holiday_exists'
   | 'holiday_missing'

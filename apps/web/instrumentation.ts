@@ -9,7 +9,8 @@
  * دادهٔ پایه (استان‌ها و شهرها، تعرفهٔ پایه اگر هیچ تعرفه‌ای نیست، پیش‌فرض‌های `settings`) در کد
  * تعریف شده و اینجا به پایگاه داده می‌رسد؛ idempotent است (`seedReferenceData`، برش ۳).
  *
- * پیش از همه، یک خط حالت مسیر خرید (`CHECKOUT_MODE`، ADR-035)، حتی بی پایگاه داده.
+ * پیش از همه، یک خط حالت مسیر خرید (`CHECKOUT_MODE`، ADR-035)، حتی بی پایگاه داده. خط `live` آمادگی است (برش ۷٫۵، ADR-052):
+ * «✓ مسیر خرید: live — زیبال و sms.ir؛ مخاطب از پنل» یا «✗ … خاموش» با نام تکه، که بعد از مهاجرت از پایگاه داده خوانده می‌شود.
  *
  * شکست هیچ‌کدام سرور را نمی‌کشد: قیمت مرورگر بدون پایگاه داده هم کار می‌کند و
  * آپلود فقط ۵۰۳ می‌دهد (بی‌صدا). ولی بلند لاگ می‌شود.
@@ -20,15 +21,28 @@ export async function register() {
   // حالت مسیر خرید (ADR-035)، یک خط: صاحب پروژه بعد از استقرار «مسیر خرید: off» را می‌بیند.
   const { configuredMode, describeMode, describePayments, describeSms, sessionSecretOf } = await import('./lib/server/checkoutMode');
   const mode = configuredMode(process.env.CHECKOUT_MODE);
-  console.log(describeMode(mode, sessionSecretOf(process.env.SESSION_SECRET) !== null));
-  // پیامک و درگاه وب (برش‌های ۷٫۱ و ۷٫۲): کنسولی یا sms.ir، درگاه نمونه یا زیبال، بی مقدار کلید.
-  const sms = describeSms(mode);
+  if (mode !== 'live') console.log(describeMode(mode, sessionSecretOf(process.env.SESSION_SECRET) !== null));
+  // پیامک و درگاه وب (برش‌های ۷٫۱ و ۷٫۲؛ از ۷٫۵ مستقل از حالت، سؤال ۱۶۴): کنسولی یا sms.ir، درگاه نمونه یا زیبال، بی مقدار کلید.
+  const sms = describeSms(process.env);
   if (sms) console.log(sms);
-  const payments = describePayments(mode);
+  const payments = describePayments(process.env);
   if (payments) console.log(payments);
+  // آمادگی live (برش ۷٫۵): همان تابعی که هر درخواست می‌خواند، با همان لاگ «فقط با عوض شدن حال».
+  const readiness = async () => {
+    if (mode !== 'live') return;
+    try {
+      const { liveReadiness } = await import('./lib/server/checkoutContext');
+      await liveReadiness();
+    } catch (error) {
+      console.error('✗ مسیر خرید: live خواسته شد ولی آمادگی از پایگاه داده خوانده نشد — خاموش', error);
+    }
+  };
 
   const url = process.env.DATABASE_URL;
-  if (!url) return;
+  if (!url) {
+    await readiness();
+    return;
+  }
 
   const { resolve } = await import('node:path');
   const { existsSync } = await import('node:fs');
@@ -45,6 +59,7 @@ export async function register() {
     console.log('✓ مهاجرت‌ها اعمال شدند.');
   } catch (error) {
     console.error('✗ مهاجرت شکست خورد:', error);
+    if (mode === 'live') console.error('✗ مسیر خرید: live خواسته شد ولی مهاجرت پایگاه داده شکست خورد — خاموش');
     return;
   }
 
@@ -66,7 +81,9 @@ export async function register() {
     await conn.client.end();
   }
 
-  // استعلام خودکار پرداخت‌ها (برش ۷٫۲، سؤال ۱۴۴): پس از مهاجرت، فقط وقتی مسیر خرید روشن است.
+  await readiness();
+
+  // استعلام خودکار پرداخت‌ها (برش ۷٫۲، سؤال ۱۴۴؛ از ۷٫۵ سؤال ۱۶۴): پس از مهاجرت، در هر حالت، فقط اگر این سرور درگاهی دارد.
   const { startAutoInquiry } = await import('./lib/server/checkoutContext');
   startAutoInquiry();
 }

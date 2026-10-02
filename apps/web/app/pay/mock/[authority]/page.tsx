@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import { Logo } from '@jozveyar/ui';
 import { GateActions } from '../../../../components/checkout/GateActions';
 import { Tomans } from '../../../../components/checkout/parts';
-import { checkoutModeFor, checkoutServices } from '../../../../lib/server/checkoutContext';
+import { mockCheckoutService, mockGatewayOpen } from '../../../../lib/server/checkoutContext';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,8 +25,8 @@ export const metadata: Metadata = {
 export default async function MockGatewayPage({ params }: { params: Promise<{ authority: string }> }) {
   const { authority } = await params;
   const request = await headers();
-  if (checkoutModeFor([request.get('host'), request.get('x-forwarded-host')]) !== 'mock') notFound();
-  const result = await checkoutServices().checkout.mockGatewayView(authority);
+  if (!mockGatewayOpen([request.get('host'), request.get('x-forwarded-host')])) notFound();
+  const result = await mockCheckoutService().mockGatewayView(authority);
   if (!result.ok) notFound();
   const { merchant, orderNumber, amountRials, decided, payment, returnUrl } = result.value;
 

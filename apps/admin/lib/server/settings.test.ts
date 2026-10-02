@@ -7,12 +7,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CHECKOUT_AUDIENCE_EVENT,
   DEFAULT_SETTINGS,
   OFFICIAL_HOLIDAYS,
+  PREVIEW_LINK_TTL_MS,
+  PREVIEW_TOKEN,
+  previewHash,
   seal,
   serviceKeyContext,
   unseal,
   type AdminEventInput,
+  type AudienceChange,
+  type CheckoutPreviewStore,
   type KeyCheck,
   type SecretStore,
   type ServiceKeyName,
@@ -136,10 +142,13 @@ function service(
     smsStats?: SmsStats;
     smsInUse?: boolean;
     now?: () => Date;
+    /** مسیر خرید روی سایت (۷٫۵)؛ `false` یعنی پنلی بی آن. */
+    checkout?: false;
   } = {},
 ) {
   const settings = memorySettings();
   const secrets = memorySecrets();
+  const previews = memoryPreviews(settings);
   const logs: string[] = [];
   const stepUp = vi.fn(async (_session: AdminSession, _code: unknown, _ip: string): Promise<Result<true>> => options.stepUp ?? ok<true>(true));
   const panel = createPanelSettings({
@@ -153,10 +162,35 @@ function service(
     ...(options.zibal ? { zibal: options.zibal } : {}),
     ...(options.smsStats ? { smsStats: options.smsStats } : {}),
     ...(options.smsInUse ? { smsInUse: options.smsInUse } : {}),
+    ...(options.checkout === false ? {} : { checkout: { previews: previews.store, lastChange: async () => lastChangeOf(settings.events) } }),
     now: options.now ?? (() => NOW),
     log: (message, error) => logs.push(`${message} ${error ?? ''}`),
   });
-  return { panel, settings, secrets, stepUp, logs };
+  return { panel, settings, secrets, previews, stepUp, logs };
+}
+
+/**
+ * پیوندهای پیش‌نمایش با همان قرارداد پستگرس (`createCheckoutPreviewStore.create`): فقط وقتی مخاطب «پیش‌نمایش مالک» است؛ قفل، بستن
+ * بازنشده‌های قبلی و رویداد در تست یکپارچگی.
+ */
+function memoryPreviews(settings: ReturnType<typeof memorySettings>) {
+  const created: Parameters<CheckoutPreviewStore['create']>[0][] = [];
+  const store: Pick<CheckoutPreviewStore, 'create'> = {
+    async create(input) {
+      if (settings.values.get('checkout.audience') !== 'preview') return { ok: false, reason: 'audience' };
+      created.push(input);
+      return { ok: true, linkExpiresAt: new Date(input.at.getTime() + PREVIEW_LINK_TTL_MS) };
+    },
+  };
+  return { store, created };
+}
+
+/** همان `lastAudienceChange`: تازه‌ترین رویداد مخاطب. */
+function lastChangeOf(events: readonly AdminEventInput[]): AudienceChange | null {
+  const last = events.filter((event) => event.action === CHECKOUT_AUDIENCE_EVENT).at(-1);
+  if (!last) return null;
+  const detail = (last.detail ?? {}) as { from?: string; to?: string; fresh?: boolean };
+  return { at: last.at, by: 'سارا', from: detail.from ?? null, to: detail.to ?? null, fresh: detail.fresh === true };
 }
 
 /** هیچ‌جای این‌ها مقدار کلید نیست. */
@@ -847,5 +881,182 @@ describe('آزمایش کد پذیرندهٔ زیبال (۷٫۲)، روی سرو
     expect(secrets.events.at(-1)).toMatchObject({ action: 'settings.key_set', detail: { tested: 'skipped' } });
     expect(leaks(MERCHANT, secrets.events)).toBe(false);
     expect(leaks(OTHER, secrets.events)).toBe(false);
+  });
+});
+
+describe('مسیر خرید روی سایت (۷٫۵، ADR-052)', () => {
+  /** همان `.env` سایت زنده با `live`، و کلیدها از `.env`؛ نشانی برگشت سرتاسری. */
+  const LIVE_ENV: Record<string, string> = {
+    CHECKOUT_MODE: 'live',
+    PAYMENT_PROVIDER: 'zibal',
+    SMS_PROVIDER: 'smsir',
+    PAYMENT_MERCHANT_ID: 'zibal-merchant-51e0',
+    SMS_API_KEY: ENV_VALUE,
+    SMS_OTP_TEMPLATE: '100001',
+    SMS_PAID_TEMPLATE: '100002',
+    SMS_TRACKING_TEMPLATE: '100003',
+    PAYMENT_CALLBACK_URL: 'http://127.0.0.1:3102/pay/callback',
+    DATABASE_URL: 'postgresql://x@127.0.0.1/x',
+    SESSION_SECRET: 's'.repeat(64),
+  };
+  const live = (over: Record<string, string> = {}) => service({ env: { ...LIVE_ENV, ...over } });
+  const audienceEvents = (events: readonly AdminEventInput[]) => events.filter((event) => event.action === CHECKOUT_AUDIENCE_EVENT);
+
+  it('کارت فقط برای مالک (`settings.edit`) و فقط با مسیر خرید؛ آمادگی با همین .env و کلیدهای پنل، مخاطب پیش‌فرض «پیش‌نمایش مالک»', async () => {
+    const { panel } = live();
+    const owner = await panel.overview(OWNER);
+    if (!owner.ok) throw new Error(owner.error);
+    expect(owner.value.checkout).toMatchObject({ mode: 'live', audience: 'preview', since: null, readiness: { requested: true, ready: true } });
+    const keysOnly = await panel.overview(session(['secrets.edit']));
+    expect(keysOnly.ok && keysOnly.value.checkout).toBeNull();
+    const without = await service({ env: LIVE_ENV, checkout: false }).panel.overview(OWNER);
+    expect(without.ok && without.value.checkout).toBeNull();
+    // یک کلید کم: خاموش، با همان تکه؛ کلید پنل بر .env مقدم (ADR-041) و پنل خواندنی‌اش را می‌سنجد.
+    const missing = service({ env: { ...LIVE_ENV, SMS_TRACKING_TEMPLATE: '' } });
+    const off = await missing.panel.overview(OWNER);
+    expect(off.ok && off.value.checkout!.readiness.ready).toBe(false);
+    missing.secrets.rows.set('SMS_TRACKING_TEMPLATE', panelRow('SMS_TRACKING_TEMPLATE', '100003'));
+    const back = await missing.panel.overview(OWNER);
+    expect(back.ok && back.value.checkout!.readiness.ready).toBe(true);
+    // .env که live نمی‌خواهد: کارت هست، آماده نه.
+    const offEnv = await service({ env: { ...LIVE_ENV, CHECKOUT_MODE: 'off' } }).panel.overview(OWNER);
+    expect(offEnv.ok && offEnv.value.checkout).toMatchObject({ mode: 'off', readiness: { requested: false, ready: false } });
+  });
+
+  it('پلهٔ بالا با کد تازه، پلهٔ پایین بی کد؛ رویداد از، به و «با کد تازه» در همان نوشتن؛ «از امروز …» همان رویداد', async () => {
+    const { panel, settings, stepUp } = live();
+    const up = await panel.changeAudience(OWNER, { to: 'everyone', seen: 'preview', code: '123456' }, 'ip', 'up');
+    expect(up).toEqual({ ok: true, value: { audience: 'everyone', written: true, fresh: true } });
+    expect(stepUp).toHaveBeenCalledTimes(1);
+    expect(stepUp.mock.calls[0]![1]).toBe('123456');
+    expect(settings.values.get('checkout.audience')).toBe('everyone');
+
+    const down = await panel.changeAudience(OWNER, { to: 'paused', seen: 'everyone' }, 'ip', 'down');
+    expect(down).toEqual({ ok: true, value: { audience: 'paused', written: true, fresh: false } });
+    expect(stepUp).toHaveBeenCalledTimes(1);
+
+    // متوقف ← پیش‌نمایش هم پلهٔ بالاست (سؤال ۱۶۹).
+    expect(await panel.changeAudience(OWNER, { to: 'preview', seen: 'paused', code: '654321' }, 'ip', 'up')).toMatchObject({
+      ok: true,
+      value: { audience: 'preview', fresh: true },
+    });
+    expect(stepUp).toHaveBeenCalledTimes(2);
+    expect(audienceEvents(settings.events).map((event) => event.detail)).toEqual([
+      { from: 'preview', to: 'everyone', fresh: true },
+      { from: 'everyone', to: 'paused', fresh: false },
+      { from: 'paused', to: 'preview', fresh: true },
+    ]);
+    expect(audienceEvents(settings.events).every((event) => event.targetId === 'checkout.audience' && event.adminUserId === 'admin-1')).toBe(true);
+    const card = await panel.checkoutCard(OWNER);
+    expect(card.ok && card.value.since).toMatchObject({ from: 'paused', to: 'preview', fresh: true, by: 'سارا' });
+  });
+
+  it('هر ردی پیش از کد: بی مجوز، مقصد ناشناس، آماده نیست، «همان که دیده شد»، و جهتی که با فرمش نخواند؛ مقصد یکسان موفق، بی کد و بی رویداد', async () => {
+    const { panel, settings, stepUp } = live();
+    expect(await panel.changeAudience(OPERATOR, { to: 'everyone', seen: 'preview', code: '1' }, 'ip', 'up')).toMatchObject({ status: 403, error: 'forbidden' });
+    expect(await panel.changeAudience(session(['secrets.edit']), { to: 'paused', seen: 'preview' }, 'ip', 'down')).toMatchObject({ status: 403 });
+    for (const to of ['all', 'PAUSED', '', null, 3]) {
+      expect(await panel.changeAudience(OWNER, { to, seen: 'preview', code: '1' }, 'ip', 'up')).toMatchObject({ status: 400, error: 'invalid_setting' });
+    }
+    expect(await panel.changeAudience(OWNER, { to: 'everyone', seen: 'paused', code: '1' }, 'ip', 'up')).toMatchObject({ status: 409, error: 'checkout_changed' });
+    // درخواست ساختگی: پلهٔ بالا از فرم پایین (بی کد) یا پایین از فرم بالا؛ پیش از کد، تا کد خالی «ورود ناموفق» نشمارد.
+    expect(await panel.changeAudience(OWNER, { to: 'everyone', seen: 'preview' }, 'ip', 'down')).toMatchObject({ status: 400, error: 'invalid_setting' });
+    expect(await panel.changeAudience(OWNER, { to: 'paused', seen: 'preview', code: '1' }, 'ip', 'up')).toMatchObject({ status: 400, error: 'invalid_setting' });
+    expect(await panel.changeAudience(OWNER, { to: 'preview', seen: 'preview' }, 'ip', 'up')).toEqual({
+      ok: true,
+      value: { audience: 'preview', written: false, fresh: false },
+    });
+    expect(stepUp).not.toHaveBeenCalled();
+    expect(settings.events).toEqual([]);
+
+    const off = live({ SMS_PAID_TEMPLATE: '' });
+    expect(await off.panel.changeAudience(OWNER, { to: 'paused', seen: 'preview' }, 'ip', 'down')).toMatchObject({ status: 409, error: 'checkout_not_ready' });
+    expect(await off.panel.changeAudience(OWNER, { to: 'everyone', seen: 'preview', code: '1' }, 'ip', 'up')).toMatchObject({ status: 409, error: 'checkout_not_ready' });
+    expect(off.stepUp).not.toHaveBeenCalled();
+    expect(off.settings.values.get('checkout.audience')).toBe('preview');
+  });
+
+  it('کد نادرست یا قفل: همان خطای کد، بی نوشتن', async () => {
+    const { panel, settings } = service({ env: LIVE_ENV, stepUp: fail(401, 'wrong_code') });
+    expect(await panel.changeAudience(OWNER, { to: 'everyone', seen: 'preview', code: '000000' }, 'ip', 'up')).toMatchObject({ status: 401, error: 'wrong_code' });
+    expect(settings.values.get('checkout.audience')).toBe('preview');
+    expect(settings.events).toEqual([]);
+  });
+
+  it('زیر قفل دوباره «همان که دیده شد»: مخاطبی که میان کد و نوشتن جای دیگری عوض شد رونویسی نمی‌شود؛ همان مقصد موفق بی رویداد', async () => {
+    const { panel, settings } = live();
+    const change = settings.store.change.bind(settings.store);
+    settings.store.change = async (input) => {
+      settings.values.set('checkout.audience', 'paused');
+      return change(input);
+    };
+    expect(await panel.changeAudience(OWNER, { to: 'everyone', seen: 'preview', code: '1' }, 'ip', 'up')).toMatchObject({ status: 409, error: 'checkout_changed' });
+    expect(settings.values.get('checkout.audience')).toBe('paused');
+    settings.store.change = async (input) => {
+      settings.values.set('checkout.audience', 'everyone');
+      return change(input);
+    };
+    settings.values.set('checkout.audience', 'preview');
+    expect(await panel.changeAudience(OWNER, { to: 'everyone', seen: 'preview', code: '1' }, 'ip', 'up')).toEqual({
+      ok: true,
+      value: { audience: 'everyone', written: false, fresh: false },
+    });
+    expect(audienceEvents(settings.events)).toEqual([]);
+  });
+
+  it('پیوند پیش‌نمایش: بی کد، فقط در «پیش‌نمایش مالک» و فقط آماده؛ مبدأ از نشانی برگشت؛ از توکن فقط هش، و هیچ‌جای لاگ نیست', async () => {
+    const { panel, previews, stepUp, settings, logs } = live();
+    const result = await panel.createPreview(OWNER, 'ip');
+    if (!result.ok) throw new Error(result.error);
+    const match = /^http:\/\/127\.0\.0\.1:3102\/preview\/([A-Za-z0-9_-]+)$/.exec(result.value.url);
+    expect(match).not.toBeNull();
+    const token = match![1]!;
+    expect(PREVIEW_TOKEN.test(token)).toBe(true);
+    expect(previews.created).toHaveLength(1);
+    expect(previews.created[0]).toMatchObject({ tokenHash: previewHash(token), at: NOW, actor: { adminUserId: 'admin-1' } });
+    expect(JSON.stringify(previews.created)).not.toContain(token);
+    expect(result.value.expiresAt).toEqual(new Date(NOW.getTime() + 15 * 60_000));
+    expect(stepUp).not.toHaveBeenCalled();
+    expect(logs.join('\n')).not.toContain(token);
+    // هر بار توکن تازه.
+    const again = await panel.createPreview(OWNER, 'ip');
+    expect(again.ok && again.value.url).not.toBe(result.value.url);
+
+    expect(await panel.createPreview(OPERATOR, 'ip')).toMatchObject({ status: 403 });
+    settings.values.set('checkout.audience', 'everyone');
+    expect(await panel.createPreview(OWNER, 'ip')).toMatchObject({ status: 409, error: 'checkout_not_preview' });
+    const off = live({ PAYMENT_CALLBACK_URL: 'https://jozveyar.com/pay/callbak' });
+    expect(await off.panel.createPreview(OWNER, 'ip')).toMatchObject({ status: 409, error: 'checkout_not_ready' });
+    expect(off.previews.created).toEqual([]);
+    // سایت زنده: مبدأ همان jozveyar.com.
+    const prod = live({ PAYMENT_CALLBACK_URL: 'https://jozveyar.com/pay/callback' });
+    const link = await prod.panel.createPreview(OWNER, 'ip');
+    expect(link.ok && link.value.url.startsWith('https://jozveyar.com/preview/')).toBe(true);
+  });
+
+  it('سطر پیشخوان: فقط با live، برای مالک و متصدی (`orders.money`)، نه چاپخانه', async () => {
+    const { panel } = live();
+    expect(await panel.checkoutStatus(OWNER)).toMatchObject({ mode: 'live', audience: 'preview', readiness: { ready: true } });
+    expect(await panel.checkoutStatus(session(['orders.read', 'orders.money']))).toMatchObject({ audience: 'preview' });
+    expect(await panel.checkoutStatus(session(['orders.read']))).toBeNull();
+    expect(await service({ env: { ...LIVE_ENV, CHECKOUT_MODE: 'off' } }).panel.checkoutStatus(OWNER)).toBeNull();
+    expect(await service({ env: { ...LIVE_ENV, CHECKOUT_MODE: 'mock' } }).panel.checkoutStatus(OWNER)).toBeNull();
+    expect(await service({ env: LIVE_ENV, checkout: false }).panel.checkoutStatus(OWNER)).toBeNull();
+    // آماده نیست هم سطر است (خاموش، با چرایش).
+    expect(await live({ SMS_OTP_TEMPLATE: '' }).panel.checkoutStatus(OWNER)).toMatchObject({ readiness: { requested: true, ready: false } });
+  });
+
+  it('صفحهٔ «باز کردن»: کارت با اعتبار sms.ir اگر خوانده شد؛ فقط مالک', async () => {
+    const { panel, secrets } = live();
+    const card = await panel.checkoutCard(OWNER);
+    expect(card).toMatchObject({ ok: true, value: { audience: 'preview', credit: null } });
+    expect(await panel.checkoutCard(OPERATOR)).toMatchObject({ status: 403 });
+    // همان خواندن کارت «اعتبار پیامک»: «آزمایش» درست کلید API با اعتبار، عددش روی کارت؛ «آزمایش» ردشدهٔ بعدی، دوباره هیچ.
+    const keyTest = (detail: Record<string, unknown>, at: Date) =>
+      secrets.events.push({ adminUserId: 'admin-1', action: 'settings.key_test', targetType: 'service_key', targetId: 'SMS_API_KEY', detail: { name: 'SMS_API_KEY', subject: 'current', ...detail }, at });
+    keyTest({ outcome: 'ok', credit: 184_200 }, new Date(NOW.getTime() - 60_000));
+    expect(await panel.checkoutCard(OWNER)).toMatchObject({ ok: true, value: { audience: 'preview', credit: 184_200 } });
+    keyTest({ outcome: 'rejected', http: 401 }, NOW);
+    expect(await panel.checkoutCard(OWNER)).toMatchObject({ ok: true, value: { credit: null } });
   });
 });

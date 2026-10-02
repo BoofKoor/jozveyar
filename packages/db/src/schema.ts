@@ -1411,6 +1411,28 @@ export const serviceSecrets = pgTable(
   ],
 );
 
+/**
+ * پیش‌نمایش مسیر خرید (برش ۷٫۵، ADR-052، سؤال‌های ۱۶۷ و ۱۷۰): مالک در «تنظیمات» پیوند یک‌باره‌ای می‌سازد که ۱۵ دقیقه کار می‌کند؛
+ * مرورگری که بازش کند (با دکمه و POST، نه GET) کوکی `jy_preview` می‌گیرد و ۲۴ ساعت مسیر خرید را با مخاطب «پیش‌نمایش مالک» می‌بیند. از
+ * پیوند و کوکی فقط هش (sha256)، مثل `admin_invites` و `admin_sessions`.
+ *
+ * - `created_by` بی کلید خارجی، مثل `service_secrets.updated_by`: ادمین پاک‌نشدنی است (`admin_users_no_delete`).
+ * - `closed_at`: پیوند تازه‌ای که مالک ساخت پیوند بازنشدهٔ قبلی را می‌بندد، و «خروج از پیش‌نمایش» ردیف بازشده را.
+ *
+ * محافظ‌ها (شکل هش‌ها، عمر پیوند و کوکی، یک بار باز شدن و بستن، ستون‌های منجمد، پاک‌نشدنی، و یک پیوند باز) در `0034`، دست‌نویس.
+ */
+export const checkoutPreviews = pgTable('checkout_previews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  linkExpiresAt: timestamp('link_expires_at', { withTimezone: true }).notNull(),
+  openedAt: timestamp('opened_at', { withTimezone: true }),
+  cookieHash: text('cookie_hash').unique(),
+  cookieExpiresAt: timestamp('cookie_expires_at', { withTimezone: true }),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+});
+
 /* ──────────────────────────── ارسال: ورود فایل پست و مرسوله‌ها (برش ۶٫۱، ADR-045، ADR-046) ──────────────────────────── */
 
 /** بایت خام؛ drizzle نوع آماده‌اش را ندارد. postgres.js آن را `Buffer` می‌دهد و می‌گیرد. */

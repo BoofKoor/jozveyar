@@ -113,6 +113,17 @@ import {
   type RefundStart,
 } from './refunds.js';
 import { refunds } from './schema.js';
+import {
+  CHECKOUT_AUDIENCE_EVENT,
+  CHECKOUT_PREVIEW_EVENT,
+  checkoutAudience,
+  createCheckoutPreviewStore,
+  gatewayRejection,
+  lastAudienceChange,
+} from './checkout.js';
+import { CHECKOUT_AUDIENCE_SETTING, DEFAULT_SETTINGS } from './reference.js';
+import { checkoutPreviews } from './schema.js';
+import { SETTINGS_LOCK } from './settings.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -7457,6 +7468,349 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(currentBands(await report().setting(REPORT_BANDS_SETTING))).toBe('tariff');
         expect(await readSetting((key) => report().setting(key), REPORT_BANDS_SETTING, () => {})).toBe('tariff');
       });
+    });
+  });
+  describe('مسیر خرید روی سایت روی پستگرس (برش ۷٫۵)', () => {
+    const MIN = 60_000;
+    let owner = '';
+    const actor = (): SettingsActor => ({ adminUserId: owner, ipHash: 'ip-hash' });
+    const hash = () => createHash('sha256').update(randomUUID()).digest('hex');
+    const previews = () => createCheckoutPreviewStore(conn);
+    const rows = () => conn.db.select().from(checkoutPreviews).orderBy(checkoutPreviews.createdAt);
+    const audienceTo = (value: string) =>
+      conn.db.update(settings).set({ value }).where(eq(settings.key, CHECKOUT_AUDIENCE_SETTING));
+    // «پس از» اکید و میکروثانیهٔ پستگرس (همان `tick` پیشخوان، برش ۷٫۲): هر زمان دو میلی‌ثانیه پس از هر چه پیش‌تر نوشته شد.
+    const tick = async () => {
+      const from = Date.now();
+      while (Date.now() < from + 2) await new Promise((resolve) => setTimeout(resolve, 1));
+      return new Date();
+    };
+
+    beforeAll(async () => {
+      await conn.db.execute(
+        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
+      owner = admin!.id;
+    });
+
+    beforeEach(async () => {
+      // پاک‌نشدنی است (0034)؛ TRUNCATE تریگر ردیفی ندارد.
+      await conn.db.execute(sql`TRUNCATE checkout_previews, admin_events`);
+      await audienceTo('preview');
+    });
+
+    it('مخاطب: پیش‌فرض دادهٔ پایه «پیش‌نمایش مالک»؛ مقدار خراب هم همان پیش‌فرض، نه ترکیدن', async () => {
+      expect(DEFAULT_SETTINGS[CHECKOUT_AUDIENCE_SETTING]).toBe('preview');
+      await conn.db.delete(settings).where(eq(settings.key, CHECKOUT_AUDIENCE_SETTING));
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      expect((await conn.db.select({ value: settings.value }).from(settings).where(eq(settings.key, CHECKOUT_AUDIENCE_SETTING)))[0]?.value).toBe(
+        'preview',
+      );
+      await audienceTo('everyone');
+      expect(await checkoutAudience(conn)).toBe('everyone');
+      await audienceTo('somebody');
+      expect(await checkoutAudience(conn, () => {})).toBe('preview');
+    });
+
+    it('پیوند پیش‌نمایش: ۱۵ دقیقه، رویداد در همان تراکنش، و پیوند تازه بازنشدهٔ قبلی را می‌بندد', async () => {
+      const first = hash();
+      const at = new Date('2026-10-05T07:00:00Z');
+      expect(await previews().create({ tokenHash: first, at, actor: actor() })).toEqual({ ok: true, linkExpiresAt: new Date(at.getTime() + 15 * MIN) });
+      const second = hash();
+      const later = new Date(at.getTime() + 5 * MIN);
+      expect(await previews().create({ tokenHash: second, at: later, actor: actor() })).toMatchObject({ ok: true });
+      const all = await rows();
+      expect(all.map((row) => [row.tokenHash, row.closedAt, row.openedAt])).toEqual([
+        [first, later, null],
+        [second, null, null],
+      ]);
+      expect(all[1]).toMatchObject({ createdBy: owner, createdAt: later, linkExpiresAt: new Date(later.getTime() + 15 * MIN) });
+      const events = await conn.db.select().from(adminEvents).orderBy(adminEvents.id);
+      expect(events.map((event) => [event.action, event.targetType, event.targetId, event.adminUserId])).toEqual([
+        [CHECKOUT_PREVIEW_EVENT, SETTING_TARGET, CHECKOUT_AUDIENCE_SETTING, owner],
+        [CHECKOUT_PREVIEW_EVENT, SETTING_TARGET, CHECKOUT_AUDIENCE_SETTING, owner],
+      ]);
+      expect(events[1]!.detail).toEqual({ preview: all[1]!.id, until: new Date(later.getTime() + 15 * MIN).toISOString() });
+      // هیچ هش یا توکنی در رویداد نیست.
+      expect(JSON.stringify(events)).not.toContain(second);
+      // پیوند بسته‌شده دیگر باز نمی‌شود؛ تازه باز می‌شود.
+      expect(await previews().link(first, later)).toBeNull();
+      expect(await previews().link(second, later)).toEqual({ linkExpiresAt: new Date(later.getTime() + 15 * MIN) });
+    });
+
+    it('ساختن فقط در مخاطب «پیش‌نمایش»: در «همه» و «متوقف» نه ردیف، نه رویداد', async () => {
+      for (const audience of ['everyone', 'paused']) {
+        await audienceTo(audience);
+        expect(await previews().create({ tokenHash: hash(), at: new Date(), actor: actor() })).toEqual({ ok: false, reason: 'audience' });
+      }
+      expect(await rows()).toEqual([]);
+      expect(await conn.db.select().from(adminEvents)).toEqual([]);
+    });
+
+    it('عوض شدن مخاطب و ساختن پیوند پشت‌سرهم‌اند (یک قفل): پیوند پس از «همه» ساخته نمی‌شود', async () => {
+      const held = await conn.client.reserve();
+      try {
+        await held`BEGIN`;
+        await held`SELECT pg_advisory_xact_lock(${SETTINGS_LOCK})`;
+        await held`UPDATE settings SET value = '"everyone"'::jsonb WHERE key = ${CHECKOUT_AUDIENCE_SETTING}`;
+        const pending = previews().create({ tokenHash: hash(), at: new Date(), actor: actor() });
+        // هنوز پشت قفل است.
+        expect(await Promise.race([pending.then(() => 'done'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 200))])).toBe('waiting');
+        await held`COMMIT`;
+        expect(await pending).toEqual({ ok: false, reason: 'audience' });
+      } finally {
+        await held`ROLLBACK`.catch(() => {});
+        held.release();
+      }
+      expect(await rows()).toEqual([]);
+    });
+
+    it('باز کردن: یک بار، فقط پیش از انقضا و فقط اگر بسته نشده؛ کوکی ۲۴ ساعت', async () => {
+      const at = new Date('2026-10-05T07:00:00Z');
+      const token = hash();
+      await previews().create({ tokenHash: token, at, actor: actor() });
+      // صفحهٔ پیوند (GET، بی مصرف) همان مرز را دارد: یک میلی‌ثانیه پیش از انقضا هنوز باز می‌شود، درست در لحظهٔ انقضا «دیگر کار نمی‌کند».
+      expect(await previews().link(token, new Date(at.getTime() + 15 * MIN - 1))).toEqual({ linkExpiresAt: new Date(at.getTime() + 15 * MIN) });
+      expect(await previews().link(token, new Date(at.getTime() + 15 * MIN))).toBeNull();
+      // درست در لحظهٔ انقضا دیگر باز نمی‌شود.
+      expect(await previews().open({ tokenHash: token, cookieHash: hash(), at: new Date(at.getTime() + 15 * MIN) })).toBeNull();
+      const cookie = hash();
+      const openedAt = new Date(at.getTime() + 15 * MIN - 1);
+      expect(await previews().open({ tokenHash: token, cookieHash: cookie, at: openedAt })).toEqual({
+        cookieExpiresAt: new Date(openedAt.getTime() + 24 * 60 * MIN),
+      });
+      // دوباره نه، با کوکی دیگر هم نه.
+      expect(await previews().open({ tokenHash: token, cookieHash: hash(), at: openedAt })).toBeNull();
+      expect(await previews().link(token, at)).toBeNull();
+      // کوکی تا ۲۴ ساعت زنده است، و همان لحظهٔ انقضا نه.
+      expect(await previews().session(cookie, new Date(openedAt.getTime() + 24 * 60 * MIN - 1))).toEqual({
+        cookieExpiresAt: new Date(openedAt.getTime() + 24 * 60 * MIN),
+      });
+      expect(await previews().session(cookie, new Date(openedAt.getTime() + 24 * 60 * MIN))).toBeNull();
+      expect(await previews().session(hash(), openedAt)).toBeNull();
+      // «خروج»: یک بار؛ بعدش کوکی مرده است.
+      expect(await previews().close(cookie, openedAt)).toBe(true);
+      expect(await previews().close(cookie, openedAt)).toBe(false);
+      expect(await previews().session(cookie, openedAt)).toBeNull();
+      // پیوند بسته‌شده‌ای که هنوز وقت دارد هم باز نمی‌شود (پیوند تازه بستش).
+      const old = hash();
+      await previews().create({ tokenHash: old, at: new Date(at.getTime() + 20 * MIN), actor: actor() });
+      await previews().create({ tokenHash: hash(), at: new Date(at.getTime() + 21 * MIN), actor: actor() });
+      expect(await previews().open({ tokenHash: old, cookieHash: hash(), at: new Date(at.getTime() + 22 * MIN) })).toBeNull();
+    });
+
+    it('دو باز کردن هم‌زمان یک پیوند: یکی کوکی می‌گیرد', async () => {
+      const at = new Date();
+      const token = hash();
+      await previews().create({ tokenHash: token, at, actor: actor() });
+      await Promise.all(Array.from({ length: 8 }, () => conn.db.execute(sql`SELECT pg_sleep(0.02)`)));
+      const opened = await Promise.all(Array.from({ length: 8 }, () => previews().open({ tokenHash: token, cookieHash: hash(), at })));
+      expect(opened.filter(Boolean)).toHaveLength(1);
+    });
+
+    it('آخرین تغییر مخاطب («از امروز 10:40، سارا»): تازه‌ترین رویداد خودش با نام کننده؛ پیوند پیش‌نمایش و تنظیم دیگر نه؛ دستور سرور بی نام', async () => {
+      expect(await lastAudienceChange(conn)).toBeNull();
+      const store = createSettingsStore(conn);
+      const move = (to: string, fresh: boolean, at: Date) =>
+        store.change({
+          key: CHECKOUT_AUDIENCE_SETTING,
+          action: CHECKOUT_AUDIENCE_EVENT,
+          at,
+          actor: { adminUserId: owner, ipHash: 'ip-hash' },
+          decide: (raw) => (raw === to ? { kind: 'same' } : { kind: 'write', value: to, detail: { from: raw, to, fresh } }),
+        });
+      const first = await tick();
+      expect(await move('everyone', true, first)).toEqual({ ok: true, written: true });
+      expect(await lastAudienceChange(conn)).toEqual({ at: first, by: 'سارا رضایی', from: 'preview', to: 'everyone', fresh: true });
+      // رویدادهای دیگر همان هدف (پیوند پیش‌نمایش) و تنظیم دیگر جای آخرین تغییر مخاطب را نمی‌گیرند.
+      await previews().create({ tokenHash: hash(), at: await tick(), actor: actor() }).catch(() => null);
+      await conn.db.insert(adminEvents).values({
+        adminUserId: owner,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        targetType: SETTING_TARGET,
+        targetId: 'order.sla_days',
+        detail: { from: 'x', to: 'y' },
+        at: await tick(),
+      });
+      expect(await lastAudienceChange(conn)).toMatchObject({ at: first, to: 'everyone' });
+      // مقصد یکسان رویداد نمی‌نویسد؛ پلهٔ پایین بی کد؛ دستور روی سرور بی نام کننده.
+      expect(await move('everyone', true, await tick())).toEqual({ ok: true, written: false });
+      // دستور روی سرور، بی ادمین: همان ردیف و همان رویداد، بی نام کننده.
+      const down = await tick();
+      await conn.db.execute(sql`UPDATE settings SET value = '"paused"'::jsonb WHERE key = ${CHECKOUT_AUDIENCE_SETTING}`);
+      await conn.db.insert(adminEvents).values({
+        adminUserId: null,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        targetType: SETTING_TARGET,
+        targetId: CHECKOUT_AUDIENCE_SETTING,
+        detail: { from: 'everyone', to: 'paused', fresh: false },
+        at: down,
+      });
+      expect(await lastAudienceChange(conn)).toEqual({ at: down, by: null, from: 'everyone', to: 'paused', fresh: false });
+      // دو رویداد در یک لحظه: تازه‌تر به شناسه.
+      await move('preview', true, down);
+      expect(await lastAudienceChange(conn)).toMatchObject({ at: down, from: 'paused', to: 'preview', by: 'سارا رضایی' });
+      // جزئیات خراب: بی از و به، نه ترکیدن.
+      const broken = await tick();
+      await conn.db.insert(adminEvents).values({
+        adminUserId: owner,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        targetType: SETTING_TARGET,
+        targetId: CHECKOUT_AUDIENCE_SETTING,
+        detail: { from: 7, fresh: 'yes' },
+        at: broken,
+      });
+      expect(await lastAudienceChange(conn)).toEqual({ at: broken, by: 'سارا رضایی', from: null, to: null, fresh: false });
+    });
+
+    it('دو پیوند هم‌زمان: هر دو ساخته می‌شوند، پشت‌سرهم، و یک پیوند باز می‌ماند', async () => {
+      const made = await Promise.all(Array.from({ length: 6 }, () => tick().then((at) => previews().create({ tokenHash: hash(), at, actor: actor() }))));
+      expect(made.every((result) => result.ok)).toBe(true);
+      const all = await rows();
+      expect(all).toHaveLength(6);
+      expect(all.filter((row) => row.openedAt === null && row.closedAt === null)).toHaveLength(1);
+    });
+
+    describe('محافظ‌های 0034', () => {
+      const base = (at = new Date('2026-10-05T07:00:00Z')) => ({
+        tokenHash: hash(),
+        createdBy: randomUUID(),
+        createdAt: at,
+        linkExpiresAt: new Date(at.getTime() + 15 * MIN),
+      });
+      const insert = (values: Partial<typeof checkoutPreviews.$inferInsert> = {}) =>
+        conn.db
+          .insert(checkoutPreviews)
+          .values({ ...base(), ...values })
+          .returning();
+      const update = (id: string, values: Partial<typeof checkoutPreviews.$inferInsert>) =>
+        conn.db.update(checkoutPreviews).set(values).where(eq(checkoutPreviews.id, id));
+      const opened = async () => {
+        const [row] = await insert();
+        const at = new Date(row!.createdAt.getTime() + MIN);
+        await update(row!.id, { openedAt: at, cookieHash: hash(), cookieExpiresAt: new Date(at.getTime() + 24 * 60 * MIN) });
+        return { ...row!, openedAt: at };
+      };
+
+      it('شکل هش‌ها: فقط ۶۴ رقم hex کوچک', async () => {
+        expect(await rejectedConstraint(insert({ tokenHash: 'abc' }))).toBe('checkout_previews_token_hash');
+        expect(await rejectedConstraint(insert({ tokenHash: hash().toUpperCase() }))).toBe('checkout_previews_token_hash');
+        const [row] = await insert();
+        const at = new Date(row!.createdAt.getTime() + MIN);
+        expect(
+          await rejectedConstraint(update(row!.id, { openedAt: at, cookieHash: 'x'.repeat(64), cookieExpiresAt: new Date(at.getTime() + 24 * 60 * MIN) })),
+        ).toBe('checkout_previews_cookie_hash');
+      });
+
+      it('عمر پیوند دقیقاً ۱۵ دقیقه و کوکی دقیقاً ۲۴ ساعت', async () => {
+        const at = new Date('2026-10-05T07:00:00Z');
+        expect(await rejectedConstraint(insert({ createdAt: at, linkExpiresAt: new Date(at.getTime() + 16 * MIN) }))).toBe('checkout_previews_link_ttl');
+        const [row] = await insert();
+        const openAt = new Date(row!.createdAt.getTime() + MIN);
+        expect(
+          await rejectedConstraint(update(row!.id, { openedAt: openAt, cookieHash: hash(), cookieExpiresAt: new Date(openAt.getTime() + 48 * 60 * MIN) })),
+        ).toBe('checkout_previews_cookie_ttl');
+      });
+
+      it('باز شدن، هش کوکی و انقضای کوکی با هم', async () => {
+        const [row] = await insert();
+        expect(await rejectedConstraint(update(row!.id, { openedAt: new Date(row!.createdAt.getTime() + MIN) }))).toBe('checkout_previews_opened');
+      });
+
+      it('ردیف تازه باز نشده و بسته نشده است', async () => {
+        const at = new Date('2026-10-05T07:00:00Z');
+        expect(await rejectedConstraint(insert({ closedAt: at }))).toBe('checkout_previews_insert_state');
+        expect(
+          await rejectedConstraint(insert({ openedAt: at, cookieHash: hash(), cookieExpiresAt: new Date(at.getTime() + 24 * 60 * MIN) })),
+        ).toBe('checkout_previews_insert_state');
+      });
+
+      it('هش پیوند، سازنده و زمان‌های ساختن منجمد', async () => {
+        const [row] = await insert();
+        expect(await rejectedConstraint(update(row!.id, { tokenHash: hash() }))).toBe('checkout_previews_frozen');
+        expect(await rejectedConstraint(update(row!.id, { createdBy: randomUUID() }))).toBe('checkout_previews_frozen');
+        expect(
+          await rejectedConstraint(
+            update(row!.id, { createdAt: new Date(row!.createdAt.getTime() + MIN), linkExpiresAt: new Date(row!.linkExpiresAt.getTime() + MIN) }),
+          ),
+        ).toBe('checkout_previews_frozen');
+      });
+
+      it('یک بار باز شدن: کوکی و زمانش پس از آن عوض نمی‌شوند', async () => {
+        const row = await opened();
+        expect(await rejectedConstraint(update(row.id, { cookieHash: hash() }))).toBe('checkout_previews_open_once');
+        const again = new Date(row.openedAt.getTime() + MIN);
+        expect(
+          await rejectedConstraint(update(row.id, { openedAt: again, cookieExpiresAt: new Date(again.getTime() + 24 * 60 * MIN) })),
+        ).toBe('checkout_previews_open_once');
+      });
+
+      it('باز شدن فقط پیش از انقضا و فقط اگر بسته نشده', async () => {
+        const [late] = await insert();
+        const at = late!.linkExpiresAt;
+        expect(
+          await rejectedConstraint(update(late!.id, { openedAt: at, cookieHash: hash(), cookieExpiresAt: new Date(at.getTime() + 24 * 60 * MIN) })),
+        ).toBe('checkout_previews_open_window');
+        await update(late!.id, { closedAt: late!.createdAt });
+        const [closed] = await insert();
+        await update(closed!.id, { closedAt: closed!.createdAt });
+        const openAt = new Date(closed!.createdAt.getTime() + MIN);
+        expect(
+          await rejectedConstraint(update(closed!.id, { openedAt: openAt, cookieHash: hash(), cookieExpiresAt: new Date(openAt.getTime() + 24 * 60 * MIN) })),
+        ).toBe('checkout_previews_open_window');
+      });
+
+      it('بستن یک بار، و پاک‌نشدنی', async () => {
+        const row = await opened();
+        await update(row.id, { closedAt: row.openedAt });
+        expect(await rejectedConstraint(update(row.id, { closedAt: new Date(row.openedAt.getTime() + MIN) }))).toBe('checkout_previews_close_once');
+        expect(await rejectedConstraint(update(row.id, { closedAt: null }))).toBe('checkout_previews_close_once');
+        expect(await rejectedConstraint(conn.db.delete(checkoutPreviews).where(eq(checkoutPreviews.id, row.id)))).toBe(
+          'checkout_previews_append_only',
+        );
+      });
+
+      it('یک پیوند باز در هر زمان؛ بازشده یا بسته‌شده شمرده نمی‌شود', async () => {
+        const [first] = await insert();
+        expect(await rejectedConstraint(insert())).toBe('checkout_previews_one_open');
+        const at = new Date(first!.createdAt.getTime() + MIN);
+        await update(first!.id, { openedAt: at, cookieHash: hash(), cookieExpiresAt: new Date(at.getTime() + 24 * 60 * MIN) });
+        const [second] = await insert();
+        expect(await rejectedConstraint(insert())).toBe('checkout_previews_one_open');
+        await update(second!.id, { closedAt: second!.createdAt });
+        expect(await insert()).toHaveLength(1);
+      });
+    });
+
+    it('درگاه آماده نیست: همان شرط پیشخوان، با پنجره', async () => {
+      const at = await tick();
+      await conn.db.insert(adminEvents).values({
+        adminUserId: null,
+        action: 'payments.gateway_rejected',
+        targetType: 'order',
+        targetId: randomUUID(),
+        detail: { orderNumber: 10001, provider: 'zibal', result: 115 },
+        at,
+      });
+      expect(await gatewayRejection(conn, new Date(at.getTime() - MIN))).toEqual({ at, orderNumber: null, provider: 'zibal', result: 115, stage: 'start' });
+      // بیرون از پنجره نه.
+      expect(await gatewayRejection(conn, at)).toBeNull();
+      const merchantTest = async (outcome: 'ok' | 'rejected') =>
+        conn.db.insert(adminEvents).values({
+          adminUserId: owner,
+          action: 'settings.key_test',
+          targetType: SERVICE_KEY_TARGET,
+          targetId: 'PAYMENT_MERCHANT_ID',
+          detail: { name: 'PAYMENT_MERCHANT_ID', subject: 'current', outcome, ...(outcome === 'rejected' ? { status: 115 } : {}) },
+          at: await tick(),
+        });
+      // «آزمایش» ردشدهٔ کد پذیرنده آماده‌اش نمی‌کند؛ «آزمایش» درست پس از آن می‌کند.
+      await merchantTest('rejected');
+      expect(await gatewayRejection(conn, new Date(at.getTime() - MIN))).toMatchObject({ at, result: 115, stage: 'start' });
+      await merchantTest('ok');
+      expect(await gatewayRejection(conn, new Date(at.getTime() - MIN))).toBeNull();
     });
   });
 });
