@@ -8,6 +8,7 @@ import { formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } fro
 import { DueBadge } from '../../../components/OrderBadges';
 import { OrderRows } from '../../../components/OrderRows';
 import { Segments } from '../../../components/Segments';
+import { liveAlert } from '../../../lib/checkout';
 import { dayText, whenText } from '../../../lib/format';
 import { panelPath } from '../../../lib/gate';
 import { statsSegs } from '../../../lib/orders';
@@ -28,6 +29,10 @@ function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: read
     </Fragment>
   ));
 }
+
+/** رنگ سطر وضعیت مسیر خرید (کلاس کامل و ثابت، برای آیکون‌های کیت). */
+const LIVE_NOTES = { error: 'jy-note jy-note--error', warning: 'jy-note jy-note--warning', info: 'jy-note jy-note--info' } as const;
+const LIVE_ICONS = { error: 'jy-icon jy-icon-error', warning: 'jy-icon jy-icon-warning', info: 'jy-icon jy-icon-info' } as const;
 
 /** نام هر تلاش بسته‌ای که پولش نزد درگاه ماند، در «پول مشتری برمی‌گردد» (برش ۷٫۲، طرح `m-dash-alerts`). */
 const HELD_KIND: Record<string, string> = {
@@ -53,7 +58,7 @@ function HeldList({ gate, held }: { gate: string; held: readonly { orderNumber: 
  * پیشخوان (طرح پنل، ADR-039): چهار کاشی مهلت تحویل به پست به روز تهران (سفارش‌هایی که هنوز به پست نرسیده‌اند)، سطر آمار
  * (چندتا در حال چاپ است، و هفتهٔ گذشته چندتا به‌موقع به پست رسید)، هشدارها (PDF جزوه‌ای که ساخته نشد، پرداخت بی برگشت، از ۵٫۲
  * سفارش «در صف چاپ» بی چاپخانه، از ۶٫۲ سطرهای صف تأیید و «کد رهگیری ندارد»، و از ۷٫۱ سقف کد پیامکی کل سایت، اعتبار کم sms.ir و
- * پیامک پرداختی که نرفت؛ به ترتیب خطا، هشدار و خبر، سؤال ۱۴۰)، و صف تحویل به ترتیب مهلت. کاربر چاپخانه (۵٫۳، طرح
+ * پیامک پرداختی که نرفت؛ به ترتیب خطا، هشدار و خبر، سؤال ۱۴۰؛ از ۷٫۵ وضعیت مسیر خرید روی سایت بالای همه)، و صف تحویل به ترتیب مهلت. کاربر چاپخانه (۵٫۳، طرح
  * `m-dash` با نقش «چاپخانه») همان را فقط برای سفارش‌های چاپخانهٔ خودش می‌بیند، بی مبلغ؛ «کد رهگیری ندارد» هم فقط سفارش‌های خودش، با
  * «فایل پست آن روز را بده» (تصمیم ۸۲). بقیهٔ هشدارها هرگز به او نمی‌رسند (سفارش پرداخت‌نشده و بی چاپخانه در محدوده‌اش نیست، و صف
  * تأیید با مالک و متصدی است).
@@ -77,8 +82,11 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   const result = await orders.dashboard(session);
   if (!result.ok) return head;
   const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked } = result.value;
-  // هشدارهای پیامک (۷٫۱): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
-  const sms = await settings.smsAlerts(session);
+  // هشدارهای پیامک (۷٫۱) و وضعیت مسیر خرید روی سایت (۷٫۵): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
+  const [sms, checkout] = await Promise.all([settings.smsAlerts(session), settings.checkoutStatus(session)]);
+  const live = liveAlert(checkout, now);
+  // درگاه آماده نیست (کد ۱۱۵ یا کد پذیرنده) و سایت `live` آماده است: مشتری تازه «موقتاً متوقف» می‌بیند (سؤال‌های ۱۳۹ و ۱۶۶).
+  const pausedByGateway = checkout?.readiness.ready === true;
   const cap = sms.otpCap ? otpCapAlert(sms.otpCap, now) : null;
   const low = sms.lowCredit;
   const settingsLink = can(session, 'settings.edit') ? (
@@ -147,7 +155,8 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
         ) : null}
       </section>
 
-      {alerts.failedPdf.length > 0 ||
+      {live ||
+      alerts.failedPdf.length > 0 ||
       unreturned > 0 ||
       rejected ||
       alerts.mismatched.length > 0 ||
@@ -164,6 +173,25 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
       low ? (
         // ترتیب (سؤال ۱۴۰): اول آنچه پول یا مسیر خرید همه را می‌بندد (خطا)، بعد آنچه کار مالک یا متصدی می‌خواهد (هشدار)، بعد خبر.
         <div className="ad-alerts">
+          {live ? (
+            // وضعیت مسیر خرید روی سایت، بالای همه (۷٫۵، سؤال ۱۴۰): فقط وقتی `.env` `live` می‌خواهد، و وقتی برای همه باز است هیچ.
+            <p className={LIVE_NOTES[live.tone]} data-alert="checkout" data-live={live.kind}>
+              <span className={LIVE_ICONS[live.tone]} aria-hidden="true" />
+              <span>
+                <b>{live.head}</b>
+                <Segments segs={live.text} />
+                {can(session, 'settings.edit') ? (
+                  <>
+                    {' '}
+                    <Link className="jy-link" href={panelPath(gate, '/settings#checkout')}>
+                      {live.link}
+                    </Link>
+                    .
+                  </>
+                ) : null}
+              </span>
+            </p>
+          ) : null}
           {rejected ? (
             // درگاه شروع پرداخت را رد کرد و کار مالک است (۷٫۲، سؤال ۱۳۹): تا اولین شروع یا «آزمایش» درست کد پذیرنده.
             <p className="jy-note jy-note--error" data-alert="gateway">
@@ -178,8 +206,8 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
                       <OrderLinks gate={gate} numbers={[rejected.orderNumber]} />
                     </>
                   ) : null}
-                  . تا IP همین سرور در پنل زیبال ثبت نشود، پرداخت تازه شروع نمی‌شود و پرداخت‌های در راه تأیید نمی‌شوند (پولشان خودکار برمی‌گردد).
-                  بعد از ثبت IP، {merchantLink}
+                  . تا IP همین سرور در پنل زیبال ثبت نشود، پرداخت تازه شروع نمی‌شود و پرداخت‌های در راه تأیید نمی‌شوند (پولشان خودکار برمی‌گردد)
+                  {pausedByGateway ? '؛ برای همین مسیر خرید برای مشتری تازه «موقتاً متوقف» است.' : '.'} بعد از ثبت IP، {merchantLink}
                 </span>
               ) : (
                 <span>
@@ -191,7 +219,8 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
                       <OrderLinks gate={gate} numbers={[rejected.orderNumber]} />
                     </>
                   ) : null}
-                  . تا کد پذیرندهٔ درست نیاید، پرداخت تازه شروع نمی‌شود. کد را از پنل زیبال بردار؛ {merchantLink}
+                  . تا کد پذیرندهٔ درست نیاید، پرداخت تازه شروع نمی‌شود
+                  {pausedByGateway ? '؛ برای همین مسیر خرید برای مشتری تازه «موقتاً متوقف» است.' : '.'} کد را از پنل زیبال بردار؛ {merchantLink}
                 </span>
               )}
             </p>

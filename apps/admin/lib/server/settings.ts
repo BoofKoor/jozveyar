@@ -24,10 +24,15 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import { SETTING_SCHEMAS, type Holiday, type SettingKey, type SettingValue } from '@jozveyar/contracts';
+import { CHECKOUT_AUDIENCES, SETTING_SCHEMAS, type CheckoutAudience, type Holiday, type SettingKey, type SettingValue } from '@jozveyar/contracts';
 import {
+  CHECKOUT_AUDIENCE_EVENT,
+  CHECKOUT_AUDIENCE_SETTING,
   DEFAULT_SETTINGS,
   REPORT_BANDS_SETTING,
+  checkoutReadiness,
+  newPreviewToken,
+  previewHash,
   SERVICE_KEYS,
   bandsDecision,
   isServiceKeyName,
@@ -35,6 +40,9 @@ import {
   resolveServiceKey,
   seal,
   serviceKeyContext,
+  type AudienceChange,
+  type CheckoutPreviewStore,
+  type CheckoutReadiness,
   type KeyCheck,
   type ReportBands,
   type SecretStore,
@@ -94,8 +102,40 @@ export interface PanelSettingsDeps {
    * وگرنه فقط با «آزمایش» کلید API، تا پنلی که پیامک واقعی ندارد بی‌دلیل به sms.ir درخواست ندهد.
    */
   smsInUse?: boolean;
+  /**
+   * مسیر خرید روی سایت (برش ۷٫۵، ADR-052): پیوند پیش‌نمایش (`checkout_previews`) و آخرین تغییر مخاطب. آمادگی همان `checkoutReadiness`
+   * سایت است، با همین `.env` (پنل و وب یک `.env` دارند). بی آن کارت نیست.
+   */
+  checkout?: { previews: Pick<CheckoutPreviewStore, 'create'>; lastChange: () => Promise<AudienceChange | null> };
   now?: () => Date;
   log?: (message: string, error?: unknown) => void;
+}
+
+/** کارت «مسیر خرید روی سایت» (برش ۷٫۵، طرح `ad-live`). */
+export interface CheckoutCardView {
+  /** `CHECKOUT_MODE` همین `.env`. */
+  mode: 'off' | 'mock' | 'live';
+  readiness: CheckoutReadiness;
+  audience: CheckoutAudience;
+  /** آخرین تغییر مخاطب؛ null یعنی پیش‌فرض پس از استقرار. */
+  since: AudienceChange | null;
+}
+
+/** پیوند پیش‌نمایش تازه: فقط همین یک بار در پاسخ (مثل پیوند ثبت)، هرگز در نشانی، لاگ یا رویداد. */
+export interface PreviewLink {
+  url: string;
+  expiresAt: Date;
+}
+
+/** نردبان مخاطب (سؤال ۱۶۹): متوقف ← پیش‌نمایش ← همه؛ هر پلهٔ بالا کد تازه می‌خواهد، هر پلهٔ پایین نه. */
+export const AUDIENCE_RANK: Record<CheckoutAudience, number> = { paused: 0, preview: 1, everyone: 2 };
+
+const isAudience = (value: unknown): value is CheckoutAudience => typeof value === 'string' && (CHECKOUT_AUDIENCES as readonly string[]).includes(value);
+
+/** `CHECKOUT_MODE` این `.env`؛ هر چیز ناشناس `off`، مثل وب. */
+export function checkoutModeOf(env: Readonly<Record<string, string | undefined>>): CheckoutCardView['mode'] {
+  const mode = env.CHECKOUT_MODE?.trim().toLowerCase();
+  return mode === 'mock' || mode === 'live' ? mode : 'off';
 }
 
 /** نتیجهٔ «آزمایش» یک کلید با خود sms.ir؛ فقط کد و عدد پاسخ، هرگز متن. */
@@ -187,6 +227,8 @@ export interface SettingsView {
   credit: CreditView | null;
   /** کلیدها، اگر `secrets.edit`؛ به ترتیب `SERVICE_KEYS`. */
   keys: KeyView[];
+  /** کارت «مسیر خرید روی سایت» (برش ۷٫۵)؛ اگر `settings.edit`. */
+  checkout: CheckoutCardView | null;
 }
 
 /** نسخهٔ مقدار پنل یک کلید، بی خود مقدار: اثر انگشت مهروموم (که با هر ذخیره عوض می‌شود)، یا `none`. */
@@ -439,6 +481,15 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
     return ok({ key, value, written: result.written });
   }
 
+  /** آمادگی همین حالا (هر بار، بی کش؛ سؤال ۱۶۱)، با همان `.env` و کلیدهای پنل که سایت می‌خواند. */
+  const readiness = () => checkoutReadiness(deps.secrets, deps.env, deps.secretsKey);
+  const audienceNow = () => readSetting((key) => deps.settings.read(key), CHECKOUT_AUDIENCE_SETTING, log);
+
+  async function checkoutCard(): Promise<CheckoutCardView> {
+    const [ready, audience, since] = await Promise.all([readiness(), audienceNow(), deps.checkout!.lastChange()]);
+    return { mode: checkoutModeOf(deps.env), readiness: ready, audience, since };
+  }
+
   return {
     async overview(session: AdminSession): Promise<Result<SettingsView>> {
       const canSettings = can(session, 'settings.edit');
@@ -446,7 +497,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
       if (!canSettings && !canSecrets) return fail(403, 'forbidden');
       const read = (key: string) => deps.settings.read(key);
       const at = now();
-      const [values, rows, checks, usage] = await Promise.all([
+      const [values, rows, checks, usage, checkout] = await Promise.all([
         canSettings
           ? Promise.all([
               readSetting(read, 'order.sla_days', log),
@@ -461,6 +512,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
         canSecrets ? deps.secrets.list() : [],
         deps.secrets.lastChecks(),
         canSettings && deps.smsStats ? deps.smsStats.otpUsage(at) : null,
+        canSettings && deps.checkout ? checkoutCard() : null,
       ]);
       return ok({
         now: at,
@@ -488,6 +540,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               ),
             )
           : [],
+        checkout,
       });
     },
 
@@ -789,6 +842,82 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
         detail: { to: envOf(name) ? 'env' : 'empty' },
       });
       return done === 'ok' ? ok({ name }) : fail(409, 'key_changed', { name });
+    },
+
+    /**
+     * کارت «مسیر خرید روی سایت» تنها، برای صفحهٔ «باز کردن» (برش ۷٫۵، طرح `st-live-open`)؛ فقط مالک. با اعتبار sms.ir، اگر خوانده شد
+     * (همان خواندن کارت «اعتبار پیامک»، تا ۵ دقیقه یکی).
+     */
+    async checkoutCard(session: AdminSession): Promise<Result<CheckoutCardView & { credit: number | null }>> {
+      if (!can(session, 'settings.edit') || !deps.checkout) return fail(403, 'forbidden');
+      const [card, credit] = await Promise.all([checkoutCard(), deps.secrets.lastChecks().then(creditView)]);
+      return ok({ ...card, credit: credit.state === 'ok' ? credit.credit : null });
+    },
+
+    /**
+     * سطر وضعیت مسیر خرید بالای هشدارهای پیشخوان (برش ۷٫۵، سؤال ۱۴۰، طرح `m-dash-alerts`): فقط وقتی `.env` همین سرور `live`
+     * می‌خواهد، برای مالک و متصدی (`orders.money`)، نه چاپخانه. null یعنی سطری نیست.
+     */
+    async checkoutStatus(session: AdminSession): Promise<CheckoutCardView | null> {
+      if (!can(session, 'orders.money') || !deps.checkout || checkoutModeOf(deps.env) !== 'live') return null;
+      return checkoutCard();
+    },
+
+    /**
+     * مخاطب مسیر خرید (برش ۷٫۵، ADR-052، سؤال ۱۶۹): متوقف ← پیش‌نمایش مالک ← همه. هر پلهٔ بالا با کد تازه (متوقف ← پیش‌نمایش هم)،
+     * هر پلهٔ پایین بی کد و همان لحظه، چون فقط دسترسی کم می‌کند. تا سایت آماده نیست مخاطب عوض نمی‌شود. «همان که دیده شد» پیش از کد و
+     * دوباره زیر قفل؛ رویداد `settings.checkout_audience` (از، به، با کد تازه) در همان تراکنش. مقصد یکسان موفق است، بی کد و بی رویداد.
+     */
+    async changeAudience(
+      session: AdminSession,
+      input: { to: unknown; seen: unknown; code?: unknown },
+      ip: string,
+      /** فرم پلهٔ بالا (`up`، با کد) یا پایین (`down`، بی کد)؛ درخواستی که جهتش با فرمش نخواند پیش از کد رد می‌شود. */
+      direction: 'up' | 'down',
+    ): Promise<Result<{ audience: CheckoutAudience; written: boolean; fresh: boolean }>> {
+      if (!can(session, 'settings.edit') || !deps.checkout) return fail(403, 'forbidden');
+      if (!isAudience(input.to)) return fail(400, 'invalid_setting', { key: CHECKOUT_AUDIENCE_SETTING });
+      const to = input.to;
+      if (!(await readiness()).ready) return fail(409, 'checkout_not_ready');
+      const current = await audienceNow();
+      if (current === to) return ok({ audience: to, written: false, fresh: false });
+      const seen = text(input.seen);
+      if (current !== seen) return fail(409, 'checkout_changed');
+      const up = AUDIENCE_RANK[to] > AUDIENCE_RANK[current];
+      if (up !== (direction === 'up')) return fail(400, 'invalid_setting', { key: CHECKOUT_AUDIENCE_SETTING });
+      if (up) {
+        const stepped = await deps.stepUp(session, input.code, ip);
+        if (!stepped.ok) return stepped;
+      }
+      const result = await deps.settings.change({
+        key: CHECKOUT_AUDIENCE_SETTING,
+        action: CHECKOUT_AUDIENCE_EVENT,
+        at: now(),
+        actor: actor(session, ip),
+        decide: (raw) => {
+          const latest = effective('checkout.audience', raw);
+          if (latest === to) return { kind: 'same' };
+          if (latest !== seen) return { kind: 'reject', reason: 'changed' };
+          return { kind: 'write', value: to, detail: { from: latest, to, fresh: up } };
+        },
+      });
+      if (!result.ok) return fail(409, 'checkout_changed');
+      return ok({ audience: to, written: result.written, fresh: up && result.written });
+    },
+
+    /**
+     * پیوند پیش‌نمایش مالک (برش ۷٫۵، سؤال ۱۶۷): فقط وقتی سایت آماده است و مخاطب «پیش‌نمایش مالک»، بی کد تازه (به‌تنهایی دسترسی
+     * کسی را بیشتر از پیش‌نمایش نمی‌کند). مبدأ از `PAYMENT_CALLBACK_URL`؛ یک‌باره و ۱۵ دقیقه، پیوند تازه کهنه‌های بازنشده را می‌بندد،
+     * و از توکن فقط هش در پایگاه داده. خود پیوند فقط در همین پاسخ.
+     */
+    async createPreview(session: AdminSession, ip: string): Promise<Result<PreviewLink>> {
+      if (!can(session, 'settings.edit') || !deps.checkout) return fail(403, 'forbidden');
+      if (!(await readiness()).ready) return fail(409, 'checkout_not_ready');
+      const origin = new URL(deps.env.PAYMENT_CALLBACK_URL!.trim()).origin;
+      const token = newPreviewToken();
+      const created = await deps.checkout.previews.create({ tokenHash: previewHash(token), at: now(), actor: actor(session, ip) });
+      if (!created.ok) return fail(409, 'checkout_not_preview');
+      return ok({ url: `${origin}/preview/${token}`, expiresAt: created.linkExpiresAt });
     },
   };
 }

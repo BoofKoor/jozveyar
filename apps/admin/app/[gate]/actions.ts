@@ -968,3 +968,54 @@ export async function resetBandsAction(form: FormData): Promise<void> {
   const home = reportHome(gate, field(form, 'month'));
   redirect(withQuery(home, result.ok ? `done=bands&b=tariff&${doneMark()}#weights` : `e=${result.error}&${doneMark()}#weights`));
 }
+
+/* ───────────────────────── مسیر خرید روی سایت (۷٫۵) ───────────────────────── */
+
+/**
+ * پلهٔ پایین مخاطب (برش ۷٫۵، ADR-052، سؤال ۱۶۹): «توقف»، «توقف مسیر خرید» یا «برگرداندن به پیش‌نمایش»، بی کد و همان لحظه، چون فقط
+ * دسترسی کم می‌کند. به «تنظیمات» با پیام یا خطایش. پلهٔ بالا از این راه نمی‌گذرد: سرویس جهت را با فرم می‌سنجد، پیش از هر کد.
+ */
+export async function lowerAudienceAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await settings.changeAudience(session, { to: field(form, 'to'), seen: field(form, 'seen') }, await requestIp(), 'down');
+  const home = panelPath(gate, '/settings');
+  // خطای کارت با `ce`، جدا از `e` بقیهٔ کارت‌ها، تا «این مقدار پذیرفته نیست» تعطیلی‌ها با درخواست ساختگی مسیر خرید نیاید.
+  redirect(result.ok ? `${home}?done=audience&a=${result.value.audience}&${doneMark()}#checkout` : `${home}?ce=${result.error}&${doneMark()}#checkout`);
+}
+
+/** خطاهایی که صفحهٔ «باز کردن» با برگشت به خودش می‌گوید (`?e=`): وضعیت تازه از نو، با پیامش. */
+const RAISE_PAGE_ERRORS: readonly AdminErrorCode[] = ['checkout_changed', 'checkout_not_ready', 'invalid_setting', 'forbidden'];
+
+/**
+ * پلهٔ بالا با کد تازهٔ برنامهٔ تأیید (صفحهٔ «باز کردن مسیر خرید»، سؤال ۱۶۹): متوقف ← پیش‌نمایش، یا ← همه. خطای کد همین‌جا؛ وضعیتی
+ * که همین حالا عوض شد به همان صفحه با پیامش؛ موفق به «تنظیمات» با پیام.
+ */
+export async function raiseAudienceAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const to = field(form, 'to');
+  const result = await settings.changeAudience(session, { to, seen: field(form, 'seen'), code: form.get('code') }, await requestIp(), 'up');
+  if (result.ok) redirect(`${panelPath(gate, '/settings')}?done=audience&a=${result.value.audience}&${doneMark()}#checkout`);
+  if (RAISE_PAGE_ERRORS.includes(result.error)) {
+    redirect(`${panelPath(gate, '/settings/checkout')}?to=${encodeURIComponent(to)}&e=${result.error}`);
+  }
+  return failure(result);
+}
+
+export interface PreviewState extends FormState {
+  /** پیوند پیش‌نمایش، فقط همین یک بار در پاسخ؛ نه در نشانی، نه در لاگ. */
+  link?: { url: string; until: string };
+}
+
+/** «پیوند پیش‌نمایش بساز» (سؤال ۱۶۷): بی کد تازه؛ پیوند فقط در حالت فرم، مثل پیوند ثبت ادمین. */
+export async function previewLinkAction(_state: PreviewState, form: FormData): Promise<PreviewState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await settings.createPreview(session, await requestIp());
+  if (!result.ok) return { error: result.error };
+  return { link: { url: result.value.url, until: formatTehranTime(result.value.expiresAt) } };
+}

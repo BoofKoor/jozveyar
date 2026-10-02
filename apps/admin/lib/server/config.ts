@@ -5,8 +5,10 @@
  * هر کدام نباشد پنل بسته است (همه‌چیز ۴۰۴) و لاگ بالا آمدن نامش را می‌گوید، نه مقدارش.
  */
 
-import { secretsKeyOf } from '@jozveyar/db';
+import type { CheckoutAudience } from '@jozveyar/contracts';
+import { firstMissing, readinessReason, secretsKeyOf, type CheckoutReadiness } from '@jozveyar/db';
 
+import { AUDIENCE_NAMES } from '../checkout';
 import { gateOf } from '../gate';
 import { originOf } from '../security';
 
@@ -83,4 +85,15 @@ export function describeConfig(env: Env): string {
   if (problems.length > 0) return `✗ پنل ادمین: بسته — ${problems.join('؛ ')}`;
   const origin = originOf(env.ADMIN_ORIGIN);
   return `✓ پنل ادمین: آماده${origin ? ` روی ${new URL(origin).host}` : ''}`;
+}
+
+/**
+ * یک خط برای لاگ بالا آمدن (برش ۷٫۵، ADR-052): مسیر خرید روی سایت، فقط وقتی `.env` همین سرور `live` می‌خواهد. آماده و مخاطب امروز، یا
+ * خاموش و اولین تکهٔ کم با نامش، هرگز مقدار؛ همان آمادگی کارت «مسیر خرید روی سایت». null یعنی خطی نیست (`off` و `mock`).
+ */
+export function describeCheckout(readiness: CheckoutReadiness, audience: CheckoutAudience): string | null {
+  if (!readiness.requested) return null;
+  const missing = firstMissing(readiness);
+  if (missing) return `✗ پنل ادمین: مسیر خرید روی سایت خاموش — ${readinessReason(missing.part, missing.state)}`;
+  return `✓ پنل ادمین: مسیر خرید روی سایت آماده؛ مخاطب «${AUDIENCE_NAMES[audience]}» (از «تنظیمات»)`;
 }

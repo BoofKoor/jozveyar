@@ -29,7 +29,7 @@ class FakeNode {
   addEventListener(type: string, listener: () => void) {
     this.listeners[type] = listener;
   }
-  get firstChild() {
+  get firstChild(): FakeNode | null {
     return this.children[0] ?? null;
   }
   insertBefore(node: FakeNode, ref: FakeNode | null) {

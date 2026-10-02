@@ -9,8 +9,9 @@
  */
 
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
-import { formatNumber, formatTomans } from '@jozveyar/text';
+import { formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
+import { AUDIENCE_NAMES } from './checkout';
 import { tehranDay } from './format';
 import { REFUND_INQUIRY_TEXT, viaGateway } from './refunds';
 import { ROLE_NAMES } from './messages';
@@ -128,6 +129,9 @@ export function gatewayRejectedText(detail: Record<string, unknown>): Segment[] 
 const ltrOf = (value: unknown): Segment => ({ ltr: typeof value === 'number' || typeof value === 'string' ? String(value) : '' });
 
 /** نام کلید در صفحه («کد پذیرندهٔ زیبال»)؛ نام ناشناس همان نام خام. */
+/** نام مخاطب مسیر خرید (۷٫۵)؛ مقدار ناشناس همان‌طور که هست. */
+const audienceName = (value: unknown) => (typeof value === 'string' && value in AUDIENCE_NAMES ? AUDIENCE_NAMES[value as keyof typeof AUDIENCE_NAMES] : String(value ?? ''));
+
 const keyName = (value: unknown) => (typeof value === 'string' && value in KEY_INFO ? KEY_INFO[value as keyof typeof KEY_INFO].label : String(value ?? ''));
 
 /**
@@ -269,6 +273,23 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       };
     case 'settings.key_revert':
       return { badge: null, text: [`کلید «${keyName(detail.name)}» به `, { ltr: '.env' }, ' برگشت'] };
+    case 'settings.checkout_audience':
+      // مخاطب مسیر خرید (۷٫۵، سؤال ۱۶۹): «مسیر خرید روی سایت: پیش‌نمایش مالک ← همه، با کد تازه».
+      return {
+        badge: null,
+        text: [`مسیر خرید روی سایت: ${audienceName(detail.from)} ← ${audienceName(detail.to)}${detail.fresh === true ? '، با کد تازه' : ''}`],
+      };
+    case 'settings.checkout_preview': {
+      // پیوند پیش‌نمایش (۷٫۵، سؤال ۱۶۷): فقط زمان انقضا؛ خود پیوند و هشش هرگز در رویداد نیست.
+      const until = typeof detail.until === 'string' ? new Date(detail.until) : null;
+      return {
+        badge: null,
+        text: [
+          'پیوند پیش‌نمایش مسیر خرید ساخته شد',
+          ...(until && !Number.isNaN(until.getTime()) ? ['، تا ', { ltr: formatTehranTime(until) }] : []),
+        ],
+      };
+    }
     case 'orders.assign': {
       // نام‌ها همان لحظه در جزئیات رویداد نشسته‌اند (۵٫۲): چاپخانه‌ای که بعداً نامش عوض شد، اینجا همان نام آن روز است.
       const from = (detail.from ?? null) as { name?: unknown } | null;

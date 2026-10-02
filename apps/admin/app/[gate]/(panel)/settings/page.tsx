@@ -7,6 +7,7 @@ import { templateText } from '@jozveyar/sms';
 import { formatJalaliNumeric, formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../components/Alert';
+import { CheckoutCard } from '../../../../components/CheckoutCard';
 import { HolidayAddForm } from '../../../../components/HolidayAddForm';
 import { KeyForm } from '../../../../components/KeyForm';
 import { KeyTestButton, TemplateTestForm } from '../../../../components/KeyTestForm';
@@ -16,6 +17,7 @@ import { OtpLimitsForm } from '../../../../components/OtpLimitsForm';
 import { Segments } from '../../../../components/Segments';
 import { StatusButton } from '../../../../components/StatusButton';
 import { TemplateKeyForm } from '../../../../components/TemplateKeyForm';
+import { AUDIENCE_NAMES } from '../../../../lib/checkout';
 import { panelPath } from '../../../../lib/gate';
 import { messageOf } from '../../../../lib/messages';
 import { can } from '../../../../lib/server/auth';
@@ -54,6 +56,16 @@ const CHECK_ICONS: Record<KeyCheckView['tone'], string> = {
   warn: 'jy-icon jy-icon-warning is-warn',
 };
 const CHECK_TONES = { ok: 'success', bad: 'error', warn: 'warning' } as const;
+
+/** خطاهای کارت «مسیر خرید روی سایت» (`?ce=`، برش ۷٫۵): فقط همین‌ها پیام دارند، تا نشانی ساختگی متن دلخواه ننشاند. */
+const CHECKOUT_ERRORS = new Set(['checkout_not_ready', 'checkout_changed', 'checkout_not_preview', 'invalid_setting', 'forbidden']);
+
+/** پیام موفق هر پلهٔ مخاطب، فقط وقتی مخاطب امروز همان است. */
+const AUDIENCE_DONE = {
+  everyone: 'مسیر خرید برای همه باز شد: از همین لحظه هر مشتری سفارش می‌دهد، با پول و پیامک واقعی.',
+  preview: `مسیر خرید روی «${AUDIENCE_NAMES.preview}» است: فقط مرورگری که پیوند پیش‌نمایش را باز کند سفارش می‌دهد.`,
+  paused: 'مسیر خرید متوقف شد: مشتری تازه «ثبت سفارش موقتاً متوقف است» می‌بیند؛ برگشت از درگاه و استعلام کار می‌کنند.',
+} as const;
 
 /** متن قالب در sms.ir (طرح `ad-keys__tpl`): سطرها، جای پارامترها، و نامشان؛ از همان یک منبع پیامک. */
 function TemplateText({ purpose }: { purpose: keyof typeof TEMPLATE_SAMPLES }) {
@@ -122,7 +134,8 @@ function SourceBadge({ source }: { source: KeyView['source'] }) {
  * تنظیمات (طرح پنل `m-settings` و `m-key-edit`، ADR-041): روز کاری تحویل به پست، سقف کد پیامکی، تعطیلی‌ها، و کلیدهای سرویس‌ها. فقط
  * مالک، و سرور هر کار را خودش می‌سنجد. کلید با «تغییر» همین‌جا باز می‌شود (`?key=`)، و «برگرداندن به .env» با `?revert=`، هر دو با
  * کد تازه و بی JS. از ۷٫۱ (ADR-049، طرح برش ۷): سقف ۲۴ ساعتهٔ کد کنار ساعتی با شمار واقعی، کارت «اعتبار پیامک»، و برای کلیدهای sms.ir
- * متن قالب، خط آخرین آزمایش و «آزمایش» (کلید API یک دکمه، قالب با موبایل پیامک آزمایشی، `?test=`).
+ * متن قالب، خط آخرین آزمایش و «آزمایش» (کلید API یک دکمه، قالب با موبایل پیامک آزمایشی، `?test=`). از ۷٫۵ (ADR-052): کارت «مسیر خرید
+ * روی سایت» اول، با پیام پلهٔ مخاطب (`?done=audience&a=`) و خطایش (`?ce=`).
  */
 export default async function SettingsPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
@@ -132,7 +145,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await settings.overview(session);
   if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
-  const { now, values, keys, otpUsage, credit } = result.value;
+  const { now, values, keys, otpUsage, credit, checkout } = result.value;
   const card = credit ? creditCard(credit, now) : null;
 
   const home = panelPath(gate, '/settings');
@@ -208,6 +221,13 @@ export default async function SettingsPage({ params, searchParams }: { params: P
         {doneKey.source === 'empty' ? '؛ .env این کلید را ندارد و کلید خالی است.' : '.'}
       </Alert>
     ) : null;
+  const checkoutError = CHECKOUT_ERRORS.has(one(query, 'ce')) ? one(query, 'ce') : null;
+  const checkoutNote = checkoutError ? (
+    <Alert tone="error">{messageOf(checkoutError)}</Alert>
+  ) : checkout && done === 'audience' && one(query, 'a') === checkout.audience && checkout.readiness.ready ? (
+    <Alert tone="success">{AUDIENCE_DONE[checkout.audience]}</Alert>
+  ) : null;
+
   const editing = one(query, 'key');
   const reverting = one(query, 'revert');
   const testing = one(query, 'test');
@@ -219,6 +239,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
       </div>
       {topNote ? <div className="ad-flash">{topNote}</div> : null}
       <div className="ad-stack">
+        {checkout ? <CheckoutCard gate={gate} view={checkout} now={now} note={checkoutNote} /> : null}
         {values && days ? (
           <>
             <div className="ad-cards">

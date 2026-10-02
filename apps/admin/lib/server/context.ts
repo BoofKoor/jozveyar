@@ -10,6 +10,7 @@ import { notFound, redirect } from 'next/navigation';
 import {
   REFUND_AUTO_EVERY_MS,
   createAdminStore,
+  createCheckoutPreviewStore,
   createOrderStore,
   createPanelOrderStore,
   createPartnerStore,
@@ -22,6 +23,7 @@ import {
   createSmsStats,
   createTariffStore,
   getDb,
+  lastAudienceChange,
   serviceKeyReader,
 } from '@jozveyar/db';
 import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
@@ -109,6 +111,8 @@ function build(config: AdminConfig): Panel {
       zibal: { client: zibalClient(zibal), callbackUrl: process.env.PAYMENT_CALLBACK_URL?.trim() || null },
       smsStats: createSmsStats(getDb()),
       smsInUse: smsIrInUse(process.env),
+      // مسیر خرید روی سایت (۷٫۵، ADR-052): مخاطب با کد تازه برای هر پلهٔ بالا، و پیوند پیش‌نمایش؛ آمادگی با همین `.env`.
+      checkout: { previews: createCheckoutPreviewStore(getDb()), lastChange: () => lastAudienceChange(getDb()) },
     }),
     // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
     partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),

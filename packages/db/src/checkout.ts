@@ -22,7 +22,7 @@ import { adminEventRow } from './admin.js';
 import type { Database } from './index.js';
 import { GATEWAY_NOT_READY_RESULTS } from './orders.js';
 import { CHECKOUT_AUDIENCE_SETTING, readSetting } from './reference.js';
-import { adminEvents, checkoutPreviews, orders, payments, settings } from './schema.js';
+import { adminEvents, adminUsers, checkoutPreviews, orders, payments, settings } from './schema.js';
 import {
   resolveServiceKey,
   SERVICE_KEYS,
@@ -221,6 +221,42 @@ export const PREVIEW_COOKIE_TTL_MS = 24 * 60 * 60_000;
 /** هدف رویداد پیوند پیش‌نمایش در `admin_events`، و نام رویدادهای ۷٫۵ (سؤال ۱۶۹، چیپ «تنظیمات و کلیدها»). */
 export const CHECKOUT_AUDIENCE_EVENT = 'settings.checkout_audience';
 export const CHECKOUT_PREVIEW_EVENT = 'settings.checkout_preview';
+
+/** آخرین تغییر مخاطب (رویداد `settings.checkout_audience`، سؤال ۱۶۹): کی، کی کرد، از چه به چه، و با کد تازه یا نه. */
+export interface AudienceChange {
+  at: Date;
+  /** نام ادمین؛ null اگر دستور روی سرور بود. */
+  by: string | null;
+  from: string | null;
+  to: string | null;
+  fresh: boolean;
+}
+
+/** کارت «مسیر خرید روی سایت» («از امروز 10:40، سارا») و سطر پیشخوان؛ null اگر مخاطب هرگز عوض نشده (پیش‌فرض پس از استقرار). */
+export async function lastAudienceChange({ db }: Pick<Database, 'db'>): Promise<AudienceChange | null> {
+  const [row] = await db
+    .select({ at: adminEvents.at, detail: adminEvents.detail, by: adminUsers.displayName })
+    .from(adminEvents)
+    .leftJoin(adminUsers, eq(adminUsers.id, adminEvents.adminUserId))
+    .where(
+      and(
+        eq(adminEvents.action, CHECKOUT_AUDIENCE_EVENT),
+        eq(adminEvents.targetType, SETTING_TARGET),
+        eq(adminEvents.targetId, CHECKOUT_AUDIENCE_SETTING),
+      ),
+    )
+    .orderBy(desc(adminEvents.at), desc(adminEvents.id))
+    .limit(1);
+  if (!row) return null;
+  const detail = (row.detail ?? {}) as { from?: unknown; to?: unknown; fresh?: unknown };
+  return {
+    at: row.at,
+    by: row.by ?? null,
+    from: typeof detail.from === 'string' ? detail.from : null,
+    to: typeof detail.to === 'string' ? detail.to : null,
+    fresh: detail.fresh === true,
+  };
+}
 
 /** توکن پیوند یا کوکی پیش‌نمایش: ۳۲ بایت تصادفی، base64url (۴۳ نویسه). پنل پیوند را می‌سازد و وب کوکی را. */
 export const newPreviewToken = (): string => randomBytes(32).toString('base64url');
