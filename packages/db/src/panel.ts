@@ -37,9 +37,9 @@ import { alias } from 'drizzle-orm/pg-core';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
 import type { AssignmentRule } from './assignment.js';
+import { gatewayRejection, type GatewayRejection } from './checkout.js';
 import type { Database } from './index.js';
 import {
-  GATEWAY_NOT_READY_RESULTS,
   HELD_FAILURES,
   MONEY_HELD_STATUSES,
   PREPARE_ORDER_JOB,
@@ -266,7 +266,7 @@ export interface PanelAlerts {
    * `payments.gateway_rejected`)، یا آخرین پرسش یک تلاش (`payments.gateway_error`، بی رویداد تازه با هر دقیقهٔ استعلام خودکار)؛ اگر پس از
    * آن نه پرداختی از همان درگاه شروع شد و نه «آزمایش» کد پذیرنده درست بود؛ پس از `untrackedSince`. در محدودهٔ چاپخانه هیچ.
    */
-  gatewayRejected: { at: Date; orderNumber: number | null; provider: string; result: number; stage: 'start' | 'inquiry' } | null;
+  gatewayRejected: GatewayRejection | null;
   /** تلاش‌هایی که درگاه مبلغ دیگری برایشان گفت (`amount_mismatch`)، در `MISMATCH_ALERT_MS` اخیر؛ تازه‌ترین اول. */
   mismatched: { orderNumber: number; amountRials: number; reportedRials: number | null; createdAt: Date }[];
   /**
@@ -724,45 +724,9 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         .innerJoin(orders, eq(orders.id, payments.orderId))
         .where(and(eq(payments.status, 'failed'), where, inScope(scope)))
         .orderBy(desc(payments.createdAt));
-    // پس از آن پرداختی از همان درگاه شروع شد، یا «آزمایش» کد پذیرنده درست بود (سؤال ۱۳۹): درگاه آماده است.
-    const ready = (provider: SQL, after: SQL) => sql`(
-      EXISTS (SELECT 1 FROM payments p WHERE p.provider = ${provider} AND p.created_at > ${after})
-      OR EXISTS (SELECT 1 FROM admin_events k WHERE k.target_type = 'service_key' AND k.target_id = 'PAYMENT_MERCHANT_ID'
-        AND k.at > ${after}
-        AND ((k.action = 'settings.key_test' AND k.detail ->> 'outcome' = 'ok')
-          OR (k.action = 'settings.key_set' AND k.detail ->> 'tested' = 'ok'))))`;
-    const later = alias(payments, 'rejected_payment');
-    const [rejected, inquired, mismatched, held, verifiedUnused, auto] = await Promise.all([
-      scope.kind === 'all'
-        ? db
-            .select({ at: adminEvents.at, detail: adminEvents.detail, orderNumber: orders.orderNumber })
-            .from(adminEvents)
-            .leftJoin(orders, sql`${orders.id}::text = ${adminEvents.targetId}`)
-            .where(
-              and(
-                eq(adminEvents.action, 'payments.gateway_rejected'),
-                sql`${adminEvents.at} > ${since}`,
-                sql`NOT ${ready(sql`${adminEvents.detail} ->> 'provider'`, sql`${adminEvents.at}`)}`,
-              ),
-            )
-            .orderBy(desc(adminEvents.at))
-            .limit(1)
-        : Promise.resolve([]),
-      scope.kind === 'all'
-        ? db
-            .select({ at: later.gatewayCheckedAt, error: later.gatewayError, provider: later.provider, orderNumber: orders.orderNumber })
-            .from(later)
-            .innerJoin(orders, eq(orders.id, later.orderId))
-            .where(
-              and(
-                sql`${later.gatewayError} ~ ${`^rejected:(${GATEWAY_NOT_READY_RESULTS.join('|')})$`}`,
-                sql`${later.gatewayCheckedAt} > ${since}`,
-                sql`NOT ${ready(sql`${later.provider}`, sql`${later.gatewayCheckedAt}`)}`,
-              ),
-            )
-            .orderBy(desc(later.gatewayCheckedAt))
-            .limit(1)
-        : Promise.resolve([]),
+    const [gatewayRejected, mismatched, held, verifiedUnused, auto] = await Promise.all([
+      // همان شرط سایت (سؤال ۱۶۶، `gatewayRejection`): ردِ شروع مال سفارش پرداخت‌نشده است، پس در محدودهٔ چاپخانه هیچ.
+      scope.kind === 'all' ? gatewayRejection({ db }, clock.untrackedSince) : Promise.resolve(null),
       closed(and(eq(payments.failureCode, 'amount_mismatch'), sql`${payments.createdAt} > ${ts(new Date(clock.at.getTime() - MISMATCH_ALERT_MS))}`)!),
       closed(
         and(
@@ -781,27 +745,8 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             .groupBy(payments.status)
         : Promise.resolve([]),
     ]);
-    const last = rejected[0];
-    const detail = (last?.detail ?? {}) as { provider?: unknown; result?: unknown };
-    const fromStart: PanelAlerts['gatewayRejected'] =
-      last && typeof detail.result === 'number'
-        ? {
-            at: last.at,
-            orderNumber: last.orderNumber ?? null,
-            provider: typeof detail.provider === 'string' ? detail.provider : '',
-            result: detail.result,
-            stage: 'start',
-          }
-        : null;
-    const asked = inquired[0];
-    const fromInquiry: PanelAlerts['gatewayRejected'] =
-      asked?.at && asked.error
-        ? { at: asked.at, orderNumber: asked.orderNumber, provider: asked.provider, result: Number(asked.error.split(':')[1]), stage: 'inquiry' }
-        : null;
     return {
-      // تازه‌ترین از هر دو.
-      gatewayRejected:
-        fromStart && fromInquiry ? (fromInquiry.at.getTime() > fromStart.at.getTime() ? fromInquiry : fromStart) : (fromStart ?? fromInquiry),
+      gatewayRejected,
       // مبلغی که درگاه گفت: تأییدشده، یا آنچه استعلام پیش از `verify` گفت (`raw.amount` زیبال).
       mismatched: mismatched.map((row) => {
         const said = (row.raw as { amount?: unknown } | null)?.amount;

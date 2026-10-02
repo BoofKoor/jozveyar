@@ -20,8 +20,8 @@ import { adminEventRow } from './admin.js';
 import type { Database } from './index.js';
 import { adminEvents, settings } from './schema.js';
 
-/** کلید قفل مشورتی تغییر تنظیم‌ها: «sett» به عدد. */
-const SETTINGS_LOCK = 0x73657474;
+/** کلید قفل مشورتی تغییر تنظیم‌ها: «sett» به عدد. پیوند پیش‌نمایش مسیر خرید هم زیر همین ساخته می‌شود (برش ۷٫۵، `checkout.ts`). */
+export const SETTINGS_LOCK = 0x73657474;
 
 /** هدف رویدادهای تنظیم در `admin_events`؛ شناسهٔ هدف نام تنظیم است. */
 export const SETTING_TARGET = 'setting';
