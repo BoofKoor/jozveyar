@@ -56,8 +56,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
 import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
-import { createSmsLog, createSmsOutbox, createSmsStats } from './sms.js';
-import { consoleTransport, deliverQueued, orderPaidText, SMS_STUCK_MS, trackingText, type SmsTransport } from '@jozveyar/sms';
+import { createSmsLog, createSmsOutbox, createSmsStats, liveSms } from './sms.js';
+import { consoleTransport, deliverQueued, orderPaidText, partnerOrderText, SMS_STUCK_MS, trackingText, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay } from '@jozveyar/text';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
 import {
@@ -2450,6 +2450,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         // پیامک پرداخت (۷٫۱) این سفارش‌ها منتظر ماند و هرگز فرستاده نشد (تست فرستنده ندارد): پس از ۵ دقیقه «نرفت» است. «شنبه» پس
         // از «حالا»ی تست پرداخت شد، پس پیامکش هنوز در راه است.
         paidSmsFailed: [num.late!, num.today2!, num.today1!, num.tomorrow!, num.wed!].sort((a, b) => a - b),
+        // پیامک چاپخانه (۷٫۶): چاپخانهٔ پیش‌فرض این‌جا موبایل اعلان ندارد، پس پیامکی هم نیست.
+        partnerSmsFailed: [],
         // هشدارهای پول و درگاه (۷٫۲): این سفارش‌ها هیچ‌کدام را ندارند.
         gatewayRejected: null,
         mismatched: [],
@@ -3962,7 +3964,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         await conn.db
           .insert(payments)
           .values({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, createdAt: new Date(NOW.getTime() - 40 * MINUTE) });
-        return { id: order.id, orderNumber: order.orderNumber, partnerId: null };
+        return { id: order.id, orderNumber: order.orderNumber, partnerId: null, smsId: null, partnerSmsId: null };
       }
       const payment = await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
       const settled = await store.settlePayment('mock', payment.authority, async ({ payment }) => ({
@@ -3974,7 +3976,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         paidAt: NOW,
         postHandoffDueAt: END_MONDAY,
       }));
-      return { id: order.id, orderNumber: order.orderNumber, partnerId: settled!.order.printPartnerId };
+      return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        partnerId: settled!.order.printPartnerId,
+        smsId: settled!.smsId,
+        partnerSmsId: settled!.partnerSmsId,
+      };
     }
 
     const assignEvent = (orderId: string): AdminEventInput => ({
@@ -4421,13 +4429,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
       // پیش‌فرض کردن و چاپخانهٔ دیگری روی برگه نیستند (شاهد).
       expect(await partners.setDefault({ id: noor, event: partnerEvent('partners.default') })).toBe('ok');
-      expect(await partners.update({ id: noor, seen: { name: 'چاپ نور', cityId: 1326 }, name: 'چاپ نور مشهد', ...MASHHAD, event: partnerEvent('partners.update') })).toMatchObject({ ok: true });
+      expect(await partners.update({ id: noor, seen: { name: 'چاپ نور', cityId: 1326, notifyMobile: null }, name: 'چاپ نور مشهد', ...MASHHAD, notifyMobile: null, event: partnerEvent('partners.update') })).toMatchObject({ ok: true });
       expect(await stampOf(open.id)).toBe(before);
       expect(await ticketJobOf(open.id)).toMatchObject({ status: 'done' });
 
       // نام چاپخانهٔ خود سفارش: اثر انگشت تازه، و کار برگهٔ سفارش باز در صف؛ سفارش رسیده به پست نه.
       expect(
-        await partners.update({ id: first, seen: { name: 'چاپخانهٔ جزوه‌یار', cityId: 394 }, name: 'چاپخانهٔ مرکزی', ...TEHRAN, event: partnerEvent('partners.update') }),
+        await partners.update({ id: first, seen: { name: 'چاپخانهٔ جزوه‌یار', cityId: 394, notifyMobile: null }, name: 'چاپخانهٔ مرکزی', ...TEHRAN, notifyMobile: null, event: partnerEvent('partners.update') }),
       ).toMatchObject({ ok: true, changed: ['name'] });
       const renamed = await stampOf(open.id);
       expect(renamed).not.toBe(before);
@@ -4435,7 +4443,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await ticketJobOf(closed.id)).toMatchObject({ status: 'done' });
       // شهر هم.
       await ticketDone(open.id);
-      await partners.update({ id: first, seen: { name: 'چاپخانهٔ مرکزی', cityId: 394 }, name: 'چاپخانهٔ مرکزی', provinceId: 8, cityId: 336, event: partnerEvent('partners.update') });
+      await partners.update({ id: first, seen: { name: 'چاپخانهٔ مرکزی', cityId: 394, notifyMobile: null }, name: 'چاپخانهٔ مرکزی', provinceId: 8, cityId: 336, notifyMobile: null, event: partnerEvent('partners.update') });
       expect(await stampOf(open.id)).not.toBe(renamed);
       expect(await ticketJobOf(open.id)).toMatchObject({ status: 'queued' });
 
@@ -4449,10 +4457,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('زبانهٔ «چاپخانه‌ها»: فهرست، افزودن، ویرایش از همان که دیده شد، پیش‌فرض و فعال کردن، هر کدام با رویداد', async () => {
       const partners = createPartnerStore(conn);
-      const created = await partners.create({ name: 'چاپ نور', ...MASHHAD, at: NOW, createdBy: admin, event: partnerEvent('partners.create') });
+      const created = await partners.create({ name: 'چاپ نور', ...MASHHAD, notifyMobile: null, at: NOW, createdBy: admin, event: partnerEvent('partners.create') });
       expect(created).toMatchObject({ ok: true, partner: { name: 'چاپ نور', isDefault: false, deactivatedAt: null, createdBy: admin } });
       const noor = created.ok ? created.partner.id : '';
-      expect(await partners.create({ name: 'چاپ نور', ...ISFAHAN, at: NOW, createdBy: admin, event: partnerEvent('partners.create') })).toEqual({
+      expect(await partners.create({ name: 'چاپ نور', ...ISFAHAN, notifyMobile: null, at: NOW, createdBy: admin, event: partnerEvent('partners.create') })).toEqual({
         ok: false,
         reason: 'name_taken',
       });
@@ -4468,7 +4476,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await partners.find(randomUUID())).toBeNull();
 
       const edit = (seen: { name: string; cityId: number }, name: string, place = MASHHAD) =>
-        partners.update({ id: noor, seen, name, ...place, event: partnerEvent('partners.update') });
+        partners.update({ id: noor, seen: { ...seen, notifyMobile: null }, name, ...place, notifyMobile: null, event: partnerEvent('partners.update') });
       expect(await edit({ name: 'چاپ نو', cityId: 1326 }, 'چاپ نور مشهد')).toEqual({ ok: false, reason: 'changed' });
       expect(await edit({ name: 'چاپ نور', cityId: 1326 }, 'چاپ آفتاب')).toEqual({ ok: false, reason: 'name_taken' });
       expect(await edit({ name: 'چاپ نور', cityId: 1326 }, 'چاپ نور')).toMatchObject({ ok: true, changed: [] });
@@ -4735,6 +4743,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           untracked: [],
           smsFailed: [],
           paidSmsFailed: [],
+          // پیامک چاپخانه (۷٫۶): در محدودهٔ چاپخانه هیچ (سؤال ۱۷۲).
+          partnerSmsFailed: [],
           // پول و درگاه (۷٫۲): ردِ شروع در محدودهٔ چاپخانه هیچ.
           gatewayRejected: null,
           mismatched: [],
@@ -4871,6 +4881,376 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
             at: NOW,
           }),
         ).toBe('not_found');
+      });
+    });
+
+    describe('پیامک به چاپخانه (برش ۷٫۶)', () => {
+      const NOOR_MOBILE = '09151234567';
+      const DAY_TEXT = formatDeadlineDay(END_MONDAY);
+      const clock = (at: Date): PanelClock => ({
+        at,
+        staleBefore: new Date(at.getTime() + 60 * MINUTE),
+        unreturnedBefore: new Date(at.getTime() - 30 * MINUTE),
+        untrackedSince: new Date(at.getTime() - 45 * DAY),
+      });
+      const smsOf = async (id: number | null) => (id === null ? null : (await conn.db.select().from(smsMessages).where(eq(smsMessages.id, id)))[0]!);
+      const deliver = (id: number, mode: 'queued' | 'retry' = 'queued', transport: SmsTransport = consoleTransport(() => {})) =>
+        deliverQueued({ outbox: createSmsOutbox(conn, transport.name), transport, now: () => NOW, log: () => {} }, [id], { mode });
+      const claim = (id: number) =>
+        rejectedConstraint(conn.db.update(smsMessages).set({ status: 'sending', attempts: sql`${smsMessages.attempts} + 1`, attemptedAt: NOW }).where(eq(smsMessages.id, id)));
+      const down: SmsTransport = { name: 'smsir', send: () => Promise.reject(new Error('down')) };
+
+      it('موبایل اعلان: فقط شکل نرمال 09…، و خالی یعنی بی پیامک (CHECK `print_partners_notify_mobile`)', async () => {
+        for (const bad of ['0915123456', '091512345678', '+989151234567', '9151234567', '۰۹۱۵۱۲۳۴۵۶۷', '0915 123 4567', '']) {
+          expect(await rejectedConstraint(conn.db.insert(printPartners).values({ name: `چاپ ${bad || 'خالی'}`, ...MASHHAD, notifyMobile: bad })), bad).toBe(
+            'print_partners_notify_mobile',
+          );
+        }
+        // شاهد: همان درج با شکل نرمال و بی موبایل پذیرفته است.
+        expect(await rejectedConstraint(conn.db.insert(printPartners).values({ name: 'چاپ نور', ...MASHHAD, notifyMobile: NOOR_MOBILE }))).toBeUndefined();
+        expect(await rejectedConstraint(conn.db.insert(printPartners).values({ name: 'چاپ آفتاب', ...ISFAHAN, notifyMobile: null }))).toBeUndefined();
+      });
+
+      it('تخصیص در پرداخت به چاپخانهٔ با موبایل: پیامک «منتظر» سفارش تازه در همان تراکنش، با متن قالب؛ بی موبایل هیچ', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        const order = await paidOrder(MASHHAD);
+        expect(order.partnerId).toBe(noor);
+        expect(order.partnerSmsId).not.toBeNull();
+        expect(order.smsId).not.toBe(order.partnerSmsId);
+        const [assignment] = await assignmentsOf(order.id);
+        expect(assignment).toMatchObject({ toPartnerId: noor, actor: 'system', rule: 'city', smsMessageId: order.partnerSmsId });
+        expect(await smsOf(order.partnerSmsId)).toMatchObject({
+          provider: 'queued',
+          toMobile: NOOR_MOBILE,
+          purpose: 'partner_order',
+          status: 'pending',
+          attempts: 0,
+          body: partnerOrderText(order.orderNumber, DAY_TEXT),
+          params: [String(order.orderNumber), DAY_TEXT],
+          createdAt: NOW,
+        });
+        // همان متن قالب sms.ir، بی نشانی پنل (سؤال ۱۴۳).
+        expect((await smsOf(order.partnerSmsId))!.body).toBe(`جزوه‌یار: سفارش تازه ${order.orderNumber}؛ تحویل به پست تا دوشنبه 13 مهر`);
+        // چاپخانهٔ بی موبایل (پیش‌فرض تهران): بی پیامک.
+        const tehran = await paidOrder(TEHRAN);
+        expect([tehran.partnerId, tehran.partnerSmsId]).toEqual([first, null]);
+        expect((await assignmentsOf(tehran.id))[0]!.smsMessageId).toBeNull();
+        // پیش‌فرض با موبایل هم (سؤال ۱۲۶: «چاپخانهٔ جزوه‌یار» هم، اگر موبایل دارد).
+        await conn.db.update(printPartners).set({ notifyMobile: '09121112233' }).where(eq(printPartners.id, first));
+        const shiraz = await paidOrder(SHIRAZ);
+        expect(shiraz.partnerId).toBe(first);
+        expect(await smsOf(shiraz.partnerSmsId)).toMatchObject({ toMobile: '09121112233', purpose: 'partner_order', status: 'pending' });
+      });
+
+      it('جابه‌جایی در پنل: فقط چاپخانهٔ تازه پیامک می‌گیرد (۱۷۳)؛ بی موبایل هیچ', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        const order = await paidOrder(MASHHAD);
+        const toFirst = await assign(order.id, noor, first);
+        expect(toFirst).toMatchObject({ ok: true, smsId: null });
+        await conn.db.update(printPartners).set({ notifyMobile: '09121112233' }).where(eq(printPartners.id, first));
+        const back = await assign(order.id, first, noor);
+        expect(back.ok).toBe(true);
+        const backSms = back.ok ? back.smsId : null;
+        expect(await smsOf(backSms)).toMatchObject({ toMobile: NOOR_MOBILE, purpose: 'partner_order', status: 'pending', createdAt: NOW });
+        expect((await assignmentsOf(order.id)).map((a) => [a.toPartnerId, a.smsMessageId])).toEqual([
+          [noor, order.partnerSmsId],
+          [first, null],
+          [noor, backSms],
+        ]);
+        // چاپخانهٔ قبلی هیچ‌وقت پیامک نگرفت: هیچ ردیف پیامکی به موبایل «چاپخانهٔ جزوه‌یار» نیست.
+        expect(await conn.db.select().from(smsMessages).where(eq(smsMessages.toMobile, '09121112233'))).toEqual([]);
+      });
+
+      it('سفارش بی چاپخانه: «انتخاب» چاپخانهٔ با موبایل پیامک دارد، و بی موبایل ندارد', async () => {
+        await conn.db.update(printPartners).set({ isDefault: false }).where(eq(printPartners.id, first));
+        await conn.db.update(printPartners).set({ deactivatedAt: NOW }).where(eq(printPartners.id, first));
+        const bare = await paidOrder(MASHHAD);
+        expect([bare.partnerId, bare.partnerSmsId]).toEqual([null, null]);
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        const picked = await assign(bare.id, null, noor, 'هنگام پرداخت چاپخانهٔ فعالی نبود.');
+        expect(picked).toMatchObject({ ok: true });
+        expect(await smsOf(picked.ok ? picked.smsId : null)).toMatchObject({ toMobile: NOOR_MOBILE, purpose: 'partner_order', status: 'pending' });
+        const aftab = await partner('چاپ آفتاب', ISFAHAN);
+        const bare2 = await paidOrder(MASHHAD);
+        expect(bare2.partnerId).toBe(noor);
+        // بی موبایل: همان جابه‌جایی بی پیامک.
+        expect(await assign(bare2.id, noor, aftab)).toMatchObject({ ok: true, smsId: null });
+      });
+
+      it('محافظ تخصیص (`order_assignments_partner_sms`): چاپخانهٔ با موبایل پیامک تازهٔ خودش را دارد، به همان موبایل و برای همین سفارش؛ بی موبایل هیچ', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        const order = await paidOrder(TEHRAN);
+        const other = await paidOrder(TEHRAN);
+        const queued = (over: Partial<typeof smsMessages.$inferInsert> = {}) =>
+          conn.db
+            .insert(smsMessages)
+            .values({
+              provider: 'queued',
+              toMobile: NOOR_MOBILE,
+              purpose: 'partner_order',
+              body: partnerOrderText(order.orderNumber, DAY_TEXT),
+              params: [String(order.orderNumber), DAY_TEXT],
+              status: 'pending',
+              createdAt: NOW,
+              ...over,
+            })
+            .returning({ id: smsMessages.id })
+            .then((rows) => rows[0]!.id);
+        const moveTo = (to: string, smsMessageId: number | null) =>
+          rejectedConstraint(
+            conn.db.transaction(async (tx) => {
+              await tx.update(orders).set({ printPartnerId: to }).where(eq(orders.id, order.id));
+              await tx.insert(orderAssignments).values({
+                orderId: order.id,
+                fromPartnerId: first,
+                toPartnerId: to,
+                at: NOW,
+                actor: 'admin',
+                adminUserId: admin,
+                reason: 'آزمون',
+                smsMessageId,
+              });
+            }),
+          );
+        expect(await moveTo(noor, null)).toBe('order_assignments_partner_sms');
+        expect(await moveTo(noor, await queued({ purpose: 'order_paid', body: orderPaidText(order.orderNumber, DAY_TEXT) }))).toBe('order_assignments_partner_sms');
+        expect(await moveTo(noor, await queued({ toMobile: '09121112233' }))).toBe('order_assignments_partner_sms');
+        expect(
+          await moveTo(noor, await queued({ body: partnerOrderText(other.orderNumber, DAY_TEXT), params: [String(other.orderNumber), DAY_TEXT] })),
+        ).toBe('order_assignments_partner_sms');
+        // پیامکی که دیگر «منتظر» نیست، یا تلاشی خورده، تازه نیست؛ هر شرط جدا، تا هر کدام شاهد خودش را داشته باشد.
+        expect(await moveTo(noor, await queued({ status: 'failed', error: 'unconfigured' }))).toBe('order_assignments_partner_sms');
+        expect(await moveTo(noor, await queued({ attempts: 1, attemptedAt: NOW }))).toBe('order_assignments_partner_sms');
+        // چاپخانهٔ بی موبایل پیامک نمی‌گیرد.
+        const aftab = await partner('چاپ آفتاب', ISFAHAN);
+        expect(await moveTo(aftab, await queued())).toBe('order_assignments_partner_sms');
+        // شاهد: پیامک تازهٔ درست پذیرفته است.
+        const good = await queued();
+        expect(await moveTo(noor, good)).toBeUndefined();
+        expect((await assignmentsOf(order.id)).at(-1)).toMatchObject({ toPartnerId: noor, smsMessageId: good });
+        // یک پیامک برای هر تخصیص (`order_assignments_sms`): همان ردیف پیامک به تخصیص دیگری، حتی با همان موبایل، وصل نمی‌شود.
+        const twin = await partner('چاپ نور دو', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        expect(
+          await rejectedConstraint(
+            conn.db.transaction(async (tx) => {
+              await tx.update(orders).set({ printPartnerId: twin }).where(eq(orders.id, order.id));
+              await tx.insert(orderAssignments).values({
+                orderId: order.id,
+                fromPartnerId: noor,
+                toPartnerId: twin,
+                at: NOW,
+                actor: 'admin',
+                adminUserId: admin,
+                reason: 'آزمون',
+                smsMessageId: good,
+              });
+            }),
+          ),
+        ).toBe('order_assignments_sms');
+        // ردیف تخصیص (پس پیامکش) عوض نمی‌شود.
+        expect(
+          await rejectedConstraint(conn.db.update(orderAssignments).set({ smsMessageId: null }).where(eq(orderAssignments.smsMessageId, good))),
+        ).toBe('order_assignments_append_only');
+      });
+
+      it('فقط تا سفارش «در صف چاپ» همان چاپخانه است می‌رود (۱۷۴): جابه‌جاشده، تخصیص قدیمی، در حال چاپ و لغوشده نه؛ پایگاه داده هم (`sms_messages_live`)', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        // شاهد: پیامک زنده می‌رود («رفت»، کنسولی).
+        const fresh = await paidOrder(MASHHAD);
+        expect((await deliver(fresh.partnerSmsId!))[0]!.outcome).toBe('sent');
+        expect(await smsOf(fresh.partnerSmsId)).toMatchObject({ status: 'logged', provider: 'console', attempts: 1, sentAt: NOW });
+
+        // جابه‌جاشده: پیامک چاپخانهٔ قبلی دیگر نمی‌رود، نه منتظر و نه «دوباره بفرست».
+        const moved = await paidOrder(MASHHAD);
+        await assign(moved.id, noor, first);
+        expect((await deliver(moved.partnerSmsId!))[0]!.outcome).toBe('skipped');
+        expect(await claim(moved.partnerSmsId!)).toBe('sms_messages_live');
+        // برگشت به همان چاپخانه: پیامک تازه زنده است و قدیمی همچنان نه (تخصیص امروز نیست).
+        const back = await assign(moved.id, first, noor);
+        const backSms = back.ok ? back.smsId! : 0;
+        expect((await deliver(moved.partnerSmsId!))[0]!.outcome).toBe('skipped');
+        expect(await claim(moved.partnerSmsId!)).toBe('sms_messages_live');
+        expect((await deliver(backSms))[0]!.outcome).toBe('sent');
+
+        // نرفته و بعد سفارش در حال چاپ: «دوباره بفرست» نه.
+        const printing = await paidOrder(MASHHAD);
+        expect((await deliver(printing.partnerSmsId!, 'queued', down))[0]!.outcome).toBe('failed');
+        expect(await startPrint(printing.id, noor)).toMatchObject({ ok: true });
+        expect((await deliver(printing.partnerSmsId!, 'retry'))[0]!.outcome).toBe('skipped');
+        expect(await claim(printing.partnerSmsId!)).toBe('sms_messages_live');
+
+        // لغوشده: نه.
+        const cancelled = await paidOrder(MASHHAD);
+        expect(await move(cancelled.id, { status: 'cancelled' })).toBeUndefined();
+        expect((await deliver(cancelled.partnerSmsId!))[0]!.outcome).toBe('skipped');
+        expect(await claim(cancelled.partnerSmsId!)).toBe('sms_messages_live');
+
+        // نرفته و هنوز در صف چاپ همان چاپخانه: «دوباره بفرست» یک تلاش بیشتر، به همان شماره (سؤال ۱۷۷)، حتی اگر موبایل چاپخانه عوض شد.
+        const retried = await paidOrder(MASHHAD);
+        expect((await deliver(retried.partnerSmsId!, 'queued', down))[0]!.outcome).toBe('failed');
+        await conn.db.update(printPartners).set({ notifyMobile: '09359998877' }).where(eq(printPartners.id, noor));
+        expect((await deliver(retried.partnerSmsId!, 'retry'))[0]!.outcome).toBe('sent');
+        expect(await smsOf(retried.partnerSmsId)).toMatchObject({ toMobile: NOOR_MOBILE, status: 'logged', attempts: 2 });
+        // پیامک‌های بعدی به شمارهٔ تازه.
+        expect(await smsOf((await paidOrder(MASHHAD)).partnerSmsId)).toMatchObject({ toMobile: '09359998877' });
+      });
+
+      it('میانهٔ تراکنش جابه‌جایی: سفارشی که دیگر پیش همان چاپخانه نیست، پیش از ردیف تخصیص تازه هم پیامکش زنده نیست؛ تریگر، صف و هشدار یک شرط', async () => {
+        // پس از commit «چاپخانهٔ امروز» و «آخرین ردیف تخصیص» همیشه یکی‌اند (`order_assignments_recorded`، معوق)؛ فقط میانهٔ تراکنشی که
+        // چاپخانهٔ سفارش را عوض کرده و ردیف تخصیص تازه را هنوز ننوشته (همان ترتیب `assignPartner`) از هم جدا می‌شوند، و هر سه نسخهٔ شرط
+        // باید همان‌جا هم «زنده نیست» بگویند.
+        await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        const order = await paidOrder(MASHHAD);
+        const id = order.partnerSmsId!;
+        expect((await deliver(id, 'queued', down))[0]!.outcome).toBe('failed');
+        const live = (db: Database['db']) => db.select({ id: smsMessages.id }).from(smsMessages).where(and(eq(smsMessages.id, id), liveSms));
+        const failedOf = async (db: Database['db']) =>
+          (await createPanelOrderStore({ ...conn, db }).alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed.map((row) => row.orderNumber);
+        // شاهد: پیش از جابه‌جایی زنده است و هشدار دارد.
+        expect(await live(conn.db)).toEqual([{ id }]);
+        expect(await failedOf(conn.db)).toEqual([order.orderNumber]);
+        const rollback = new Error('برگرداندن تراکنش آزمون');
+        await expect(
+          conn.db.transaction(async (tx) => {
+            await tx.update(orders).set({ printPartnerId: first }).where(eq(orders.id, order.id));
+            const db = tx as unknown as Database['db'];
+            expect(await live(db)).toEqual([]);
+            expect(await failedOf(db)).toEqual([]);
+            expect(
+              await rejectedConstraint(
+                tx.transaction((step) =>
+                  step.update(smsMessages).set({ status: 'sending', attempts: 2, attemptedAt: NOW }).where(eq(smsMessages.id, id)),
+                ),
+              ),
+            ).toBe('sms_messages_live');
+            throw rollback;
+          }),
+        ).rejects.toBe(rollback);
+        // شاهد: تراکنش برگشت، پس همان پیامک باز زنده است و «دوباره بفرست» می‌رود.
+        expect(await live(conn.db)).toEqual([{ id }]);
+        expect((await deliver(id, 'retry'))[0]!.outcome).toBe('sent');
+      });
+
+      it('ویرایش موبایل هم‌زمان با پرداخت: پرداخت نمی‌شکند و پیامک به شمارهٔ تازه می‌رود (موبایل پس از قفل خوانده می‌شود)', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let locked!: () => void;
+        const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+        const editing = conn.db.transaction(async (tx) => {
+          await tx.update(printPartners).set({ notifyMobile: '09359998877' }).where(eq(printPartners.id, noor));
+          locked();
+          await held;
+        });
+        await lockTaken;
+        const paying = paidOrder(MASHHAD);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        release();
+        await editing;
+        const paid = await paying;
+        expect(paid.partnerId).toBe(noor);
+        expect(await smsOf(paid.partnerSmsId)).toMatchObject({ toMobile: '09359998877', status: 'pending' });
+        // برداشتن موبایل هم‌زمان: بی پیامک، و پرداخت نمی‌شکند.
+        let release2!: () => void;
+        const held2 = new Promise<void>((resolve) => (release2 = resolve));
+        let locked2!: () => void;
+        const lockTaken2 = new Promise<void>((resolve) => (locked2 = resolve));
+        const clearing = conn.db.transaction(async (tx) => {
+          await tx.update(printPartners).set({ notifyMobile: null }).where(eq(printPartners.id, noor));
+          locked2();
+          await held2;
+        });
+        await lockTaken2;
+        const paying2 = paidOrder(MASHHAD);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        release2();
+        await clearing;
+        expect(await paying2).toMatchObject({ partnerId: noor, partnerSmsId: null });
+      });
+
+      it('پنل: پیامک هر تخصیص در جزئیات، «دوباره بفرست» با تخصیص امروز و محدوده، و هشدار پیشخوان فقط برای مالک و متصدی', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { notifyMobile: NOOR_MOBILE });
+        const panel = createPanelOrderStore(conn);
+        const order = await paidOrder(MASHHAD);
+        const details = await panel.details(ALL_ORDERS, order.orderNumber);
+        expect(details!.assignments.map((a) => [a.toPartnerId, a.sms?.id ?? null, a.sms?.toMobile ?? null, a.sms?.status ?? null])).toEqual([
+          [noor, order.partnerSmsId, NOOR_MOBILE, 'pending'],
+        ]);
+        const [row] = await assignmentsOf(order.id);
+        expect(await panel.assignmentSms(ALL_ORDERS, row!.id)).toMatchObject({
+          assignmentId: row!.id,
+          orderNumber: order.orderNumber,
+          orderStatus: 'paid',
+          partnerId: noor,
+          partnerName: 'چاپ نور',
+          current: true,
+          sms: { id: order.partnerSmsId, toMobile: NOOR_MOBILE, status: 'pending' },
+        });
+        // محدوده: خود چاپخانه می‌بیندش (کاربرش نه؛ سرویس پنل)، چاپخانهٔ دیگر «نیست».
+        expect(await panel.assignmentSms({ kind: 'partner', partnerId: noor }, row!.id)).toMatchObject({ current: true });
+        expect(await panel.assignmentSms({ kind: 'partner', partnerId: first }, row!.id)).toBeNull();
+        expect(await panel.assignmentSms(ALL_ORDERS, 987_654_321)).toBeNull();
+
+        // هشدار: منتظرِ تازه نه؛ منتظری که ماند هست؛ «نرفت» هست، با نام چاپخانه؛ «رفت» نه.
+        expect((await panel.alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed).toEqual([]);
+        const later = new Date(NOW.getTime() + SMS_STUCK_MS + MINUTE);
+        expect((await panel.alerts(ALL_ORDERS, clock(later))).partnerSmsFailed).toEqual([{ orderNumber: order.orderNumber, partnerName: 'چاپ نور' }]);
+        expect((await deliver(order.partnerSmsId!, 'queued', down))[0]!.outcome).toBe('failed');
+        expect((await panel.alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed).toEqual([{ orderNumber: order.orderNumber, partnerName: 'چاپ نور' }]);
+        // در محدودهٔ چاپخانه هیچ (کاربر چاپخانه نمی‌بیندش، سؤال ۱۷۲).
+        expect((await panel.alerts({ kind: 'partner', partnerId: noor }, clock(NOW))).partnerSmsFailed).toEqual([]);
+        // جابه‌جاشده: پیامکش دیگر زنده نیست، پس هشدار هم نه؛ و «دوباره بفرست»ش هم نه (`current: false`).
+        await assign(order.id, noor, first);
+        expect((await panel.alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed).toEqual([]);
+        expect(await panel.assignmentSms(ALL_ORDERS, row!.id)).toMatchObject({ current: false, orderStatus: 'paid' });
+        // برگشت و «دوباره بفرست» که رفت: هشدار نه.
+        const back = await assign(order.id, first, noor);
+        const [, , latest] = await assignmentsOf(order.id);
+        expect(await panel.assignmentSms(ALL_ORDERS, latest!.id)).toMatchObject({ current: true, sms: { id: back.ok ? back.smsId : -1 } });
+        expect((await deliver(back.ok ? back.smsId! : 0, 'queued', down))[0]!.outcome).toBe('failed');
+        expect((await panel.alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed.map((a) => a.orderNumber)).toEqual([order.orderNumber]);
+        expect((await deliver(back.ok ? back.smsId! : 0, 'retry'))[0]!.outcome).toBe('sent');
+        expect((await panel.alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed).toEqual([]);
+        // تخصیص پیش از پنجره (`untrackedSince`) هشدار نیست.
+        const old = await paidOrder(MASHHAD);
+        await deliver(old.partnerSmsId!, 'queued', down);
+        expect((await panel.alerts(ALL_ORDERS, clock(NOW))).partnerSmsFailed.map((a) => a.orderNumber)).toEqual([old.orderNumber]);
+        expect((await panel.alerts(ALL_ORDERS, { ...clock(NOW), untrackedSince: NOW })).partnerSmsFailed).toEqual([]);
+      });
+
+      it('زبانهٔ «چاپخانه‌ها»: موبایل اعلان در افزودن و ویرایش، از همان که دیده شد؛ فقط موبایل کار برگه نمی‌سازد', async () => {
+        const partners = createPartnerStore(conn);
+        const created = await partners.create({ name: 'چاپ نور', ...MASHHAD, notifyMobile: NOOR_MOBILE, at: NOW, createdBy: admin, event: partnerEvent('partners.create') });
+        expect(created).toMatchObject({ ok: true, partner: { notifyMobile: NOOR_MOBILE } });
+        const noor = created.ok ? created.partner.id : '';
+        expect(await partners.find(noor)).toMatchObject({ notifyMobile: NOOR_MOBILE });
+        expect((await partners.list()).map((p) => [p.name, p.notifyMobile])).toEqual([
+          ['چاپخانهٔ جزوه‌یار', null],
+          ['چاپ نور', NOOR_MOBILE],
+        ]);
+        const open = await paidOrder(MASHHAD);
+        await ticketDone(open.id);
+        const stamp = await stampOf(open.id);
+        const seen = { name: 'چاپ نور', cityId: 1326, notifyMobile: NOOR_MOBILE };
+        const edit = (from: typeof seen, notifyMobile: string | null) =>
+          partners.update({ id: noor, seen: from, name: 'چاپ نور', ...MASHHAD, notifyMobile, event: partnerEvent('partners.update') });
+        // همان که دیده شد: موبایلی که همین حالا جای دیگری عوض شد، هیچ نمی‌نویسد.
+        expect(await edit({ ...seen, notifyMobile: '09121112233' }, null)).toEqual({ ok: false, reason: 'changed' });
+        expect(await edit(seen, NOOR_MOBILE)).toMatchObject({ ok: true, changed: [] });
+        expect(await edit(seen, '09359998877')).toMatchObject({ ok: true, changed: ['mobile'], partner: { notifyMobile: '09359998877' } });
+        // موبایل روی برگه نیست: اثر انگشت همان، کار برگه همان «ساخته شد».
+        expect(await stampOf(open.id)).toBe(stamp);
+        expect(await ticketJobOf(open.id)).toMatchObject({ status: 'done' });
+        expect(await edit({ ...seen, notifyMobile: '09359998877' }, null)).toMatchObject({ ok: true, changed: ['mobile'], partner: { notifyMobile: null } });
+        const events = await conn.db.select().from(adminEvents).where(eq(adminEvents.targetId, noor)).orderBy(adminEvents.id);
+        expect(events.map((e) => [e.action, (e.detail as { changed?: string[] }).changed ?? null])).toEqual([
+          ['partners.create', null],
+          ['partners.update', ['mobile']],
+          ['partners.update', ['mobile']],
+        ]);
+        // رویداد شمارهٔ خام ندارد (پوشاندنش با سرویس پنل).
+        expect(JSON.stringify(events.map((e) => e.detail))).not.toContain('09359998877');
+        expect(JSON.stringify(events.map((e) => e.detail))).not.toContain(NOOR_MOBILE);
       });
     });
   });
@@ -5504,8 +5884,15 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(await rejectedConstraint(conn.db.insert(serviceSecrets).values({ name, sealed, updatedAt: NOW })), name).toBeUndefined();
         expect(resolveServiceKey(name, await createSecretStore(conn).read(name), {}, KEY, () => undefined)).toMatchObject({ source: 'panel', value: '731058' });
       }
-      expect(SERVICE_KEYS).toEqual(['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID']);
-      // CHECK همان پنج نام کد است، نه بیشتر: نام تازه‌ای که کد نمی‌شناسد در پایگاه داده هم جا ندارد.
+      expect(SERVICE_KEYS).toEqual([
+        'SMS_API_KEY',
+        'SMS_OTP_TEMPLATE',
+        'SMS_PAID_TEMPLATE',
+        'SMS_TRACKING_TEMPLATE',
+        'SMS_PARTNER_TEMPLATE',
+        'PAYMENT_MERCHANT_ID',
+      ]);
+      // CHECK همان نام‌های کد است (از ۷٫۶ شش، با قالب چاپخانه)، نه بیشتر: نام تازه‌ای که کد نمی‌شناسد در پایگاه داده هم جا ندارد.
       const [check] = await conn.db.execute<{ def: string }>(
         sql`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'service_secrets_name'`,
       );

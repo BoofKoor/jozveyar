@@ -14,8 +14,8 @@ import { CITIES_LIST, CitiesList } from '../cities';
 export const metadata: Metadata = { title: 'ویرایش چاپخانه' };
 
 /**
- * ویرایش چاپخانه (طرح پنل `m-partner-edit`، همان فرم افزودن): نام و شهر، از همان که مالک دید. اگر همین حالا جای دیگری عوض شد،
- * همین صفحه با نام و شهر تازه و پیامش (`?e=partner_changed`).
+ * ویرایش چاپخانه (طرح پنل `m-partner-edit`، همان فرم افزودن): نام، شهر و از ۷٫۶ موبایل اعلان، از همان که مالک دید. اگر همین حالا جای
+ * دیگری عوض شد، همین صفحه با مقدارهای تازه و پیامش (`?e=partner_changed`).
  */
 export default async function PartnerPage({
   params,
@@ -26,7 +26,7 @@ export default async function PartnerPage({
 }) {
   const { gate, id } = await params;
   const query = await searchParams;
-  const { partners } = requirePanel(gate);
+  const { partners, settings } = requirePanel(gate);
   const session = await requireSession(gate);
   if (!can(session, 'partners.manage')) return <NoAccess gate={gate} partner={session.partner} />;
   const back = panelPath(gate, '/partners');
@@ -51,16 +51,25 @@ export default async function PartnerPage({
     );
   }
   const partner = result.value;
+  const templateMissing = await settings.partnerTemplateMissing(session);
   return (
     <>
       {backLink}
       {query.e === 'partner_changed' ? <Alert tone="error">{messageOf('partner_changed')}</Alert> : null}
       <PartnerForm
-        key={`${partner.name}|${partner.cityId}`}
+        key={`${partner.name}|${partner.cityId}|${partner.notifyMobile ?? ''}`}
         gate={gate}
         back={back}
         citiesList={CITIES_LIST}
-        partner={{ id: partner.id, name: partner.name, cityId: partner.cityId, cityLabel: partnerCityLabel(partner) }}
+        partner={{
+          id: partner.id,
+          name: partner.name,
+          cityId: partner.cityId,
+          cityLabel: partnerCityLabel(partner),
+          notifyMobile: partner.notifyMobile,
+        }}
+        templateMissing={templateMissing}
+        keysHref={`${panelPath(gate, '/settings')}#keys`}
       />
       <CitiesList />
     </>

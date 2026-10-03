@@ -51,6 +51,8 @@ export type AdminErrorCode =
   /** زبانهٔ «چاپخانه‌ها» (۵٫۲). */
   | 'partner_not_found'
   | 'invalid_partner_name'
+  /** موبایل اعلان (۷٫۶). */
+  | 'invalid_partner_mobile'
   | 'city_required'
   | 'invalid_city'
   | 'partner_name_taken'
@@ -91,6 +93,9 @@ export type AdminErrorCode =
   /** «دوباره بفرست» پیامک پرداخت (۷٫۱). */
   | 'payment_not_found'
   | 'paid_sms_closed'
+  /** «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه (۷٫۶). */
+  | 'partner_sms_not_found'
+  | 'partner_sms_closed'
   /** «استعلام از درگاه» (۷٫۲). */
   | 'gateway_not_configured'
   | 'payment_final'

@@ -57,7 +57,8 @@ export function needList(readiness: CheckoutReadiness) {
     .map(({ part, state }) => ({ part, label: READINESS_LABELS[part], ok: state === 'ok', state: READINESS_STATES[state] }));
 }
 
-const isKey = (part: ReadinessPart): part is (typeof SERVICE_KEYS)[number] => (SERVICE_KEYS as readonly string[]).includes(part);
+/** تکه‌ای که کلید پنل است؛ قالب پیامک چاپخانه (۷٫۶) کلید هست ولی تکهٔ آمادگی نیست. */
+const isKey = (part: ReadinessPart): part is (typeof SERVICE_KEYS)[number] & ReadinessPart => (SERVICE_KEYS as readonly string[]).includes(part);
 
 /** اولین تکه‌ای که درست نیست، به ترتیب کارت. */
 export function firstGap(readiness: CheckoutReadiness) {

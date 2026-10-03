@@ -308,13 +308,17 @@ export function createCheckoutService(deps: CheckoutDeps) {
   const gateways: Readonly<Record<string, PaymentGateway>> = deps.gateways ?? { [deps.gateway.name]: deps.gateway };
   const providers = Object.keys(gateways);
 
-  /** پیامک پرداختی که همین تراکنش نوشت، بعد از commit (برش ۷٫۱): شکستش پرداخت را برنمی‌گرداند؛ ردیفش «نرفت» می‌ماند. */
-  async function deliverPaidSms(smsId: number | null, orderNumber: number) {
-    if (smsId === null) return;
+  /**
+   * پیامک‌هایی که همین تراکنش پرداخت نوشت، بعد از commit: پیامک پرداخت به مشتری (برش ۷٫۱)، و پیامک سفارش تازه به چاپخانه‌ای که سفارش به
+   * آن رسید و موبایل اعلان دارد (برش ۷٫۶). شکستشان پرداخت را برنمی‌گرداند؛ ردیفشان «نرفت» می‌ماند و پنل «دوباره بفرست» دارد.
+   */
+  async function deliverPaidSms(result: { smsId: number | null; partnerSmsId: number | null; order: { orderNumber: number } }) {
+    const ids = [result.smsId, result.partnerSmsId].filter((id): id is number => id !== null);
+    if (ids.length === 0) return;
     try {
-      await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log }, [smsId]);
+      await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log }, ids);
     } catch (error) {
-      log(`✗ پیامک پرداخت سفارش ${orderNumber} فرستاده نشد:`, error);
+      log(`✗ پیامک‌های پرداخت سفارش ${result.order.orderNumber} فرستاده نشد:`, error);
     }
   }
 
@@ -536,14 +540,15 @@ export function createCheckoutService(deps: CheckoutDeps) {
      * برگشت از درگاه (`/pay/callback/<کلید>`، سؤال ۱۴۵): فقط کلید برگشت همین تلاش خوانده می‌شود، هیچ پارامتر درگاه؛ کلید ناشناس ۴۰۴.
      * سنجش سمت سرور با درگاه خود همان پرداخت، زیر قفل پرداخت و سفارش: استعلام پیش از `verify` (`settleWith`، ADR-050)؛ برگشت تکراری
      * (رفرش، Push Transaction زیبال) همان نتیجهٔ قبل را می‌دهد. موفق: در یک تراکنش `paid`، تاریخ پرداخت، مهلت تحویل به پست، رویداد،
-     * کارهای `prepare_order` و `prepare_ticket` (برش ۵٫۱) و ردیف «منتظر» پیامک پرداخت (برش ۷٫۱)؛ بعد از commit همان پیامک فرستاده می‌شود.
+     * کارهای `prepare_order` و `prepare_ticket` (برش ۵٫۱)، ردیف «منتظر» پیامک پرداخت (برش ۷٫۱)، و پیامک سفارش تازه به چاپخانه‌ای که موبایل
+     * اعلان دارد (برش ۷٫۶)؛ بعد از commit همان پیامک‌ها فرستاده می‌شوند.
      * «در انتظار» (برگشت زودرس، یا درگاه جواب نداد) و ناموفق: سفارش `awaiting_payment` با همان قیمت می‌ماند.
      */
     async settle(returnKey: string): Promise<Result<{ token: string; payment: 'succeeded' | 'failed' | 'pending' }>> {
       if (!RETURN_KEY.test(returnKey)) return fail(404, 'not_found');
       const result = await settleWith({ store: deps.orders, lookup: { returnKey, providers }, gateways, via: 'callback', now, returned: true, log });
       if (!result || result === 'busy') return fail(404, 'not_found');
-      await deliverPaidSms(result.smsId, result.order.orderNumber);
+      await deliverPaidSms(result);
       return ok({ token: result.order.publicToken, payment: result.payment.status });
     },
 
@@ -565,7 +570,7 @@ export function createCheckoutService(deps: CheckoutDeps) {
         const result = await settleWith({ store: deps.orders, lookup: { paymentId, providers }, gateways, via: 'auto', now, skipLocked: true, log });
         if (!result || result === 'busy') continue;
         if (result.settled) settled += 1;
-        await deliverPaidSms(result.smsId, result.order.orderNumber);
+        await deliverPaidSms(result);
       }
       const real = providers.filter((name) => name !== 'mock');
       const held = await deps.orders.heldAttempts({

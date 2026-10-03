@@ -582,24 +582,29 @@ export async function assignPartnerAction(_state: AssignState, form: FormData): 
 export interface PartnerState {
   error?: AdminErrorCode;
   /** فیلدی که خطا دارد. */
-  field?: 'name' | 'city';
+  field?: 'name' | 'city' | 'mobile';
   /** شهرهایی که به متن فیلد می‌خورند («مشهد، خراسان رضوی»)، برای خطای شهر. */
   suggestions?: string[];
-  values?: { name: string; city: string };
+  values?: { name: string; city: string; mobile: string };
 }
 
 /**
- * افزودن و ویرایش چاپخانه (۵٫۲، طرح `m-partner-edit`): خطای نام یا شهر همین‌جا با نوشته‌ها و پیشنهادهای شهر؛ چاپخانه‌ای که همین
- * حالا جای دیگری عوض شد به همان فرم با نام و شهر تازه؛ موفق به فهرست با پیام. کد تازه نمی‌خواهد (سؤال ۳۵).
+ * افزودن و ویرایش چاپخانه (۵٫۲، طرح `m-partner-edit`): خطای نام، شهر یا موبایل اعلان (۷٫۶) همین‌جا با نوشته‌ها و پیشنهادهای شهر؛
+ * چاپخانه‌ای که همین حالا جای دیگری عوض شد به همان فرم با نام، شهر و موبایل تازه؛ موفق به فهرست با پیام. کد تازه نمی‌خواهد (سؤال ۳۵).
  */
 export async function savePartnerAction(_state: PartnerState, form: FormData): Promise<PartnerState> {
   const gate = field(form, 'gate');
   const { partners } = requirePanel(gate);
   const session = await requireSession(gate);
   const id = field(form, 'id');
-  const values = { name: field(form, 'name').slice(0, 400), city: field(form, 'city').slice(0, 400) };
+  const values = {
+    name: field(form, 'name').slice(0, 400),
+    city: field(form, 'city').slice(0, 400),
+    mobile: field(form, 'mobile').slice(0, 100),
+  };
+  const seen = { seenName: field(form, 'seenName'), seenCity: field(form, 'seenCity'), seenMobile: field(form, 'seenMobile') };
   const result = id
-    ? await partners.update(session, id, { ...values, seenName: field(form, 'seenName'), seenCity: field(form, 'seenCity') }, await requestIp())
+    ? await partners.update(session, id, { ...values, ...seen }, await requestIp())
     : await partners.create(session, values, await requestIp());
   const home = panelPath(gate, '/partners');
   if (result.ok) redirect(`${home}?done=${id ? 'update' : 'create'}&p=${encodeURIComponent(id || ('id' in result.value ? result.value.id : ''))}&${doneMark()}`);
@@ -613,7 +618,7 @@ export async function savePartnerAction(_state: PartnerState, form: FormData): P
     : undefined;
   return {
     error: result.error,
-    ...(result.field === 'name' || result.field === 'city' ? { field: result.field } : {}),
+    ...(result.field === 'name' || result.field === 'city' || result.field === 'mobile' ? { field: result.field } : {}),
     ...(suggestions ? { suggestions } : {}),
     values,
   };
@@ -833,6 +838,24 @@ export async function resendPaymentSmsAction(form: FormData): Promise<void> {
   redirect(
     result.ok
       ? withQuery(back, `done=paid_sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
+      : withQuery(back, `e=${result.error}&${doneMark()}`),
+  );
+}
+
+/**
+ * «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه (۷٫۶، سؤال ۱۷۲؛ مالک و متصدی): از کارت «چاپخانه» سفارش؛ برگشت به همان سفارش با نتیجه
+ * (`done=partner_sms_resend&sent=1|0`) یا پیامش. کد تازه نمی‌خواهد: فقط پیامکی را دوباره می‌فرستد که نرفت، به همان شماره.
+ */
+export async function resendPartnerSmsAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await orders.resendPartnerSms(session, { assignment: field(form, 'assignment') }, await requestIp());
+  const number = result.ok ? String(result.value.orderNumber) : typeof result.orderNumber === 'number' ? String(result.orderNumber) : field(form, 'number');
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number.slice(0, 20))}`);
+  redirect(
+    result.ok
+      ? withQuery(back, `done=partner_sms_resend&sent=${result.value.outcome === 'sent' ? 1 : 0}&${doneMark()}`)
       : withQuery(back, `e=${result.error}&${doneMark()}`),
   );
 }

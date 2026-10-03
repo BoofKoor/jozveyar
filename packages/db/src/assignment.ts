@@ -5,12 +5,17 @@
  *
  * قاعده خالص است (`choosePartner`)، تا ذخیره‌گاه حافظه‌ای تست سایت هم همین را بخواند؛ `assignAtPayment` همان را درون تراکنش
  * پرداخت (`settlePayment`) روی پستگرس اجرا می‌کند. کرایهٔ مشتری دست نمی‌خورد: سفارش با کرایهٔ استانش منجمد است (ADR-034).
+ *
+ * از ۷٫۶ (سؤال ۱۲۶): چاپخانه‌ای که موبایل اعلان دارد، پیامک «منتظر» سفارش تازه را در همین تراکنش می‌گیرد (`queuedPartnerSms`)، و
+ * صدازننده بعد از commit می‌فرستدش؛ شکستش پرداخت را برنمی‌گرداند.
  */
 
+import { formatDeadlineDay } from '@jozveyar/text';
 import { and, eq, isNull } from 'drizzle-orm';
 
 import type { Database } from './index.js';
 import { orderAssignments, orders, printPartners } from './schema.js';
+import { queuedPartnerSms } from './sms.js';
 
 /** قاعدهٔ تخصیص خودکار: هم‌شهر مشتری، هم‌استان، چاپخانهٔ پیش‌فرض، یا قدیمی‌ترین چاپخانهٔ فعال وقتی پیش‌فرضی نیست. */
 export type AssignmentRule = 'city' | 'province' | 'default' | 'oldest';
@@ -56,12 +61,15 @@ const PICK_TRIES = 3;
  * چاپخانهٔ انتخاب‌شده قفل می‌شود (`FOR SHARE`)، نه همه: پیش‌فرض کردنِ هم‌زمان دو ردیف را قفل می‌کند، و قفل چند ردیف به ترتیب
  * دیگر بن‌بست می‌ساخت که پرداخت را برمی‌گرداند. چاپخانه‌ای که همان لحظه غیرفعال شد، پس از قفل دیگر پیدا نمی‌شود و انتخاب از
  * نو است؛ پس غیرفعال کردن هم‌زمان هیچ‌وقت پرداخت را نمی‌شکند.
+ *
+ * موبایل اعلان پس از همان قفل خوانده می‌شود، پس ویرایش هم‌زمانش یا پیش از این است یا پس از این تراکنش (تریگر
+ * `order_assignments_partner_sms` همان شماره را می‌خواهد). `smsId` پیامک سفارش تازهٔ چاپخانه است، یا null بی موبایل اعلان.
  */
 export async function assignAtPayment(
   tx: Tx,
-  order: { id: string; cityId: number | null; provinceId: number },
+  order: { id: string; orderNumber: number; cityId: number | null; provinceId: number; postHandoffDueAt: Date | null },
   at: Date,
-): Promise<{ partnerId: string; rule: AssignmentRule } | null> {
+): Promise<{ partnerId: string; rule: AssignmentRule; smsId: number | null } | null> {
   for (let i = 0; i < PICK_TRIES; i += 1) {
     const candidates = await tx
       .select({
@@ -76,13 +84,14 @@ export async function assignAtPayment(
     const chosen = choosePartner(candidates, order);
     if (!chosen) return null;
     const [locked] = await tx
-      .select({ id: printPartners.id })
+      .select({ id: printPartners.id, notifyMobile: printPartners.notifyMobile })
       .from(printPartners)
       .where(and(eq(printPartners.id, chosen.partnerId), isNull(printPartners.deactivatedAt)))
       .limit(1)
       .for('share');
     if (!locked) continue;
     await tx.update(orders).set({ printPartnerId: chosen.partnerId }).where(eq(orders.id, order.id));
+    const smsId = await partnerSmsOf(tx, locked.notifyMobile, order, at);
     await tx.insert(orderAssignments).values({
       orderId: order.id,
       fromPartnerId: null,
@@ -90,8 +99,29 @@ export async function assignAtPayment(
       at,
       actor: 'system',
       rule: chosen.rule,
+      smsMessageId: smsId,
     });
-    return chosen;
+    return { ...chosen, smsId };
   }
   return null;
+}
+
+/**
+ * پیامک «منتظر» سفارش تازه برای چاپخانه‌ای که موبایل اعلان دارد (برش ۷٫۶)، درون همان تراکنش تخصیص؛ null بی موبایل. پرداخت و جابه‌جایی پنل
+ * (`assignPartner`) هر دو از همین. سفارش «در صف چاپ» همیشه مهلت دارد (`orders_paid_has_dates`).
+ */
+export async function partnerSmsOf(
+  tx: Pick<Tx, 'insert'>,
+  notifyMobile: string | null,
+  order: { orderNumber: number; postHandoffDueAt: Date | null },
+  at: Date,
+): Promise<number | null> {
+  if (!notifyMobile) return null;
+  if (!order.postHandoffDueAt) throw new Error(`سفارش ${order.orderNumber} مهلت تحویل به پست ندارد.`);
+  return queuedPartnerSms(tx, {
+    toMobile: notifyMobile,
+    orderNumber: order.orderNumber,
+    handoffDay: formatDeadlineDay(order.postHandoffDueAt),
+    at,
+  });
 }

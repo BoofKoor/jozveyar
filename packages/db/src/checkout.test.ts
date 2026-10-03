@@ -91,7 +91,7 @@ describe('آمادگی live', () => {
     const empty = readinessOf({ ...LIVE_ENV, SMS_TRACKING_TEMPLATE: '' }, [], KEY);
     expect([stateOf(empty, 'SMS_TRACKING_TEMPLATE'), empty.ready]).toEqual(['empty', false]);
     expect(describeReadiness(empty)).toBe('✗ مسیر خرید: live خواسته شد ولی SMS_TRACKING_TEMPLATE خالی است — خاموش');
-    const cases: [ServiceKeyName, string][] = [
+    const cases: [Extract<ServiceKeyName, (typeof READINESS_PARTS)[number]>, string][] = [
       ['SMS_OTP_TEMPLATE', 'abc'],
       ['SMS_PAID_TEMPLATE', '0123'],
       ['SMS_API_KEY', 'short'],
@@ -118,6 +118,20 @@ describe('آمادگی live', () => {
       const unreadable = readinessOf(LIVE_ENV, [rowOf('SMS_API_KEY', 'panel-key-0000000001')], secretsKey);
       expect([stateOf(unreadable, 'SMS_API_KEY'), unreadable.ready]).toEqual(['unreadable', false]);
       expect(describeReadiness(unreadable)).toBe('✗ مسیر خرید: live خواسته شد ولی SMS_API_KEY پنل با SECRETS_KEY امروز خوانده نشد — خاموش');
+    }
+  });
+
+  it('قالب پیامک چاپخانه (۷٫۶) پیش‌نیاز live نیست: خالی، شکل نادرست یا «خوانده نشد»ش آمادگی را عوض نمی‌کند (سؤال‌های ۱۲۶ و ۱۷۵)', () => {
+    expect(READINESS_PARTS).not.toContain('SMS_PARTNER_TEMPLATE');
+    // LIVE_ENV قالب چاپخانه ندارد و آماده است (همان تست اول)؛ با هر حال دیگرش هم.
+    for (const readiness of [
+      readinessOf({ ...LIVE_ENV, SMS_PARTNER_TEMPLATE: 'قالب' }, [], KEY),
+      readinessOf(LIVE_ENV, [rowOf('SMS_PARTNER_TEMPLATE', 'not-a-number')], KEY),
+      readinessOf(LIVE_ENV, [rowOf('SMS_PARTNER_TEMPLATE', '100004', OTHER_KEY)], KEY),
+    ]) {
+      expect(readiness.ready).toBe(true);
+      expect(readiness.parts.map((part) => part.part)).toEqual([...READINESS_PARTS]);
+      expect(describeReadiness(readiness)).toBe('✓ مسیر خرید: live — زیبال و sms.ir؛ مخاطب از پنل');
     }
   });
 

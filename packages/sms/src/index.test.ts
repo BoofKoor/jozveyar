@@ -13,6 +13,8 @@ import {
   otpText,
   paidParams,
   parseSmsErrorTag,
+  partnerOrderText,
+  partnerParams,
   resendable,
   smsErrorTag,
   smsSegments,
@@ -45,11 +47,26 @@ describe('متن‌ها: یک منبع برای کد و قالب‌های sms.ir
       ['otp', 'SMS_OTP_TEMPLATE', ['CODE']],
       ['order_paid', 'SMS_PAID_TEMPLATE', ['ORDER', 'DAY']],
       ['tracking', 'SMS_TRACKING_TEMPLATE', ['ORDER', 'BARCODE']],
+      ['partner_order', 'SMS_PARTNER_TEMPLATE', ['ORDER', 'DAY']],
     ]);
     // متن جز پارامترها چیز متغیری ندارد: قالب با همان پارامترها همان متن است.
     expect(templateText('tracking', trackingParams(10027, BARCODE))).toBe(trackingText(10027, BARCODE));
     expect(templateText('order_paid', paidParams(10001, 'دوشنبه 6 مهر'))).toBe(orderPaidText(10001, 'دوشنبه 6 مهر'));
     expect(templateText('otp', otpParams('12345'))).toBe(otpText('12345'));
+  });
+
+  it('پیامک چاپخانه (۷٫۶، سؤال ۱۴۳): «سفارش تازه» با شماره و روز تحویل، یک تکه، و هرگز نشانی پنل', () => {
+    expect(partnerOrderText(10027, 'دوشنبه 13 مهر')).toBe('جزوه‌یار: سفارش تازه 10027؛ تحویل به پست تا دوشنبه 13 مهر');
+    expect(templateSource('partner_order')).toBe('جزوه‌یار: سفارش تازه #ORDER#؛ تحویل به پست تا #DAY#');
+    expect(templateText('partner_order', partnerParams(10027, 'دوشنبه 13 مهر'))).toBe(partnerOrderText(10027, 'دوشنبه 13 مهر'));
+    const longest = partnerOrderText(999999, 'چهارشنبه 16 اردیبهشت');
+    expect([...longest].length).toBe(65);
+    expect(smsSegments(longest)).toBe(1);
+    // بی نشانی و دامنه: چاپخانه سفارش را در پنل خودش می‌بیند.
+    expect(templateSource('partner_order')).not.toMatch(/https?:|jozveyar\.com|\/|admin/i);
+    expect(() => partnerParams(-1, 'دوشنبه 13 مهر')).toThrow();
+    expect(() => partnerParams(10027, '')).toThrow();
+    expect(() => partnerParams(10027, 'دوشنبه\n13 مهر')).toThrow();
   });
 
   it('هر پیامک یک تکه، حتی با شمارهٔ شش رقمی و بلندترین روز تحویل', () => {

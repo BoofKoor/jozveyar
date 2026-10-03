@@ -29,7 +29,7 @@ import {
   type StoredAnalysis,
 } from '@jozveyar/db';
 import type { DocumentAnalysis, PriceList } from '@jozveyar/contracts';
-import { orderPaidText, paidParams, type SmsOutbox } from '@jozveyar/sms';
+import { orderPaidText, paidParams, partnerOrderText, partnerParams, type SmsOutbox } from '@jozveyar/sms';
 import { formatDeadlineDay } from '@jozveyar/text';
 
 export function memoryStore(): DocumentStore & {
@@ -224,10 +224,10 @@ interface MemoryItem {
   rules: PrintRuleRow[];
 }
 
-/** ردیف پیامک پرداخت ذخیره‌گاه حافظه‌ای (برش ۷٫۱). */
+/** ردیف پیامک پرداخت (برش ۷٫۱) و سفارش تازهٔ چاپخانه (برش ۷٫۶) ذخیره‌گاه حافظه‌ای. */
 export interface MemorySms {
   id: number;
-  purpose: 'order_paid';
+  purpose: 'order_paid' | 'partner_order';
   to: string;
   body: string;
   params: string[];
@@ -238,10 +238,21 @@ export interface MemorySms {
   cost: number | null;
 }
 
-/** چاپخانهٔ ذخیره‌گاه حافظه‌ای (برش ۵٫۲)؛ غیرفعال یعنی سفارش تازه نمی‌گیرد. */
+/** چاپخانهٔ ذخیره‌گاه حافظه‌ای (برش ۵٫۲)؛ غیرفعال یعنی سفارش تازه نمی‌گیرد. موبایل اعلان (برش ۷٫۶) یعنی پیامک سفارش تازه. */
 export interface MemoryPartner extends PartnerCandidate {
   name: string;
   active: boolean;
+  notifyMobile?: string | null;
+}
+
+/** ردیف تخصیص ذخیره‌گاه حافظه‌ای، با پیامک سفارش تازه‌اش (برش ۷٫۶). */
+export interface MemoryAssignment {
+  orderId: string;
+  fromPartnerId: string | null;
+  toPartnerId: string;
+  actor: 'system';
+  rule: AssignmentRule;
+  smsMessageId: number | null;
 }
 
 /** همان اولین چاپخانهٔ دادهٔ پایه (`seedReferenceData`): «چاپخانهٔ جزوه‌یار» در شهر تهران، پیش‌فرض. */
@@ -271,13 +282,13 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   priceLists: Map<number, PriceList>;
   /** چاپخانه‌ها؛ با اولین چاپخانهٔ دادهٔ پایه شروع می‌شود. */
   partners: MemoryPartner[];
-  assignments: { orderId: string; fromPartnerId: string | null; toPartnerId: string; actor: 'system'; rule: AssignmentRule }[];
+  assignments: MemoryAssignment[];
   activate(list: PriceList): void;
   /** کدهای رهگیری زندهٔ هر سفارش با پیامکشان (برش ۶٫۳)؛ پنل می‌نشاندشان، اینجا تست. */
   parcels: Map<string, OrderDetails['parcels']>;
   /** بازپرداخت‌های هر سفارش (برش ۷٫۳)، تازه‌ترین اول؛ پنل می‌نشاندشان، اینجا تست. */
   refunds: Map<string, OrderDetails['refunds']>;
-  /** پیامک‌های پرداخت منتظر و فرستاده (برش ۷٫۱)، و درگاه `deliverQueued` رویشان، مثل `createSmsOutbox`. */
+  /** پیامک‌های پرداخت (برش ۷٫۱) و چاپخانه (برش ۷٫۶)، منتظر و فرستاده، و درگاه `deliverQueued` رویشان، مثل `createSmsOutbox`. */
   sms: Map<number, MemorySms>;
   smsOutbox: SmsOutbox;
   /** رویدادهای سیستم «درگاه شروع را رد کرد» (برش ۷٫۲)، مثل `payments.gateway_rejected`. */
@@ -296,7 +307,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   const events: { orderId: string; fromStatus: string | null; toStatus: string; actor: string; note: unknown }[] = [];
   const jobs: { kind: string; orderId: string }[] = [];
   const partners: MemoryPartner[] = [{ ...FIRST_MEMORY_PARTNER }];
-  const assignments: { orderId: string; fromPartnerId: string | null; toPartnerId: string; actor: 'system'; rule: AssignmentRule }[] = [];
+  const assignments: MemoryAssignment[] = [];
   const priceLists = new Map<number, PriceList>([[options.priceList.version, options.priceList]]);
   let active = options.priceList;
   let nextNumber = 10_001;
@@ -371,13 +382,24 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     refunds,
     sms,
     rejections,
-    // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامک پرداختی که سفارشش لغو نشده.
+    // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامکی که زنده است: پیامک پرداختی که سفارشش لغو نشده، و پیامک
+    // چاپخانه‌ای که تخصیصش امروزِ سفارشی است که هنوز «در صف چاپ» همان چاپخانه است (سؤال ۱۷۴).
     smsOutbox: {
       async claim(id, _at, mode) {
         const row = sms.get(id);
-        const payment = payments.find((p) => p.smsMessageId === id && p.status === 'succeeded');
-        const order = payment ? orders.find((o) => o.id === payment.orderId) : undefined;
-        if (!row || !order || order.status === 'cancelled') return null;
+        if (!row) return null;
+        let live = false;
+        if (row.purpose === 'order_paid') {
+          const payment = payments.find((p) => p.smsMessageId === id && p.status === 'succeeded');
+          const order = payment ? orders.find((o) => o.id === payment.orderId) : undefined;
+          live = Boolean(order && order.status !== 'cancelled');
+        } else {
+          const assignment = assignments.find((a) => a.smsMessageId === id);
+          const order = assignment ? orders.find((o) => o.id === assignment.orderId) : undefined;
+          const current = order ? assignments.filter((a) => a.orderId === order.id).at(-1) : undefined;
+          live = Boolean(order && order.status === 'paid' && current === assignment && order.printPartnerId === assignment!.toPartnerId);
+        }
+        if (!live) return null;
         if (mode === 'queued' ? row.status !== 'pending' : row.status !== 'failed') return null;
         Object.assign(row, { status: 'sending', attempts: row.attempts + 1, error: null });
         return { id, to: row.to, purpose: row.purpose, body: row.body, params: row.params };
@@ -536,12 +558,12 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       );
       if (!payment) return null;
       const order = orders.find((o) => o.id === payment.orderId)!;
-      if (payment.status !== 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null };
+      if (payment.status !== 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null, partnerSmsId: null };
       const outcome = await decide({ payment: { ...payment }, order: { ...order } });
       if (settleOptions.returned && !payment.returnedAt) payment.returnedAt = settleOptions.returned;
       const check = 'check' in outcome && outcome.check ? outcome.check : null;
       if (check) Object.assign(payment, { gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at });
-      if (outcome.kind === 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null };
+      if (outcome.kind === 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null, partnerSmsId: null };
       if (outcome.kind === 'failed') {
         Object.assign(payment, {
           status: 'failed',
@@ -551,7 +573,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
           verifiedAmountRials: outcome.verifiedAmountRials ?? null,
           settledVia: settleOptions.via ?? null,
         });
-        return { payment: { ...payment }, order: { ...order }, settled: true, smsId: null };
+        return { payment: { ...payment }, order: { ...order }, settled: true, smsId: null, partnerSmsId: null };
       }
       // همان `payments_success_amount` (0029).
       if (outcome.verifiedAmountRials !== payment.amountRials) throw new Error('payments_success_amount');
@@ -595,15 +617,40 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         partners.filter((p) => p.active),
         order,
       );
+      let partnerSmsId: number | null = null;
       if (chosen) {
         order.printPartnerId = chosen.partnerId;
-        assignments.push({ orderId: order.id, fromPartnerId: null, toPartnerId: chosen.partnerId, actor: 'system', rule: chosen.rule });
+        // پیامک سفارش تازه، مثل `queuedPartnerSms`، برای چاپخانه‌ای که موبایل اعلان دارد (برش ۷٫۶).
+        const mobile = partners.find((p) => p.id === chosen.partnerId)?.notifyMobile ?? null;
+        if (mobile) {
+          partnerSmsId = nextSms++;
+          sms.set(partnerSmsId, {
+            id: partnerSmsId,
+            purpose: 'partner_order',
+            to: mobile,
+            body: partnerOrderText(order.orderNumber, day),
+            params: partnerParams(order.orderNumber, day),
+            status: 'pending',
+            provider: 'queued',
+            attempts: 0,
+            error: null,
+            cost: null,
+          });
+        }
+        assignments.push({
+          orderId: order.id,
+          fromPartnerId: null,
+          toPartnerId: chosen.partnerId,
+          actor: 'system',
+          rule: chosen.rule,
+          smsMessageId: partnerSmsId,
+        });
       }
       // PDF جزوه و فایل چاپ، و برگهٔ سفارش (برش ۵٫۱)؛ هر کدام یک بار، مثل `jobs_order_kind`.
       for (const kind of ['prepare_order', 'prepare_ticket']) {
         if (!jobs.some((j) => j.orderId === order.id && j.kind === kind)) jobs.push({ kind, orderId: order.id });
       }
-      return { payment: { ...payment }, order: { ...order }, settled: true, smsId };
+      return { payment: { ...payment }, order: { ...order }, settled: true, smsId, partnerSmsId };
     },
     async pendingAttempts({ providers, createdBefore, checkedBefore, limit }) {
       return payments

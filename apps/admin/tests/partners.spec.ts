@@ -8,7 +8,7 @@ import postgres from 'postgres';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { S3Driver } from '@jozveyar/storage';
-import { tehranDayStart } from '@jozveyar/text';
+import { formatDeadlineDay, formatTehranTime, tehranDayStart, toPersianDigits } from '@jozveyar/text';
 
 import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
 
@@ -17,6 +17,10 @@ import { alertOf, assignAtPayment, at, BASE, enroll, GATE, layoutProblems, newCo
  * `m-order-assign` و هشدار پیشخوان؛ ADR-042): زبانهٔ «چاپخانه‌ها» فقط برای مالک (فهرست، افزودن و ویرایش نام و شهر، پیش‌فرض،
  * غیرفعال و فعال)، کارت چاپخانهٔ سفارش با «جابه‌جایی» و دلیل، برگه‌ای که با چاپخانهٔ تازه به‌روز می‌شود، سفارش بی چاپخانه (هشدار،
  * «اول چاپخانه انتخاب شود» و انتخاب)، و جابه‌جایی و «شروع چاپ» هم‌زمان در دو زبانه، که فقط یکی می‌شود.
+ *
+ * از ۷٫۶ (سؤال‌های ۱۲۶ و ۱۷۲ تا ۱۷۷): موبایل اعلان در همان فرم و فهرست، پیامک سفارش تازه با جابه‌جایی (فقط به چاپخانهٔ تازه)، پیامکی که
+ * هنگام پرداخت ساخته شد و نرفت با هشدار پیشخوان و «دوباره بفرست»، پیامک سفارشی که جابه‌جا شد که دیگر نمی‌رود، و رویدادها با شمارهٔ
+ * پوشیده. این اجرا کنسولی است (پیامک فقط ردیف `sms_messages`)؛ همین با sms.ir و شناسهٔ قالبی که مالک وارد می‌کند در `live.spec.ts`.
  *
  * سفارش‌ها را مثل `status.spec.ts` خود تست با SQL می‌نشاند، با همان تخصیصی که برگشت درگاه در تراکنش پرداخت می‌نویسد
  * (`assignAtPayment` در `helpers.ts`)، و فایل چاپ را کارگر واقعی می‌سازد؛ همان متغیرها و همان کارگر لازم است (طرز اجرا بالای
@@ -37,7 +41,15 @@ const FIXTURES = join(process.cwd(), '..', 'web', 'tests', 'fixtures');
 const FIRST = 'چاپخانهٔ جزوه‌یار';
 const NOOR = `چاپ نور ${RUN}`;
 const AFTAB = `چاپ آفتاب ${RUN}`;
+const MEHR = `چاپ مهر ${RUN}`;
 const MASHHAD = { provinceId: 11, cityId: 1326 };
+const YAZD = { provinceId: 31, cityId: 1511 };
+/** موبایل اعلان چاپخانه‌های این اجرا (۷٫۶): شمارهٔ اجرا در چهار رقم آخر، تا با اجرای دیگری قاطی نشود. */
+const MEHR_MOBILE = `0915123${RUN}`;
+const AFTAB_MOBILE = `0912345${RUN}`;
+/** شماره همان‌طور که پنل نشان می‌دهد («0915 123 4567») و در رویداد پوشیده («0915 ••• 4567»). */
+const spaced = (mobile: string) => `${mobile.slice(0, 4)} ${mobile.slice(4, 7)} ${mobile.slice(7)}`;
+const masked = (mobile: string) => `${mobile.slice(0, 4)} ••• ${mobile.slice(7)}`;
 
 let sql: postgres.Sql;
 let s3: S3Driver;
@@ -59,11 +71,12 @@ interface Seeded {
 }
 
 /**
- * سفارش پرداخت‌شده به مشهد، همان ردیف‌هایی که سرور می‌نویسد: سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد، چاپخانه
- * (`assignAtPayment`، یا بی چاپخانه با `assign: false`، مثل وقتی هیچ چاپخانهٔ فعالی نبود) و کارهای `prepare_order` و
- * `prepare_ticket`. ۱۰ صفحهٔ سیاه‌سفید؛ فایلش در استوریج تا کارگر فایل چاپ را بسازد.
+ * سفارش پرداخت‌شده به مشهد (یا شهر `place`)، همان ردیف‌هایی که سرور می‌نویسد: سفارش در یک تراکنش، و برگشت موفق درگاه با رویداد،
+ * چاپخانه (`assignAtPayment`، یا بی چاپخانه با `assign: false`، مثل وقتی هیچ چاپخانهٔ فعالی نبود) و کارهای `prepare_order` و
+ * `prepare_ticket`. ۱۰ صفحهٔ سیاه‌سفید؛ فایلش در استوریج تا کارگر فایل چاپ را بسازد. چاپخانه‌ای که موبایل اعلان دارد پیامک منتظرش را
+ * هم می‌گیرد، ساخته یک ساعت پیش و نرفته (پنل پیش از فرستادن افتاد).
  */
-async function paidOrder(name: string, phone: string, { assign = true } = {}): Promise<Seeded> {
+async function paidOrder(name: string, phone: string, { assign = true, place = MASHHAD } = {}): Promise<Seeded> {
   const docId = randomUUID();
   const key = `uploads/${docId}.pdf`;
   const body = readFileSync(join(FIXTURES, 'plain-bw-10.pdf'));
@@ -92,7 +105,7 @@ async function paidOrder(name: string, phone: string, { assign = true } = {}): P
       VALUES (${randomUUID()}, ${user!.id}, ${breakdown.priceListVersion}, ${tx.json(breakdown as never)},
               ${breakdown.subtotalRials}, ${breakdown.discountRials}, ${breakdown.shippingRials!}, ${breakdown.vatRials},
               ${breakdown.roundingRials}, ${breakdown.totalRials}, ${breakdown.estWeightGrams}, 2, 'post', 'other',
-              ${MASHHAD.provinceId}, ${MASHHAD.cityId}, ${name}, ${phone}, 'بلوار سجاد، سجاد 18، پلاک 42، واحد 6', '9187654321',
+              ${place.provinceId}, ${place.cityId}, ${name}, ${phone}, 'بلوار سجاد، سجاد 18، پلاک 42، واحد 6', '9187654321',
               ${createdAt})
       RETURNING id, order_number`;
     const [item] = await tx<{ id: string }[]>`
@@ -126,6 +139,12 @@ const partnerOf = async (o: Seeded) =>
 const statusOf = async (o: Seeded) => (await sql<{ status: string }[]>`SELECT status::text FROM orders WHERE id = ${o.id}`)[0]!.status;
 const jobStatus = async (o: Seeded, kind = 'prepare_order') =>
   (await sql<{ status: string }[]>`SELECT status FROM jobs WHERE order_id = ${o.id} AND kind = ${kind}`)[0]?.status;
+/** پیامک سفارش تازهٔ تخصیص‌های یک سفارش (۷٫۶)، به ترتیب تخصیص؛ تخصیص به چاپخانهٔ بی موبایل اعلان پیامک ندارد. */
+const partnerSmsRows = async (o: Seeded) =>
+  sql<{ to_mobile: string; status: string; provider: string; body: string; params: string[]; attempts: number; created_at: Date }[]>`
+    SELECT m.to_mobile, m.status, m.provider, m.body, m.params, m.attempts, m.created_at
+      FROM order_assignments a JOIN sms_messages m ON m.id = a.sms_message_id
+     WHERE a.order_id = ${o.id} ORDER BY a.id`;
 const side = (page: Page) => page.locator('.ad-side');
 const partnerCard = (page: Page) => page.locator('section', { has: page.getByRole('heading', { name: 'چاپخانه', exact: true }) });
 const row = (page: Page, name: string) => page.locator(`.ad-partners li[data-partner="${name}"]`);
@@ -273,7 +292,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await stale.getByLabel('نام').fill(`${AFTAB} شیراز`);
     await stale.getByRole('button', { name: 'ذخیره' }).click();
     await expect(alertOf(stale)).toHaveText(
-      'این چاپخانه همین حالا جای دیگری عوض شد؛ نام و شهر تازه را ببین و اگر هنوز لازم است، دوباره ذخیره کن.',
+      'این چاپخانه همین حالا جای دیگری عوض شد؛ نام، شهر و موبایل اعلان تازه را ببین و اگر هنوز لازم است، دوباره ذخیره کن.',
     );
     await expect(stale.getByLabel('شهر')).toHaveValue('اصفهان، اصفهان');
     await expect(stale.getByLabel('نام')).toHaveValue(AFTAB);
@@ -513,8 +532,175 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     expect(ownerProblems).toEqual([]);
   });
 
-  test('گوشی و دسکتاپ: فهرست، فرم، کارت چاپخانه، جابه‌جایی و هشدار بی سرریز افقی، هدف لمسی ۴۴ پیکسل و آیکون با شکل', async ({ browser }) => {
+  test('موبایل اعلان (۷٫۶): راهنما و خطا زیر فیلد، ارقام فارسی، فهرست با شماره و ویرایش کهنه؛ پیامک سفارش تازه فقط به چاپخانهٔ تازه؛ پیامکی که هنگام پرداخت نرفت با هشدار پیشخوان و «دوباره بفرست»؛ پیامک سفارش جابه‌جاشده دیگر نمی‌رود، و سفارشی که چاپش شروع شد «دوباره بفرست» ندارد؛ رویدادها با شمارهٔ پوشیده', async () => {
+    test.setTimeout(180_000);
+    // افزودن با موبایل: راهنمای طرح زیر فیلد. این اجرا کنسولی است و شناسهٔ قالب نمی‌خواهد، پس بی هشدار قالب (سؤال ۱۷۵ در `live.spec.ts`).
+    await ownerPage.goto(at('/partners/new'));
+    const mobile = ownerPage.getByLabel('موبایل اعلان');
+    await expect(mobile).toHaveAttribute('type', 'tel');
+    await expect(mobile).toHaveAttribute('inputmode', 'numeric');
+    await expect(mobile).toHaveValue('');
+    await expect(ownerPage.locator('#p-mobile-hint')).toHaveText(
+      'برای هر سفارش تازه‌ای که به این چاپخانه برسد، هنگام پرداخت یا جابه‌جایی، یک پیامک: «جزوه‌یار: سفارش تازه 10027؛ تحویل به پست تا دوشنبه 13 مهر». خالی یعنی بی پیامک. نشانی پنل در پیامک نمی‌آید.',
+    );
+    await expect(ownerPage.locator('[data-partner-template]')).toHaveCount(0);
+    // شمارهٔ نادرست: خطا زیر همان فیلد، هر سه نوشته می‌مانند و چاپخانه‌ای ساخته نمی‌شود.
+    await ownerPage.getByLabel('نام').fill(MEHR);
+    await ownerPage.getByLabel('شهر').fill('یزد، یزد');
+    await mobile.fill('0915123');
+    await ownerPage.getByRole('button', { name: 'افزودن' }).click();
+    await expect(ownerPage.locator('#p-mobile-error')).toHaveText('موبایل اعلان درست نیست؛ 11 رقم است و با 09 شروع می‌شود. خالی یعنی بی پیامک.');
+    await expect(mobile).toHaveAttribute('aria-invalid', 'true');
+    await expect(mobile).toHaveValue('0915123');
+    await expect(ownerPage.getByLabel('نام')).toHaveValue(MEHR);
+    await expect(ownerPage.getByLabel('شهر')).toHaveValue('یزد، یزد');
+    expect((await sql`SELECT 1 FROM print_partners WHERE name = ${MEHR}`).length).toBe(0);
+    // ارقام فارسی با فاصله، نرمال ذخیره می‌شود؛ فهرست شماره را کامل نشان می‌دهد، فقط برای مالک (سؤال ۱۷۷).
+    await mobile.fill(toPersianDigits(spaced(MEHR_MOBILE)));
+    await ownerPage.getByRole('button', { name: 'افزودن' }).click();
+    await expect(ownerPage.locator('main .jy-note--success')).toHaveText(
+      `چاپخانهٔ «${MEHR}» در یزد افزوده شد؛ سفارش‌های تازهٔ همین شهر، و بعد همین استان، به آن می‌روند.`,
+    );
+    await expect(row(ownerPage, MEHR).locator('.ad-partners__meta')).toHaveText(
+      `یزد · 0 سفارش باز · کاربرها: همان مالک و متصدی · پیامک سفارش تازه به ${spaced(MEHR_MOBILE)}`,
+    );
+    expect(await sql`SELECT notify_mobile FROM print_partners WHERE name = ${MEHR}`).toEqual([{ notify_mobile: MEHR_MOBILE }]);
+
+    // آفتاب موبایل می‌گیرد. زبانهٔ کهنه‌ای که موبایل خالی را دیده بود با ذخیرهٔ نام پاکش نمی‌کند: همان «همین حالا عوض شد».
+    await row(ownerPage, AFTAB).getByRole('link', { name: 'ویرایش' }).click();
+    await expect(ownerPage.getByRole('heading', { name: 'ویرایش چاپخانه' })).toBeVisible();
+    await expect(mobile).toHaveValue('');
+    const stale = await ownerContext.newPage();
+    await stale.goto(ownerPage.url());
+    await mobile.fill(AFTAB_MOBILE);
+    await ownerPage.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(ownerPage.locator('main .jy-note--success')).toHaveText(`«${AFTAB}» ذخیره شد.`);
+    await expect(row(ownerPage, AFTAB).locator('.ad-partners__meta')).toHaveText(
+      `اصفهان · 1 سفارش باز · کاربرها: همان مالک و متصدی · پیامک سفارش تازه به ${spaced(AFTAB_MOBILE)}`,
+    );
+    await stale.getByLabel('نام').fill(`${AFTAB} ب`);
+    await stale.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(alertOf(stale)).toHaveText(
+      'این چاپخانه همین حالا جای دیگری عوض شد؛ نام، شهر و موبایل اعلان تازه را ببین و اگر هنوز لازم است، دوباره ذخیره کن.',
+    );
+    await expect(stale.getByLabel('موبایل اعلان')).toHaveValue(AFTAB_MOBILE);
+    await expect(stale.getByLabel('نام')).toHaveValue(AFTAB);
+    await stale.close();
+    expect(await sql`SELECT name, notify_mobile FROM print_partners WHERE name LIKE ${`${AFTAB}%`}`).toEqual([{ name: AFTAB, notify_mobile: AFTAB_MOBILE }]);
+
+    // جابه‌جایی A از آفتاب به مهر: پیامک سفارش تازه به موبایل مهر، پس از ثبت جابه‌جایی (کنسولی: «رفت»)؛ آفتاب که سفارش را از دست داد
+    // پیامکی نمی‌گیرد (سؤال ۱۷۳).
+    await ownerPage.goto(at(`/orders/${o.A.number}?do=assign`));
+    const form = ownerPage.locator('[data-assign]');
+    await form.getByLabel(MEHR).check();
+    await form.getByLabel('دلیل').fill('چاپخانهٔ یزد زودتر می‌رساند.');
+    await form.getByRole('button', { name: 'جابه‌جا کن' }).click();
+    const card = partnerCard(ownerPage);
+    await expect(card.locator('.ad-partner b')).toHaveText(MEHR);
+    const sent = card.locator('[data-partner-sms="sent"]');
+    await expect(sent.locator('b')).toHaveText('پیامک سفارش تازه');
+    await expect(sent.locator('.ad-paysms__ok')).toHaveText(new RegExp(`^به ${spaced(MEHR_MOBILE)} رفت، امروز \\d\\d:\\d\\d$`));
+    await expect(card.getByRole('button', { name: 'دوباره بفرست' })).toHaveCount(0);
+    // متن پیامک: شمارهٔ سفارش و روز تحویل به پست، بی نشانی پنل (سؤال ۱۴۳)؛ به همان موبایل مهر، فقط برای تخصیص آخر.
+    const [due] = await sql<{ at: Date }[]>`SELECT post_handoff_due_at AS at FROM orders WHERE id = ${o.A.id}`;
+    const day = formatDeadlineDay(due!.at);
+    expect(await partnerSmsRows(o.A)).toMatchObject([
+      {
+        to_mobile: MEHR_MOBILE,
+        status: 'logged',
+        provider: 'console',
+        attempts: 1,
+        body: `جزوه‌یار: سفارش تازه ${o.A.number}؛ تحویل به پست تا ${day}`,
+        params: [String(o.A.number), day],
+      },
+    ]);
+    expect(await sql`SELECT 1 FROM sms_messages WHERE purpose = 'partner_order' AND to_mobile = ${AFTAB_MOBILE}`).toHaveLength(0);
+    // متصدی هم ردیف را می‌بیند (`orders.assign`، سؤال ۱۷۲).
+    await operatorPage.goto(at(`/orders/${o.A.number}`));
+    await expect(partnerCard(operatorPage).locator('[data-partner-sms="sent"]')).toBeVisible();
+
+    // دو سفارش یزد که هنگام پرداخت به مهر رسیدند و پیامکشان نرفت (پنل پیش از فرستادن افتاد): هشدار پیشخوان برای مالک و متصدی.
+    const Y = await paidOrder('فاطمه یزدانی', phone(7), { place: YAZD });
+    const Z = await paidOrder('رضا میبدی', phone(8), { place: YAZD });
+    expect([await partnerOf(Y), await partnerOf(Z)]).toEqual([MEHR, MEHR]);
+    const alertText = `پیامک سفارش تازهٔ ${Y.number} به ${MEHR} و ${Z.number} به ${MEHR} نرفت؛ از کارت «چاپخانه»ی هر کدام دوباره بفرست.`;
+    await ownerPage.goto(at());
+    await expect(ownerPage.locator('[data-alert="partner-sms"]')).toHaveText(alertText);
+    await expect(ownerPage.locator('[data-alert="partner-sms"] .jy-icon-warning')).toHaveCount(1);
+    await operatorPage.goto(at());
+    const alert = operatorPage.locator('[data-alert="partner-sms"]');
+    await expect(alert).toHaveText(alertText);
+
+    // سؤال ۱۷۴: زبانه‌ای که «دوباره بفرست» پیامک Z را نشان می‌دهد کهنه می‌ماند؛ پایین‌تر Z از مهر جابه‌جا می‌شود.
+    const staleZ = await ownerContext.newPage();
+    await staleZ.goto(at(`/orders/${Z.number}`));
+    await expect(partnerCard(staleZ).locator('[data-partner-sms="failed"]').getByRole('button', { name: 'دوباره بفرست' })).toBeVisible();
+
+    // متصدی از هشدار به Y: «نرفت: فرستادنش نیمه‌کاره ماند» با زمان ساختنش، و «دوباره بفرست».
+    await alert.getByRole('link', { name: String(Y.number) }).click();
+    await expect(operatorPage).toHaveURL(new RegExp(`/orders/${Y.number}$`));
+    const [stuck] = await partnerSmsRows(Y);
+    expect(stuck).toMatchObject({ to_mobile: MEHR_MOBILE, status: 'pending', attempts: 0 });
+    const failed = partnerCard(operatorPage).locator('[data-partner-sms="failed"]');
+    await expect(failed.locator('b')).toHaveText('پیامک سفارش تازه');
+    await expect(failed.locator('.ad-paysms__fail')).toHaveText(
+      new RegExp(`^نرفت: فرستادنش نیمه‌کاره ماند، (امروز|دیروز) ${formatTehranTime(stuck!.created_at)}$`),
+    );
+    await failed.getByRole('button', { name: 'دوباره بفرست' }).click();
+    await expect(operatorPage.getByText('پیامک سفارش تازه دوباره به چاپخانه فرستاده شد و رفت.')).toBeVisible();
+    const resent = partnerCard(operatorPage).locator('[data-partner-sms="sent"] .ad-paysms__ok');
+    await expect(resent).toHaveText(new RegExp(`^به ${spaced(MEHR_MOBILE)} رفت، امروز \\d\\d:\\d\\d$`));
+    await expect(partnerCard(operatorPage).getByRole('button', { name: 'دوباره بفرست' })).toHaveCount(0);
+    expect(await partnerSmsRows(Y)).toMatchObject([{ to_mobile: MEHR_MOBILE, status: 'logged', provider: 'console', attempts: 1 }]);
+
+    // Z به پیش‌فرض (بی موبایل اعلان: بی پیامک تازه)؛ «دوباره بفرست» زبانهٔ کهنه دیگر نمی‌رود و پیامک Z همان منتظر می‌ماند.
+    await ownerPage.goto(at(`/orders/${Z.number}?do=assign`));
+    await ownerPage.locator('[data-assign]').getByLabel('دلیل').fill('چاپ مهر امروز تعطیل است.');
+    await ownerPage.locator('[data-assign]').getByRole('button', { name: 'جابه‌جا کن' }).click();
+    await expect(partnerCard(ownerPage).locator('.ad-partner b')).toHaveText(`${FIRST} ${RUN}`);
+    await expect(partnerCard(ownerPage).locator('[data-partner-sms]')).toHaveCount(0);
+    await partnerCard(staleZ).getByRole('button', { name: 'دوباره بفرست' }).click();
+    await expect(staleZ).toHaveURL(new RegExp(`/orders/${Z.number}\\?e=partner_sms_closed&`));
+    await expect(alertOf(staleZ)).toHaveText(
+      'این سفارش دیگر پیش همین چاپخانه در صف چاپ نیست: جابه‌جا شد، چاپش شروع شد یا لغو شد؛ پیامک سفارش تازه‌اش دوباره نمی‌رود.',
+    );
+    await expect(partnerCard(staleZ).locator('.ad-partner b')).toHaveText(`${FIRST} ${RUN}`);
+    await staleZ.close();
+    expect(await partnerSmsRows(Z)).toMatchObject([{ to_mobile: MEHR_MOBILE, status: 'pending', attempts: 0 }]);
+    // چاپش شروع شد (سؤال ۱۷۴): ردیف «نرفت» سر جایش است، ولی «دوباره بفرست» نه، و هشدار پیشخوان هم نه؛ صفحه خودش این را می‌داند، نه فقط سرور.
+    const W = await paidOrder('مینا اردکانی', phone(0), { place: YAZD });
+    expect(await partnerOf(W)).toBe(MEHR);
+    await sql`UPDATE orders SET status = 'printing' WHERE id = ${W.id}`;
+    await ownerPage.goto(at(`/orders/${W.number}`));
+    await expect(partnerCard(ownerPage).locator('[data-partner-sms="failed"] .ad-paysms__fail')).toHaveText(/^نرفت: فرستادنش نیمه‌کاره ماند، /);
+    await expect(partnerCard(ownerPage).getByRole('button', { name: 'دوباره بفرست' })).toHaveCount(0);
+    await ownerPage.goto(at());
+    await expect(ownerPage.locator('[data-alert="partner-sms"]')).toHaveCount(0);
+
+    // رویدادها: «دوباره بفرست» زیر «سفارش» با نام متصدی؛ افزودن و ویرایش موبایل زیر «چاپخانه‌ها» با شمارهٔ پوشیده؛ شمارهٔ کامل نه در
+    // صفحه و نه در `admin_events` (سؤال ۱۷۷).
+    await ownerPage.goto(at('/events?kind=orders'));
+    await expect(
+      ownerPage.locator('.ad-log li').filter({ hasText: `پیامک سفارش تازهٔ ${Y.number} به «${MEHR}» دوباره فرستاده شد و رفت` }),
+    ).toContainText('علی محمدی');
+    await ownerPage.goto(at('/events?kind=partners'));
+    const log = ownerPage.locator('.ad-log li');
+    await expect(log.filter({ hasText: `چاپخانهٔ «${MEHR}» در یزد افزوده شد، با پیامک سفارش تازه به ${masked(MEHR_MOBILE)}` })).toHaveCount(1);
+    await expect(log.filter({ hasText: `چاپخانهٔ «${AFTAB}» ویرایش شد: موبایل اعلان ${masked(AFTAB_MOBILE)}` })).toHaveCount(1);
+    for (const path of ['/events?kind=partners', '/events?kind=orders', '/events']) {
+      await ownerPage.goto(at(path));
+      const html = await ownerPage.content();
+      expect([html.includes(MEHR_MOBILE), html.includes(AFTAB_MOBILE)], path).toEqual([false, false]);
+    }
+    const details = JSON.stringify(await sql`SELECT detail FROM admin_events WHERE action IN ('partners.create', 'partners.update', 'orders.partner_sms_resend')`);
+    expect([details.includes(MEHR_MOBILE), details.includes(AFTAB_MOBILE)]).toEqual([false, false]);
+    expect(ownerProblems).toEqual([]);
+  });
+
+  test('گوشی و دسکتاپ: فهرست، فرم، کارت چاپخانه، جابه‌جایی، ردیف پیامک و هشدارها بی سرریز افقی، هدف لمسی ۴۴ پیکسل و آیکون با شکل', async ({ browser }) => {
     const F = await paidOrder('الهام یزدانی', phone(6), { assign: false });
+    // پیامک سفارش تازه‌ای که هنگام پرداخت نرفت (۷٫۶): هشدار پیشخوان و ردیف «نرفت» با «دوباره بفرست».
+    const G = await paidOrder('سحر اردکانی', phone(9), { place: YAZD });
     for (const width of [320, 390, 1280]) {
       const context = await newContext(browser, { width, height: 800 });
       await context.addCookies(await ownerContext.cookies());
@@ -529,6 +715,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
         at(`/orders/${o.A.number}?do=assign`),
         at(`/orders/${F.number}`),
         at(`/orders/${F.number}?do=assign`),
+        at(`/orders/${G.number}`),
         at('/orders'),
         at(),
       ]) {

@@ -60,6 +60,7 @@ import {
   volumeFileName,
   volumesSegs,
   withoutMoney,
+  withoutPartnerSms,
   type Seg,
 } from './orders';
 
@@ -422,6 +423,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
         adminName: null,
         rule: 'city',
         reason: null,
+        sms: null,
       },
     ],
     shipments: [],
@@ -913,6 +915,7 @@ describe('وضعیت پس از پرداخت (۴٫۳)', () => {
       adminName: null,
       rule: 'city',
       reason: null,
+      sms: null,
       ...over,
     });
     const d = details({
@@ -1068,6 +1071,38 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
     expect(d.events.map((e) => e.action)).toEqual(['orders.pdf_download', 'payments.sms_resend']);
   });
 
+  it('بی پیامک چاپخانه (۷٫۶، سؤال ۱۷۲): پیامک تخصیص‌ها و رویداد «دوباره بفرست»ش نه؛ بقیه همان؛ مالک و متصدی سطرش را دارند', () => {
+    const sms = { id: 51, toMobile: '09151234567', status: 'sent', error: null, attempts: 1, createdAt: NOW, attemptedAt: NOW, sentAt: NOW };
+    const resend = (id: number, outcome: string) => ({
+      id,
+      at: tehran('2026-10-04 10:05'),
+      action: 'orders.partner_sms_resend',
+      detail: { orderNumber: 10027, partner: 'چاپ نور', mobile: '0915 ••• 4567', outcome },
+      adminName: 'سارا',
+    });
+    const d = details({
+      rest: {
+        assignments: [
+          { id: 1, at: tehran('2026-10-03 14:05'), fromName: null, toPartnerId: 'partner-noor', toName: 'چاپ نور', actor: 'system', adminName: null, rule: 'city', reason: null, sms },
+        ],
+        events: [
+          { id: 8, at: tehran('2026-10-04 10:00'), action: 'orders.pdf_download', detail: { orderNumber: 10027, item: 1 }, adminName: 'حسن' },
+          resend(9, 'failed'),
+          resend(10, 'sent'),
+        ],
+      },
+    });
+    const hidden = withoutPartnerSms(d);
+    expect(hidden.assignments.map((a) => a.sms)).toEqual([null]);
+    expect(hidden.events.map((e) => e.action)).toEqual(['orders.pdf_download']);
+    for (const mobile of ['09151234567', '0915 ••• 4567']) expect(JSON.stringify(hidden)).not.toContain(mobile);
+    // شاهد: خود جزئیات دست نخورد، و سطرهای «دوباره بفرست» در رویدادهای سفارش مالک و متصدی.
+    expect(d.assignments[0]!.sms?.toMobile).toBe('09151234567');
+    const lines = orderTimeline(d).map((entry) => [text(entry.text), entry.who]);
+    expect(lines).toContainEqual(['پیامک سفارش تازه به «چاپ نور» دوباره نرفت', 'سارا']);
+    expect(lines).toContainEqual(['پیامک سفارش تازه به «چاپ نور» دوباره رفت', 'سارا']);
+  });
+
   it('از چشم چاپخانه: بی دلیل، بی چاپخانهٔ دیگر، و رویدادهای سفارش فقط با آنچه سطرشان می‌گوید', () => {
     const d = details({
       order: { status: 'cancelled' },
@@ -1078,8 +1113,8 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
           statusEvent({ fromStatus: 'paid', toStatus: 'cancelled', adminName: 'سارا', note: { reason: 'مشتری خواست؛ 374,750 تومان برگشت' } }),
         ],
         assignments: [
-          { id: 1, at: tehran('2026-10-03 14:05'), fromName: null, toPartnerId: 'partner-aftab', toName: 'چاپ آفتاب', actor: 'system', adminName: null, rule: 'province', reason: null },
-          { id: 2, at: tehran('2026-10-04 09:00'), fromName: 'چاپ آفتاب', toPartnerId: 'partner-noor', toName: 'چاپ نور', actor: 'admin', adminName: 'سارا', rule: null, reason: 'آفتاب کند است' },
+          { id: 1, at: tehran('2026-10-03 14:05'), fromName: null, toPartnerId: 'partner-aftab', toName: 'چاپ آفتاب', actor: 'system', adminName: null, rule: 'province', reason: null, sms: null },
+          { id: 2, at: tehran('2026-10-04 09:00'), fromName: 'چاپ آفتاب', toPartnerId: 'partner-noor', toName: 'چاپ نور', actor: 'admin', adminName: 'سارا', rule: null, reason: 'آفتاب کند است', sms: null },
         ],
         events: [
           { id: 7, at: tehran('2026-10-04 09:00'), action: 'orders.assign', detail: { reason: 'آفتاب کند است' }, adminName: 'سارا' },

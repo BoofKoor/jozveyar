@@ -10,8 +10,9 @@
 import type { AssignmentRule, PanelAssignment, PanelOrderDetails, PartnerView } from '@jozveyar/db';
 import { CITIES, findCity, findProvince, searchCities, searchKey, type City } from '@jozveyar/geo';
 import { formatJalaliNumeric, formatNumber } from '@jozveyar/text';
-import { tidyInputFa } from '@jozveyar/text/input';
+import { normalizeIranMobile, tidyInputFa } from '@jozveyar/text/input';
 
+import { phoneText } from './format';
 import type { Seg } from './orders';
 
 /** همان محدودیت `print_partners_name`. */
@@ -21,6 +22,17 @@ export const PARTNER_NAME_MAX = 100;
 export function partnerNameOf(input: unknown): string | null {
   const name = tidyInputFa(typeof input === 'string' ? input.slice(0, 1000) : '');
   return name.length >= 1 && name.length <= PARTNER_NAME_MAX ? name : null;
+}
+
+/**
+ * موبایل اعلان فرم (برش ۷٫۶، سؤال‌های ۱۲۶ و ۱۷۷): خالی یعنی بی پیامک (null)؛ وگرنه همان شکل‌های موبایل ایران سایت (ارقام فارسی،
+ * `+98`، `0098`، فاصله و خط تیره) به `09…`. شمارهٔ ناموبایل `ok: false`.
+ */
+export function partnerMobileOf(input: unknown): { ok: true; mobile: string | null } | { ok: false } {
+  const text = typeof input === 'string' ? input.slice(0, 100).trim() : '';
+  if (!text) return { ok: true, mobile: null };
+  const mobile = normalizeIranMobile(text);
+  return mobile ? { ok: true, mobile } : { ok: false };
 }
 
 /** «مشهد، خراسان رضوی»: شهر با استانش، همان گزینهٔ فیلد شهر. */
@@ -70,7 +82,8 @@ function usersText(users: readonly string[]): string {
 /**
  * خط دوم فهرست «چاپخانه‌ها» (طرح): «تهران · 8 سفارش باز · کاربرها: همان مالک و متصدی»، «مشهد · 2 سفارش باز · کاربر: حسن نوری»،
  * و برای غیرفعال «اصفهان · از 1405/07/01 سفارش تازه نمی‌گیرد»؛ غیرفعالی که هنوز کاربر فعال دارد، نامشان را هم («· کاربر: …»)،
- * تا با پایان همکاری غیرفعال شوند (ADR-042).
+ * تا با پایان همکاری غیرفعال شوند (ADR-042). چاپخانهٔ فعال با موبایل اعلان «· پیامک سفارش تازه به 0915 123 4567» (برش ۷٫۶، سؤال
+ * ۱۷۷: شمارهٔ کامل، چون فقط مالک این صفحه را می‌بیند)؛ غیرفعال سفارش تازه نمی‌گیرد، پس پیامکی هم ندارد.
  */
 export function partnerMeta(partner: PartnerView): Seg[] {
   if (partner.deactivatedAt) {
@@ -82,7 +95,13 @@ export function partnerMeta(partner: PartnerView): Seg[] {
       ...(partner.users.length > 0 ? [` · ${usersText(partner.users)}`] : []),
     ];
   }
-  return [partner.cityName, ' · ', { num: formatNumber(partner.openOrders) }, ` سفارش باز · ${usersText(partner.users)}`];
+  return [
+    partner.cityName,
+    ' · ',
+    { num: formatNumber(partner.openOrders) },
+    ` سفارش باز · ${usersText(partner.users)}`,
+    ...(partner.notifyMobile ? [' · پیامک سفارش تازه به ', { num: phoneText(partner.notifyMobile) }] : []),
+  ];
 }
 
 /**

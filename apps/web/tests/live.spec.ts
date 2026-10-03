@@ -17,6 +17,10 @@ import { formatTomans } from '@jozveyar/text';
  * (`E2E_LIVE_HANDOFF`)، که وب را با `CHECKOUT_MODE=off` دوباره بالا می‌آورد: برگشت و استعلام خودکار همیشه کار می‌کنند
  * (`live-off.spec.ts`).
  *
+ * پیامک چاپخانه (برش ۷٫۶، سؤال ۱۷۵): در اولین پرداخت، چاپخانهٔ پیش‌فرض موبایل اعلان دارد و شناسهٔ قالب پیامک چاپخانه در `.env` این مرحله
+ * عمداً نیست؛ پیامکش «نرفت» می‌ماند و پرداخت سر جایش. پنل (`admin/tests/live.spec.ts`) همان را پس از اینکه مالک شناسه را وارد کرد دوباره
+ * می‌فرستد.
+ *
  *   E2E_LIVE_BASE_URL=http://127.0.0.1:3102 E2E_SMSIR_URL=http://127.0.0.1:3301 E2E_ZIBAL_URL=http://127.0.0.1:3401 DATABASE_URL=… \
  *     npx playwright test tests/live.spec.ts
  *
@@ -85,10 +89,11 @@ interface MockSms {
   templateId: number;
   parameters: { name: string; value: string }[];
 }
-async function smsTo(mobile: string, templateId: number): Promise<MockSms[]> {
+/** پیامک‌هایی که sms.ir ساختگی به این شماره پذیرفت؛ با `templateId` فقط همان قالب. */
+async function smsTo(mobile: string, templateId?: number): Promise<MockSms[]> {
   const response = await fetch(`${SMSIR}/__mock/messages`);
   const body = (await response.json()) as { messages: MockSms[] };
-  return body.messages.filter((m) => m.mobile === mobile && m.templateId === templateId);
+  return body.messages.filter((m) => m.mobile === mobile && (templateId === undefined || m.templateId === templateId));
 }
 const param = (sms: MockSms | undefined, name: string) => sms?.parameters.find((p) => p.name === name)?.value ?? '';
 
@@ -188,32 +193,57 @@ test.describe.serial('مسیر خرید live', () => {
     await context.close();
   });
 
-  test('«همه»: کد با sms.ir، پرداخت با زیبال، برگشت، و «سفارش ثبت شد» با پیامک پرداخت', async ({ browser }) => {
+  test('«همه»: کد با sms.ir، پرداخت با زیبال، برگشت، و «سفارش ثبت شد» با پیامک پرداخت؛ پیامک چاپخانه با قالب خالی «نرفت» و پرداخت سر جایش', async ({ browser }) => {
     await audience('everyone');
-    const context = await newContext(browser);
-    const page = await context.newPage();
-    expect(await (await page.request.get('/api/checkout')).json()).toEqual({ mode: 'live', auth: null });
-    const mobile = newMobile();
-    await dropReady(page);
-    await toReview(page, mobile);
-    await expect(page.locator('.home-sum__secure').filter({ visible: true })).toHaveText('پرداخت امن با درگاه زیبال و همهٔ کارت‌های بانکی');
-    const trackId = await toGateway(page);
-    await expect(page.locator('[data-amount]')).toHaveText(String(TOTAL));
-    await decide(page, 'پرداخت موفق');
-    await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
+    // سفارش مشهد به چاپخانهٔ پیش‌فرض می‌رسد (تنها چاپخانهٔ پایگاه دادهٔ تازه)؛ همین پرداخت با موبایل اعلان، بقیهٔ این مرحله بی آن.
+    const partnerMobile = newMobile();
+    const partners = await sql()`update print_partners set notify_mobile = ${partnerMobile} where is_default returning id`;
+    expect(partners).toHaveLength(1);
+    try {
+      const context = await newContext(browser);
+      const page = await context.newPage();
+      expect(await (await page.request.get('/api/checkout')).json()).toEqual({ mode: 'live', auth: null });
+      const mobile = newMobile();
+      await dropReady(page);
+      await toReview(page, mobile);
+      await expect(page.locator('.home-sum__secure').filter({ visible: true })).toHaveText('پرداخت امن با درگاه زیبال و همهٔ کارت‌های بانکی');
+      const trackId = await toGateway(page);
+      await expect(page.locator('[data-amount]')).toHaveText(String(TOTAL));
+      await decide(page, 'پرداخت موفق');
+      await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
 
-    const [order] = await sql()`
-      select o.order_number, o.status, p.provider, p.status as payment, p.gateway_status
-        from payments p join orders o on o.id = p.order_id where p.authority = ${String(trackId)}`;
-    expect(order).toMatchObject({ status: 'paid', provider: 'zibal', payment: 'succeeded', gateway_status: 1 });
-    await expect(page.getByTestId('order-paid')).toContainText(`سفارش ${order!.order_number} · ${toman(TOTAL)} تومان پرداخت شد.`);
-    // زیبال ساختگی: تأییدشده (۱)، با همان مبلغ.
-    const { transactions } = (await zibal('/__mock/transactions')) as { transactions: { trackId: number; status: number; amount: number }[] };
-    expect(transactions.find((tx) => tx.trackId === trackId)).toMatchObject({ status: 1, amount: TOTAL });
-    // پیامک پرداخت با sms.ir: شمارهٔ سفارش و روز تحویل به پست.
-    await expect.poll(async () => param((await smsTo(mobile, PAID_TEMPLATE)).at(-1), 'ORDER')).toBe(String(order!.order_number));
-    expect(param((await smsTo(mobile, PAID_TEMPLATE)).at(-1), 'DAY')).not.toBe('');
-    await context.close();
+      const [order] = await sql()`
+        select o.order_number, o.status, p.provider, p.status as payment, p.gateway_status
+          from payments p join orders o on o.id = p.order_id where p.authority = ${String(trackId)}`;
+      expect(order).toMatchObject({ status: 'paid', provider: 'zibal', payment: 'succeeded', gateway_status: 1 });
+      await expect(page.getByTestId('order-paid')).toContainText(`سفارش ${order!.order_number} · ${toman(TOTAL)} تومان پرداخت شد.`);
+      // زیبال ساختگی: تأییدشده (۱)، با همان مبلغ.
+      const { transactions } = (await zibal('/__mock/transactions')) as { transactions: { trackId: number; status: number; amount: number }[] };
+      expect(transactions.find((tx) => tx.trackId === trackId)).toMatchObject({ status: 1, amount: TOTAL });
+      // پیامک پرداخت با sms.ir: شمارهٔ سفارش و روز تحویل به پست.
+      await expect.poll(async () => param((await smsTo(mobile, PAID_TEMPLATE)).at(-1), 'ORDER')).toBe(String(order!.order_number));
+      expect(param((await smsTo(mobile, PAID_TEMPLATE)).at(-1), 'DAY')).not.toBe('');
+      // پیامک چاپخانه (۷٫۶): در همان تراکنش پرداخت ساخته و بعد از commit فرستاده شد، و «نرفت» چون شناسهٔ قالبش هنوز نیست؛ sms.ir هیچ
+      // درخواستی برایش نگرفت، و پرداخت و سفارش همان بالا.
+      const partnerSms = await sql()`
+        select m.status, m.error, m.provider, m.to_mobile, m.attempts, m.params
+          from order_assignments a join sms_messages m on m.id = a.sms_message_id join orders o on o.id = a.order_id
+         where o.order_number = ${order!.order_number}`;
+      expect(partnerSms).toEqual([
+        {
+          status: 'failed',
+          error: 'unconfigured',
+          provider: 'smsir',
+          to_mobile: partnerMobile,
+          attempts: 1,
+          params: [String(order!.order_number), param((await smsTo(mobile, PAID_TEMPLATE)).at(-1), 'DAY')],
+        },
+      ]);
+      expect(await smsTo(partnerMobile)).toEqual([]);
+      await context.close();
+    } finally {
+      await sql()`update print_partners set notify_mobile = null where notify_mobile = ${partnerMobile}`;
+    }
   });
 
   test('لغو در درگاه، و «دوباره پرداخت کن» از صفحهٔ سفارش با Referer همین سایت', async ({ browser }) => {

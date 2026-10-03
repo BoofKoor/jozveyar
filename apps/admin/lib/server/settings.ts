@@ -717,6 +717,16 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
     },
 
     /**
+     * هشدار فرم چاپخانه (برش ۷٫۶، سؤال ۱۷۵): شناسهٔ قالب پیامک چاپخانه گذاشته نشده (خالی، ناخوانا یا بدشکل) و sms.ir در کار است؛ با
+     * پیامک کنسولی قالب لازم نیست. فقط مالک (`partners.manage`، همان که فرم را دارد)؛ فقط بله یا نه، هرگز مقدار.
+     */
+    async partnerTemplateMissing(session: AdminSession): Promise<boolean> {
+      if (!can(session, 'partners.manage') || !deps.smsInUse) return false;
+      const value = await currentValue('SMS_PARTNER_TEMPLATE');
+      return !(value && isSmsIrTemplateId(value));
+    },
+
+    /**
      * «آزمایش» یک کلید sms.ir (برش ۷٫۱، سؤال‌های ۱۱۹ و ۱۳۸)، بی کد: مقدار امروز (`value` خالی)، یا مقدار تازه پیش از ذخیره (قدم اول قالب).
      * کلید API با اعتبار، بی پیامک؛ قالب با یک پیامک آزمایشی با پارامترهای نمونه به `mobile`. سقف ۱۰ در ساعت زیر قفل، رویداد
      * `settings.key_test` بی مقدار. مقدار تازه رسید می‌گیرد، برای «ذخیره» همان.

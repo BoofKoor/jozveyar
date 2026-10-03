@@ -89,6 +89,7 @@ import {
   transitionOf,
   volumeFileName,
   withoutMoney,
+  withoutPartnerSms,
   type DayBounds,
   type DueTile,
   type Seg,
@@ -96,6 +97,7 @@ import {
 } from '../orders';
 import { REFUND_SLOW_MS, readManualRefund, refundAskable, refundCard, viaGateway, type RefundCard, type RefundState } from '../refunds';
 import { monthKey, monthLabel, monthRange, parseMonthKey } from '../report';
+import { maskMobile } from '../settings';
 import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 
@@ -207,6 +209,11 @@ export interface OrderDetailsView {
   canAssign: boolean;
   /** چاپخانه‌های فعالی که سفارش به آن‌ها می‌رود (جز چاپخانهٔ امروزش)؛ فقط با `canAssign`. */
   partnerOptions: PanelPartnerOption[];
+  /**
+   * ردیف «پیامک سفارش تازه» کارت «چاپخانه» و «دوباره بفرست»ش (۷٫۶، سؤال ۱۷۲): مالک و متصدی (`orders.assign`)؛ بی آن، پیامک تخصیص‌ها در
+   * `details` نیست (`withoutPartnerSms`).
+   */
+  canPartnerSms: boolean;
   /** مبلغ و پرداخت‌ها (۵٫۳، `orders.money`)؛ بی آن، `details` بی مبلغ است. */
   canMoney: boolean;
   /** درگاه‌هایی که «استعلام از درگاه» پرداخت‌هایشان در این پنل هست (برش ۷٫۲)؛ فقط با `canMoney`. */
@@ -349,6 +356,8 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
           reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
           smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
           paidSmsFailed: can(session, 'orders.money') ? alerts.paidSmsFailed : [],
+          // پیامک سفارش تازهٔ چاپخانه (۷٫۶، سؤال ۱۷۲): همان که کارت «چاپخانه» و «دوباره بفرست»ش را دارد؛ چاپخانه هرگز.
+          partnerSmsFailed: can(session, 'orders.assign') ? alerts.partnerSmsFailed : [],
           // پول و درگاه (۷٫۲، سؤال ۱۴۰) و بازپرداخت (۷٫۳، سؤال ۱۵۸): فقط مالک و متصدی. «هنوز در حال برگشت» فقط پس از `REFUND_SLOW_MS`.
           ...(can(session, 'orders.money')
             ? { refunding: alerts.refunding.filter((row) => row.createdAt.getTime() <= at.getTime() - REFUND_SLOW_MS) }
@@ -414,7 +423,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const canMoney = can(session, 'orders.money');
       // بی مبلغ و از چشم چاپخانه همین‌جا، پیش از صفحه: آنچه صفحه نمی‌گیرد، هیچ‌جا نشان داده نمی‌شود.
       const unpriced = canMoney ? found : withoutMoney(found);
-      const details = scope.kind === 'partner' ? partnerView(unpriced, scope.partnerId) : unpriced;
+      // پیامک سفارش تازهٔ چاپخانه (۷٫۶، سؤال ۱۷۲) فقط از چشم مالک و متصدی؛ چاپخانه هرگز.
+      const visible = can(session, 'orders.assign') ? unpriced : withoutPartnerSms(unpriced);
+      const details = scope.kind === 'partner' ? partnerView(visible, scope.partnerId) : visible;
       const { status } = details.order;
       // سفارشی که فایل‌هایش پاک شد به صف چاپ برنمی‌گردد (ADR-044)؛ و «تحویل پست شد»ی که کد رهگیری زنده دارد، تا ورودش برنگشته.
       const revertTo = details.order.filesDeletedAt ? null : transitionOf('revert', status, details.statusEvents);
@@ -437,6 +448,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         canEditRecipient: can(session, 'orders.address') && (RECIPIENT_EDITABLE as readonly OrderStatus[]).includes(status),
         canAssign: partnerOptions.length > 0,
         partnerOptions,
+        canPartnerSms: can(session, 'orders.assign'),
         canMoney,
         inquiryProviders: canMoney && deps.payments ? Object.keys(deps.payments.gateways) : [],
         partnerView: scope.kind === 'partner',
@@ -550,7 +562,18 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
           at,
         },
       });
-      if (written.ok) return ok({ to });
+      if (written.ok) {
+        // پیامک سفارش تازه به چاپخانهٔ تازه، اگر موبایل اعلان دارد (۷٫۶، سؤال ۱۷۳: قبلی هیچ)، بعد از commit؛ نرفتنش جابه‌جایی را
+        // برنمی‌گرداند و در کارت «چاپخانه» و پیشخوان دیده می‌شود.
+        if (written.smsId !== null && deps.sms) {
+          try {
+            await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log ?? log }, [written.smsId]);
+          } catch (error) {
+            log(`✗ پیامک سفارش تازهٔ ${details.order.orderNumber} به چاپخانه فرستاده نشد:`, error);
+          }
+        }
+        return ok({ to });
+      }
       if (written.reason === 'partner_inactive') return fail(409, 'partner_inactive');
       if (written.current === null) return fail(404, 'order_not_found');
       // دو کلیک هم‌زمان به یک مقصد: دومی همان را می‌بیند که خواست.
@@ -753,9 +776,11 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
               : row.gatewayError
                 ? 'unanswered'
                 : 'pending';
-          if (result.settled && result.smsId !== null && deps.sms) {
+          // پیامک پرداخت، و از ۷٫۶ پیامک سفارش تازهٔ چاپخانه‌ای که موبایل اعلان دارد؛ هر دو بعد از commit.
+          const queued = result.settled ? [result.smsId, result.partnerSmsId].filter((id): id is number => id !== null) : [];
+          if (queued.length > 0 && deps.sms) {
             try {
-              await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log ?? log }, [result.smsId]);
+              await deliverQueued({ outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log ?? log }, queued);
             } catch (error) {
               log(`✗ پیامک پرداخت سفارش ${orderNumber} فرستاده نشد:`, error);
             }
@@ -817,6 +842,49 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         ipHash: ipHashOf(deps.secret, ip),
         at: now(),
         detail: { orderNumber: found.orderNumber, outcome: delivery.outcome, ...(delivery.tag ? { error: delivery.tag } : {}) },
+      });
+      return ok({ orderNumber: found.orderNumber, outcome: delivery.outcome, error: delivery.error ?? null });
+    },
+
+    /**
+     * «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه (برش ۷٫۶، سؤال‌های ۱۷۲ و ۱۷۴؛ کارت «چاپخانه»): فقط مالک و متصدی (`orders.assign`)، فقط
+     * پیامکی که نرفت یا معلوم نیست رفت، و فقط تا وقتی همان تخصیص زنده است: سفارش در صف چاپ و هنوز پیش همان چاپخانه. همان ردیف به
+     * همان شماره‌ای که با آن ساخته شد (سؤال ۱۷۷)، یک تلاش بیشتر، و رویداد `orders.partner_sms_resend` با نتیجه و شمارهٔ پوشیده.
+     */
+    async resendPartnerSms(
+      session: AdminSession,
+      form: { assignment: unknown },
+      ip: string,
+    ): Promise<Result<{ orderNumber: number; outcome: 'sent' | 'failed'; error: SmsErrorCode | null }>> {
+      if (!can(session, 'orders.assign')) return fail(403, 'forbidden');
+      const assignmentId = typeof form.assignment === 'string' && /^[1-9]\d{0,14}$/.test(form.assignment) ? Number(form.assignment) : null;
+      const found = assignmentId ? await store.assignmentSms(scopeOf(session), assignmentId) : null;
+      if (!found?.sms) return fail(404, 'partner_sms_not_found', found ? { orderNumber: found.orderNumber } : {});
+      if (!deps.sms) return fail(503, 'unavailable');
+      if (!found.current || found.orderStatus !== 'paid') return fail(409, 'partner_sms_closed', { orderNumber: found.orderNumber });
+      const at = now();
+      if (!resendable(smsState(found.sms, at))) return fail(409, 'sms_not_failed', { orderNumber: found.orderNumber });
+      const [delivery] = await deliverQueued(
+        { outbox: deps.sms.outbox, transport: deps.sms.transport, now, log: deps.sms.log ?? log },
+        [found.sms.id],
+        { mode: 'retry' },
+      );
+      // برداشته نشد: کس دیگری همین حالا فرستاد، یا سفارش همین حالا جابه‌جا شد، چاپش شروع شد یا لغو شد (`sms_messages_guard`).
+      if (!delivery || delivery.outcome === 'skipped') return fail(409, 'sms_not_failed', { orderNumber: found.orderNumber });
+      await store.logEvent({
+        adminUserId: session.userId,
+        action: 'orders.partner_sms_resend',
+        targetType: 'order',
+        targetId: found.orderId,
+        ipHash: ipHashOf(deps.secret, ip),
+        at: now(),
+        detail: {
+          orderNumber: found.orderNumber,
+          partner: found.partnerName,
+          mobile: maskMobile(found.sms.toMobile),
+          outcome: delivery.outcome,
+          ...(delivery.tag ? { error: delivery.tag } : {}),
+        },
       });
       return ok({ orderNumber: found.orderNumber, outcome: delivery.outcome, error: delivery.error ?? null });
     },

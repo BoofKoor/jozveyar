@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-import { at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, watch } from './helpers';
+import { at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvite, smsirMock, watch } from './helpers';
 
 /**
  * کارت «مسیر خرید روی سایت»، سرتاسری (برش ۷٫۵، ADR-052، سؤال‌های ۱۶۱ تا ۱۷۱؛ طرح `docs/ui/mockups/admin.html`: `st-live-*` و
@@ -14,6 +14,11 @@ import { at, BASE, codeFor, enroll, GATE, layoutProblems, newContext, serverInvi
  * برگردانده. آمادگی و «چه کم است» با مقدار پنلی که با `SECRETS_KEY` امروز باز نمی‌شود؛ پیوند پیش‌نمایش تا نوار سایت و «خروج»؛ «باز برای
  * همه» با کد تازه؛ «توقف» بی کد؛ «برگرداندن به پیش‌نمایش» با کد تازه و صفحه‌ای که در این میان کهنه شد؛ سطر پیشخوان مالک و متصدی؛ و
  * رویدادها زیر «تنظیمات و کلیدها». پیوند پیش‌نمایش فقط در صفحه است: نه در پایگاه داده (فقط هش)، نه در رویداد.
+ *
+ * پیامک چاپخانه با sms.ir (برش ۷٫۶، سؤال ۱۷۵): پیامک سفارش تازه‌ای که پرداخت تست وب ساخت و با شناسهٔ قالب خالی «نرفت»؛ هشدار پیشخوان،
+ * علت با نام همان قالب، هشدار فرم چاپخانه، ورود شناسه با پیامک آزمایشی و کد تازه، و «دوباره بفرست» که با همان قالب می‌رود. اینجا، نه در
+ * `smsir.spec.ts`: سقف ۱۰ «آزمایش» کلید در ساعت (همهٔ کلیدها، همهٔ ادمین‌ها) را اجرای اصلی پنل پر کرده است (هشت در `settings.spec.ts`،
+ * دو در `payments.spec.ts`)، و پایگاه دادهٔ این مرحله تازه است.
  *
  *   CHECKOUT_MODE=live ADMIN_BASE_PATH=… E2E_ADMIN_BASE_URL=http://127.0.0.1:3203 E2E_WEB_BASE_URL=http://127.0.0.1:3102 DATABASE_URL=… \
  *     [E2E_PREVIEW_TOKEN_FILE=…] npx playwright test tests/live.spec.ts
@@ -32,6 +37,8 @@ test.use({ baseURL: BASE });
 
 const RUN = randomInt(1000, 9999);
 const OWNER = 'سارا رضایی';
+/** شناسهٔ قالب پیامک چاپخانه‌ای که مالک در sms.ir ساخت؛ sms.ir ساختگی این مرحله همین را می‌شناسد، `.env` نه (سؤال ۱۷۵). */
+const PARTNER_TEMPLATE = '100004';
 const TIME = '\\d\\d:\\d\\d';
 const FIXTURE = join(process.cwd(), '..', 'web', 'tests', 'fixtures', 'plain-bw-10.pdf');
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -113,7 +120,7 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     await owner?.close();
     await operator?.close();
     if (sql) {
-      await sql`DELETE FROM service_secrets WHERE name = 'SMS_TRACKING_TEMPLATE'`;
+      await sql`DELETE FROM service_secrets WHERE name IN ('SMS_TRACKING_TEMPLATE', 'SMS_PARTNER_TEMPLATE')`;
       await sql.end();
     }
   });
@@ -420,6 +427,84 @@ test.describe.serial('مسیر خرید روی سایت', () => {
     await expect(log).toContainText('مسیر خرید روی سایت: همه ← متوقف');
     await expect(log).toContainText('مسیر خرید روی سایت: پیش‌نمایش مالک ← همه، با کد تازه');
     await expect(log).toContainText(new RegExp(`پیوند پیش‌نمایش مسیر خرید ساخته شد، تا ${TIME}`));
+    expect(ownerProblems).toEqual([]);
+  });
+
+  test('پیامک چاپخانه با sms.ir (۷٫۶، سؤال ۱۷۵): قالب خالی «نرفت» با نام همان قالب، هشدار پیشخوان و فرم؛ مالک شناسه را با پیامک آزمایشی وارد می‌کند و «دوباره بفرست» با همان قالب می‌رود', async () => {
+    test.setTimeout(120_000);
+    // تنها پیامک سفارش تازه: همان که پرداخت `apps/web/tests/live.spec.ts` ساخت و نرفت، چون شناسهٔ قالب پیامک چاپخانه هنوز نبود.
+    const rows = await sql<{ number: number; mobile: string; partner: string; status: string; error: string | null }[]>`
+      SELECT o.order_number AS number, m.to_mobile AS mobile, p.name AS partner, m.status, m.error
+        FROM order_assignments a JOIN sms_messages m ON m.id = a.sms_message_id
+        JOIN orders o ON o.id = a.order_id JOIN print_partners p ON p.id = a.to_partner_id
+       WHERE m.purpose = 'partner_order'`;
+    expect(rows).toHaveLength(1);
+    const sms = rows[0]!;
+    expect(sms).toMatchObject({ status: 'failed', error: 'unconfigured' });
+    const to = `${sms.mobile.slice(0, 4)} ${sms.mobile.slice(4, 7)} ${sms.mobile.slice(7)}`;
+
+    // پیشخوان: هشدار با شماره و نام چاپخانه، برای مالک و متصدی.
+    const alert = `پیامک سفارش تازهٔ ${sms.number} به ${sms.partner} نرفت؛ از کارت «چاپخانه» دوباره بفرست.`;
+    await page.goto(at('/'));
+    await expect(page.locator('[data-alert="partner-sms"]')).toHaveText(alert);
+    await fits(page, 'پیشخوان با هشدار پیامک سفارش تازه');
+    await operatorPage.goto(at('/'));
+    await expect(operatorPage.locator('[data-alert="partner-sms"]')).toHaveText(alert);
+    // کارت «چاپخانه»: علت با نام همان قالب (کلید API هست)، و «دوباره بفرست».
+    await page.goto(at(`/orders/${sms.number}`));
+    const row = page.locator('[data-partner-sms]');
+    await expect(row).toHaveAttribute('data-partner-sms', 'failed');
+    await expect(row.locator('.ad-paysms__fail')).toHaveText(
+      new RegExp(`^نرفت: کلید API یا شناسهٔ قالب پیامک چاپخانه خالی است یا خوانده نشد، (امروز|دیروز) ${TIME}$`),
+    );
+    await expect(row.getByRole('button', { name: 'دوباره بفرست' })).toBeVisible();
+    await fits(page, 'کارت «چاپخانه» با پیامکی که نرفت');
+
+    // فرم چاپخانه: sms.ir در کار است و شناسهٔ قالب پیامک چاپخانه نیست، پس هشدار زیر موبایل با پیوند «تنظیمات و کلیدها».
+    await page.goto(at('/partners/new'));
+    const warning = page.locator('[data-partner-template="missing"]');
+    await expect(warning).toHaveText(
+      'شناسهٔ قالب پیامک چاپخانه در «تنظیمات و کلیدها» هنوز گذاشته نشده؛ تا گذاشته نشود، این پیامک‌ها نمی‌روند. پس از گذاشتنش، هر پیامکی که نرفت را از کارت «چاپخانه» همان سفارش دوباره بفرست.',
+    );
+    await fits(page, 'فرم چاپخانه با هشدار قالب');
+    await warning.getByRole('link', { name: '«تنظیمات و کلیدها»' }).click();
+    await expect(page).toHaveURL(/\/settings#keys$/);
+
+    // مالک قالب «جزوه‌یار: سفارش تازه #ORDER#؛ تحویل به پست تا #DAY#» را در sms.ir ساخت و تأیید گرفت: شناسه، پیامک آزمایشی با پارامتر
+    // نمونه، بعد «ذخیره» با کد تازه.
+    const key = page.locator('li[data-key="SMS_PARTNER_TEMPLATE"]');
+    await expect(key.locator('.jy-badge')).toHaveText('خالی');
+    await key.getByRole('link', { name: 'وارد کن' }).click();
+    await key.getByLabel('شناسهٔ قالب').fill(PARTNER_TEMPLATE);
+    await key.getByLabel('موبایل برای پیامک آزمایشی').fill('09351234567');
+    await key.getByRole('button', { name: 'پیامک آزمایشی بفرست' }).click();
+    await expect(key.locator('[data-key-note="sent"]')).toContainText(
+      'پیامک آزمایشی رفت (sms.ir پذیرفت) به 0935 ••• 4567. روی گوشی ببین همین رسیده: «جزوه‌یار: سفارش تازه 10027؛ تحویل به پست تا دوشنبه 13 مهر»',
+    );
+    await key.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
+    await key.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(page.locator('#keys .jy-note--success')).toHaveText('«شناسهٔ قالب پیامک چاپخانه» ذخیره شد؛ از این لحظه مقدار پنل به کار می‌رود.');
+    await expect(key.locator('.jy-badge')).toHaveText('از پنل');
+    // هشدار فرم همان لحظه می‌رود؛ آمادگی مسیر خرید از اول به این قالب بسته نبود.
+    await page.goto(at('/partners/new'));
+    await expect(page.locator('[data-partner-template]')).toHaveCount(0);
+
+    // «دوباره بفرست»: با sms.ir و همان قالب، به همان موبایلی که پیامک با آن ساخته شد (سؤال ۱۷۷).
+    await page.goto(at(`/orders/${sms.number}`));
+    await row.getByRole('button', { name: 'دوباره بفرست' }).click();
+    await expect(page.getByText('پیامک سفارش تازه دوباره به چاپخانه فرستاده شد و رفت.')).toBeVisible();
+    await expect(row).toHaveAttribute('data-partner-sms', 'sent');
+    await expect(row.locator('.ad-paysms__ok')).toHaveText(new RegExp(`^به ${to} رفت، امروز ${TIME}$`));
+    await expect(row.getByRole('button')).toHaveCount(0);
+    const sent = (await smsirMock.messages()).messages.filter((m) => m.mobile === sms.mobile);
+    expect(sent.map((m) => [m.templateId, m.parameters.map((p) => p.name), m.parameters[0]?.value])).toEqual([
+      [Number(PARTNER_TEMPLATE), ['ORDER', 'DAY'], String(sms.number)],
+    ]);
+    expect(await sql`SELECT status, provider, error, attempts FROM sms_messages WHERE purpose = 'partner_order'`).toEqual([
+      { status: 'sent', provider: 'smsir', error: null, attempts: 2 },
+    ]);
+    await page.goto(at('/'));
+    await expect(page.locator('[data-alert="partner-sms"]')).toHaveCount(0);
     expect(ownerProblems).toEqual([]);
   });
 });

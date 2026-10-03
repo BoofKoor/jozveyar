@@ -233,6 +233,11 @@ export interface SettledPayment {
   settled: boolean;
   /** ردیف «منتظر» پیامک پرداختی که همین تراکنش نوشت (برش ۷٫۱)؛ بعد از commit فرستاده می‌شود. */
   smsId: number | null;
+  /**
+   * ردیف «منتظر» پیامک سفارش تازه به چاپخانه‌ای که همین تراکنش سفارش را به آن داد و موبایل اعلان دارد (برش ۷٫۶)؛ بعد از commit با پیامک
+   * پرداخت فرستاده می‌شود. null: پرداخت نهایی نشد، چاپخانه‌ای نبود، یا چاپخانه موبایل اعلان ندارد.
+   */
+  partnerSmsId: number | null;
 }
 
 export interface OrderStore {
@@ -340,7 +345,7 @@ export function createOrderStore({ db }: Database): OrderStore {
         return exists ? 'busy' : null;
       }
       const [order] = await tx.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1).for('update');
-      if (payment.status !== 'pending') return { payment, order: order!, settled: false, smsId: null };
+      if (payment.status !== 'pending') return { payment, order: order!, settled: false, smsId: null, partnerSmsId: null };
 
       const outcome = await decide({ payment, order: order! });
       const returned = options.returned && !payment.returnedAt ? { returnedAt: options.returned } : {};
@@ -352,7 +357,7 @@ export function createOrderStore({ db }: Database): OrderStore {
           .set({ ...returned, ...gateway(outcome.check) })
           .where(eq(payments.id, payment.id))
           .returning();
-        return { payment: row!, order: order!, settled: false, smsId: null };
+        return { payment: row!, order: order!, settled: false, smsId: null, partnerSmsId: null };
       }
       if (outcome.kind === 'failed') {
         const [failed] = await tx
@@ -369,7 +374,7 @@ export function createOrderStore({ db }: Database): OrderStore {
           })
           .where(eq(payments.id, payment.id))
           .returning();
-        return { payment: failed!, order: order!, settled: true, smsId: null };
+        return { payment: failed!, order: order!, settled: true, smsId: null, partnerSmsId: null };
       }
 
       // پیامک پرداخت (برش ۷٫۱، ADR-049): ردیف «منتظر» در همین تراکنش، و پرداخت موفق به آن وصل (تریگر `payments_sms`)؛ فرستادنش بعد از
@@ -411,7 +416,8 @@ export function createOrderStore({ db }: Database): OrderStore {
         actor: 'gateway',
         note: { paymentId: payment.id, provider: payment.provider, refId: outcome.refId, ...(options.via ? { via: options.via } : {}) },
       });
-      // چاپخانه پیش از کار برگه: برگه نام و شهرش را دارد. بی چاپخانهٔ فعال سفارش بی چاپخانه می‌ماند (هشدار پیشخوان).
+      // چاپخانه پیش از کار برگه: برگه نام و شهرش را دارد. بی چاپخانهٔ فعال سفارش بی چاپخانه می‌ماند (هشدار پیشخوان). چاپخانهٔ با موبایل
+      // اعلان پیامک «منتظر» سفارش تازه را هم در همین تراکنش می‌گیرد (برش ۷٫۶).
       const assigned = await assignAtPayment(tx, paid, outcome.paidAt);
       // برگشت دوباره از درگاه کار دوم نمی‌سازد: شاخص یکتای (سفارش، نوع) جلویش را می‌گیرد.
       await tx
@@ -421,7 +427,13 @@ export function createOrderStore({ db }: Database): OrderStore {
           { kind: PREPARE_TICKET_JOB, orderId: order!.id },
         ])
         .onConflictDoNothing();
-      return { payment: succeeded!, order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid, settled: true, smsId };
+      return {
+        payment: succeeded!,
+        order: assigned ? { ...paid, printPartnerId: assigned.partnerId } : paid,
+        settled: true,
+        smsId,
+        partnerSmsId: assigned?.smsId ?? null,
+      };
     });
   };
 

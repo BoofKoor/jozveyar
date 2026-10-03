@@ -12,19 +12,24 @@ interface Props {
   back: string;
   /** شناسهٔ `datalist` شهرها، که صفحه یک بار می‌سازد. */
   citiesList: string;
-  /** ویرایش: چاپخانه با نام و شهری که مالک دید؛ نبودنش یعنی افزودن. */
-  partner?: { id: string; name: string; cityId: number; cityLabel: string };
+  /** ویرایش: چاپخانه با نام، شهر و موبایل اعلانی که مالک دید؛ نبودنش یعنی افزودن. */
+  partner?: { id: string; name: string; cityId: number; cityLabel: string; notifyMobile: string | null };
+  /** شناسهٔ قالب پیامک چاپخانه گذاشته نشده و sms.ir در کار است (برش ۷٫۶، سؤال ۱۷۵): هشدار زیر فیلد موبایل. */
+  templateMissing?: boolean;
+  /** «تنظیمات و کلیدها»، برای پیوند هشدار. */
+  keysHref?: string;
 }
 
 /**
- * افزودن و ویرایش چاپخانه (طرح پنل `m-partner-edit`، برش ۵٫۲): فقط نام و شهر. شهر با جست‌وجو در همان فهرست شهرهای سایت
- * (`datalist`، بی JS هم کار می‌کند)؛ سرور متن را به یک شهر برمی‌گرداند و اگر نشد، پیشنهادهایش را. خطای هر فیلد زیر همان
- * فیلد، با نوشته‌ها.
+ * افزودن و ویرایش چاپخانه (طرح پنل `m-partner-edit`، برش ۵٫۲): نام و شهر، و از ۷٫۶ موبایل اعلان (اختیاری). شهر با جست‌وجو در همان
+ * فهرست شهرهای سایت (`datalist`، بی JS هم کار می‌کند)؛ سرور متن را به یک شهر برمی‌گرداند و اگر نشد، پیشنهادهایش را. خطای هر فیلد زیر
+ * همان فیلد، با نوشته‌ها. شناسهٔ قالبی که هنوز گذاشته نشده زیر موبایل هشدار می‌گیرد (سؤال ۱۷۵): پیامک‌ها «نرفت» می‌مانند تا گذاشته شود.
  */
-export function PartnerForm({ gate, back, citiesList, partner }: Props) {
+export function PartnerForm({ gate, back, citiesList, partner, templateMissing = false, keysHref }: Props) {
   const [state, action, pending] = useActionState<PartnerState, FormData>(savePartnerAction, {});
   const nameError = state.field === 'name' ? messageOf(state.error) : null;
   const cityError = state.field === 'city' ? messageOf(state.error) : null;
+  const mobileError = state.field === 'mobile' ? messageOf(state.error) : null;
   const other = state.error && !state.field ? messageOf(state.error) : null;
 
   return (
@@ -41,6 +46,7 @@ export function PartnerForm({ gate, back, citiesList, partner }: Props) {
             <input type="hidden" name="id" value={partner.id} />
             <input type="hidden" name="seenName" value={partner.name} />
             <input type="hidden" name="seenCity" value={partner.cityId} />
+            <input type="hidden" name="seenMobile" value={partner.notifyMobile ?? ''} />
           </>
         ) : null}
         <div className="ad-form">
@@ -95,6 +101,51 @@ export function PartnerForm({ gate, back, citiesList, partner }: Props) {
             <p id="p-city-hint" className="jy-hint">
               همان فهرست شهرهای سایت. سفارش‌های همین شهر، و بعد همین استان، به این چاپخانه می‌روند.
             </p>
+          </div>
+          <div className="jy-field">
+            <label className="jy-label" htmlFor="p-mobile">
+              موبایل اعلان <span className="jy-optional">(اختیاری)</span>
+            </label>
+            <input
+              id="p-mobile"
+              name="mobile"
+              className="jy-input jy-input--ltr ad-short"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={20}
+              defaultValue={state.values?.mobile ?? partner?.notifyMobile ?? ''}
+              aria-invalid={mobileError ? true : undefined}
+              aria-describedby={mobileError ? 'p-mobile-error p-mobile-hint' : 'p-mobile-hint'}
+            />
+            {mobileError ? (
+              <p id="p-mobile-error" className="jy-error">
+                <span className="jy-icon jy-icon-error" aria-hidden="true" />
+                {mobileError}
+              </p>
+            ) : null}
+            <p id="p-mobile-hint" className="jy-hint">
+              برای هر سفارش تازه‌ای که به این چاپخانه برسد، هنگام پرداخت یا جابه‌جایی، یک پیامک: «جزوه‌یار: سفارش تازه{' '}
+              <span className="num">10027</span>؛ تحویل به پست تا دوشنبه <span className="num">13</span> مهر». خالی یعنی بی پیامک. نشانی پنل در
+              پیامک نمی‌آید.
+            </p>
+            {templateMissing ? (
+              <p className="jy-note jy-note--warning ad-gap" data-partner-template="missing">
+                <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+                <span>
+                  شناسهٔ قالب پیامک چاپخانه در{' '}
+                  {keysHref ? (
+                    <Link href={keysHref} className="jy-link">
+                      «تنظیمات و کلیدها»
+                    </Link>
+                  ) : (
+                    '«تنظیمات و کلیدها»'
+                  )}{' '}
+                  هنوز گذاشته نشده؛ تا گذاشته نشود، این پیامک‌ها نمی‌روند. پس از گذاشتنش، هر پیامکی که نرفت را از کارت «چاپخانه» همان سفارش
+                  دوباره بفرست.
+                </span>
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="ad-actions">

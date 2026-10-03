@@ -17,6 +17,7 @@ import {
   creditCard,
   holidaysView,
   jalaliDate,
+  KEY_INFO,
   keyCheckView,
   keyTail,
   maskText,
@@ -27,6 +28,7 @@ import {
   readHolidayInput,
   readKeyValue,
   sortHolidays,
+  TEMPLATE_SAMPLES,
   templateView,
   untilText,
 } from './settings';
@@ -164,6 +166,23 @@ describe('آزمایش کلیدها، متن قالب و اعتبار (۷٫۱)',
       params: ['ORDER', 'DAY'],
     });
     expect(templateView('tracking').params).toEqual(['ORDER', 'BARCODE']);
+  });
+
+  it('قالب پیامک چاپخانه (۷٫۶): کلید ششم، شناسهٔ قالب با «آزمایش» sms.ir؛ متن همان راهنمای فرم چاپخانه، و نمونهٔ آزمایش همان نمونه', () => {
+    expect(KEY_INFO.SMS_PARTNER_TEMPLATE).toMatchObject({
+      label: 'شناسهٔ قالب پیامک چاپخانه',
+      kind: 'template',
+      purpose: 'partner_order',
+      testable: true,
+      service: 'smsir',
+      dots: 0,
+    });
+    expect(templateView('partner_order')).toEqual({
+      lines: [['جزوه‌یار: سفارش تازه ', { mark: '#ORDER#' }, '؛ تحویل به پست تا ', { mark: '#DAY#' }]],
+      params: ['ORDER', 'DAY'],
+    });
+    // نمونهٔ پیامک آزمایشی همان سفارش و روز راهنمای فرم (طرح `m-partner-edit`).
+    expect(TEMPLATE_SAMPLES.partner_order).toEqual(['10027', 'دوشنبه 13 مهر']);
   });
 
   const check = (over: Partial<KeyCheck> & { detail: Record<string, unknown> }): KeyCheck => ({

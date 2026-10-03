@@ -8,6 +8,9 @@
  * - **برگه:** نام و شهر چاپخانه روی برگهٔ سفارش است (`order_ticket_stamp`)، پس ویرایش نام یا شهر کار برگهٔ سفارش‌های باز همان
  *   چاپخانه را در همان تراکنش دوباره در صف می‌گذارد؛ ردیف آن سفارش‌ها قفل می‌شود تا کارگری که همین حالا برگه می‌سازد، اثر
  *   انگشت را پس از این تغییر بسنجد (مثل ویرایش گیرنده، `panel.ts`).
+ * - **موبایل اعلان** (برش ۷٫۶، سؤال‌های ۱۲۶ و ۱۷۷): اختیاری، از همان فرم و با همان «همان که دیدی» نام و شهر. روی برگه نیست، پس
+ *   عوض شدنش کار برگه نمی‌سازد؛ شمارهٔ تازه فقط برای سفارش‌های بعدی است (پیامک‌های ساخته‌شده و «دوباره بفرست»شان همان شمارهٔ خودشان).
+ *   شماره در رویداد پوشیده است و پوشاندنش با سرویس پنل (`detail` رویداد)، نه اینجا.
  */
 
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
@@ -48,12 +51,16 @@ export interface PartnerView {
   openOrders: number;
   /** نام کاربرهای این چاپخانه که غیرفعال نشده‌اند (برش ۵٫۳)، به ترتیب ساختن؛ خالی یعنی همان مالک و متصدی. */
   users: string[];
+  /** موبایل اعلان (برش ۷٫۶)؛ null یعنی بی پیامک. */
+  notifyMobile: string | null;
 }
 
 export interface NewPartner {
   name: string;
   provinceId: number;
   cityId: number;
+  /** موبایل اعلان، نرمال (`09…`)؛ null یعنی بی پیامک. */
+  notifyMobile: string | null;
   at: Date;
   createdBy: string | null;
   event: AdminEventInput;
@@ -61,16 +68,20 @@ export interface NewPartner {
 
 export interface PartnerEdit {
   id: string;
-  /** نام و شهری که ادمین در فرم دید؛ اگر همین حالا جای دیگری عوض شده، هیچ نوشته نمی‌شود. */
-  seen: { name: string; cityId: number };
+  /** نام، شهر و موبایل اعلانی که ادمین در فرم دید؛ اگر همین حالا جای دیگری عوض شده، هیچ نوشته نمی‌شود. */
+  seen: { name: string; cityId: number; notifyMobile: string | null };
   name: string;
   provinceId: number;
   cityId: number;
+  notifyMobile: string | null;
   event: AdminEventInput;
 }
 
+/** آنچه ویرایش عوض کرد: نام، شهر، یا موبایل اعلان (برش ۷٫۶). */
+export type PartnerField = 'name' | 'city' | 'mobile';
+
 export type PartnerWrite =
-  | { ok: true; partner: PartnerRow; changed: ('name' | 'city')[] }
+  | { ok: true; partner: PartnerRow; changed: PartnerField[] }
   | { ok: false; reason: 'not_found' | 'changed' | 'name_taken' };
 
 export interface PartnerStore {
@@ -80,8 +91,8 @@ export interface PartnerStore {
   /** چاپخانهٔ تازه، فعال و نه پیش‌فرض، با رویداد در همان تراکنش. نام تکراری `name_taken`. */
   create(input: NewPartner): Promise<PartnerWrite>;
   /**
-   * نام و شهر، از همان که ادمین دید. نام یا شهر عوض‌شده روی برگهٔ سفارش‌های باز این چاپخانه هست، پس کار برگه‌شان دوباره در
-   * صف. بی تغییر، بی رویداد.
+   * نام، شهر و موبایل اعلان، از همان که ادمین دید. نام یا شهر عوض‌شده روی برگهٔ سفارش‌های باز این چاپخانه هست، پس کار برگه‌شان
+   * دوباره در صف؛ موبایل نه. بی تغییر، بی رویداد.
    */
   update(input: PartnerEdit): Promise<PartnerWrite>;
   /** پیش‌فرض تازه؛ قبلی دیگر پیش‌فرض نیست. فقط چاپخانهٔ فعال. */
@@ -121,6 +132,7 @@ export function createPartnerStore({ db }: Database): PartnerStore {
         createdAt: printPartners.createdAt,
         openOrders,
         users,
+        notifyMobile: printPartners.notifyMobile,
       })
       .from(printPartners)
       .innerJoin(provinces, eq(provinces.id, printPartners.provinceId))
@@ -148,7 +160,14 @@ export function createPartnerStore({ db }: Database): PartnerStore {
           if (taken) return { ok: false as const, reason: 'name_taken' as const };
           const [partner] = await tx
             .insert(printPartners)
-            .values({ name: input.name, provinceId: input.provinceId, cityId: input.cityId, createdAt: input.at, createdBy: input.createdBy })
+            .values({
+              name: input.name,
+              provinceId: input.provinceId,
+              cityId: input.cityId,
+              notifyMobile: input.notifyMobile,
+              createdAt: input.at,
+              createdBy: input.createdBy,
+            })
             .returning();
           await tx.insert(adminEvents).values(
             adminEventRow({
@@ -172,10 +191,13 @@ export function createPartnerStore({ db }: Database): PartnerStore {
           await tx.execute(sql`SELECT pg_advisory_xact_lock(${PARTNERS_LOCK})`);
           const [partner] = await tx.select().from(printPartners).where(eq(printPartners.id, input.id)).limit(1).for('update');
           if (!partner) return { ok: false, reason: 'not_found' };
-          if (partner.name !== input.seen.name || partner.cityId !== input.seen.cityId) return { ok: false, reason: 'changed' };
-          const changed = [
+          if (partner.name !== input.seen.name || partner.cityId !== input.seen.cityId || partner.notifyMobile !== input.seen.notifyMobile) {
+            return { ok: false, reason: 'changed' };
+          }
+          const changed: PartnerField[] = [
             ...(partner.name !== input.name ? (['name'] as const) : []),
             ...(partner.cityId !== input.cityId ? (['city'] as const) : []),
+            ...(partner.notifyMobile !== input.notifyMobile ? (['mobile'] as const) : []),
           ];
           if (changed.length === 0) return { ok: true, partner, changed: [] };
           if (changed.includes('name')) {
@@ -184,18 +206,21 @@ export function createPartnerStore({ db }: Database): PartnerStore {
           }
           const [updated] = await tx
             .update(printPartners)
-            .set({ name: input.name, provinceId: input.provinceId, cityId: input.cityId })
+            .set({ name: input.name, provinceId: input.provinceId, cityId: input.cityId, notifyMobile: input.notifyMobile })
             .where(eq(printPartners.id, input.id))
             .returning();
           // پس از عوض کردن خود ردیف: سفارشی که همین حالا به این چاپخانه جابه‌جا می‌شد، پشت قفل این ردیف ماند و حالا در
-          // فهرست است. ردیف سفارش‌ها قفل می‌شود تا کارگرِ وسط ساختن برگه، اثر انگشت را پس از این تغییر بسنجد.
-          const open = await tx
-            .select({ id: orders.id })
-            .from(orders)
-            .where(and(eq(orders.printPartnerId, input.id), inArray(orders.status, [...OPEN])))
-            .orderBy(asc(orders.id))
-            .for('update');
-          for (const order of open) await requeueTicket(tx, order.id);
+          // فهرست است. ردیف سفارش‌ها قفل می‌شود تا کارگرِ وسط ساختن برگه، اثر انگشت را پس از این تغییر بسنجد. موبایل اعلان روی برگه
+          // نیست (برش ۷٫۶)، پس فقط با نام یا شهر.
+          if (changed.includes('name') || changed.includes('city')) {
+            const open = await tx
+              .select({ id: orders.id })
+              .from(orders)
+              .where(and(eq(orders.printPartnerId, input.id), inArray(orders.status, [...OPEN])))
+              .orderBy(asc(orders.id))
+              .for('update');
+            for (const order of open) await requeueTicket(tx, order.id);
+          }
           await tx.insert(adminEvents).values(
             adminEventRow({
               ...input.event,

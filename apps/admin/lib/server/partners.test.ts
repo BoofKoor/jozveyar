@@ -51,6 +51,7 @@ function memoryPartners() {
         createdAt: new Date(NOW.getTime() - 86_400_000),
         openOrders: 3,
         users: [],
+        notifyMobile: null,
       },
     ],
   ]);
@@ -68,7 +69,20 @@ function memoryPartners() {
       calls.push({ method: 'create', input });
       if ([...rows.values()].some((row) => row.name === input.name)) return { ok: false, reason: 'name_taken' };
       const id = NOOR;
-      const row = { id, name: input.name, provinceId: input.provinceId, cityId: input.cityId, provinceName: '', cityName: '', isDefault: false, deactivatedAt: null, createdAt: input.at, openOrders: 0, users: [] };
+      const row = {
+        id,
+        name: input.name,
+        provinceId: input.provinceId,
+        cityId: input.cityId,
+        provinceName: '',
+        cityName: '',
+        isDefault: false,
+        deactivatedAt: null,
+        createdAt: input.at,
+        openOrders: 0,
+        users: [],
+        notifyMobile: input.notifyMobile,
+      };
       rows.set(id, row);
       events.push(input.event);
       return { ok: true, partner: { ...row, createdBy: input.createdBy }, changed: [] };
@@ -77,10 +91,16 @@ function memoryPartners() {
       calls.push({ method: 'update', input });
       const row = rows.get(input.id);
       if (!row) return { ok: false, reason: 'not_found' };
-      if (row.name !== input.seen.name || row.cityId !== input.seen.cityId) return { ok: false, reason: 'changed' };
+      if (row.name !== input.seen.name || row.cityId !== input.seen.cityId || row.notifyMobile !== input.seen.notifyMobile) {
+        return { ok: false, reason: 'changed' };
+      }
       if ([...rows.values()].some((other) => other.id !== row.id && other.name === input.name)) return { ok: false, reason: 'name_taken' };
-      const changed = [...(row.name !== input.name ? (['name'] as const) : []), ...(row.cityId !== input.cityId ? (['city'] as const) : [])];
-      Object.assign(row, { name: input.name, provinceId: input.provinceId, cityId: input.cityId });
+      const changed = [
+        ...(row.name !== input.name ? (['name'] as const) : []),
+        ...(row.cityId !== input.cityId ? (['city'] as const) : []),
+        ...(row.notifyMobile !== input.notifyMobile ? (['mobile'] as const) : []),
+      ];
+      Object.assign(row, { name: input.name, provinceId: input.provinceId, cityId: input.cityId, notifyMobile: input.notifyMobile });
       if (changed.length) events.push(input.event);
       return { ok: true, partner: { ...row, createdBy: null }, changed };
     },
@@ -154,6 +174,8 @@ describe('افزودن و ویرایش', () => {
         name: 'چاپ نور',
         provinceId: 11,
         cityId: 1326,
+        // بی موبایل اعلان (۷٫۶): بی پیامک، و رویداد بی شماره.
+        notifyMobile: null,
         at: NOW,
         createdBy: 'admin-1',
         event: { adminUserId: 'admin-1', action: 'partners.create', targetType: 'partner', targetId: null, ipHash: ipHashOf(SECRET, '1.2.3.4'), at: NOW },
@@ -253,5 +275,71 @@ describe('پیش‌فرض، غیرفعال و فعال', () => {
       expect(await run(OWNER, MISSING, 'ip')).toMatchObject({ status: 404, error: 'partner_not_found' });
       expect(await run(OWNER, '', 'ip')).toMatchObject({ status: 404, error: 'partner_not_found' });
     }
+  });
+});
+
+describe('موبایل اعلان (۷٫۶، سؤال‌های ۱۲۶ و ۱۷۷)', () => {
+  const details = (events: AdminEventInput[]) => JSON.stringify(events.map((event) => event.detail ?? null));
+
+  it('افزودن: هر شکل موبایل ایران به 09…؛ رویداد با شمارهٔ پوشیده، هرگز کامل؛ شمارهٔ نادرست زیر همان فیلد و بی ذخیره‌گاه', async () => {
+    const { partners, calls, events, rows } = service();
+    expect(await partners.create(OWNER, { name: 'چاپ نور', city: 'مشهد', mobile: '+98 915 123 4567' }, '1.2.3.4')).toEqual({ ok: true, value: { id: NOOR } });
+    expect((calls[0]!.input as NewPartner).notifyMobile).toBe('09151234567');
+    expect(rows.get(NOOR)!.notifyMobile).toBe('09151234567');
+    expect(events[0]!.detail).toEqual({ mobile: '0915 ••• 4567' });
+    expect(details(events)).not.toContain('09151234567');
+    // خالی یعنی بی پیامک، و رویداد بی شماره.
+    const empty = service();
+    await empty.partners.create(OWNER, { name: 'چاپ نور', city: 'مشهد', mobile: '  ' }, 'ip');
+    expect([(empty.calls[0]!.input as NewPartner).notifyMobile, empty.events[0]!.detail]).toEqual([null, undefined]);
+    for (const bad of ['0915123456', '02112345678', 'abc']) {
+      const wrong = service();
+      expect(await wrong.partners.create(OWNER, { name: 'چاپ نور', city: 'مشهد', mobile: bad }, 'ip')).toMatchObject({
+        status: 400,
+        error: 'invalid_partner_mobile',
+        field: 'mobile',
+      });
+      expect(wrong.calls).toEqual([]);
+    }
+    // چند خطا با هم: همان که در فرم بالاتر است.
+    expect(await service().partners.create(OWNER, { name: ' ', city: 'مشهد', mobile: 'abc' }, 'ip')).toMatchObject({ error: 'invalid_partner_name' });
+  });
+
+  it('ویرایش: «همان که دیدی» موبایل هم؛ رویداد با قبل و بعد پوشیده؛ بی تغییر موبایل بی کلید موبایل؛ برداشتن یعنی بی پیامک', async () => {
+    const { partners, rows, events } = service();
+    const base = { name: 'چاپخانهٔ جزوه‌یار', city: 'تهران', seenName: 'چاپخانهٔ جزوه‌یار', seenCity: '394' };
+    expect(await partners.update(OWNER, FIRST, { ...base, mobile: '0915 123 4567', seenMobile: '' }, 'ip')).toEqual({ ok: true, value: { changed: ['mobile'] } });
+    expect(rows.get(FIRST)!.notifyMobile).toBe('09151234567');
+    expect(events.at(-1)!.detail).toEqual({ mobile: '0915 ••• 4567', previousMobile: null });
+    // فرم کهنه: موبایل همین حالا گذاشته شد و این فرم هنوز «نداشت» می‌گوید؛ فرم پیش از ۷٫۶ (بی فیلد) هم.
+    expect(await partners.update(OWNER, FIRST, { ...base, mobile: '', seenMobile: '' }, 'ip')).toMatchObject({ status: 409, error: 'partner_changed' });
+    expect(await partners.update(OWNER, FIRST, { ...base, mobile: '' }, 'ip')).toMatchObject({ error: 'partner_changed' });
+    expect(rows.get(FIRST)!.notifyMobile).toBe('09151234567');
+    expect(await partners.update(OWNER, FIRST, { ...base, mobile: '09121112222', seenMobile: '09151234567' }, 'ip')).toEqual({
+      ok: true,
+      value: { changed: ['mobile'] },
+    });
+    expect(events.at(-1)!.detail).toEqual({ mobile: '0912 ••• 2222', previousMobile: '0915 ••• 4567' });
+    // فقط نام: رویداد بی کلید موبایل.
+    const before = events.length;
+    expect(await partners.update(OWNER, FIRST, { ...base, name: 'جزوه‌یار مرکز', mobile: '09121112222', seenMobile: '09121112222' }, 'ip')).toEqual({
+      ok: true,
+      value: { changed: ['name'] },
+    });
+    expect([events.length, events.at(-1)!.detail]).toEqual([before + 1, undefined]);
+    const renamed = { ...base, name: 'جزوه‌یار مرکز', seenName: 'جزوه‌یار مرکز' };
+    expect(await partners.update(OWNER, FIRST, { ...renamed, mobile: '', seenMobile: '09121112222' }, 'ip')).toEqual({ ok: true, value: { changed: ['mobile'] } });
+    expect(rows.get(FIRST)!.notifyMobile).toBeNull();
+    expect(events.at(-1)!.detail).toEqual({ mobile: null, previousMobile: '0912 ••• 2222' });
+    expect(details(events)).not.toMatch(/09\d{9}/);
+    // دیده‌شدهٔ ناموبایل از جای دیگری آمده: کهنه، بی ذخیره‌گاه؛ موبایل نادرست زیر همان فیلد.
+    const other = service();
+    expect(await other.partners.update(OWNER, FIRST, { ...base, mobile: '', seenMobile: '0915 123 4567' }, 'ip')).toMatchObject({ error: 'partner_changed' });
+    expect(await other.partners.update(OWNER, FIRST, { ...base, mobile: '021', seenMobile: '' }, 'ip')).toMatchObject({
+      status: 400,
+      error: 'invalid_partner_mobile',
+      field: 'mobile',
+    });
+    expect(other.calls).toEqual([]);
   });
 });

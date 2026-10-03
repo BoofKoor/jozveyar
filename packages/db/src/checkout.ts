@@ -96,8 +96,15 @@ const KEY_SHAPE: Record<ServiceKeyName, (value: string) => boolean> = {
   SMS_OTP_TEMPLATE: isSmsIrTemplateId,
   SMS_PAID_TEMPLATE: isSmsIrTemplateId,
   SMS_TRACKING_TEMPLATE: isSmsIrTemplateId,
+  SMS_PARTNER_TEMPLATE: isSmsIrTemplateId,
   PAYMENT_MERCHANT_ID: isZibalMerchant,
 };
+
+/**
+ * کلیدهایی که آمادگی `live` می‌خواهد: همهٔ کلیدها جز قالب پیامک چاپخانه (برش ۷٫۶، سؤال ۱۲۶): پیامک چاپخانه پیش‌نیاز `live` نیست، و
+ * قالب خالی‌اش فقط همان پیامک را «نرفت» می‌کند (سؤال ۱۷۵).
+ */
+const READINESS_KEYS = SERVICE_KEYS.filter((name): name is ServiceKeyName & ReadinessPart => (READINESS_PARTS as readonly string[]).includes(name));
 
 const keyState = (name: ServiceKeyName, state: ServiceKeyState): ReadinessState => {
   if (state.source === 'unreadable') return 'unreadable';
@@ -132,7 +139,7 @@ export function readinessOf(
     SESSION_SECRET:
       (env.SESSION_SECRET?.length ?? 0) >= MIN_SESSION_SECRET_LENGTH ? 'ok' : env.SESSION_SECRET ? 'malformed' : 'empty',
   };
-  for (const name of SERVICE_KEYS) {
+  for (const name of READINESS_KEYS) {
     const row = rows?.find((candidate) => candidate.name === name) ?? null;
     states[name] = keyState(name, resolveServiceKey(name, row, env, secretsKey, () => {}));
   }

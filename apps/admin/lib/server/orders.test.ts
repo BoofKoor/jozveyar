@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ALL_ORDERS,
   type AdminEventInput,
+  type AssignmentSmsRef,
   type OrderStore,
   type OrderStatus,
   type PanelDueSummary,
@@ -103,6 +104,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       untracked: UNTRACKED,
       smsFailed: [10018],
       paidSmsFailed: [10027],
+      partnerSmsFailed: [{ orderNumber: 10051, partnerName: 'چاپ نور' }],
       gatewayRejected: { at: NOW, orderNumber: 10046, provider: 'zibal', result: 115, stage: 'start' },
       mismatched: [{ orderNumber: 10044, amountRials: 3_747_500, reportedRials: 374_750, createdAt: NOW }],
       held: [{ orderNumber: 10047, failureCode: 'order_not_payable', createdAt: NOW }],
@@ -123,6 +125,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     ticketFile: record('ticketFile', null),
     paymentSms: record('paymentSms', null),
     paymentOf: record('paymentOf', null),
+    assignmentSms: record('assignmentSms', null),
     requeue: async (scope, orderId, kind, event) => {
       calls.push({ method: 'requeue', args: [orderId, kind, event], scope });
       events.push(event);
@@ -153,7 +156,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
     assignPartner: async (scope, input) => {
       calls.push({ method: 'assignPartner', args: [input], scope });
       events.push(input.event);
-      return { ok: true, order: { printPartnerId: input.to } as never };
+      return { ok: true, order: { printPartnerId: input.to } as never, smsId: null };
     },
     ...over,
   };
@@ -1322,6 +1325,182 @@ describe('«دوباره بفرست» پیامک پرداخت (۷٫۱، ADR-049)
   });
 });
 
+describe('پیامک سفارش تازهٔ چاپخانه (۷٫۶، سؤال‌های ۱۷۲ تا ۱۷۷)', () => {
+  const ASSIGNER = ['orders.read', 'orders.assign'];
+  const smsRow = (status: string, over: Partial<ShipmentSms> = {}): ShipmentSms => ({
+    id: 51,
+    toMobile: '09151234567',
+    status,
+    error: status === 'failed' ? 'unconfigured' : null,
+    attempts: status === 'pending' ? 0 : 1,
+    createdAt: new Date(NOW.getTime() - 60_000),
+    attemptedAt: status === 'pending' ? null : new Date(NOW.getTime() - 60_000),
+    sentAt: null,
+    ...over,
+  });
+  /** درگاه ردیف پیامک حافظه‌ای: «منتظر» یا «نرفت» فقط یک بار برداشته می‌شود، مثل پایگاه داده؛ ترتیب کارها در `steps`. */
+  function outboxOf(status: string, steps: string[]) {
+    const row = { status, claims: [] as number[] };
+    const outbox: SmsOutbox = {
+      async claim(id) {
+        row.claims.push(id);
+        if (row.status !== 'failed' && row.status !== 'pending') return null;
+        row.status = 'sending';
+        steps.push(`claim ${id}`);
+        return { id, to: '09151234567', purpose: 'partner_order', body: 'x', params: ['10027', 'دوشنبه 13 مهر'] };
+      },
+      async finish(_id, _at, result) {
+        row.status = result.ok ? result.status : 'failed';
+      },
+    };
+    return { outbox, row };
+  }
+  const delivered: SmsTransport = { name: 'smsir', send: async () => ({ status: 'sent', providerMessageId: '1' }) };
+  function build(
+    over: Partial<PanelOrderStore> | ((steps: string[]) => Partial<PanelOrderStore>) = {},
+    ref: AssignmentSmsRef | null = null,
+    transport: SmsTransport = delivered,
+    smsStatus = 'pending',
+  ) {
+    const steps: string[] = [];
+    const fake = fakeStore({
+      assignmentSms: async (scope, id) => (fake.calls.push({ method: 'assignmentSms', args: [id], scope }), ref),
+      ...(typeof over === 'function' ? over(steps) : over),
+    });
+    const { outbox, row } = outboxOf(ref?.sms?.status ?? smsStatus, steps);
+    const sent = {
+      name: transport.name,
+      send: async (message: Parameters<SmsTransport['send']>[0]) => (steps.push(`send ${message.to}`), transport.send(message)),
+    } satisfies SmsTransport;
+    const orders = createPanelOrders({ store: fake.store, storage: null, secret: SECRET, now: () => NOW, log: () => {}, sms: { transport: sent, outbox, log: () => {} } });
+    return { orders, row, steps, ...fake };
+  }
+  /** جابه‌جایی نوشته شد (commit)، با شناسهٔ پیامکی که در همان تراکنش ساخته شد، یا بی آن. */
+  const assigned =
+    (smsId: number | null) =>
+    (steps: string[]): Partial<PanelOrderStore> => ({
+      details: async () => orderDetails('paid'),
+      assignPartner: async (_scope, input) => {
+        steps.push('commit');
+        return { ok: true, order: { printPartnerId: input.to } as never, smsId };
+      },
+    });
+  const ref = (status = 'failed', over: Partial<AssignmentSmsRef> = {}): AssignmentSmsRef => ({
+    assignmentId: 12,
+    orderId: 'order-1',
+    orderNumber: 10027,
+    orderStatus: 'paid',
+    partnerId: PARTNER_B,
+    partnerName: 'چاپ نور',
+    current: true,
+    sms: smsRow(status),
+    ...over,
+  });
+  const form = { from: PARTNER_A, to: PARTNER_B, reason: 'دستگاه خراب است' };
+
+  it('جابه‌جایی (و «انتخاب»): پیامک چاپخانهٔ تازه بعد از commit، یک بار؛ بی موبایل اعلان هیچ؛ نرفتنش جابه‌جایی را برنمی‌گرداند', async () => {
+    const moved = build(assigned(51));
+    expect(await moved.orders.assign(session(ASSIGNER), '10027', form, 'ip')).toEqual(ok({ to: PARTNER_B }));
+    // commit پیش از برداشتن و فرستادن، نه وسط تراکنش.
+    expect(moved.steps).toEqual(['commit', 'claim 51', 'send 09151234567']);
+    expect(moved.row).toMatchObject({ status: 'sent', claims: [51] });
+    const silent = build(assigned(null));
+    expect(await silent.orders.assign(session(ASSIGNER), '10027', form, 'ip')).toEqual(ok({ to: PARTNER_B }));
+    expect(silent.row.claims).toEqual([]);
+    const down = build(assigned(51), null, { name: 'smsir', send: () => Promise.reject(new SmsError('unavailable')) });
+    expect(await down.orders.assign(session(ASSIGNER), '10027', form, 'ip')).toEqual(ok({ to: PARTNER_B }));
+    expect(down.row.status).toBe('failed');
+  });
+
+  it('«دوباره بفرست» (سؤال ۱۷۲): مالک و متصدی (`orders.assign`)، همان ردیف به همان شماره، یک تلاش، رویداد با نام چاپخانه و شمارهٔ پوشیده', async () => {
+    const { orders, events, row, calls } = build({}, ref());
+    expect(await orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, '1.2.3.4')).toEqual(ok({ orderNumber: 10027, outcome: 'sent', error: null }));
+    expect(row).toMatchObject({ status: 'sent', claims: [51] });
+    expect(events).toEqual([
+      {
+        adminUserId: 'admin-1',
+        action: 'orders.partner_sms_resend',
+        targetType: 'order',
+        targetId: 'order-1',
+        ipHash,
+        at: NOW,
+        detail: { orderNumber: 10027, partner: 'چاپ نور', mobile: '0915 ••• 4567', outcome: 'sent' },
+      },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('09151234567');
+    expect(calls.find((c) => c.method === 'assignmentSms')).toMatchObject({ args: [12], scope: { kind: 'all' } });
+    // بی جابه‌جایی چاپخانه هیچ، حتی با مبلغ (پیامک پرداخت با `orders.money` است، نه این)؛ ذخیره‌گاه دست نمی‌خورد.
+    for (const permissions of [['orders.read', 'orders.money'], ['orders.read']]) {
+      const denied = build({}, ref());
+      expect(await denied.orders.resendPartnerSms(session(permissions), { assignment: '12' }, 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+      expect(denied.calls.some((c) => c.method === 'assignmentSms')).toBe(false);
+    }
+  });
+
+  it('باز نرفت با علت در رویداد؛ رفته، در راه، بسته (جابه‌جا، چاپ، لغو)، بی پیامک و ناشناس نه (سؤال ۱۷۴)', async () => {
+    const failing = build({}, ref(), { name: 'smsir', send: () => Promise.reject(new SmsError('rejected', { http: 400 })) });
+    expect(await failing.orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toEqual(
+      ok({ orderNumber: 10027, outcome: 'failed', error: 'rejected' }),
+    );
+    expect(failing.events[0]).toMatchObject({ detail: { outcome: 'failed', error: 'rejected:400' } });
+    const sent = build({}, ref('sent'));
+    expect(await sent.orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toMatchObject({ status: 409, error: 'sms_not_failed' });
+    const sending = build({}, { ...ref(), sms: smsRow('sending', { attemptedAt: NOW }) });
+    expect(await sending.orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toMatchObject({ error: 'sms_not_failed' });
+    expect([sent.row.claims, sending.row.claims]).toEqual([[], []]);
+    for (const closed of [{ current: false }, { orderStatus: 'printing' }, { orderStatus: 'cancelled' }] as Partial<AssignmentSmsRef>[]) {
+      const shut = build({}, ref('failed', closed));
+      expect(await shut.orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toMatchObject({
+        status: 409,
+        error: 'partner_sms_closed',
+        orderNumber: 10027,
+      });
+      expect(shut.row.claims).toEqual([]);
+    }
+    // همین حالا کس دیگری فرستاد، یا سفارش همین حالا جابه‌جا شد (پایگاه داده برنداشت): «رفت یا در راه است».
+    const raced = build({}, ref());
+    raced.row.status = 'sent';
+    expect(await raced.orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toMatchObject({ error: 'sms_not_failed' });
+    expect(raced.events).toEqual([]);
+    expect(await build({}, { ...ref(), sms: null }).orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toMatchObject({
+      status: 404,
+      error: 'partner_sms_not_found',
+    });
+    expect(await build({}, null).orders.resendPartnerSms(session(ASSIGNER), { assignment: '12' }, 'ip')).toMatchObject({ status: 404 });
+    for (const bad of ['x', '0', '-1', '1.5', '../12', '1'.repeat(16)]) {
+      const odd = build({}, ref());
+      expect(await odd.orders.resendPartnerSms(session(ASSIGNER), { assignment: bad }, 'ip')).toMatchObject({ status: 404, error: 'partner_sms_not_found' });
+      expect(odd.calls.some((c) => c.method === 'assignmentSms')).toBe(false);
+    }
+  });
+
+  it('پیشخوان: «پیامک سفارش تازه نرفت» فقط با `orders.assign`؛ بی آن و چاپخانه هیچ', async () => {
+    const staff = await service().orders.dashboard(session(ASSIGNER));
+    expect(staff.ok && staff.value.alerts.partnerSmsFailed).toEqual([{ orderNumber: 10051, partnerName: 'چاپ نور' }]);
+    const money = await service().orders.dashboard(session(['orders.read', 'orders.money', 'shipments.review']));
+    expect(money.ok && money.value.alerts.partnerSmsFailed).toEqual([]);
+    const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
+    expect(noor.ok && noor.value.alerts.partnerSmsFailed).toEqual([]);
+  });
+
+  it('جزئیات: ردیف پیامک و رویداد «دوباره بفرست»ش فقط با `orders.assign`؛ بی آن، و از چشم چاپخانه، هیچ‌جای جزئیات نیست', async () => {
+    const withSms = {
+      ...orderDetails('paid', { partner: PARTNER_B }),
+      assignments: [{ id: 12, at: NOW, fromName: null, toPartnerId: PARTNER_B, toName: 'چاپ نور', actor: 'system', adminName: null, rule: 'city', reason: null, sms: smsRow('sent') }],
+      events: [{ id: 3, at: NOW, action: 'orders.partner_sms_resend', detail: { orderNumber: 10027, partner: 'چاپ نور', mobile: '0915 ••• 4567', outcome: 'sent' }, adminName: 'سارا' }],
+    } as unknown as PanelOrderDetails;
+    const seen = async (permissions: string[], partner?: { id: string; name: string }) => {
+      const result = await service({ details: async () => withSms }).orders.details(session(permissions, partner), '10027');
+      if (!result.ok) throw new Error(result.error);
+      const { details, canPartnerSms } = result.value;
+      return [canPartnerSms, details.assignments.map((a) => a.sms?.toMobile ?? null), details.events.map((e) => e.action)];
+    };
+    expect(await seen(ASSIGNER)).toEqual([true, ['09151234567'], ['orders.partner_sms_resend']]);
+    expect(await seen(['orders.read', 'orders.money'])).toEqual([false, [null], []]);
+    expect(await seen(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' })).toEqual([false, [null], []]);
+  });
+});
+
 describe('«استعلام از درگاه» (۷٫۲، ADR-050)', () => {
   const PAYMENT = '44444444-4444-4444-8444-444444444444';
   const row = (over: Partial<PaymentRow> = {}): PaymentRow => ({
@@ -1380,8 +1559,10 @@ describe('«استعلام از درگاه» (۷٫۲، ADR-050)', () => {
         checks.push({ id, check });
       },
     } as unknown as OrderStore;
+    const claimed: number[] = [];
     const outbox: SmsOutbox = {
       async claim(id) {
+        claimed.push(id);
         return { id, to: '09152345678', purpose: 'order_paid', body: 'x', params: ['10030', 'دوشنبه 6 مهر'] };
       },
       async finish() {},
@@ -1396,13 +1577,33 @@ describe('«استعلام از درگاه» (۷٫۲، ADR-050)', () => {
       sms: { transport, outbox, log: () => {} },
       payments: { orders: orderStore, gateways: Object.fromEntries(gateways.map((name) => [name, gateway])) },
     });
-    return { orders, settles, checks, sent, ...fake };
+    return { orders, settles, checks, sent, claimed, ...fake };
   }
-  const settledAs = (status: PaymentRow['status'], over: Partial<PaymentRow> = {}, settled = true, smsId: number | null = null): SettledPayment => ({
+  const settledAs = (
+    status: PaymentRow['status'],
+    over: Partial<PaymentRow> = {},
+    settled = true,
+    smsId: number | null = null,
+    partnerSmsId: number | null = null,
+  ): SettledPayment => ({
     payment: row({ status, ...over }),
     order: {} as never,
     settled,
     smsId,
+    partnerSmsId,
+  });
+
+  it('موفق با چاپخانه‌ای که موبایل اعلان دارد (۷٫۶): پیامک پرداخت و پیامک سفارش تازه، هر دو بعد از commit؛ بی آن فقط پیامک پرداخت', async () => {
+    const both = build(row(), settledAs('succeeded', { gatewayStatus: 1 }, true, 77, 88));
+    expect(await both.orders.inquirePayment(session(OPERATOR), { payment: PAYMENT }, 'ip')).toEqual(ok({ orderNumber: 10030, outcome: 'succeeded' }));
+    expect(both.claimed).toEqual([77, 88]);
+    const paidOnly = build(row(), settledAs('succeeded', { gatewayStatus: 1 }, true, 77, null));
+    await paidOnly.orders.inquirePayment(session(OPERATOR), { payment: PAYMENT }, 'ip');
+    expect(paidOnly.claimed).toEqual([77]);
+    // بسته نشد (هنوز منتظر): هیچ پیامکی، حتی اگر شناسه‌ای آمده باشد.
+    const open = build(row(), settledAs('pending', {}, false, null, 88));
+    await open.orders.inquirePayment(session(OPERATOR), { payment: PAYMENT }, 'ip');
+    expect(open.claimed).toEqual([]);
   });
 
   it('تلاش باز: همان `settleWith` با `via: panel` و `SKIP LOCKED`؛ موفق یعنی پیامک پرداخت، با رویداد `payments.inquiry`', async () => {

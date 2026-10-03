@@ -19,6 +19,7 @@ import { RefundGatewayForm, RefundManualForm } from '../../../../../components/R
 import { RefundInquiryForm } from '../../../../../components/RefundInquiryForm';
 import { RecipientForm } from '../../../../../components/RecipientForm';
 import { ResendPaymentSmsForm } from '../../../../../components/ResendPaymentSmsForm';
+import { ResendPartnerSmsForm } from '../../../../../components/ResendPartnerSmsForm';
 import { ResendSmsForm } from '../../../../../components/ResendSmsForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
@@ -29,7 +30,7 @@ import { messageOf } from '../../../../../lib/messages';
 import { partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
 import { REFUND_NOTE_MAX, rejectionNow, rejectionResult, viaGateway } from '../../../../../lib/refunds';
-import { paymentSmsView, smsView } from '../../../../../lib/sms';
+import { partnerSmsView, paymentSmsView, smsView } from '../../../../../lib/sms';
 import {
   REASON_MAX,
   STATUS_LABELS,
@@ -96,6 +97,8 @@ const PAGE_ERRORS = new Set([
   'reason_required',
   'payment_not_found',
   'paid_sms_closed',
+  'partner_sms_not_found',
+  'partner_sms_closed',
   'gateway_not_configured',
   'payment_final',
   'unavailable',
@@ -634,6 +637,7 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
   if (!card) return null;
   const { partner, order } = details;
   const self = panelPath(gate, `/orders/${order.orderNumber}`);
+  const latest = details.assignments.at(-1);
   return (
     <section className="jy-card" aria-labelledby="t-prt" data-partner={partner?.id ?? 'none'}>
       <div className="jy-card__head">
@@ -654,6 +658,15 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
             {partner.active ? null : <span className="jy-badge jy-badge--neutral">غیرفعال</span>}
           </p>
           {card.note ? <p className="ad-meta">{card.note}</p> : null}
+          {latest && view.canPartnerSms ? (
+            <PartnerSmsRow
+              gate={gate}
+              assignment={latest}
+              orderNumber={order.orderNumber}
+              live={order.status === 'paid' && latest.toPartnerId === order.printPartnerId}
+              now={view.bounds.at}
+            />
+          ) : null}
         </>
       ) : order.status === 'paid' ? (
         <p className="jy-note jy-note--warning ad-gap">
@@ -668,6 +681,53 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
         <p className="ad-meta">بی چاپخانه.</p>
       )}
     </section>
+  );
+}
+
+/**
+ * ردیف «پیامک سفارش تازه» کارت «چاپخانه» (۷٫۶، سؤال ۱۷۲؛ همان شکل `ad-paysms`): پیامک آخرین تخصیص به چاپخانه‌ای که موبایل اعلان
+ * دارد؛ رفت، در راه، نرفت با علت، یا معلوم نیست. «دوباره بفرست» فقط تا وقتی همان تخصیص زنده است (سفارش در صف چاپ و هنوز پیش همان
+ * چاپخانه، سؤال ۱۷۴). فقط مالک و متصدی؛ تخصیص بی موبایل اعلان، یا پیش از ۷٫۶، ردیف ندارد.
+ */
+function PartnerSmsRow({
+  gate,
+  assignment,
+  orderNumber,
+  live,
+  now,
+}: {
+  gate: string;
+  assignment: PanelOrderDetails['assignments'][number];
+  orderNumber: number;
+  live: boolean;
+  now: Date;
+}) {
+  const view = partnerSmsView(assignment.sms, live, now);
+  if (!view) return null;
+  return (
+    <div className="ad-paysms" data-partner-sms={view.state}>
+      <b>پیامک سفارش تازه</b>
+      {view.state === 'sent' ? (
+        <span className="ad-paysms__ok">
+          <span className="jy-icon jy-icon-success" aria-hidden="true" />
+          <span>
+            <Segments segs={view.text} />
+          </span>
+        </span>
+      ) : view.state === 'sending' ? (
+        <span>
+          <Segments segs={view.text} />
+        </span>
+      ) : (
+        <span className="ad-paysms__fail">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            <Segments segs={view.text} />
+          </span>
+        </span>
+      )}
+      {view.resendable ? <ResendPartnerSmsForm gate={gate} assignmentId={assignment.id} orderNumber={orderNumber} /> : null}
+    </div>
   );
 }
 
@@ -1258,6 +1318,13 @@ export default async function OrderPage({
           <Alert tone="success">پیامک پرداخت دوباره فرستاده شد و رفت.</Alert>
         ) : (
           <Alert tone="error">پیامک پرداخت باز نرفت؛ علتش در کارت «پرداخت‌ها» است. کمی بعد دوباره بفرست، یا روز تحویل را خودت به مشتری بگو.</Alert>
+        )
+      ) : null}
+      {query.done === 'partner_sms_resend' ? (
+        query.sent === '1' ? (
+          <Alert tone="success">پیامک سفارش تازه دوباره به چاپخانه فرستاده شد و رفت.</Alert>
+        ) : (
+          <Alert tone="error">پیامک سفارش تازه باز نرفت؛ علتش در کارت «چاپخانه» است. کمی بعد دوباره بفرست، یا سفارش را خودت به چاپخانه خبر بده.</Alert>
         )
       ) : null}
       {query.done === 'inquiry' && typeof query.r === 'string' && query.r in INQUIRY_DONE ? (

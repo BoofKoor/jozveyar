@@ -1,9 +1,9 @@
 /**
- * کلیدهای سرویس‌های بیرونی (برش ۴٫۶، ADR-041): کلید API پنل پیامک (sms.ir)، شناسهٔ قالب کد پیامکی و از برش ۷ قالب پرداخت و رهگیری
- * (ADR-049)، و کد پذیرندهٔ زیبال. در `.env` سرورند؛ مالک از پنل هم می‌گذاردشان، مهروموم‌شده با `SECRETS_KEY`، و مقدار پنل بر `.env`
- * مقدم است.
+ * کلیدهای سرویس‌های بیرونی (برش ۴٫۶، ADR-041): کلید API پنل پیامک (sms.ir)، شناسهٔ قالب کد پیامکی، از برش ۷ قالب پرداخت و رهگیری
+ * (ADR-049) و از ۷٫۶ قالب پیامک چاپخانه، و کد پذیرندهٔ زیبال. در `.env` سرورند؛ مالک از پنل هم می‌گذاردشان، مهروموم‌شده با `SECRETS_KEY`، و
+ * مقدار پنل بر `.env` مقدم است.
  *
- *  - **فقط این پنج نام** (`SERVICE_KEYS`؛ همان CHECK `service_secrets_name`، 0027): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
+ *  - **فقط این شش نام** (`SERVICE_KEYS`؛ همان CHECK `service_secrets_name`، 0027 و 0035): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
  *    `PAYMENT_PROVIDER`، نه رمزهای خود سرور.
  *  - **مهروموم به جای ردیف** (AAD `service_secrets:<نام>`): مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود.
  *  - **خواندن با هر استفاده** (`readServiceKey`)، بی کش در حافظه: کلیدی که از پنل عوض شد بی ری‌استارت و روی هر نود همان
@@ -28,7 +28,14 @@ const SECRETS_LOCK = 0x6b657973;
 const KEY_TEST_LOCK = 0x6b747374;
 
 /** کلیدهایی که پنل نگه می‌دارد، به ترتیب صفحهٔ تنظیمات؛ همان نام‌های `.env`. */
-export const SERVICE_KEYS = ['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID'] as const;
+export const SERVICE_KEYS = [
+  'SMS_API_KEY',
+  'SMS_OTP_TEMPLATE',
+  'SMS_PAID_TEMPLATE',
+  'SMS_TRACKING_TEMPLATE',
+  'SMS_PARTNER_TEMPLATE',
+  'PAYMENT_MERCHANT_ID',
+] as const;
 export type ServiceKeyName = (typeof SERVICE_KEYS)[number];
 
 export const isServiceKeyName = (value: unknown): value is ServiceKeyName =>
