@@ -22,7 +22,8 @@
  *    `orders_files_deleted` هم.
  *  - **چاپخانهٔ سفارش** (برش ۵٫۲، ADR-042): جابه‌جایی فقط از چاپخانه‌ای که ادمین دید و فقط در «در صف چاپ»، با ردیف
  *    `order_assignments`، کار برگه و رویداد ادمین در همان تراکنش؛ «شروع چاپ» هم از چاپخانه‌ای که ادمین دید. پس جابه‌جایی و
- *    «شروع چاپ» هم‌زمان فقط یکی می‌شوند: هر دو ردیف سفارش را قفل می‌کنند و دومی شرطش را دیگر نمی‌یابد.
+ *    «شروع چاپ» هم‌زمان فقط یکی می‌شوند: هر دو ردیف سفارش را قفل می‌کنند و دومی شرطش را دیگر نمی‌یابد. از ۷٫۶ چاپخانهٔ تازه‌ای که
+ *    موبایل اعلان دارد پیامک «منتظر» سفارش تازه را در همان تراکنش می‌گیرد؛ چاپخانهٔ قبلی هیچ (سؤال ۱۷۳).
  *  - **بسته‌های پستی** (برش ۶٫۱، ADR-046): جزئیات سفارش مرسوله‌هایش را دارد، و جست‌وجو کد رهگیری را هم می‌شناسد؛ ورود فایل
  *    پست خودش در `shipments.ts` است.
  *  - **محدوده** (برش ۵٫۳، ADR-042): هر تابعی که سفارش می‌خواند یا می‌نویسد، محدوده را آرگومان اول و اجباری می‌گیرد (`PanelScope`:
@@ -36,7 +37,7 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'driz
 import { alias } from 'drizzle-orm/pg-core';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
-import type { AssignmentRule } from './assignment.js';
+import { partnerSmsOf, type AssignmentRule } from './assignment.js';
 import { gatewayRejection, type GatewayRejection } from './checkout.js';
 import type { Database } from './index.js';
 import {
@@ -262,6 +263,12 @@ export interface PanelAlerts {
    */
   paidSmsFailed: number[];
   /**
+   * سفارش‌های «در صف چاپ» که پیامک سفارش تازه به چاپخانهٔ امروزشان نرفت، یا معلوم نیست رفت (برش ۷٫۶، سؤال ۱۷۲): فقط پیامک تخصیص امروز
+   * (سفارش هنوز در صف چاپ همان چاپخانه است؛ جز آن پیامک دیگر نمی‌رود، سؤال ۱۷۴)، تخصیص‌های پس از `untrackedSince`؛ کوچک‌ترین شماره اول.
+   * در محدودهٔ چاپخانه هیچ: کاربر چاپخانه این پیامک را نمی‌بیند. پیشخوان فقط با «دوباره بفرست» (`orders.assign`).
+   */
+  partnerSmsFailed: { orderNumber: number; partnerName: string }[];
+  /**
    * آخرین ردِ درگاه که کار مالک است (برش ۷٫۲، سؤال‌های ۱۳۹ و ۱۴۷؛ ۱۱۵ IP، یا ۱۰۲ تا ۱۰۴ کد پذیرنده): در شروع پرداخت (رویداد سیستم
    * `payments.gateway_rejected`)، یا آخرین پرسش یک تلاش (`payments.gateway_error`، بی رویداد تازه با هر دقیقهٔ استعلام خودکار)؛ اگر پس از
    * آن نه پرداختی از همان درگاه شروع شد و نه «آزمایش» کد پذیرنده درست بود؛ پس از `untrackedSince`. در محدودهٔ چاپخانه هیچ.
@@ -299,6 +306,19 @@ export interface PaymentSmsRef {
   orderId: string;
   orderNumber: number;
   orderStatus: OrderRow['status'];
+  sms: ShipmentSms | null;
+}
+
+/** تخصیصی که «دوباره بفرست» پیامک سفارش تازه‌اش زده شد (برش ۷٫۶). */
+export interface AssignmentSmsRef {
+  assignmentId: number;
+  orderId: string;
+  orderNumber: number;
+  orderStatus: OrderRow['status'];
+  partnerId: string;
+  partnerName: string;
+  /** تخصیص امروز سفارش: آخرین ردیف تخصیص، و سفارش هنوز به همان چاپخانه (سؤال ۱۷۴). */
+  current: boolean;
   sms: ShipmentSms | null;
 }
 
@@ -393,6 +413,8 @@ export interface PanelAssignment {
   adminName: string | null;
   rule: AssignmentRule | null;
   reason: string | null;
+  /** پیامک سفارش تازه به همین چاپخانه (برش ۷٫۶)؛ null بی موبایل اعلان، یا تخصیص پیش از ۷٫۶. */
+  sms: ShipmentSms | null;
 }
 
 /** چاپخانهٔ فعالی که سفارش به آن جابه‌جا می‌شود: شهر و سفارش‌های بازش، مثل کاشی طرح. */
@@ -552,7 +574,8 @@ export interface PanelAssign {
  * (`changed`، با وضعیت و چاپخانهٔ امروز).
  */
 export type PanelAssignWrite =
-  | { ok: true; order: OrderRow }
+  /** `smsId`: پیامک «منتظر» سفارش تازه به چاپخانهٔ تازه (برش ۷٫۶)، برای فرستادن بعد از commit؛ null بی موبایل اعلان. */
+  | { ok: true; order: OrderRow; smsId: number | null }
   | { ok: false; reason: 'partner_inactive' }
   | { ok: false; reason: 'changed'; current: OrderStatus | null; partnerId: string | null };
 
@@ -614,11 +637,14 @@ export interface PanelOrderStore {
   /**
    * جابه‌جایی در یک تراکنش: چاپخانهٔ تازه `FOR SHARE` (فعال بماند)، `UPDATE … WHERE status = 'paid' AND چاپخانه = from`، ردیف
    * `order_assignments` با ادمین و دلیل، کار برگه دوباره در صف (نام و شهر چاپخانه روی برگه است)، و رویداد ادمین با نام هر دو
-   * چاپخانه و دلیل. دو کلیک هم‌زمان یک بار؛ دومی `changed` با چاپخانهٔ تازه.
+   * چاپخانه و دلیل. دو کلیک هم‌زمان یک بار؛ دومی `changed` با چاپخانهٔ تازه. چاپخانهٔ تازه‌ای که موبایل اعلان دارد پیامک «منتظر»
+   * سفارش تازه را در همان تراکنش می‌گیرد (برش ۷٫۶، `smsId`)؛ موبایلش پس از همان قفل خوانده می‌شود.
    */
   assignPartner(scope: PanelScope, input: PanelAssign): Promise<PanelAssignWrite>;
   /** پیامک پرداخت یک تلاش پرداخت در محدوده (برش ۷٫۱)؛ null یعنی چنین پرداختی (در این محدوده) نیست. */
   paymentSms(scope: PanelScope, paymentId: string): Promise<PaymentSmsRef | null>;
+  /** پیامک سفارش تازهٔ یک تخصیص در محدوده (برش ۷٫۶)؛ null یعنی چنین تخصیصی (در این محدوده) نیست. */
+  assignmentSms(scope: PanelScope, assignmentId: number): Promise<AssignmentSmsRef | null>;
   /** یک تلاش پرداخت در محدوده، برای «استعلام از درگاه» (برش ۷٫۲)؛ null یعنی چنین پرداختی (در این محدوده) نیست. */
   paymentOf(scope: PanelScope, paymentId: string): Promise<{ payment: PaymentRow; orderId: string; orderNumber: number } | null>;
   logEvent(event: AdminEventInput): Promise<void>;
@@ -854,7 +880,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
 
     async alerts(scope, clock) {
       const stuck = ts(new Date(clock.at.getTime() - SMS_STUCK_MS));
-      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed, money, unrefunded, refunding] = await Promise.all([
+      const [failed, unreturned, unassigned, review, untracked, smsFailed, paidSmsFailed, partnerSmsFailed, money, unrefunded, refunding] = await Promise.all([
         db
           .select({ orderNumber: orders.orderNumber })
           .from(orders)
@@ -936,6 +962,28 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             ),
           )
           .orderBy(asc(orders.orderNumber)),
+        // پیامک سفارش تازه به چاپخانه که نرفت (۷٫۶): فقط تخصیص امروز سفارشی که هنوز در صف چاپ همان چاپخانه است، در همان پنجره؛ در
+        // محدودهٔ چاپخانه هیچ (کاربر چاپخانه نمی‌بیندش، سؤال ۱۷۲).
+        scope.kind === 'all'
+          ? db
+              .select({ orderNumber: orders.orderNumber, partnerName: printPartners.name })
+              .from(orderAssignments)
+              .innerJoin(orders, eq(orders.id, orderAssignments.orderId))
+              .innerJoin(printPartners, eq(printPartners.id, orderAssignments.toPartnerId))
+              .innerJoin(smsMessages, eq(smsMessages.id, orderAssignments.smsMessageId))
+              .where(
+                and(
+                  eq(orders.status, 'paid'),
+                  eq(orders.printPartnerId, orderAssignments.toPartnerId),
+                  sql`${orderAssignments.id} = (SELECT max(b.id) FROM order_assignments b WHERE b.order_id = ${orders.id})`,
+                  sql`${orderAssignments.at} > ${ts(clock.untrackedSince)}`,
+                  sql`(${smsMessages.status} = 'failed'
+                    OR (${smsMessages.status} = 'pending' AND ${smsMessages.createdAt} < ${stuck})
+                    OR (${smsMessages.status} = 'sending' AND ${smsMessages.attemptedAt} < ${stuck}))`,
+                ),
+              )
+              .orderBy(asc(orders.orderNumber))
+          : Promise.resolve([]),
         paymentAlerts(scope, clock),
         // «لغوشده، پول برنگشته» (۷٫۳): پرداخت موفق، و نه بازپرداخت در جریان و نه برگشت‌داده‌شده.
         db
@@ -977,6 +1025,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         untracked: untracked.flatMap((row) => (row.handedToPostAt ? [{ orderNumber: row.orderNumber, handedToPostAt: row.handedToPostAt }] : [])),
         smsFailed: smsFailed.map((row) => row.orderNumber),
         paidSmsFailed: paidSmsFailed.map((row) => row.orderNumber),
+        partnerSmsFailed,
       };
     },
 
@@ -1172,11 +1221,13 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             adminName: adminUsers.displayName,
             rule: orderAssignments.rule,
             reason: orderAssignments.reason,
+            ...shipmentSmsFields,
           })
           .from(orderAssignments)
           .innerJoin(toPartner, eq(toPartner.id, orderAssignments.toPartnerId))
           .leftJoin(fromPartner, eq(fromPartner.id, orderAssignments.fromPartnerId))
           .leftJoin(adminUsers, eq(adminUsers.id, orderAssignments.adminUserId))
+          .leftJoin(smsMessages, eq(smsMessages.id, orderAssignments.smsMessageId))
           .where(eq(orderAssignments.orderId, order.id))
           .orderBy(asc(orderAssignments.id)),
         db
@@ -1262,11 +1313,15 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         ticket: ticketRows[0] ?? null,
         events: eventRows,
         partner: partnerRows[0] ?? null,
-        assignments: assignmentRows.map((row) => ({
-          ...row,
-          actor: row.actor === 'admin' ? ('admin' as const) : ('system' as const),
-          rule: (row.rule as AssignmentRule | null) ?? null,
-        })),
+        assignments: assignmentRows.map((row) => {
+          const { smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt, ...assignment } = row;
+          return {
+            ...assignment,
+            actor: row.actor === 'admin' ? ('admin' as const) : ('system' as const),
+            rule: (row.rule as AssignmentRule | null) ?? null,
+            sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+          };
+        }),
         shipments: shipmentRows.map((row) => {
           const { smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt, ...shipment } = row;
           return {
@@ -1491,7 +1546,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       return db.transaction(async (tx): Promise<PanelAssignWrite> => {
         // چاپخانهٔ تازه تا پایان تراکنش فعال می‌ماند: غیرفعال کردنش پشت این قفل منتظر می‌ماند و بعد سفارش باز را می‌بیند.
         const [target] = await tx
-          .select({ id: printPartners.id, name: printPartners.name })
+          .select({ id: printPartners.id, name: printPartners.name, notifyMobile: printPartners.notifyMobile })
           .from(printPartners)
           .where(and(eq(printPartners.id, input.to), isNull(printPartners.deactivatedAt)))
           .limit(1)
@@ -1517,6 +1572,8 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             .limit(1);
           return { ok: false, reason: 'changed', current: current?.status ?? null, partnerId: current?.printPartnerId ?? null };
         }
+        // پیامک سفارش تازه فقط به چاپخانهٔ تازه (۷٫۶؛ قبلی هیچ، سؤال ۱۷۳)، به موبایل اعلانی که پس از قفل خوانده شد.
+        const smsId = await partnerSmsOf(tx, target.notifyMobile, order, input.at);
         await tx.insert(orderAssignments).values({
           orderId: input.orderId,
           fromPartnerId: input.from,
@@ -1525,6 +1582,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           actor: 'admin',
           adminUserId: input.adminUserId,
           reason: input.reason,
+          smsMessageId: smsId,
         });
         await requeueTicket(tx, input.orderId);
         const [from] =
@@ -1542,7 +1600,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
             },
           }),
         );
-        return { ok: true, order };
+        return { ok: true, order, smsId };
       });
     },
 
@@ -1567,6 +1625,39 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         orderId: row.orderId,
         orderNumber: row.orderNumber,
         orderStatus: row.orderStatus,
+        sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
+      };
+    },
+
+    async assignmentSms(scope, assignmentId) {
+      const [row] = await db
+        .select({
+          assignmentId: orderAssignments.id,
+          orderId: orders.id,
+          orderNumber: orders.orderNumber,
+          orderStatus: orders.status,
+          partnerId: printPartners.id,
+          partnerName: printPartners.name,
+          current: sql<boolean>`${orders.printPartnerId} = ${orderAssignments.toPartnerId}
+            AND ${orderAssignments.id} = (SELECT max(b.id) FROM order_assignments b WHERE b.order_id = ${orders.id})`,
+          ...shipmentSmsFields,
+        })
+        .from(orderAssignments)
+        .innerJoin(orders, eq(orders.id, orderAssignments.orderId))
+        .innerJoin(printPartners, eq(printPartners.id, orderAssignments.toPartnerId))
+        .leftJoin(smsMessages, eq(smsMessages.id, orderAssignments.smsMessageId))
+        .where(and(eq(orderAssignments.id, assignmentId), inScope(scope)))
+        .limit(1);
+      if (!row) return null;
+      const { smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt } = row;
+      return {
+        assignmentId: row.assignmentId,
+        orderId: row.orderId,
+        orderNumber: row.orderNumber,
+        orderStatus: row.orderStatus,
+        partnerId: row.partnerId,
+        partnerName: row.partnerName,
+        current: row.current === true,
         sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
       };
     },

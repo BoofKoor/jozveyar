@@ -246,6 +246,20 @@
       "when": 1790949538774,
       "tag": "0034_checkout_previews_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791043986267,
+      "tag": "0035_partner_sms",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791043997414,
+      "tag": "0036_partner_sms_guards",
+      "breakpoints": true
     }
   ]
 }

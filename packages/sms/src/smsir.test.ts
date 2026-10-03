@@ -8,11 +8,24 @@ import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createSmsIrMock, type SmsIrMock } from '../mock/smsir.mjs';
-import { SmsError, loggedSms, otpParams, otpText, paidParams, orderPaidText, smsErrorTag, trackingParams, trackingText, type SmsRecord } from './index';
+import {
+  SmsError,
+  loggedSms,
+  otpParams,
+  otpText,
+  paidParams,
+  orderPaidText,
+  partnerOrderText,
+  partnerParams,
+  smsErrorTag,
+  trackingParams,
+  trackingText,
+  type SmsRecord,
+} from './index';
 import { SMSIR_API_URL, isSmsIrApiKey, isSmsIrTemplateId, smsIrBaseUrl, smsIrClient, smsIrTransport, type SmsIrKeyName } from './smsir';
 
 const API_KEY = 'mock-key-7f3a9c2e41d8b605';
-const TEMPLATES = { SMS_OTP_TEMPLATE: '100001', SMS_PAID_TEMPLATE: '100002', SMS_TRACKING_TEMPLATE: '100003' } as const;
+const TEMPLATES = { SMS_OTP_TEMPLATE: '100001', SMS_PAID_TEMPLATE: '100002', SMS_TRACKING_TEMPLATE: '100003', SMS_PARTNER_TEMPLATE: '100004' } as const;
 const BARCODE = '118800000000000000000101';
 
 let mock: SmsIrMock;
@@ -21,7 +34,7 @@ let url = '';
 beforeAll(async () => {
   mock = createSmsIrMock({
     keys: [API_KEY],
-    templates: { '100001': ['CODE'], '100002': ['ORDER', 'DAY'], '100003': ['ORDER', 'BARCODE'] },
+    templates: { '100001': ['CODE'], '100002': ['ORDER', 'DAY'], '100003': ['ORDER', 'BARCODE'], '100004': ['ORDER', 'DAY'] },
     credit: 500,
     cost: 2,
   });
@@ -75,6 +88,33 @@ describe('ارسال با قالب', () => {
     ]);
     expect(read).toEqual(['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_API_KEY', 'SMS_PAID_TEMPLATE', 'SMS_API_KEY', 'SMS_TRACKING_TEMPLATE']);
     expect(mock.state.credit).toBe(494);
+  });
+
+  it('پیامک چاپخانه (۷٫۶): شناسهٔ قالب خودش و همان دو پارامتر؛ قالب خالی `unconfigured`، بی هیچ درخواست (سؤال ۱۷۵)', async () => {
+    const { keys, read } = keysOf();
+    const sent = await smsIrTransport({ keys, baseUrl: url }).send({
+      to: '09151234567',
+      purpose: 'partner_order',
+      text: partnerOrderText(10027, 'دوشنبه 13 مهر'),
+      params: partnerParams(10027, 'دوشنبه 13 مهر'),
+    });
+    expect(sent).toMatchObject({ status: 'sent', cost: 2 });
+    expect(read).toEqual(['SMS_API_KEY', 'SMS_PARTNER_TEMPLATE']);
+    expect(mock.state.messages.map((m) => [m.mobile, m.templateId, m.parameters])).toEqual([
+      ['09151234567', 100004, [{ name: 'ORDER', value: '10027' }, { name: 'DAY', value: 'دوشنبه 13 مهر' }]],
+    ]);
+    for (const over of [{ SMS_PARTNER_TEMPLATE: null }, { SMS_PARTNER_TEMPLATE: '' }, { SMS_PARTNER_TEMPLATE: 'قالب' }]) {
+      const error = await failure(
+        smsIrTransport({ keys: keysOf(over).keys, baseUrl: url }).send({
+          to: '09151234567',
+          purpose: 'partner_order',
+          text: 'x',
+          params: partnerParams(10028, 'شنبه 18 مهر'),
+        }),
+      );
+      expect((error as SmsError).code).toBe('unconfigured');
+    }
+    expect(mock.state.messages).toHaveLength(1);
   });
 
   it('متن آزاد فرستاده نمی‌شود: فقط پارامترها', async () => {

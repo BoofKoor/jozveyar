@@ -481,6 +481,8 @@ export const cities = pgTable(
  * - پاک نمی‌شود، غیرفعال می‌شود (`deactivated_at`): سفارش‌ها و تاریخچهٔ تخصیص به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی
  *   سفارش باز ندارد؛ هر دو را تریگر `print_partners_guard` هم می‌سنجد (0018).
  * - `created_by` بی کلید خارجی، مثل `price_lists.created_by`؛ null یعنی دادهٔ پایه.
+ * - `notify_mobile` (برش ۷٫۶، سؤال ۱۲۶): موبایل اعلان اختیاری، نرمال (`09…`)؛ هر سفارش تازه‌ای که به این چاپخانه برسد یک پیامک از صف
+ *   به همین شماره دارد (`order_assignments.sms_message_id`). خالی یعنی بی پیامک.
  */
 export const printPartners = pgTable(
   'print_partners',
@@ -497,6 +499,8 @@ export const printPartners = pgTable(
     deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     createdBy: uuid('created_by'),
+    /** موبایل اعلان (برش ۷٫۶): پیامک سفارش تازه به همین؛ null یعنی بی پیامک. */
+    notifyMobile: text('notify_mobile'),
   },
   (t) => [
     foreignKey({
@@ -507,6 +511,8 @@ export const printPartners = pgTable(
     uniqueIndex('print_partners_one_default').on(t.isDefault).where(sql`${t.isDefault}`),
     check('print_partners_name', sql`length(btrim(${t.name})) BETWEEN 1 AND 100`),
     check('print_partners_default_active', sql`NOT ${t.isDefault} OR ${t.deactivatedAt} IS NULL`),
+    /** همان شکل `users.mobile`: نرمال‌شده با `normalizeIranMobile`. */
+    check('print_partners_notify_mobile', sql`${t.notifyMobile} IS NULL OR ${t.notifyMobile} ~ '^09[0-9]{9}$'`),
   ],
 );
 
@@ -932,6 +938,9 @@ export const orderStatusEvents = pgTable(
  * - سیستم فقط در پرداخت: از هیچ، با `rule` — `city` هم‌شهر مشتری، `province` هم‌استان، `default` چاپخانهٔ پیش‌فرض، و
  *   `oldest` قدیمی‌ترین چاپخانهٔ فعال وقتی پیش‌فرضی نیست.
  * - ادمین (جابه‌جایی، یا چاپخانهٔ سفارشی که نداشت): با `admin_user_id` و دلیل ۱ تا ۵۰۰ نویسه، که فقط در پنل دیده می‌شود.
+ * - پیامک چاپخانه (برش ۷٫۶، سؤال ۱۲۶): تخصیص به چاپخانه‌ای که موبایل اعلان دارد ردیف «منتظر» `sms_messages` خودش را دارد، در همان
+ *   تراکنش؛ بی موبایل، بی پیامک (تریگر `order_assignments_sms`، 0036). یک پیامک برای هر تخصیص (`order_assignments_sms`)، و چون ردیف
+ *   تخصیص عوض نمی‌شود، پیامکش هم.
  */
 export const orderAssignments = pgTable(
   'order_assignments',
@@ -950,9 +959,13 @@ export const orderAssignments = pgTable(
     adminUserId: uuid('admin_user_id').references(() => adminUsers.id),
     rule: text('rule'),
     reason: text('reason'),
+    /** پیامک سفارش تازه به چاپخانه (برش ۷٫۶)؛ null برای چاپخانهٔ بی موبایل اعلان و تخصیص‌های پیش از ۷٫۶. */
+    smsMessageId: bigint('sms_message_id', { mode: 'number' }).references(() => smsMessages.id),
   },
   (t) => [
     index('order_assignments_order').on(t.orderId, t.id),
+    /** یک پیامک برای هر تخصیص (ردیف پیامک به تخصیص دیگری وصل نمی‌شود). */
+    uniqueIndex('order_assignments_sms').on(t.smsMessageId),
     check('order_assignments_moves', sql`${t.fromPartnerId} IS DISTINCT FROM ${t.toPartnerId}`),
     check(
       'order_assignments_actor',
@@ -1167,19 +1180,20 @@ export const smsMessages = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     provider: text('provider').notNull(),
     toMobile: text('to_mobile').notNull(),
-    /** `otp`، `order_paid` یا از ۶٫۳ `tracking` (کد رهگیری هر مرسوله، ADR-047). */
+    /** `otp`، `order_paid`، از ۶٫۳ `tracking` (کد رهگیری هر مرسوله، ADR-047)، و از ۷٫۶ `partner_order` (سفارش تازهٔ چاپخانه). */
     purpose: text('purpose').notNull(),
     body: text('body'),
     /**
-     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری و از برش ۷ پرداخت `pending` (در همان تراکنش مرسوله یا پرداخت نوشته شد و
-     * هنوز فرستاده نشده) و `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard` (0026، بازنویسی 0028).
+     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری، از برش ۷ پرداخت و از ۷٫۶ چاپخانه `pending` (در همان تراکنش مرسوله، پرداخت
+     * یا تخصیص نوشته شد و هنوز فرستاده نشده) و `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard` (0026، بازنویسی 0028 و
+     * 0036).
      */
     status: text('status').notNull(),
     providerMessageId: text('provider_message_id'),
     error: text('error'),
-    /** پارامترهای قالب پنل پیامک (برش ۷)؛ رهگیری: شمارهٔ سفارش و بارکد. */
+    /** پارامترهای قالب پنل پیامک (برش ۷)؛ رهگیری: شمارهٔ سفارش و بارکد؛ پرداخت و چاپخانه: شمارهٔ سفارش و روز تحویل. */
     params: jsonb('params'),
-    /** شمار تلاش‌های فرستادن پرداخت و رهگیری («دوباره بفرست» یکی بالا می‌برد)؛ کد ۰، چون یک بار و بی ردیف منتظر است. */
+    /** شمار تلاش‌های فرستادن پیامک از صف («دوباره بفرست» یکی بالا می‌برد)؛ کد ۰، چون یک بار و بی ردیف منتظر است. */
     attempts: integer('attempts').notNull().default(0),
     /** آخرین «در حال فرستادن»؛ «معلوم نیست رفت» از همین حساب می‌شود. */
     attemptedAt: timestamp('attempted_at', { withTimezone: true }),
@@ -1193,11 +1207,11 @@ export const smsMessages = pgTable(
   },
   (t) => [
     index('sms_messages_to').on(t.toMobile, t.createdAt),
-    check('sms_messages_purpose', sql`${t.purpose} IN ('otp', 'order_paid', 'tracking')`),
+    check('sms_messages_purpose', sql`${t.purpose} IN ('otp', 'order_paid', 'tracking', 'partner_order')`),
     check('sms_messages_status', sql`${t.status} IN ('logged', 'sent', 'failed', 'pending', 'sending')`),
     check(
       'sms_messages_queued',
-      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} IN ('tracking', 'order_paid') AND ${t.body} IS NOT NULL)`,
+      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} IN ('tracking', 'order_paid', 'partner_order') AND ${t.body} IS NOT NULL)`,
     ),
     check('sms_messages_sent_at', sql`(${t.sentAt} IS NULL) OR ${t.status} IN ('logged', 'sent')`),
     /** کد تأیید زنده با پنل واقعی هرگز در پایگاه داده (ADR-033، ADR-049): نه متن و نه پارامترش؛ کنسولی متن را دارد تا تست بخواندش. */
@@ -1384,13 +1398,13 @@ export const adminEvents = pgTable(
 /* ──────────────────────────── کلیدهای سرویس‌ها (برش ۴٫۶، ADR-041) ──────────────────────────── */
 
 /**
- * کلید سرویس بیرونی که مالک از پنل گذاشته: کلید API پنل پیامک (sms.ir)، شناسهٔ سه قالب پیامک (کد، و از برش ۷ پرداخت و رهگیری)، کد
- * پذیرندهٔ زیبال. مقدار پنل بر همان نام در `.env` مقدم است؛ ردیف نبودن یعنی `.env` («برگرداندن به .env» ردیف را پاک می‌کند).
+ * کلید سرویس بیرونی که مالک از پنل گذاشته: کلید API پنل پیامک (sms.ir)، شناسهٔ چهار قالب پیامک (کد، از برش ۷ پرداخت و رهگیری، و از
+ * ۷٫۶ پیامک چاپخانه)، کد پذیرندهٔ زیبال. مقدار پنل بر همان نام در `.env` مقدم است؛ ردیف نبودن یعنی `.env` («برگرداندن به .env» ردیف را پاک می‌کند).
  *
  * - `sealed` مهروموم AES-256-GCM با `SECRETS_KEY` است (`sealed.ts`)، بسته به نام همین ردیف (AAD `service_secrets:<نام>`):
  *   نشت پایگاه داده یا پشتیبانش بی `.env` کلیدی لو نمی‌دهد، و مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود. CHECK
  *   `service_secrets_sealed` فقط شکل مهروموم را می‌پذیرد، پس مقدار خام اینجا نمی‌نشیند، حتی با کد اشتباه.
- * - نام فقط همین پنج (CHECK `service_secrets_name`؛ دو قالب تازه با 0027، برش ۷): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
+ * - نام فقط همین شش (CHECK `service_secrets_name`؛ دو قالب تازه با 0027، برش ۷، و قالب چاپخانه با 0035، ۷٫۶): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
  *   `PAYMENT_PROVIDER`، نه رمزهای خود سرور. کلید تازه مهاجرت تازهٔ همین CHECK را می‌خواهد.
  * - `updated_by` بی کلید خارجی، مثل `price_lists.created_by`: ادمین پاک‌نشدنی است (`admin_users_no_delete`).
  */
@@ -1405,7 +1419,7 @@ export const serviceSecrets = pgTable(
   (t) => [
     check(
       'service_secrets_name',
-      sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID')`,
+      sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'SMS_PARTNER_TEMPLATE', 'PAYMENT_MERCHANT_ID')`,
     ),
     check('service_secrets_sealed', sql`${t.sealed} ~ '^v1[.][A-Za-z0-9_-]{16}[.][A-Za-z0-9_-]{22,}$'`),
   ],

@@ -29,8 +29,15 @@ const rowOf = (name: ServiceKeyName, value = VALUE, context = serviceKeyContext(
 });
 
 describe('کلیدهای سرویس‌ها', () => {
-  it('فقط پنج نام (۷٫۱: دو قالب تازه)، به ترتیب صفحه؛ نه حالت خرید، نه آداپتورها، نه رمزهای خود سرور', () => {
-    expect(SERVICE_KEYS).toEqual(['SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'PAYMENT_MERCHANT_ID']);
+  it('فقط شش نام (۷٫۱: دو قالب تازه؛ ۷٫۶: قالب چاپخانه)، به ترتیب صفحه؛ نه حالت خرید، نه آداپتورها، نه رمزهای خود سرور', () => {
+    expect(SERVICE_KEYS).toEqual([
+      'SMS_API_KEY',
+      'SMS_OTP_TEMPLATE',
+      'SMS_PAID_TEMPLATE',
+      'SMS_TRACKING_TEMPLATE',
+      'SMS_PARTNER_TEMPLATE',
+      'PAYMENT_MERCHANT_ID',
+    ]);
     for (const name of SERVICE_KEYS) expect(isServiceKeyName(name)).toBe(true);
     for (const other of ['CHECKOUT_MODE', 'SMS_PROVIDER', 'PAYMENT_PROVIDER', 'SECRETS_KEY', 'SESSION_SECRET', 'sms_api_key', '', null, 1]) {
       expect(isServiceKeyName(other)).toBe(false);
