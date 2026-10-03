@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 
 import { StaticPage } from '../../components/StaticPage';
-import { CONTACT, contactRows, type ContactRow } from '../../lib/contact';
+import { CONTACT, contactLead, contactRows, type ContactRow } from '../../lib/contact';
 import { STATIC_PAGES, pageMetadata } from '../../lib/staticPages';
 
 export const generateMetadata = pageMetadata(STATIC_PAGES.contact);
@@ -28,13 +28,13 @@ function Value({ row }: { row: ContactRow }) {
 }
 
 /**
- * تماس (برش ۷٫۴، طرح قدم ۵): هر راه یک ردیف. اطلاعات ساختگی روی سایت زنده نمی‌رود، پس تا اطلاعات واقعی نرسیده (`CONTACT`
- * خالی) این صفحه ۴۰۴ است و در پاورقی و نقشهٔ سایت نیست (`lib/staticPages.ts`).
+ * تماس (برش ۷٫۴، طرح قدم ۵؛ اطلاعات واقعی در مرحلهٔ آخر): هر راه یک ردیف. اطلاعات ساختگی روی سایت زنده نمی‌رود، پس بی
+ * `CONTACT` این صفحه ۴۰۴ است و در پاورقی و نقشهٔ سایت نیست (`lib/staticPages.ts`).
  */
 export default function ContactPage() {
   if (!CONTACT) notFound();
   return (
-    <StaticPage id="contact-title" title="تماس با جزوه‌یار" lead="شمارهٔ سفارشت را آماده داشته باش؛ در صفحهٔ سفارش و پیامک پرداخت هست.">
+    <StaticPage id="contact-title" title="تماس با جزوه‌یار" lead={contactLead(CONTACT)}>
       <dl className="pg-contact">
         {contactRows(CONTACT).map((row) => (
           <div key={row.label}>

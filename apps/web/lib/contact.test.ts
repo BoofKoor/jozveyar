@@ -1,11 +1,11 @@
 /**
- * اطلاعات تماس (برش ۷٫۴): تا اطلاعات واقعی نرسیده هیچ؛ بعد هر راه یک ردیف، به ترتیب طرح، و شماره‌ها پیوند `tel:` بین‌المللی.
- * خود صفحه و پیوندها در `staticPages.test.ts` و `tests/site.spec.ts`.
+ * اطلاعات تماس (برش ۷٫۴؛ اطلاعات واقعی در مرحلهٔ آخر): هر راه یک ردیف، به ترتیب طرح، و شماره‌ها پیوند `tel:` بین‌المللی؛
+ * زیرعنوان به راه‌هایی که هست. خود صفحه و پیوندها در `staticPages.test.ts` و `tests/site.spec.ts`.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { CONTACT, contactRows, telHref, type Contact } from './contact';
+import { CONTACT, contactLead, contactRows, telHref, type Contact } from './contact';
 
 const FULL: Contact = {
   mobile: '0912 345 6789',
@@ -18,7 +18,8 @@ const FULL: Contact = {
 
 describe('اطلاعات تماس', () => {
   it('اطلاعات ساختگی روی سایت زنده نمی‌رود: هر مقدار ناتهی است، نه جای‌نگه‌دار طرح و نه نمونهٔ همین تست', () => {
-    // تا اطلاعات واقعی صاحب پروژه برسد CONTACT خالی است؛ با رسیدنش این تست جلوی جای‌نگه‌دارهای طرح و نمونه‌ها را می‌گیرد.
+    // CONTACT اطلاعات خود صاحب پروژه است (مرحلهٔ آخر)؛ این تست جلوی جای‌نگه‌دارهای طرح و نمونه‌ها را می‌گیرد. بی CONTACT چیزی
+    // برای سنجیدن نیست: صفحه ۴۰۴ است.
     if (CONTACT === null) return;
     const slots = ['موبایل پشتیبانی', 'تلفن ثابت', 'ایمیل', 'روزها و ساعت‌ها', 'نشانی و کد پستی'];
     const fixtures = Object.values(FULL);
@@ -47,6 +48,14 @@ describe('اطلاعات تماس', () => {
       { label: 'ساعت پاسخ‌گویی', kind: 'text', value: 'شنبه تا چهارشنبه، ۹ تا ۱۷' },
       { label: 'نشانی', kind: 'text', value: 'تهران، خیابان نمونه، پلاک ۱', postalCode: '1234567890' },
     ]);
+  });
+
+  it('زیرعنوان: با تلفن یا موبایل جملهٔ طرح؛ فقط با ایمیل، شمارهٔ سفارش در خود ایمیل', () => {
+    const where = 'در صفحهٔ سفارش و پیامک پرداخت هست.';
+    expect(contactLead(FULL)).toBe(`شمارهٔ سفارشت را آماده داشته باش؛ ${where}`);
+    expect(contactLead({ mobile: '09123456789' })).toBe(`شمارهٔ سفارشت را آماده داشته باش؛ ${where}`);
+    expect(contactLead({ phone: '021-12345678', email: 'a@b.ir' })).toBe(`شمارهٔ سفارشت را آماده داشته باش؛ ${where}`);
+    expect(contactLead({ email: 'a@b.ir', hours: 'شنبه', address: 'قم' })).toBe(`شمارهٔ سفارشت را در ایمیلت بنویس؛ ${where}`);
   });
 
   it('فقط آنچه هست: ردیف خالی نیست، و کد پستی بی نشانی ردیفی نمی‌سازد', () => {
