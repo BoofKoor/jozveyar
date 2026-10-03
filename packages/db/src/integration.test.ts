@@ -42,7 +42,7 @@ import {
   smsMessages,
   users,
 } from './schema.js';
-import { and, count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull } from 'drizzle-orm';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
 import { HOLIDAYS_SETTING, SLA_DAYS_SETTING, seedReferenceData } from './reference.js';
@@ -164,6 +164,22 @@ async function clearOrders({ db }: Database) {
 async function clearPriceLists(conn: Database) {
   await clearOrders(conn);
   await conn.db.execute(sql`TRUNCATE price_lists CASCADE`);
+}
+
+/**
+ * رویداد ساختن سفارش با زمان صحنه. `createOrder` آن را با `now()` پایگاه داده می‌نویسد، ولی صحنهٔ تست پرداخت و تغییر وضعیت را با زمان
+ * ثابت می‌نویسد («حالا»ی طرح، دوشنبه 13 مهر 1405)، و جزئیات پنل رویدادها را به ترتیب زمان می‌دهد؛ پس از گذشتن آن زمان‌ها «ساخته شد» پس
+ * از «پرداخت شد» می‌افتاد و تست بی هیچ تغییری قرمز می‌شد (بمب زمانی، ۱۴۰۵/۰۷/۱۱). فقط همین یک زمان به صحنه برمی‌گردد، مثل `createdAt`
+ * صریح تلاش پرداخت؛ جدول رویدادهای وضعیت تریگر محافظ ندارد، و `orders.created_at` منجمد است و دست نمی‌خورد.
+ */
+async function placedAt({ db }: Database, orderId: string, at: Date) {
+  const rows = await db
+    .update(orderStatusEvents)
+    .set({ at })
+    .where(and(eq(orderStatusEvents.orderId, orderId), isNull(orderStatusEvents.fromStatus)))
+    .returning({ id: orderStatusEvents.id });
+  // دقیقاً یک رویداد ساختن؛ وگرنه این کمکی بی‌صدا هیچ نکرده و صحنه همان ساعت واقعی را دارد.
+  expect(rows).toHaveLength(1);
 }
 
 describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
@@ -2155,6 +2171,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     const END_TUESDAY = tehran('2026-10-07 00:00');
     const END_WEDNESDAY = tehran('2026-10-08 00:00');
     const END_SATURDAY = tehran('2026-10-11 00:00');
+    /** همهٔ سفارش‌های صحنه پیش از نخستین تلاش پرداختشان ساخته شدند (`placedAt`)؛ زودترین تلاش 08:59 همان روز است («late»). */
+    const PLACED = tehran('2026-10-01 08:00');
     const MINUTE = 60_000;
     /** حاشیهٔ پرداخت یک ساعت و مهلت هر تلاش نیم ساعت (ADR-034)؛ صریح. */
     const clock: PanelClock = {
@@ -2207,6 +2225,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         postalCode: null,
         items: [{ pageCount, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
       });
+      await placedAt(conn, order.id, PLACED);
       num[key] = order.orderNumber;
       ids[key] = order.id;
       totals[key] = order.totalRials;
@@ -2567,6 +2586,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     // مهلت پایان انحصاری روز است: «تا پایان دوشنبه» یعنی نیمه‌شب آغاز سه‌شنبه. صریح، نه از کد.
     const END_SATURDAY = tehran('2026-10-04 00:00');
     const END_MONDAY = tehran('2026-10-06 00:00');
+    /** سفارش پیش از پرداختش ساخته شد (`placedAt`؛ پرداخت `paidOrder` ساعت 10:00 همان روز است). */
+    const PLACED = tehran('2026-10-04 09:00');
     let docId = '';
     let owner = '';
     let operator = '';
@@ -2601,6 +2622,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         postalCode: null,
         items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
       });
+      await placedAt(conn, order.id, PLACED);
       const payment = await store.insertPayment({
         orderId: order.id,
         provider: 'mock',
@@ -3932,14 +3954,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         postalCode: null,
         items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
       });
-      const payment = await store.insertPayment({
-        orderId: order.id,
-        provider: 'mock',
-        amountRials: order.totalRials,
-        authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
-        raw: null,
-      });
-      if (!settle) return { id: order.id, orderNumber: order.orderNumber, partnerId: null };
+      const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+      if (!settle) {
+        // تلاشی که از درگاه برنگشت، ساخته چهل دقیقه پیش از «حالا»ی طرح، پیش از `unreturnedBefore` پیشخوان. با `insertPayment` زمان ساختنش
+        // `now()` پایگاه داده بود و از 13 مهر 1405 ساعت 10:50 تهران دیگر «برنگشته» نبود (بمب زمانی، ۱۴۰۵/۰۷/۱۱). پس در خود درج، مثل
+        // `attempt` برش ۴٫۲: زمان ساختن پس از درج منجمد است (`payments_frozen`).
+        await conn.db
+          .insert(payments)
+          .values({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, createdAt: new Date(NOW.getTime() - 40 * MINUTE) });
+        return { id: order.id, orderNumber: order.orderNumber, partnerId: null };
+      }
+      const payment = await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
       const settled = await store.settlePayment('mock', payment.authority, async ({ payment }) => ({
         kind: 'succeeded',
         verifiedAmountRials: payment.amountRials,
@@ -5147,6 +5172,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('فعال کردن: نسخهٔ قبل خاموش و رویداد در یک تراکنش؛ نسخهٔ فعال یا محتوای دیگر «عوض شد»؛ دو کلیک یک بار؛ برگشت به نسخهٔ قبل', async () => {
       const store = createTariffStore(conn);
+      // تعرفهٔ پایه پیش از «حالا»ی طرح فعال شده بود. `beforeEach` آن را با تریگر و `now()` پایگاه داده فعال می‌کند و فعال کردن‌های پایین
+      // زمان ثابت دارند، پس از 13 مهر 1405 ساعت 11:21 تهران ترتیب «فعال شدن‌ها» برمی‌گشت (بمب زمانی، ۱۴۰۵/۰۷/۱۱). همان نسخهٔ ۱ از نو، با
+      // زمان فعال شدن صحنه: تریگر فقط وقتی زمان می‌گذارد که کسی ننوشته باشد (0013)؛ زمان‌گذاری خود تریگر را تست «تغییرناپذیر» بالا می‌سنجد.
+      await clearPriceLists(conn);
+      await seedPriceList(conn, SEED_PRICE_LIST, { activate: false });
+      const webUp = new Date(NOW.getTime() - 60 * MINUTE);
+      await conn.db.update(priceLists).set({ isActive: true, activatedAt: webUp }).where(eq(priceLists.version, 1));
+      expect((await headOf(1))!.activatedAt).toEqual(webUp);
       const { version } = await store.createDraft({ at: NOW, label: 'مهر', actor: actor() });
       const activate = (target: number, expectedActive: number | null, at: Date, verify: (list: PriceList) => boolean = () => true) =>
         store.activate({ version: target, expectedActive, verify, at, actor: actor() });
