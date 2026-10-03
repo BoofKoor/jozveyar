@@ -166,6 +166,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
       alerts.reviewRows > 0 ||
       alerts.smsFailed.length > 0 ||
       alerts.paidSmsFailed.length > 0 ||
+      alerts.partnerSmsFailed.length > 0 ||
       alerts.unrefunded.length > 0 ||
       alerts.refunding.length > 0 ||
       untracked.length > 0 ||
@@ -370,6 +371,26 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
                 پیامک پرداخت {alerts.paidSmsFailed.length === 1 ? 'سفارش ' : 'سفارش‌های '}
                 <OrderLinks gate={gate} numbers={alerts.paidSmsFailed} /> نرفت؛ از کارت «پرداخت‌ها»
                 {alerts.paidSmsFailed.length === 1 ? '' : 'ی هر کدام'} دوباره بفرست.
+              </span>
+            </p>
+          ) : null}
+          {alerts.partnerSmsFailed.length > 0 ? (
+            // پیامک سفارش تازهٔ چاپخانه که نرفت (۷٫۶، سؤال ۱۷۲): فقط مالک و متصدی، که «دوباره بفرست» کارت «چاپخانه» را دارند؛ کنار هر
+            // سفارش، چاپخانه‌ای که پیامک باید به آن می‌رفت.
+            <p className="jy-note jy-note--warning" data-alert="partner-sms">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                پیامک سفارش تازهٔ{' '}
+                {alerts.partnerSmsFailed.map((row, i) => (
+                  <Fragment key={row.orderNumber}>
+                    {i === 0 ? '' : i === alerts.partnerSmsFailed.length - 1 ? ' و ' : '، '}
+                    <Link className="jy-link" href={panelPath(gate, `/orders/${row.orderNumber}`)}>
+                      <span className="num">{row.orderNumber}</span>
+                    </Link>{' '}
+                    به {row.partnerName}
+                  </Fragment>
+                ))}{' '}
+                نرفت؛ از کارت «چاپخانه»{alerts.partnerSmsFailed.length === 1 ? '' : 'ی هر کدام'} دوباره بفرست.
               </span>
             </p>
           ) : null}

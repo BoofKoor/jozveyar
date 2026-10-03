@@ -71,6 +71,27 @@ function loginFailed(detail: Detail): Segment[] {
   }
 }
 
+/** تکه‌های متنی پشت‌سرهم یک تکه، تا جملهٔ بی شماره همان یک رشته بماند. */
+function merged(segments: Segment[]): Segment[] {
+  const out: Segment[] = [];
+  for (const segment of segments) {
+    const last = out.at(-1);
+    if (typeof segment === 'string' && typeof last === 'string') out[out.length - 1] = last + segment;
+    else out.push(segment);
+  }
+  return out;
+}
+
+/**
+ * موبایل اعلان چاپخانه در ویرایش (۷٫۶)، هر دو پوشیده («0915 ••• 4567»، سؤال ۱۷۷): گذاشته شد، عوض شد، یا برداشته شد؛ شماره‌ها جدا از
+ * جملهٔ فارسی.
+ */
+function mobileChange(previous: string, next: string): Segment[] {
+  if (previous && next) return ['موبایل اعلان ', { ltr: previous }, ' ← ', { ltr: next }];
+  if (next) return ['موبایل اعلان ', { ltr: next }];
+  return previous ? ['موبایل اعلان ', { ltr: previous }, ' برداشته شد'] : ['موبایل اعلان برداشته شد'];
+}
+
 /** شمارهٔ نسخهٔ تعرفه، جدا از جملهٔ فارسی. */
 const versionRef = (value: unknown): Segment[] => [{ ltr: typeof value === 'number' ? String(value) : '' }];
 
@@ -303,15 +324,26 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       };
     }
     case 'partners.create':
-      return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» در ${str(detail.city)} افزوده شد`] };
+      // موبایل اعلان (۷٫۶) پوشیده در رویداد («0915 ••• 4567»)، سؤال ۱۷۷.
+      return {
+        badge: null,
+        text: merged([
+          `چاپخانهٔ «${str(detail.name)}» در ${str(detail.city)} افزوده شد`,
+          ...(str(detail.mobile) ? ['، با پیامک سفارش تازه به ', { ltr: str(detail.mobile) }] : []),
+        ]),
+      };
     case 'partners.update': {
       const previous = (detail.previous ?? {}) as { name?: unknown; city?: unknown };
       const changed = Array.isArray(detail.changed) ? detail.changed : [];
-      const parts = [
-        ...(changed.includes('name') ? [`نام «${str(previous.name)}» ← «${str(detail.name)}»`] : []),
-        ...(changed.includes('city') ? [`شهر ${str(previous.city)} ← ${str(detail.city)}`] : []),
+      const parts: Segment[][] = [
+        ...(changed.includes('name') ? [[`نام «${str(previous.name)}» ← «${str(detail.name)}»`]] : []),
+        ...(changed.includes('city') ? [[`شهر ${str(previous.city)} ← ${str(detail.city)}`]] : []),
+        ...(changed.includes('mobile') ? [mobileChange(str(detail.previousMobile), str(detail.mobile))] : []),
       ];
-      return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» ویرایش شد${parts.length ? `: ${parts.join('، ')}` : ''}`] };
+      return {
+        badge: null,
+        text: merged([`چاپخانهٔ «${str(detail.name)}» ویرایش شد`, ...(parts.length ? [': ', ...parts.flatMap((part, i) => (i === 0 ? part : ['، ', ...part]))] : [])]),
+      };
     }
     case 'partners.default': {
       const previous = (detail.previous ?? null) as { name?: unknown } | null;
@@ -430,6 +462,17 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         badge: null,
         text: ['پیامک پرداخت سفارش ', ...orderRef(detail), detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت'],
       };
+    case 'orders.partner_sms_resend':
+      // «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه (۷٫۶)، کار روی همان سفارش، پس زیر چیپ «سفارش»؛ شماره پوشیده نمی‌آید، نام چاپخانه بس است.
+      return {
+        badge: null,
+        text: merged([
+          'پیامک سفارش تازهٔ ',
+          ...orderRef(detail),
+          ` به «${str(detail.partner)}»`,
+          detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت',
+        ]),
+      };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
@@ -480,9 +523,9 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
 
 /**
  * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲،
- * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش کار روی همان سفارش است، پس زیر «سفارش»؛ کارهای صف
- * تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و
- * بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها».
+ * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش و از ۷٫۶ «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه کار روی
+ * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
+ * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها».
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },

@@ -243,9 +243,11 @@ describe('نمای صفحه', () => {
       ['SMS_OTP_TEMPLATE', 'empty', null, null, false, null, null],
       ['SMS_PAID_TEMPLATE', 'empty', null, null, false, null, null],
       ['SMS_TRACKING_TEMPLATE', 'empty', null, null, false, null, null],
+      // ۷٫۶: قالب پیامک چاپخانه، پیش از کد پذیرنده (ترتیب `SERVICE_KEYS`).
+      ['SMS_PARTNER_TEMPLATE', 'empty', null, null, false, null, null],
       ['PAYMENT_MERCHANT_ID', 'panel', 'c2d8', 'سارا', true, '0000', null],
     ]);
-    expect(view.keys[4]!.seen).toBe(keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed));
+    expect(view.keys[5]!.seen).toBe(keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed));
     expect(view.keys[0]!.seen).toBe('none');
     expect(leaks(PANEL_VALUE, view)).toBe(false);
     expect(leaks(ENV_VALUE, view)).toBe(false);
@@ -266,7 +268,7 @@ describe('نمای صفحه', () => {
     // مقدار مهروموم‌شدهٔ کلید API در ردیف کد پذیرنده.
     swapped.secrets.rows.set('PAYMENT_MERCHANT_ID', panelRow('PAYMENT_MERCHANT_ID', PANEL_VALUE, KEY, serviceKeyContext('SMS_API_KEY')));
     const view = await swapped.panel.overview(OWNER);
-    expect(view.ok && view.value.keys[4]!.source).toBe('unreadable');
+    expect(view.ok && view.value.keys.find((k) => k.name === 'PAYMENT_MERCHANT_ID')!.source).toBe('unreadable');
   });
 
   it('تنظیم خراب: پیش‌فرض و لاگ بلند (readSetting)، نه شکستن صفحه', async () => {
@@ -573,7 +575,7 @@ describe('کلیدها', () => {
       { name: 'SMS_OTP_TEMPLATE', to: 'empty' },
     ]);
     const view = await panel.overview(OWNER);
-    expect(view.ok && view.value.keys.map((k) => k.source)).toEqual(['env', 'empty', 'empty', 'empty', 'env']);
+    expect(view.ok && view.value.keys.map((k) => k.source)).toEqual(['env', 'empty', 'empty', 'empty', 'empty', 'env']);
   });
 });
 
@@ -1058,5 +1060,27 @@ describe('مسیر خرید روی سایت (۷٫۵، ADR-052)', () => {
     expect(await panel.checkoutCard(OWNER)).toMatchObject({ ok: true, value: { audience: 'preview', credit: 184_200 } });
     keyTest({ outcome: 'rejected', http: 401 }, NOW);
     expect(await panel.checkoutCard(OWNER)).toMatchObject({ ok: true, value: { credit: null } });
+  });
+});
+
+describe('هشدار فرم چاپخانه (۷٫۶، سؤال ۱۷۵)', () => {
+  const PARTNERS = session(['partners.manage']);
+
+  it('شناسهٔ قالب پیامک چاپخانه گذاشته نشده و sms.ir در کار است: هشدار؛ با پیامک کنسولی یا بی `partners.manage` نه؛ هرگز مقدار', async () => {
+    expect(await service({ smsInUse: true }).panel.partnerTemplateMissing(PARTNERS)).toBe(true);
+    // پیامک کنسولی: قالب لازم نیست.
+    expect(await service().panel.partnerTemplateMissing(PARTNERS)).toBe(false);
+    // فقط مالک (همان که فرم چاپخانه را دارد).
+    expect(await service({ smsInUse: true }).panel.partnerTemplateMissing(OPERATOR)).toBe(false);
+    // از پنل یا .env، گذاشته شده: نه.
+    const panelSet = service({ smsInUse: true });
+    panelSet.secrets.rows.set('SMS_PARTNER_TEMPLATE', panelRow('SMS_PARTNER_TEMPLATE', '100004'));
+    expect(await panelSet.panel.partnerTemplateMissing(PARTNERS)).toBe(false);
+    expect(await service({ smsInUse: true, env: { SMS_PARTNER_TEMPLATE: '100004' } }).panel.partnerTemplateMissing(PARTNERS)).toBe(false);
+    // بدشکل یا ناخوانا همان «گذاشته نشده».
+    expect(await service({ smsInUse: true, env: { SMS_PARTNER_TEMPLATE: 'abc' } }).panel.partnerTemplateMissing(PARTNERS)).toBe(true);
+    const unreadable = service({ smsInUse: true, secretsKey: Buffer.alloc(32, 7) });
+    unreadable.secrets.rows.set('SMS_PARTNER_TEMPLATE', panelRow('SMS_PARTNER_TEMPLATE', '100004'));
+    expect(await unreadable.panel.partnerTemplateMissing(PARTNERS)).toBe(true);
   });
 });

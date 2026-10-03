@@ -1,14 +1,14 @@
 /**
  * پیامک رهگیری در پنل (برش ۶٫۳، ADR-047؛ طرح `m-order-shipped` و `m-ship-done`): ردیف «پیامک» کارت «بستهٔ پستی» و سطر صفحهٔ ورود،
- * شمار پیامک‌های یک ورود، و فهرست پیامک‌گرفته‌ها در صفحهٔ برگرداندن. خالص؛ حال هر پیامک همان `smsState` از `@jozveyar/sms`، که
- * «دوباره بفرست» سرور هم با آن می‌سنجد.
+ * شمار پیامک‌های یک ورود، و فهرست پیامک‌گرفته‌ها در صفحهٔ برگرداندن؛ از ۷٫۱ ردیف «پیامک پرداخت»، و از ۷٫۶ ردیف «پیامک سفارش تازه»
+ * کارت «چاپخانه». خالص؛ حال هر پیامک همان `smsState` از `@jozveyar/sms`، که «دوباره بفرست» سرور هم با آن می‌سنجد.
  */
 
 import type { ShipmentSms } from '@jozveyar/db';
 import { parseSmsErrorTag, resendable, smsState, type SmsErrorCode, type SmsState } from '@jozveyar/sms';
 
-import { whenText } from './format';
-import { phoneText, type Seg } from './orders';
+import { phoneText, whenText } from './format';
+import type { Seg } from './orders';
 
 /** علت «نرفت» به زبان ادمین؛ کد ناشناس همان «جواب نداد». از ۷٫۱ با عدد پاسخ sms.ir (`rejected:401`) و «کلید خالی». */
 const SMS_ERRORS: Record<SmsErrorCode, string> = {
@@ -18,11 +18,20 @@ const SMS_ERRORS: Record<SmsErrorCode, string> = {
   unconfigured: 'کلید API یا شناسهٔ قالب sms.ir خالی است یا خوانده نشد',
 };
 
+/**
+ * پیامک چاپخانه (برش ۷٫۶، سؤال ۱۷۵): «کلید خالی» نام قالب خودش را می‌برد، چون پیامک‌های دیگر شاید با همان کلید API رفته باشند و فقط
+ * شناسهٔ قالب چاپخانه هنوز گذاشته نشده؛ مالک بداند کدام را در «تنظیمات و کلیدها» بگذارد.
+ */
+const PARTNER_SMS_ERRORS: Record<SmsErrorCode, string> = {
+  ...SMS_ERRORS,
+  unconfigured: 'کلید API یا شناسهٔ قالب پیامک چاپخانه خالی است یا خوانده نشد',
+};
+
 /** علت «نرفت» یک ردیف: «پنل پیامک نپذیرفت (کد 401).»؛ منتظرِ مانده «نیمه‌کاره ماند». */
-function whyNot(sms: ShipmentSms): string {
-  if (sms.status === 'pending') return `${SMS_ERRORS.interrupted}.`;
+function whyNot(sms: ShipmentSms, errors: Record<SmsErrorCode, string> = SMS_ERRORS): string {
+  if (sms.status === 'pending') return `${errors.interrupted}.`;
   const { code, number } = parseSmsErrorTag(sms.error);
-  return number === null ? `${SMS_ERRORS[code]}.` : `${SMS_ERRORS[code]} (کد ${number}).`;
+  return number === null ? `${errors[code]}.` : `${errors[code]} (کد ${number}).`;
 }
 
 export interface SmsView {
@@ -91,12 +100,14 @@ export function smsRowNote(sms: ShipmentSms | null, shipmentCreatedAt: Date, now
   return { text: `پیامک نرفت: ${whyNot(sms)}`, failed: true, resendable: true };
 }
 
-/**
- * ردیف «پیامک پرداخت» کارت «پرداخت‌ها» (برش ۷٫۱، طرح `ad-paysms`): «به 0915 234 5678 رفت، شنبه 14:05»، یا «نرفت: …» با «دوباره بفرست»
- * (مالک و متصدی) وقتی سفارش هنوز در صف چاپ یا در حال چاپ است. پرداخت پیش از ۷٫۱ پیامکش را بی ردیف منتظر فرستاده بود: هیچ.
- */
-export function paymentSmsView(sms: ShipmentSms | null, orderOpen: boolean, now: Date): { state: SmsState; text: Seg[]; resendable: boolean } | null {
-  if (!sms) return null;
+export interface QueuedSmsView {
+  state: SmsState;
+  text: Seg[];
+  resendable: boolean;
+}
+
+/** یک ردیف پیامک از صف به زبان کارت: رفت با زمانش، در راه، معلوم نیست، یا «نرفت: …» با زمان تلاش. */
+function queuedSmsView(sms: ShipmentSms, open: boolean, now: Date, errors: Record<SmsErrorCode, string>): QueuedSmsView {
   const state = smsState(sms, now);
   const to: Seg = { num: phoneText(sms.toMobile) };
   const at = whenText(sms.attemptedAt ?? sms.createdAt, now);
@@ -107,6 +118,24 @@ export function paymentSmsView(sms: ShipmentSms | null, orderOpen: boolean, now:
         ? ['در حال فرستادن به ', to, '…']
         : state === 'unknown'
           ? ['معلوم نیست به ', to, ` رفت یا نه: فرستادنش نیمه‌کاره ماند، ${at}.`]
-          : [`نرفت: ${whyNot(sms).replace(/\.$/, '')}، ${at}`];
-  return { state, text, resendable: orderOpen && resendable(state) };
+          : [`نرفت: ${whyNot(sms, errors).replace(/\.$/, '')}، ${at}`];
+  return { state, text, resendable: open && resendable(state) };
+}
+
+/**
+ * ردیف «پیامک پرداخت» کارت «پرداخت‌ها» (برش ۷٫۱، طرح `ad-paysms`): «به 0915 234 5678 رفت، شنبه 14:05»، یا «نرفت: …» با «دوباره بفرست»
+ * (مالک و متصدی) وقتی سفارش هنوز در صف چاپ یا در حال چاپ است. پرداخت پیش از ۷٫۱ پیامکش را بی ردیف منتظر فرستاده بود: هیچ.
+ */
+export function paymentSmsView(sms: ShipmentSms | null, orderOpen: boolean, now: Date): QueuedSmsView | null {
+  return sms ? queuedSmsView(sms, orderOpen, now, SMS_ERRORS) : null;
+}
+
+/**
+ * ردیف «پیامک سفارش تازه» کارت «چاپخانه» (برش ۷٫۶، سؤال ۱۷۲): همان شکل ردیف پیامک پرداخت، «به 0915 123 4567 رفت، شنبه 14:05»، یا
+ * «نرفت: …» با «دوباره بفرست» فقط تا وقتی همین تخصیص زنده است: سفارش در صف چاپ و هنوز پیش همین چاپخانه (`live`؛ سؤال ۱۷۴: سفارشی
+ * که جابه‌جا شد، چاپش شروع شد یا لغو شد، پیامک تازه نمی‌خواهد). «کلید خالی» نام قالب چاپخانه را می‌برد (سؤال ۱۷۵). چاپخانهٔ بی موبایل
+ * اعلان پیامکی نداشت: هیچ.
+ */
+export function partnerSmsView(sms: ShipmentSms | null, live: boolean, now: Date): QueuedSmsView | null {
+  return sms ? queuedSmsView(sms, live, now, PARTNER_SMS_ERRORS) : null;
 }

@@ -1,11 +1,14 @@
 /**
- * زمان در پنل، به وقت تهران و با ارقام لاتین: «امروز 10:02»، «دیروز 23:40»، «شنبه 11 مهر 09:15». خالص،
- * تا تست بی ساعت واقعی بسنجدش.
+ * زمان در پنل، به وقت تهران و با ارقام لاتین: «امروز 10:02»، «دیروز 23:40»، «شنبه 11 مهر 09:15»؛ و شکل شمارهٔ تلفن («0915 234
+ * 5678»). خالص، تا تست بی ساعت واقعی بسنجدش.
  */
 
 import { formatJalali, formatJalaliNumeric, formatJalaliWeekday, formatTehranTime, jalaliYear } from '@jozveyar/text';
 
 const DAY_MS = 86_400_000;
+
+/** «0915 234 5678»: شمارهٔ یازده‌رقمی در سه تکه؛ هر شکل دیگر همان‌طور می‌ماند. */
+export const phoneText = (phone: string) => (/^\d{11}$/.test(phone) ? `${phone.slice(0, 4)} ${phone.slice(4, 7)} ${phone.slice(7)}` : phone);
 
 /** روز تهران یک لحظه، برای مقایسه: `1405/07/13`. */
 export const tehranDay = (at: Date) => formatJalaliNumeric(at);

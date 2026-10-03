@@ -10,7 +10,7 @@ import { CodeField } from './CodeField';
 
 interface Props {
   gate: string;
-  /** `SMS_OTP_TEMPLATE`، `SMS_PAID_TEMPLATE` یا `SMS_TRACKING_TEMPLATE`. */
+  /** `SMS_OTP_TEMPLATE`، `SMS_PAID_TEMPLATE`، `SMS_TRACKING_TEMPLATE` یا از ۷٫۶ `SMS_PARTNER_TEMPLATE`. */
   name: string;
   /** شناسهٔ امروز (راز نیست)، برای پر بودن فیلد در «تغییر». */
   current: string | null;

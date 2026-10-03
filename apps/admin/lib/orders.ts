@@ -487,8 +487,8 @@ export const shippingText = (details: PanelOrderDetails) =>
 export const addressText = (details: PanelOrderDetails) =>
   [details.provinceName, details.cityName, details.order.addressText].filter(Boolean).join('، ');
 
-/** «0915 234 5678». */
-export const phoneText = (phone: string) => (/^\d{11}$/.test(phone) ? `${phone.slice(0, 4)} ${phone.slice(4, 7)} ${phone.slice(7)}` : phone);
+/** «0915 234 5678»؛ از ۷٫۶ در `format.ts`، تا «چاپخانه‌ها» هم بی چرخهٔ import داشته باشدش. */
+export { phoneText } from './format';
 
 /* ───────────────────────── پرداخت‌ها ───────────────────────── */
 
@@ -1125,6 +1125,11 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
       // «دوباره بفرست» پیامک پرداخت (۷٫۱)؛ از چشم چاپخانه نه (`withoutMoney`).
       const resent = detail as { outcome?: unknown };
       entries.push({ at: event.at, text: [resent.outcome === 'sent' ? 'پیامک پرداخت دوباره رفت' : 'پیامک پرداخت دوباره نرفت'], who });
+    } else if (event.action === 'orders.partner_sms_resend') {
+      // «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه (۷٫۶)؛ فقط از چشم مالک و متصدی (`withoutPartnerSms`).
+      const resent = detail as { partner?: unknown; outcome?: unknown };
+      const to = typeof resent.partner === 'string' ? ` به «${resent.partner}»` : '';
+      entries.push({ at: event.at, text: [`پیامک سفارش تازه${to} ${resent.outcome === 'sent' ? 'دوباره رفت' : 'دوباره نرفت'}`], who });
     } else if (event.action === 'payments.inquiry') {
       // «استعلام از درگاه» (۷٫۲)، با نتیجه؛ از چشم چاپخانه نه.
       const outcome = String((detail as { outcome?: unknown }).outcome ?? '');
@@ -1176,6 +1181,18 @@ export function withoutMoney(details: PanelOrderDetails): PanelOrderDetails {
     // بازپرداخت (۷٫۳) همه مبلغ است.
     refunds: [],
     events: details.events.filter((event) => !event.action.startsWith('payments.') && !event.action.startsWith('orders.refund')),
+  };
+}
+
+/**
+ * جزئیات بی پیامک چاپخانه (برش ۷٫۶، سؤال ۱۷۲): پیامک سفارش تازه و «دوباره بفرست»ش فقط از چشم مالک و متصدی (`orders.assign`)؛
+ * چاپخانه نه ردیف پیامک تخصیص‌هایش را می‌بیند (شمارهٔ اعلان خودش هم)، نه رویدادش را. سرویس پیش از صفحه می‌کندش، مثل `withoutMoney`.
+ */
+export function withoutPartnerSms(details: PanelOrderDetails): PanelOrderDetails {
+  return {
+    ...details,
+    assignments: details.assignments.map((assignment) => ({ ...assignment, sms: null })),
+    events: details.events.filter((event) => event.action !== 'orders.partner_sms_resend'),
   };
 }
 

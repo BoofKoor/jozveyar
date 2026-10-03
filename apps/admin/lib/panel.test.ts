@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import type { AdminEventView } from '@jozveyar/db';
+import { inEventKind, type AdminEventView } from '@jozveyar/db';
 
 import { byDay, EVENT_KINDS, eventLines } from './events';
 import { dayHeading, dayText, whenText } from './format';
@@ -465,6 +465,36 @@ describe('رویدادها', () => {
       ['سفارش ', { ltr: '10027' }, ' از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه خراب است'],
       ['سفارش ', { ltr: '10037' }, ' به «چاپ نور» سپرده شد؛ تازه آمد'],
     ]);
+  });
+
+  it('موبایل اعلان (۷٫۶، سؤال ۱۷۷): پوشیده و جدا از جمله، گذاشته، عوض یا برداشته؛ «دوباره بفرست» پیامک سفارش تازه زیر «سفارش»', () => {
+    const partner = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'partner', detail });
+    const previous = { name: 'چاپ نور', city: 'مشهد' };
+    const lines = eventLines([
+      partner('partners.create', { name: 'چاپ نور', city: 'مشهد', mobile: '0915 ••• 4567' }),
+      partner('partners.update', { name: 'چاپ نور', city: 'مشهد', changed: ['mobile'], mobile: '0915 ••• 4567', previousMobile: null, previous }),
+      partner('partners.update', {
+        name: 'چاپ نور مشهد',
+        city: 'مشهد',
+        changed: ['name', 'mobile'],
+        mobile: '0912 ••• 2222',
+        previousMobile: '0915 ••• 4567',
+        previous,
+      }),
+      partner('partners.update', { name: 'چاپ نور', city: 'مشهد', changed: ['mobile'], mobile: null, previousMobile: '0912 ••• 2222', previous }),
+      event('orders.partner_sms_resend', { targetType: 'order', detail: { orderNumber: 10027, partner: 'چاپ نور', mobile: '0915 ••• 4567', outcome: 'sent' } }),
+      event('orders.partner_sms_resend', { targetType: 'order', detail: { orderNumber: 10027, partner: 'چاپ نور', outcome: 'failed', error: 'unconfigured' } }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['چاپخانهٔ «چاپ نور» در مشهد افزوده شد، با پیامک سفارش تازه به ', { ltr: '0915 ••• 4567' }],
+      ['چاپخانهٔ «چاپ نور» ویرایش شد: موبایل اعلان ', { ltr: '0915 ••• 4567' }],
+      ['چاپخانهٔ «چاپ نور مشهد» ویرایش شد: نام «چاپ نور» ← «چاپ نور مشهد»، موبایل اعلان ', { ltr: '0915 ••• 4567' }, ' ← ', { ltr: '0912 ••• 2222' }],
+      ['چاپخانهٔ «چاپ نور» ویرایش شد: موبایل اعلان ', { ltr: '0912 ••• 2222' }, ' برداشته شد'],
+      ['پیامک سفارش تازهٔ ', { ltr: '10027' }, ' به «چاپ نور» دوباره فرستاده شد و رفت'],
+      ['پیامک سفارش تازهٔ ', { ltr: '10027' }, ' به «چاپ نور» دوباره فرستاده شد و باز نرفت'],
+    ]);
+    // جابه‌جایی چاپخانه و «دوباره بفرست» پیامکش کار روی همان سفارش است: چیپ «سفارش»، نه «پرداخت و بازپرداخت».
+    expect([inEventKind('orders.partner_sms_resend', 'orders'), inEventKind('orders.partner_sms_resend', 'payments')]).toEqual([true, false]);
   });
 });
 

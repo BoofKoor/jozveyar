@@ -9,7 +9,7 @@ import type { PanelAssignment, PanelOrderDetails, PartnerView } from '@jozveyar/
 import { findCity } from '@jozveyar/geo';
 
 import type { Seg } from './orders';
-import { assignmentNote, assignmentText, cityLabel, partnerCard, partnerCityLabel, partnerMeta, partnerNameOf, pickCity } from './partners';
+import { assignmentNote, assignmentText, cityLabel, partnerCard, partnerCityLabel, partnerMeta, partnerMobileOf, partnerNameOf, pickCity } from './partners';
 
 const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
 const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
@@ -58,6 +58,16 @@ describe('فرم چاپخانه', () => {
   });
 });
 
+describe('موبایل اعلان فرم (۷٫۶)', () => {
+  it('خالی یعنی بی پیامک؛ همان شکل‌های موبایل ایران سایت به 09…؛ شمارهٔ ناموبایل نه', () => {
+    for (const empty of ['', '   ', undefined, null, 42]) expect(partnerMobileOf(empty)).toEqual({ ok: true, mobile: null });
+    for (const input of ['09151234567', '0915 123 4567', '0915-123-4567', '۰۹۱۵۱۲۳۴۵۶۷', '+989151234567', '00989151234567', '989151234567', '9151234567']) {
+      expect(partnerMobileOf(input)).toEqual({ ok: true, mobile: '09151234567' });
+    }
+    for (const input of ['0915123456', '091512345678', '02112345678', '+98 21 1234 5678', 'abc']) expect(partnerMobileOf(input)).toEqual({ ok: false });
+  });
+});
+
 describe('فهرست «چاپخانه‌ها»', () => {
   const partner = (over: Partial<PartnerView> = {}): PartnerView => ({
     id: 'p1',
@@ -71,6 +81,7 @@ describe('فهرست «چاپخانه‌ها»', () => {
     createdAt: tehran('2026-09-20 10:00'),
     openOrders: 8,
     users: [],
+    notifyMobile: null,
     ...over,
   });
 
@@ -81,6 +92,16 @@ describe('فهرست «چاپخانه‌ها»', () => {
     expect(text(partnerMeta(partner({ users: ['حسن نوری', 'رضا کریمی'] })))).toBe('تهران · 8 سفارش باز · کاربرها: حسن نوری، رضا کریمی');
     const inactive = partner({ cityName: 'اصفهان', deactivatedAt: tehran('2026-09-23 10:00'), openOrders: 0, users: ['مینا'] });
     expect(text(partnerMeta(inactive))).toBe('اصفهان · از 1405/07/01 سفارش تازه نمی‌گیرد · کاربر: مینا');
+  });
+
+  it('موبایل اعلان (۷٫۶، طرح): «مشهد · 2 سفارش باز · کاربر: حسن نوری · پیامک سفارش تازه به 0915 123 4567»، شمارهٔ کامل (سؤال ۱۷۷)؛ غیرفعال نه', () => {
+    const noor = partner({ cityName: 'مشهد', openOrders: 2, isDefault: false, users: ['حسن نوری'], notifyMobile: '09151234567' });
+    expect(text(partnerMeta(noor))).toBe('مشهد · 2 سفارش باز · کاربر: حسن نوری · پیامک سفارش تازه به 0915 123 4567');
+    // شماره جدا از جملهٔ فارسی (کلاس `num`)، مثل شمار سفارش.
+    expect(nums(partnerMeta(noor))).toEqual(['2', '0915 123 4567']);
+    // غیرفعال سفارش تازه نمی‌گیرد، پس پیامکی هم ندارد؛ بی موبایل همان خط پیش از ۷٫۶.
+    expect(text(partnerMeta({ ...noor, deactivatedAt: tehran('2026-09-23 10:00'), users: [] }))).toBe('مشهد · از 1405/07/01 سفارش تازه نمی‌گیرد');
+    expect(text(partnerMeta({ ...noor, notifyMobile: null }))).toBe('مشهد · 2 سفارش باز · کاربر: حسن نوری');
   });
 
   it('خط دوم، همان طرح: «تهران · 8 سفارش باز · کاربرها: همان مالک و متصدی»؛ غیرفعال «از 1405/07/01 سفارش تازه نمی‌گیرد»', () => {
@@ -103,6 +124,7 @@ describe('چاپخانهٔ سفارش', () => {
     adminName: null,
     rule: 'city',
     reason: null,
+    sms: null,
     ...over,
   });
   const moved = assignment({ id: 2, fromName: 'چاپ نور', toName: 'چاپخانهٔ جزوه‌یار', actor: 'admin', adminName: 'سارا', rule: null, reason: 'دستگاه چاپ نور تا فردا خراب است' });

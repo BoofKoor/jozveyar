@@ -4,7 +4,7 @@ import type { ShipmentSms } from '@jozveyar/db';
 import { SMS_STUCK_MS } from '@jozveyar/sms';
 
 import type { Seg } from './orders';
-import { paymentSmsView, smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
+import { partnerSmsView, paymentSmsView, smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
 
 /** «حالا»ی طرح: دوشنبه 13 مهر 1405، 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -88,5 +88,34 @@ describe('پیامک sms.ir در پنل (۷٫۱)', () => {
     const stuck = new Date(AT.getTime() + SMS_STUCK_MS + 1);
     expect(paymentSmsView(sms({ status: 'sending', sentAt: null }), true, stuck)).toMatchObject({ state: 'unknown', resendable: true });
     expect(paymentSmsView(null, true, NOW)).toBeNull();
+  });
+});
+
+describe('پیامک سفارش تازهٔ چاپخانه (۷٫۶)', () => {
+  const partner = (over: Partial<ShipmentSms> = {}) => sms({ toMobile: '09151234567', ...over });
+  const failed = (error: string) => partner({ status: 'failed', sentAt: null, error });
+
+  it('ردیف کارت «چاپخانه» (سؤال ۱۷۲): رفت، نرفت با «دوباره بفرست» فقط تا وقتی همان تخصیص زنده است (۱۷۴)؛ بی موبایل اعلان هیچ', () => {
+    expect(text(partnerSmsView(partner(), true, NOW)!.text)).toBe('به 0915 123 4567 رفت، امروز 11:10');
+    expect(partnerSmsView(partner(), true, NOW)!.resendable).toBe(false);
+    const down = partnerSmsView(failed('unavailable'), true, NOW)!;
+    expect([down.state, down.resendable, text(down.text)]).toEqual(['failed', true, 'نرفت: پنل پیامک جواب نداد، امروز 11:10']);
+    // جابه‌جا شد، چاپش شروع شد یا لغو شد: همان «نرفت»، بی «دوباره بفرست».
+    expect(partnerSmsView(failed('unavailable'), false, NOW)).toMatchObject({ state: 'failed', resendable: false });
+    const stuck = new Date(AT.getTime() + SMS_STUCK_MS + 1);
+    expect(partnerSmsView(partner({ status: 'pending', sentAt: null, attemptedAt: null }), true, stuck)).toMatchObject({ state: 'failed', resendable: true });
+    expect(partnerSmsView(partner({ status: 'sending', sentAt: null }), true, stuck)).toMatchObject({ state: 'unknown', resendable: true });
+    expect(text(partnerSmsView(partner({ status: 'pending', sentAt: null, attemptedAt: null, createdAt: NOW }), true, NOW)!.text)).toBe(
+      'در حال فرستادن به 0915 123 4567…',
+    );
+    expect(partnerSmsView(null, true, NOW)).toBeNull();
+  });
+
+  it('«کلید خالی» نام قالب چاپخانه را می‌برد (سؤال ۱۷۵)؛ پیامک‌های دیگر همان متن عمومی', () => {
+    expect(text(partnerSmsView(failed('unconfigured'), true, NOW)!.text)).toBe(
+      'نرفت: کلید API یا شناسهٔ قالب پیامک چاپخانه خالی است یا خوانده نشد، امروز 11:10',
+    );
+    expect(text(paymentSmsView(failed('unconfigured'), true, NOW)!.text)).toBe('نرفت: کلید API یا شناسهٔ قالب sms.ir خالی است یا خوانده نشد، امروز 11:10');
+    expect(text(partnerSmsView(failed('rejected:401'), true, NOW)!.text)).toBe('نرفت: پنل پیامک نپذیرفت (کد 401)، امروز 11:10');
   });
 });
