@@ -443,6 +443,75 @@ describe('مسیر خرید روی سرور', () => {
       expect(tehran.shippingZoneId).toBe('tehran');
     });
 
+    it('پیامک سفارش تازه به چاپخانهٔ با موبایل اعلان (برش ۷٫۶): در همان پرداخت، و بعد از commit با پیامک پرداخت؛ بی موبایل هیچ', async () => {
+      orders.partners.push({
+        id: 'partner-noor',
+        name: 'چاپ نور',
+        cityId: 1326,
+        provinceId: 11,
+        isDefault: false,
+        createdAt: clock,
+        active: true,
+        notifyMobile: '09151234567',
+      });
+      const tehran = await placed([doc(10)]);
+      await pay(tehran.payment!.redirectUrl, 'success');
+      // چاپخانهٔ پیش‌فرض موبایل اعلان ندارد: فقط پیامک پرداخت.
+      expect(sent.map((message) => message.purpose)).toEqual(['order_paid']);
+      expect(orders.assignments.at(-1)).toMatchObject({ toPartnerId: 'partner-jozveyar', smsMessageId: null });
+      sent.length = 0;
+
+      const documentIds = [doc(10)];
+      const priced = await service.quote(ME, { items: [item(documentIds)], place: MASHHAD });
+      if (!priced.ok) throw new Error(priced.error);
+      const placedMashhad = await service.placeOrder(ME, SARA, {
+        items: [item(documentIds)],
+        place: MASHHAD,
+        recipient,
+        checkoutKey: randomUUID(),
+        expectedTotalRials: priced.value.breakdown.totalRials,
+      });
+      if (!placedMashhad.ok) throw new Error(placedMashhad.error);
+      expect(await pay(placedMashhad.value.payment!.redirectUrl, 'success')).toMatchObject({ value: { payment: 'succeeded' } });
+      expect(sent).toEqual([
+        {
+          to: SARA.mobile,
+          purpose: 'order_paid',
+          text: 'جزوه‌یار: سفارش 10002 پرداخت شد؛ تحویل به پست تا دوشنبه 6 مهر',
+          params: ['10002', 'دوشنبه 6 مهر'],
+        },
+        {
+          to: '09151234567',
+          purpose: 'partner_order',
+          text: 'جزوه‌یار: سفارش تازه 10002؛ تحویل به پست تا دوشنبه 6 مهر',
+          params: ['10002', 'دوشنبه 6 مهر'],
+        },
+      ]);
+      const assignment = orders.assignments.at(-1)!;
+      expect(assignment).toMatchObject({ toPartnerId: 'partner-noor', rule: 'city' });
+      expect(orders.sms.get(assignment.smsMessageId!)).toMatchObject({ purpose: 'partner_order', status: 'logged', attempts: 1, to: '09151234567' });
+    });
+
+    it('پیامک چاپخانه‌ای که نرفت پرداخت را برنمی‌گرداند (برش ۷٫۶): ردیفش «نرفت» می‌ماند، پیامک پرداخت همان', async () => {
+      orders.partners[0]!.notifyMobile = '09121112233';
+      build({
+        name: 'flaky',
+        async send(message) {
+          if (message.purpose === 'partner_order') throw new Error('panel down');
+          sent.push(message);
+          return { status: 'sent', providerMessageId: '1', cost: 1 };
+        },
+      });
+      const { payment } = await placed([doc(10)]);
+      expect(await pay(payment!.redirectUrl, 'success')).toMatchObject({ value: { payment: 'succeeded' } });
+      expect(orders.orders[0]!.status).toBe('paid');
+      expect(sent.map((message) => message.purpose)).toEqual(['order_paid']);
+      const assignment = orders.assignments.at(-1)!;
+      expect(orders.sms.get(assignment.smsMessageId!)).toMatchObject({ purpose: 'partner_order', status: 'failed', error: 'unavailable', attempts: 1 });
+      expect(logs.some((line) => line.includes('partner_order') && line.includes('نرفت'))).toBe(true);
+      expect(logs.some((line) => line.includes('panel down'))).toBe(false);
+    });
+
     it('بی چاپخانهٔ فعال پرداخت همان است و سفارش بی چاپخانه می‌ماند، نه بن‌بست (برش ۵٫۲)', async () => {
       orders.partners[0]!.active = false;
       const { order, payment } = await placed([doc(10)]);
