@@ -219,6 +219,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
       'شناسهٔ قالب کد تأیید',
       'شناسهٔ قالب پیامک پرداخت',
       'شناسهٔ قالب پیامک رهگیری',
+      'شناسهٔ قالب پیامک چاپخانه',
       'کد پذیرندهٔ زیبال',
     ]);
     const api = keyRow(page, 'SMS_API_KEY');
@@ -242,6 +243,14 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await expect(keyRow(page, 'SMS_TRACKING_TEMPLATE').locator('.ad-keys__tpl')).toHaveText(
       'متن در sms.ir: «جزوه‌یار: سفارش #ORDER# به پست رسید. کد رهگیری #BARCODE#» · پارامترها: ORDER، BARCODE',
     );
+    // قالب ششم (۷٫۶، سؤال ۱۴۳): پیامک سفارش تازه به چاپخانه، بی نشانی پنل؛ خالی، پس «آزمایش» ندارد.
+    const partner = keyRow(page, 'SMS_PARTNER_TEMPLATE');
+    await expect(partner.locator('.jy-badge')).toHaveText('خالی');
+    await expect(partner.locator('.ad-keys__tpl')).toHaveText(
+      'متن در sms.ir: «جزوه‌یار: سفارش تازه #ORDER#؛ تحویل به پست تا #DAY#» · پارامترها: ORDER، DAY',
+    );
+    await expect(partner.getByRole('link', { name: 'وارد کن' })).toBeVisible();
+    await expect(partner.getByRole('link', { name: 'آزمایش' })).toHaveCount(0);
     // کد پذیرنده از ۷٫۲ با زیبال آزموده می‌شود، وقتی مقدار دارد (`payments.spec.ts` خود آزمایش را می‌سنجد، با سقف ۱۰ در ساعت).
     await expect(keyRow(page, 'PAYMENT_MERCHANT_ID').getByRole('button', { name: 'آزمایش' })).toHaveCount(process.env.PAYMENT_MERCHANT_ID ? 1 : 0);
     await expect(page.getByRole('link', { name: 'برگرداندن به .env' })).toHaveCount(0);

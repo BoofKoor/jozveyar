@@ -12,7 +12,8 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import type postgres from 'postgres';
 
 import { POST_HEADERS, totalRow } from '@jozveyar/db/postfile.fixtures';
-import { tehranDayStart } from '@jozveyar/text';
+import { partnerOrderText, partnerParams } from '@jozveyar/sms';
+import { formatDeadlineDay, tehranDayStart } from '@jozveyar/text';
 
 import { base32Decode, hotp, totpStep } from '../lib/server/totp';
 
@@ -150,10 +151,14 @@ export async function layoutProblems(page: Page): Promise<{ overflow: number; sm
  * شهر، وگرنه همان استان، وگرنه پیش‌فرض، وگرنه قدیمی‌ترین؛ و ردیف تخصیص با قاعده‌اش. هیچ چاپخانهٔ فعالی نیست؟ بی چاپخانه (null).
  * تست‌ها سفارش را با SQL می‌نشانند، چون Playwright ماژول ESM `@jozveyar/db` را بار نمی‌کند؛ پایگاه داده جابه‌جایی بی ردیف تخصیص را
  * رد می‌کند (`order_assignments_recorded`).
+ *
+ * از ۷٫۶: چاپخانه‌ای که موبایل اعلان دارد، ردیف «منتظر» پیامک سفارش تازه را هم در همان تراکنش می‌گیرد، با همان متن و پارامترهای
+ * `queuedPartnerSms` (تریگر `order_assignments_partner_sms` بی آن تخصیص را رد می‌کند). مثل پرداخت واقعی پیش از فرستادن است: اینجا
+ * هیچ‌کس نمی‌فرستدش، پس پس از پنج دقیقه «نرفت: … نیمه‌کاره ماند» می‌شود و «دوباره بفرست» دارد (۷٫۶ در `partners.spec.ts`).
  */
 export async function assignAtPayment(tx: postgres.TransactionSql, orderId: string, at: Date): Promise<string | null> {
-  const [chosen] = await tx<{ id: string; rule: string }[]>`
-    SELECT p.id,
+  const [chosen] = await tx<{ id: string; rule: string; notifyMobile: string | null; orderNumber: number; dueAt: Date | null }[]>`
+    SELECT p.id, p.notify_mobile AS "notifyMobile", o.order_number AS "orderNumber", o.post_handoff_due_at AS "dueAt",
            CASE WHEN p.city_id = o.city_id THEN 'city' WHEN p.province_id = o.province_id THEN 'province'
                 WHEN p.is_default THEN 'default' ELSE 'oldest' END AS rule
       FROM print_partners p, orders o
@@ -162,8 +167,19 @@ export async function assignAtPayment(tx: postgres.TransactionSql, orderId: stri
      LIMIT 1`;
   if (!chosen) return null;
   await tx`UPDATE orders SET print_partner_id = ${chosen.id} WHERE id = ${orderId}`;
-  await tx`INSERT INTO order_assignments (order_id, to_partner_id, at, actor, rule)
-           VALUES (${orderId}, ${chosen.id}, ${at}, 'system', ${chosen.rule})`;
+  let smsId: string | null = null;
+  if (chosen.notifyMobile) {
+    if (!chosen.dueAt) throw new Error(`سفارش ${chosen.orderNumber} مهلت تحویل به پست ندارد`);
+    const day = formatDeadlineDay(chosen.dueAt);
+    const [sms] = await tx<{ id: string }[]>`
+      INSERT INTO sms_messages (provider, to_mobile, purpose, body, params, status, created_at)
+      VALUES ('queued', ${chosen.notifyMobile}, 'partner_order', ${partnerOrderText(chosen.orderNumber, day)},
+              ${tx.json(partnerParams(chosen.orderNumber, day))}, 'pending', ${at})
+      RETURNING id`;
+    smsId = sms!.id;
+  }
+  await tx`INSERT INTO order_assignments (order_id, to_partner_id, at, actor, rule, sms_message_id)
+           VALUES (${orderId}, ${chosen.id}, ${at}, 'system', ${chosen.rule}, ${smsId})`;
   return chosen.id;
 }
 
