@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CONTACT } from '../lib/contact';
+import { CONTACT, contactLead, contactRows } from '../lib/contact';
 
 /**
  * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک، آیکون گوشی،
@@ -393,9 +393,29 @@ test.describe('صفحه‌های ثابت', () => {
     await expect(footerNav(page).getByRole('link', { name: 'تماس' })).toHaveAttribute('href', '/contact');
     expect(sitemap).toContain('/contact');
     await page.goto('/contact');
+    const article = page.getByRole('article');
     for (const value of Object.values(CONTACT).filter((value) => value !== undefined)) {
-      await expect(page.getByRole('article')).toContainText(value);
+      await expect(article).toContainText(value);
     }
+    // زیرعنوان به راه‌هایی که هست، ردیف‌ها به ترتیب طرح و فقط آنچه هست، و هر شماره و ایمیل پیوند خودش.
+    await expect(article.locator('.pg-lead')).toHaveText(contactLead(CONTACT));
+    await expect(article.locator('.pg-contact dt')).toHaveText(contactRows(CONTACT).map(({ label }) => label));
+    const links = contactRows(CONTACT).flatMap((row) => (row.kind === 'text' ? [] : [row]));
+    await expect(article.locator('.pg-contact a')).toHaveCount(links.length);
+    for (const { value, href } of links) await expect(article.getByRole('link', { name: value })).toHaveAttribute('href', href);
+  });
+
+  test('دربارهٔ ما: نشانی همان نشانی تماس، با پیوند صفحهٔ تماس', async ({ page }) => {
+    await page.goto('/about');
+    const about = page.getByRole('article');
+    const heading = about.getByRole('heading', { level: 2, name: 'نشانی' });
+    if (!CONTACT?.address) {
+      await expect(heading).toHaveCount(0);
+      return;
+    }
+    const section = heading.locator('xpath=following-sibling::*[1]');
+    await expect(section).toContainText(CONTACT.address);
+    await expect(section.getByRole('link', { name: 'تماس' })).toHaveAttribute('href', '/contact');
   });
 
   test('نقشهٔ سایت: صفحهٔ اصلی و صفحه‌های ثابت، به ترتیب پاورقی', async ({ request }) => {

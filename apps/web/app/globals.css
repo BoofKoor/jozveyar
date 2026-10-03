@@ -187,6 +187,8 @@
   .site-foot__nav a {
     display: inline-flex;
     align-items: center;
+    /* پهنا هم ۴۴: «تماس» کوتاه‌ترین نام است و بی آن ۳۷ پیکسل می‌شد. متن سر جایش می‌ماند و فقط جای لمس پهن می‌شود. */
+    min-width: 44px;
     min-height: 44px;
     color: var(--color-muted);
     text-decoration: none;

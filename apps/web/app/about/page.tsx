@@ -1,4 +1,5 @@
 import { StaticPage } from '../../components/StaticPage';
+import { CONTACT } from '../../lib/contact';
 import { siteFacts } from '../../lib/server/siteFacts';
 import { STATIC_PAGES, pageMetadata } from '../../lib/staticPages';
 
@@ -9,7 +10,7 @@ export const generateMetadata = pageMetadata(STATIC_PAGES.about);
 
 /**
  * دربارهٔ ما (برش ۷٫۴): جزوه‌یار چیست و چطور کار می‌کند، از روی خود سایت و صفحهٔ اصلی («سه قدم»، تعرفه، سؤال‌ها). نام کسب‌وکار
- * و نشانی با اطلاعات تماس واقعی می‌آیند (سؤال باز ۴)، نه حدسی.
+ * همان جزوه‌یار است، و نشانی از اطلاعات تماس واقعی (`lib/contact.ts`، مرحلهٔ آخر) می‌آید، نه نسخهٔ دوم آن؛ بی نشانی بخشش نمی‌آید.
  */
 export default async function AboutPage() {
   const { slaDays } = await siteFacts();
@@ -47,6 +48,19 @@ export default async function AboutPage() {
 
       <h2>نماد اعتماد</h2>
       <p>جزوه‌یار نماد اعتماد الکترونیکی (اینماد) دارد؛ نشانش پایین همهٔ صفحه‌هاست.</p>
+
+      {CONTACT?.address ? (
+        <>
+          <h2>نشانی</h2>
+          <p>
+            {CONTACT.address}. راه‌های تماس و ساعت پاسخ‌گویی در صفحهٔ{' '}
+            <a className="jy-link" href={STATIC_PAGES.contact.path}>
+              تماس
+            </a>{' '}
+            است.
+          </p>
+        </>
+      ) : null}
     </StaticPage>
   );
 }
