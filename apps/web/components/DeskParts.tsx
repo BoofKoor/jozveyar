@@ -173,6 +173,11 @@ export function RowMenu({ name, items }: { name: string; items: readonly MenuIte
                 onClick={() => {
                   setOpen(false);
                   item.onSelect();
+                  // ردیفی که در همین جزوه ماند فوکوس را به دکمهٔ همین منو برمی‌گرداند؛ ردیفی که به جزوهٔ دیگر رفت، رابط فوکوس
+                  // را به سر همان جزوه می‌دهد (`OrderDesk`).
+                  requestAnimationFrame(() => {
+                    if (button.current?.isConnected) button.current.focus();
+                  });
                 }}
               >
                 {item.label}

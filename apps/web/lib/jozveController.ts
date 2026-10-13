@@ -1,5 +1,6 @@
 /**
- * صف جزوهٔ چندفایلی — کارگر تحلیل و آپلودگر را به نوبت اجرا می‌کند (ADR-030).
+ * صف جزوهٔ چندفایلی — کارگر تحلیل و آپلودگر را به نوبت اجرا می‌کند (ADR-030). از برش ۸٫۲ همهٔ فایل‌های سفارش، در هر
+ * جزوه‌ای که باشند، در همین یک صف‌اند (چیدمان جزوه‌ها در `layout.ts`، با رابط پس از فایل).
  *
  * تصمیم‌ها (کدام فایل نوبت کیست) خالص‌اند و در `jozve.ts`؛ این ماژول فقط اجرایشان می‌کند و
  * هر وابستگی به مرورگر (Worker، خواندن فایل، آپلودگر) را تزریقی می‌گیرد، تا کل صف بی
@@ -23,7 +24,6 @@ import {
 } from './analysis-protocol';
 import { applyWorkerMessage, initialAnalysis, toServerPath, type AnalysisState } from './fileAnalysis';
 import {
-  moveSection,
   nextAnalysisJob,
   nextUpload,
   orderBatch,
@@ -284,11 +284,6 @@ export function createJozve(deps: JozveDeps) {
       fresh.forEach(estimateOffice);
       pump();
       return fresh.map((section) => section.key);
-    },
-
-    /** یکی بالاتر یا پایین‌تر. فقط ترتیب صحافی عوض می‌شود؛ قیمت همان است. */
-    move(key: string, delta: -1 | 1) {
-      commit({ sections: moveSection(snapshot.sections, key, delta) });
     },
 
     remove(key: string) {

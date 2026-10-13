@@ -2,7 +2,8 @@
  * جزوهٔ چندفایلی — صف، خالص (ADR-030).
  *
  * جزوه فهرستی مرتب از فایل‌هاست که پشت‌سرهم، بی صفحهٔ سفید بینشان، یک‌جا صحافی
- * می‌شوند. هر فایل یک سند جدا روی سرور است. اینجا بی React و بی مرورگر حساب می‌شود:
+ * می‌شوند. هر فایل یک سند جدا روی سرور است. از برش ۸٫۲ صف همهٔ فایل‌های سفارش است، هر جزوه‌ای که
+ * باشند؛ اینکه هر فایل در کدام جزوه و کجای آن است در `layout.ts` است. اینجا بی React و بی مرورگر حساب می‌شود:
  *  - نوبت کارگر تحلیل و نوبت آپلود (`nextAnalysisJob`، `nextUpload`)؛
  *  - ترتیب اولیهٔ فایل‌هایی که با هم انداخته شده‌اند (`orderBatch`).
  *
@@ -109,14 +110,4 @@ const byName = new Intl.Collator('fa', { numeric: true, sensitivity: 'base' });
 export function orderBatch<T extends { name: string }>(files: readonly T[]): T[] {
   const keyed = files.map((file) => ({ file, sortKey: normalizeFa(file.name.replace(/\.[^.]*$/, '')) }));
   return keyed.sort((a, b) => byName.compare(a.sortKey, b.sortKey)).map((entry) => entry.file);
-}
-
-/** جابه‌جایی یک فایل با همسایه‌اش؛ لبهٔ فهرست بی‌اثر است. */
-export function moveSection<T extends { key: string }>(list: readonly T[], key: string, delta: -1 | 1): T[] {
-  const from = list.findIndex((s) => s.key === key);
-  const to = from + delta;
-  if (from < 0 || to < 0 || to >= list.length) return [...list];
-  const next = [...list];
-  [next[from], next[to]] = [next[to]!, next[from]!];
-  return next;
 }

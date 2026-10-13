@@ -317,16 +317,6 @@ describe('کارهای کاربر', () => {
     expect(h.view().pageCount).toBe(10);
   });
 
-  it('جابه‌جایی فقط ترتیب است، قیمت همان', async () => {
-    const h = harness({ 'a.pdf': 10, 'b.pdf': 6 });
-    h.jozve.add(files('a.pdf', 'b.pdf'));
-    await settle();
-    const [, b] = h.jozve.getSnapshot().sections;
-    h.jozve.move(b!.key, -1);
-    expect(h.names()).toEqual(['b.pdf', 'a.pdf']);
-    expect(h.view().pageCount).toBe(16);
-  });
-
   it('بیش از سی فایل اضافه نمی‌شود، و نام بقیه گفته می‌شود', () => {
     const h = harness({});
     h.jozve.add(files(...Array.from({ length: 31 }, (_, i) => `f${String(i + 1).padStart(2, '0')}.pdf`)));

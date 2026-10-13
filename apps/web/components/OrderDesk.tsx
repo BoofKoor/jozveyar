@@ -35,7 +35,7 @@ import type { OrderConfig } from '../lib/orderConfig';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import { pageTariff } from '../lib/tariff';
 import type { JozveHandle } from '../lib/useJozve';
-import { Names, Note, SingleFileCard } from './AnalysisCard';
+import { Names, Note, SingleFileCard, jozveTitleId } from './AnalysisCard';
 import { ConfigPanel, type ConfigQuote } from './ConfigPanel';
 import { AskCard, JozveSettings, NewJozve, OverflowNote, type MenuItem } from './DeskParts';
 import { ACCEPT } from './DropZone';
@@ -338,6 +338,15 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
         : jozves[0]!.slot.key;
   /** کلید جزوه‌ای که کار بعدی چیدمان می‌سازد. */
   const freshKey = `j${synced.next}`;
+  /** فایلی که با منوی ردیف به جزوهٔ دیگر رفت: فوکوس به سر همان جزوه، نه گم شدن با ردیفی که از جایش رفت. */
+  const focusAfter = useRef<string | null>(null);
+  useEffect(() => {
+    const key = focusAfter.current;
+    if (!key) return;
+    focusAfter.current = null;
+    const index = jozves.findIndex((j) => j.slot.sections.includes(key));
+    if (index >= 0) document.getElementById(jozveTitleId(index))?.focus();
+  }, [jozves]);
 
   /*
    * ── حالت مسیر خرید، وقتی قیمت نهایی شد ──
@@ -474,7 +483,10 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           ),
           detail: other.view.sections[0]?.name,
           divided: within > 0 && items.length === within,
-          onSelect: () => update((current) => moveTo(current, section.key, other.slot.key)),
+          onSelect: () => {
+            focusAfter.current = section.key;
+            update((current) => moveTo(current, section.key, other.slot.key));
+          },
         });
       });
       if (own.view.sections.length > 1) {
@@ -483,6 +495,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           divided: within > 0 && items.length === within,
           onSelect: () => {
             setOpen({ key: freshKey });
+            focusAfter.current = section.key;
             update((current) => moveTo(current, section.key, 'new'));
           },
         });

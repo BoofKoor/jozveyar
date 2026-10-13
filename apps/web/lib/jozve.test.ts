@@ -7,7 +7,7 @@ import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { INITIAL, type AnalysisState } from './fileAnalysis';
-import { jozveCounted, moveSection, nextAnalysisJob, nextUpload, orderBatch, type Section } from './jozve';
+import { jozveCounted, nextAnalysisJob, nextUpload, orderBatch, type Section } from './jozve';
 import { jozveView, orderSpec, sectionView } from './jozveView';
 import type { UploadSnapshot } from './upload/client';
 
@@ -50,14 +50,6 @@ describe('ترتیب فایل‌هایی که با هم انداخته شده‌
       'جلسه 10.pdf',
       'فصل ۳.docx',
     ]);
-  });
-
-  it('جابه‌جایی با همسایه؛ لبهٔ فهرست بی‌اثر است', () => {
-    const list = [{ key: 'a' }, { key: 'b' }, { key: 'c' }];
-    expect(moveSection(list, 'c', -1).map((s) => s.key)).toEqual(['a', 'c', 'b']);
-    expect(moveSection(list, 'a', 1).map((s) => s.key)).toEqual(['b', 'a', 'c']);
-    expect(moveSection(list, 'a', -1).map((s) => s.key)).toEqual(['a', 'b', 'c']);
-    expect(moveSection(list, 'c', 1).map((s) => s.key)).toEqual(['a', 'b', 'c']);
   });
 });
 

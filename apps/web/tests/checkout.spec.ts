@@ -367,6 +367,64 @@ test.describe.serial('سفارش کامل', () => {
   });
 });
 
+/**
+ * چند جزوه در یک سفارش (برش ۸٫۲، سؤال ۱۸۲؛ سؤال ۲۲۵): هر جزوه تنظیمات خودش، قیمت سرور با یک قلم برای هر جزوه و کرایه یک بار،
+ * مرور «جزوه‌ها»، و سفارش با دو قلم منجمد؛ صفحهٔ سفارش با متن جمع.
+ */
+test('دو جزوه: هر کدام تنظیمات خودش، قیمت سرور با دو قلم، مرور «جزوه‌ها»، و سفارش با دو قلم', async ({ browser }) => {
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  const mobile = newMobile();
+  await page.goto('/');
+  await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
+  await expect(visibleButton(page, 'ادامه — آدرس و تحویل')).toBeEnabled({ timeout: 90_000 });
+  await page.getByTestId('jozve-ask').locator('label.jy-tile').filter({ hasText: 'هر فایل جزوهٔ جدا' }).click();
+  // جزوهٔ ۲ (plain-bw-10، به ترتیب نام) دو نسخه
+  await page.getByRole('button', { name: /^تنظیمات چاپ/ }).nth(1).click();
+  await page.getByRole('button', { name: 'یکی بیشتر' }).click();
+  const item = (pages: number, copies: number) => ({
+    sections: [{ documentId: 'test', pageCount: pages }],
+    rules: wholeDocumentRule(pages, 'bw', DEFAULT_PAPER_TYPE_ID),
+    copies,
+    sidesMode: 'double' as const,
+    bindingTypeId: DEFAULT_BINDING_TYPE_ID,
+  });
+  const two = (zoneId: 'other' | null) =>
+    quote({ items: [item(6, 1), item(10, 2)], shipping: zoneId ? { methodId: DEFAULT_SHIPPING_METHOD_ID, zoneId } : null }, SEED_PRICE_LIST);
+  await expect(page.getByTestId('summary-total')).toHaveText(toman(two(null).totalWithoutShippingRials));
+  await expect(page.getByTestId('jozve-price')).toHaveText([toman(two(null).items[0]!.totalRials), toman(two(null).items[1]!.totalRials)]);
+
+  await toPay(page);
+  await signIn(page, mobile);
+  const recap = page.getByTestId('recap-jozve');
+  await expect(recap.locator('dt')).toHaveText('جزوه‌ها');
+  await expect(recap.getByTestId('recap-jozves-item')).toHaveText([
+    'جزوهٔ 11image-scan-6.pdf6 صفحه6 صفحه · سیاه‌سفید، دورو · طلق و سیم · 1 نسخه',
+    'جزوهٔ 21plain-bw-10.pdf10 صفحه10 صفحه · سیاه‌سفید، دورو · طلق و سیم · 2 نسخه',
+  ]);
+  await expect(page.locator('.ck-sum-jozve .ck-file__name').first()).toHaveText('2 جزوه، 2 فایل');
+  await expect(page.getByTestId('summary-jozve')).toHaveCount(2);
+  await expect(page.getByTestId('summary-shipping')).toContainText(toman(two('other').shippingRials!));
+  await expect(page.getByTestId('summary-total')).toHaveText(toman(two('other').totalRials));
+  await expect(page.locator('.ck-sub').first()).toContainText('جزوه‌ها به صف چاپ می‌روند.');
+
+  const number = await payAt(page, 'پرداخت موفق', two('other').totalRials);
+  await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
+  await expect(page.getByTestId('order-paid')).toContainText('جزوه‌هایت در صف چاپ‌اند.');
+  await expect(page.getByTestId('summary-jozve')).toHaveCount(2);
+  await expect(page.getByTestId('summary-total')).toHaveText(toman(two('other').totalRials));
+  const items = await sql()`
+    select i.seq, i.page_count, i.copies, array_agg(d.original_name order by s.seq) as files
+    from order_items i join orders o on o.id = i.order_id
+    join order_item_sections s on s.order_item_id = i.id join documents d on d.id = s.document_id
+    where o.order_number = ${number} group by i.seq, i.page_count, i.copies order by i.seq`;
+  expect(items).toEqual([
+    { seq: 1, page_count: 6, copies: 1, files: ['image-scan-6.pdf'] },
+    { seq: 2, page_count: 10, copies: 2, files: ['plain-bw-10.pdf'] },
+  ]);
+  await context.close();
+});
+
 test.describe('قدم‌ها', () => {
   test('«برگشت» گوشی قدم قبل را می‌آورد و «جلو» همان قدم را، با همان نشانی', async ({ browser }) => {
     const context = await newContext(browser);

@@ -68,6 +68,8 @@ test.describe('چند فایل در یک جزوه', () => {
     await moveFile(page, 'جلسه 10.pdf', 'یکی بالاتر');
     await expect.poll(() => names(page)).toEqual(['جلسه ۱.pdf', 'جلسه 10.pdf', 'جلسه 2.pdf']);
     await expect(price(page)).toContainText('86,600');
+    // ردیف در همان جزوه ماند: فوکوس به دکمهٔ منویش برمی‌گردد
+    await expect(menuOf(page, 'جلسه 10.pdf')).toBeFocused();
     // فایل اول «یکی بالاتر» ندارد، و آخری «یکی پایین‌تر»؛ Esc منو را می‌بندد و فوکوس به دکمه‌اش برمی‌گردد
     await menuOf(page, 'جلسه ۱.pdf').click();
     await expect(page.getByRole('menuitem')).toHaveText(['یکی پایین‌تر', 'جزوهٔ تازه با همین فایل']);
@@ -289,6 +291,8 @@ test.describe('چند جزوه در یک سفارش (۸٫۲)', () => {
     await page.getByRole('menuitem', { name: /به جزوهٔ 1/ }).click();
     await expect(ask(page)).toHaveCount(0);
     await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2']);
+    // ردیف به جزوهٔ دیگر رفت: فوکوس به سر همان جزوه، نه گم
+    await expect(cards(page).first().getByRole('heading', { level: 2 })).toBeFocused();
     expect(await names(page)).toEqual(['image-scan-6.pdf', 'plain-bw-10.pdf', 'mixed-color-10.pdf']);
     // جزوهٔ ۱: ۱۶ صفحه و یک صحافی
     await expect.poll(() => cardPrices(page)).toEqual(['70,600', '61,000']);
