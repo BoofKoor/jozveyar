@@ -16,6 +16,7 @@ import type {
   PanelPayment,
   PanelPdfJob,
   PanelPrintVolume,
+  PanelSection,
   PanelStatusEvent,
   PaymentRow,
 } from '@jozveyar/db';
@@ -33,6 +34,7 @@ import {
   dueKind,
   dueTiles,
   durationSegs,
+  fileWarnings,
   filesUntil,
   isRevert,
   jozveSegs,
@@ -76,7 +78,7 @@ const END_NEXT_SATURDAY = tehran('2026-10-11 00:00');
 const MINUTE = 60_000;
 
 /** تکه‌ها به متن، برای سنجیدن؛ و جای عددها. */
-const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
+const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : 'name' in s ? s.name : s.barcode)).join('');
 const nums = (segs: readonly Seg[]) => segs.filter((s): s is { num: string } => typeof s === 'object' && 'num' in s).map((s) => s.num);
 
 describe('فهرست: پارامترهای نشانی و جست‌وجو', () => {
@@ -358,6 +360,8 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
       sourceKind: i === 2 ? 'docx' : 'pdf',
       fileExpiresAt: live,
       fileDeletedAt: null,
+      conversion: i === 2 ? { format: 'docx', fonts: { mismatched: [] } } : null,
+      flaggedPages: [],
     })),
     rules: [{ seq: 1, pageRanges: [[1, 120]], colorMode: 'bw', paperTypeId: 'tahrir80', paperName: 'تحریر ۸۰ گرم' }],
     ...over.item,
@@ -595,6 +599,64 @@ describe('جزئیات سفارش', () => {
     );
     // همهٔ صفحه‌ها عوض شد: «بقیه» ندارد.
     expect(note([{ rotated: [[1, 120]] }])).toBe('صفحهٔ 1 تا 120 (3 فایل) افقی بود و چرخید، بالایش لبهٔ چپ کاغذ.');
+  });
+
+  it('هشدارهای فایل (۸٫۱): هر هشدار یک یادداشت، صفحهٔ سراسری جزوه با نام فایل، اسلاید بی حاشیه، و فونت جایگزین', () => {
+    const flagged = (n: number, warnings: string[], size: [number, number] = [595, 842], blank = false) => ({
+      n,
+      widthPt: size[0],
+      heightPt: size[1],
+      blank,
+      warnings,
+    });
+    const notes = (sections: Partial<PanelSection>[]) => {
+      const base = details().items[0]!;
+      return fileWarnings({ ...base, sections: base.sections.map((s, i) => ({ ...s, ...sections[i] })) }).map(
+        (w) => `${w.kind}| ${text(w.segs)}`,
+      );
+    };
+    // بی هشدار: هیچ.
+    expect(notes([])).toEqual([]);
+    // فایل اول ۴۸ صفحه و دوم ۵۴: صفحهٔ ۲ فایل دوم صفحهٔ ۵۰ جزوه است، همان فایل چاپ.
+    expect(
+      notes([
+        { flaggedPages: [flagged(2, ['low_dpi']), flagged(3, ['tight_margin']), flagged(4, ['tight_margin']), flagged(5, ['tight_margin'])] },
+        { flaggedPages: [flagged(2, ['low_dpi', 'blank_page'], [595, 842], true)] },
+        { conversion: { format: 'docx', fonts: { mismatched: ['B Nazanin', 'B Titr', 'B Lotus', 'B Yekan'] } } },
+      ]),
+    ).toEqual([
+      'low-dpi| کیفیت اسکن یا عکس پایین، کمی مات چاپ می‌شود: صفحهٔ 2 (فایل ریاضی ۲ - جلسه ۱.pdf)؛ صفحهٔ 50 (فایل ریاضی ۲ - جلسه ۲.pdf).',
+      'tight-margin| حاشیهٔ کم، صحافی ممکن است لبهٔ متن را بگیرد: صفحه‌های 3 تا 5 (فایل ریاضی ۲ - جلسه ۱.pdf).',
+      'blank| صفحهٔ خالی: صفحهٔ 50 (فایل ریاضی ۲ - جلسه ۲.pdf).',
+      'fonts| فونت جایگزین، ظاهر و تعداد صفحه ممکن است با فایل مشتری فرق کند: B Nazanin، B Titr، B Lotus و 1 فونت دیگر (فایل حل تمرین فصل ۱.docx).',
+    ]);
+    // اسلاید (پاورپوینت، یا صفحه‌ای به شکل اسلاید) هشدار حاشیه نمی‌گیرد، ولی کیفیت اسکن چرا.
+    expect(
+      notes([
+        { flaggedPages: [flagged(1, ['tight_margin'], [960, 540]), flagged(2, ['tight_margin'])] },
+        { sourceKind: 'pptx', conversion: { format: 'pptx' }, flaggedPages: [flagged(1, ['tight_margin', 'low_dpi'])] },
+      ]),
+    ).toEqual([
+      'low-dpi| کیفیت اسکن یا عکس پایین، کمی مات چاپ می‌شود: صفحهٔ 49 (فایل ریاضی ۲ - جلسه ۲.pdf).',
+      'tight-margin| حاشیهٔ کم، صحافی ممکن است لبهٔ متن را بگیرد: صفحهٔ 2 (فایل ریاضی ۲ - جلسه ۱.pdf).',
+    ]);
+    // تک‌فایل: بی نام فایل.
+    const single = details({ item: { sections: [{ ...details().items[0]!.sections[0]!, flaggedPages: [flagged(7, ['low_dpi'])] }] } });
+    expect(fileWarnings(single.items[0]!).map((w) => text(w.segs))).toEqual(['کیفیت اسکن یا عکس پایین، کمی مات چاپ می‌شود: صفحهٔ 7.']);
+    // نام فایل و فونت از مشتری می‌آید و هر خطی دارد: `bdi` با جهت خودش، نه چپ‌به‌راست (نام فارسی در `ltr` به هم می‌ریخت).
+    const [lowDpi, , , fonts] = fileWarnings({
+      ...details().items[0]!,
+      sections: details().items[0]!.sections.map((s, i) => {
+        if (i === 0) return { ...s, flaggedPages: [flagged(2, ['low_dpi'])] };
+        if (i === 2) {
+          const blank = flagged(1, ['tight_margin', 'blank_page'], [595, 842], true);
+          return { ...s, flaggedPages: [blank], conversion: { fonts: { mismatched: ['ب نازنین'] } } };
+        }
+        return s;
+      }),
+    });
+    expect(lowDpi!.segs).toContainEqual({ name: 'ریاضی ۲ - جلسه ۱.pdf' });
+    expect(fonts!.segs.filter((seg) => typeof seg === 'object' && !('num' in seg))).toEqual([{ name: 'ب نازنین' }, { name: 'حل تمرین فصل ۱.docx' }]);
   });
 
   it('برگهٔ سفارش: با دادهٔ امروز، در حال به‌روز شدن، در حال ساختن، یا ساخته نشد؛ برگهٔ کهنه هرگز', () => {

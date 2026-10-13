@@ -9,6 +9,7 @@ import {
   formatJalaliWeekday,
   formatNumber,
   formatPages,
+  pageListParts,
   formatTehranTime,
   formatTomans,
   formatWeight,
@@ -279,6 +280,13 @@ describe('formatPages — شمارهٔ صفحه در هشدار', () => {
   it('تکراری و خالی', () => {
     expect(formatPages([4, 4])).toBe('صفحهٔ 4');
     expect(formatPages([])).toBe('');
+  });
+
+  it('بخش‌ها برای پنل، که هر عدد را جدا نشان می‌دهد (۸٫۱): همان فهرست، بی متن', () => {
+    expect(pageListParts([2])).toEqual({ single: true, runs: [[2, 2]], rest: 0 });
+    expect(pageListParts([52, 1, 2, 3, 10, 11])).toEqual({ single: false, runs: [[1, 3], [10, 10], [11, 11], [52, 52]], rest: 0 });
+    expect(pageListParts([1, 3, 5, 7, 9, 11, 13, 20, 21, 22, 40])).toMatchObject({ runs: [[1, 1], [3, 3], [5, 5], [7, 7], [9, 9], [11, 11]], rest: 5 });
+    expect(pageListParts([])).toBeNull();
   });
 });
 

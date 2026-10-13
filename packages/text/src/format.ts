@@ -87,33 +87,55 @@ export function pluralFa(count: number, noun: string): string {
   return `${formatNumber(count)} ${noun}`;
 }
 
+/** بخش‌های فهرست شمارهٔ صفحه‌ها، همان که `formatPages` می‌نویسد. */
+export interface PageListParts {
+  /** یک صفحه («صفحهٔ 2»)، نه چند («صفحه‌های …»). */
+  single: boolean;
+  /** بخش‌های نام‌برده، به ترتیب: `[از، تا]`؛ صفحهٔ تنها `[n, n]`. */
+  runs: [number, number][];
+  /** صفحه‌هایی که نام برده نشدند: «و N صفحهٔ دیگر». */
+  rest: number;
+}
+
+/**
+ * بخش‌های فهرست شمارهٔ صفحه‌ها (`formatPages`)، برای جایی که هر عدد جدا نشان داده می‌شود (پنل، با `.num`؛ برش ۸٫۱):
+ * بازه‌های پشت‌سرهم از سه صفحه یک بخش‌اند، و بیش از `maxItems` بخش در `rest` شمرده می‌شود. null یعنی صفحه‌ای نیست.
+ */
+export function pageListParts(pages: readonly number[], maxItems = 6): PageListParts | null {
+  const sorted = [...new Set(pages)].sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+
+  const items: { run: [number, number]; count: number }[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j += 1;
+    const run = j - i + 1;
+    if (run >= 3) {
+      items.push({ run: [sorted[i]!, sorted[j]!], count: run });
+    } else {
+      for (let k = i; k <= j; k += 1) items.push({ run: [sorted[k]!, sorted[k]!], count: 1 });
+    }
+    i = j + 1;
+  }
+  return {
+    single: sorted.length === 1,
+    runs: items.slice(0, maxItems).map((item) => item.run),
+    rest: items.slice(maxItems).reduce((sum, item) => sum + item.count, 0),
+  };
+}
+
 /**
  * فهرست شمارهٔ صفحه‌ها برای هشدار: `صفحهٔ 2`، `صفحه‌های 3، 7 و 12`، و بازهٔ پشت‌سرهم
  * به‌صورت `صفحه‌های 1 تا 40 و 52`. بیش از `maxItems` بخش کوتاه می‌شود:
  * `… و 38 صفحهٔ دیگر` — کاربر باید جا را پیدا کند، نه فهرست را بخواند.
  */
 export function formatPages(pages: readonly number[], maxItems = 6): string {
-  const sorted = [...new Set(pages)].sort((a, b) => a - b);
-  if (sorted.length === 0) return '';
-
-  const items: { text: string; count: number }[] = [];
-  for (let i = 0; i < sorted.length; ) {
-    let j = i;
-    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j += 1;
-    const run = j - i + 1;
-    if (run >= 3) {
-      items.push({ text: `${formatNumber(sorted[i]!)} تا ${formatNumber(sorted[j]!)}`, count: run });
-    } else {
-      for (let k = i; k <= j; k += 1) items.push({ text: formatNumber(sorted[k]!), count: 1 });
-    }
-    i = j + 1;
-  }
-
-  const shown = items.slice(0, maxItems);
-  const rest = items.slice(maxItems).reduce((sum, item) => sum + item.count, 0);
-  const parts = shown.map((item) => item.text);
-  if (rest > 0) parts.push(`${formatNumber(rest)} صفحهٔ دیگر`);
-
-  const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join('، ')} و ${parts.at(-1)!}`;
-  return `${sorted.length === 1 ? 'صفحهٔ' : 'صفحه‌های'} ${list}`;
+  const list = pageListParts(pages, maxItems);
+  if (!list) return '';
+  const parts = list.runs.map(([first, last]) =>
+    first === last ? formatNumber(first) : `${formatNumber(first)} تا ${formatNumber(last)}`,
+  );
+  if (list.rest > 0) parts.push(`${formatNumber(list.rest)} صفحهٔ دیگر`);
+  const joined = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join('، ')} و ${parts.at(-1)!}`;
+  return `${list.single ? 'صفحهٔ' : 'صفحه‌های'} ${joined}`;
 }

@@ -203,7 +203,10 @@ export function Note({
   );
 }
 
-/** هشدارهای یک فایل (ADR-029): فونت، کیفیت، حاشیه، صفحهٔ خالی. */
+/**
+ * هشدارهای یک فایل برای مشتری (ADR-029): فونت جایگزین و صفحهٔ خالی، هر دو دربارهٔ پول. کیفیت اسکن و حاشیه از ۸٫۱ فقط در
+ * پنل‌اند (سؤال ۱۸۱، ADR-053)؛ همان‌طور حساب و ذخیره می‌شوند.
+ */
 export function Warnings({
   summary,
   program,
@@ -214,14 +217,7 @@ export function Warnings({
   /** پایان هشدار فونت: چه کند با PDF‌ای که از Word گرفت. */
   fontsAdvice: ReactNode;
 }) {
-  if (
-    summary.mismatchedFonts.length === 0 &&
-    summary.lowDpiPageCount === 0 &&
-    summary.tightMarginPageCount === 0 &&
-    summary.blankPageCount === 0
-  ) {
-    return null;
-  }
+  if (summary.mismatchedFonts.length === 0 && summary.blankPageCount === 0) return null;
   return (
     <ul className="flex flex-col gap-2">
       {summary.mismatchedFonts.length > 0 ? (
@@ -234,20 +230,6 @@ export function Warnings({
           </span>
         </li>
       ) : null}
-      <PageWarning
-        testId="warning-low-dpi"
-        pages={summary.lowDpiPages}
-        count={summary.lowDpiPageCount}
-        estimated={summary.estimated}
-        text="کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود"
-      />
-      <PageWarning
-        testId="warning-tight-margin"
-        pages={summary.tightMarginPages}
-        count={summary.tightMarginPageCount}
-        estimated={summary.estimated}
-        text="حاشیهٔ کمی دارد — صحافی ممکن است لبهٔ متن را بگیرد"
-      />
       <PageWarning
         testId="warning-blank"
         pages={summary.blankPages}
@@ -556,7 +538,7 @@ function AnalysisCard({
 
         {estimatedFrom === 'image' ? (
           <Note tone="info">
-            هر عکس یک صفحهٔ A4 می‌شود. رنگی بودن و کیفیتش بعد از بررسی روی سرور معلوم می‌شود.
+            هر عکس یک صفحهٔ A4 می‌شود. رنگی بودنش بعد از بررسی روی سرور معلوم می‌شود.
           </Note>
         ) : null}
 

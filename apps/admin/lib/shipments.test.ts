@@ -49,7 +49,7 @@ import {
 const NOW = new Date('2026-10-05T07:50:00Z'); // دوشنبه ۱۳ مهر ۱۴۰۵، ۱۱:۲۰ تهران
 const SUNDAY = new Date('2026-10-03T20:30:00Z'); // آغاز یکشنبه ۱۲ مهر تهران
 const text = (segs: readonly Seg[] | null) =>
-  (segs ?? []).map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
+  (segs ?? []).map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : 'name' in s ? s.name : s.barcode)).join('');
 
 const order = (number: number, over: Partial<ShipmentOrderFacts> = {}): ShipmentOrderFacts => ({
   id: `o-${number}`,

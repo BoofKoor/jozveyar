@@ -240,13 +240,13 @@ function sectionState(section: SectionView): ReactNode {
       if (state.estimatedFrom === 'office') {
         return `تعداد صفحه به گفتهٔ خود فایل ${section.kind === 'slides' ? 'پاورپوینت' : 'Word'}`;
       }
-      return 'رنگ و کیفیت بعد از بررسی روی سرور';
+      return 'رنگ بعد از بررسی روی سرور';
     }
     return 'قیمتش بعد از بررسی روی سرور می‌آید';
   }
   switch (state.phase) {
     case 'queued':
-      return pageCount > 0 ? 'بررسی رنگ و کیفیت در صف' : 'در صف شمارش';
+      return pageCount > 0 ? 'بررسی رنگ در صف' : 'در صف شمارش';
     case 'reading':
       return pageCount > 0 ? 'در حال بررسی…' : 'در حال باز کردن…';
     case 'analyzing': {

@@ -31,6 +31,32 @@ const price = (page: import('@playwright/test').Page) => page.getByTestId('price
 const colorHint = (page: import('@playwright/test').Page) => page.getByTestId('color-hint');
 const ALL_BW = 'فایل تماماً سیاه‌سفید است.';
 
+/** متن هشدارهایی که از ۸٫۱ فقط پنل نشان می‌دهد (سؤال ۱۸۱)؛ مشتری هیچ‌کدام را نمی‌بیند. */
+const PANEL_ONLY_WARNINGS = /کیفیت اسکن|حاشیهٔ کم/;
+
+/**
+ * سرور آپلود ساختگی: فایل همان لحظه «رسیده» است و بررسی سرور هرگز تمام نمی‌شود، پس کارت عدد مرورگر را نگه می‌دارد. تحلیل
+ * مرورگر که برای سنجیدن اختلاف به سرور می‌رود (`browser-analysis`، ADR-002) همان چیزی است که این‌جا گرفته می‌شود: هشدار هر
+ * صفحه با خودش ذخیره می‌شود، حتی وقتی مشتری آن را نمی‌بیند (۸٫۱، ADR-029).
+ */
+async function capturedAnalysis(page: import('@playwright/test').Page) {
+  const status = { documentId: 'flow-1', status: 'uploaded', partSizeBytes: 8 * 1024 * 1024, partCount: 1, receivedParts: [1], analysis: { state: 'running' } };
+  await page.route('**/api/uploads', (route) =>
+    route.request().method() === 'POST' ? route.fulfill({ json: status }) : route.continue(),
+  );
+  await page.route('**/api/uploads/flow-1', (route) => route.fulfill({ json: status }));
+  const posted = new Promise<{ pages: { n: number; warnings: string[] }[] }>((resolve) => {
+    void page.route('**/api/uploads/flow-1/browser-analysis', async (route) => {
+      resolve(route.request().postDataJSON());
+      await route.fulfill({ json: { saved: true } });
+    });
+  });
+  return posted;
+}
+
+const pagesWith = (analysis: { pages: { n: number; warnings: string[] }[] }, warning: string) =>
+  analysis.pages.filter((p) => p.warnings.includes(warning)).map((p) => p.n);
+
 test.describe('سئو و بار اولیه', () => {
   test('صفحه سمت سرور رندر می‌شود و متن در HTML خام هست', async ({ request }) => {
     const response = await request.get('/');
@@ -173,28 +199,32 @@ test.describe('تحلیل در مرورگر', () => {
   });
 
   /**
-   * هشدار جای مشکل را نام می‌برد و DPI از جای واقعی تصویر است (ADR-029): لوگوی
-   * کوچک صفحهٔ ۱ و تصویری که داخل فرم نیم‌مقیاس صفحهٔ ۴ نشسته هشدار کیفیت
-   * نمی‌گیرند. فرمول قدیمی به صفحهٔ ۱ «۴ DPI» می‌داد و هر چهار صفحه را نام می‌برد.
+   * DPI از جای واقعی تصویر است (ADR-029): لوگوی کوچک صفحهٔ ۱ و تصویری که داخل فرم نیم‌مقیاس صفحهٔ ۴ نشسته هشدار کیفیت
+   * نمی‌گیرند. فرمول قدیمی به صفحهٔ ۱ «۴ DPI» می‌داد و هر چهار صفحه را نام می‌برد. از ۸٫۱ این هشدارها فقط در پنل‌اند
+   * (سؤال ۱۸۱): تحلیل مرورگر همان‌ها را با صفحه‌هایشان برای سرور می‌فرستد، و کارت مشتری هیچ‌کدام را نشان نمی‌دهد.
    */
-  test('هشدار کیفیت فقط صفحهٔ واقعاً بی‌کیفیت را نام می‌برد', async ({ page }) => {
+  test('هشدار کیفیت فقط صفحهٔ واقعاً بی‌کیفیت را دارد، و مشتری کیفیت و حاشیه را نمی‌بیند (۸٫۱)', async ({ page }) => {
+    const analysis = capturedAnalysis(page);
     await page.goto('/');
     await page.setInputFiles('#jozve-file', join(FIXTURES, 'dpi-mix-4.pdf'));
     await expect(page.getByTestId('stat-page-count')).toHaveText('4', { timeout: 15_000 });
-    await expect(page.getByTestId('warning-low-dpi')).toHaveText(
-      'صفحهٔ 2 کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود.',
-      { timeout: 15_000 },
-    );
-    await expect(page.getByTestId('warning-tight-margin')).toContainText('صفحه‌های 3 و 4');
-    await expect(page.getByTestId('warning-blank')).toHaveCount(0);
+    const sent = await analysis;
+    expect(pagesWith(sent, 'low_dpi')).toEqual([2]);
+    expect(pagesWith(sent, 'tight_margin')).toEqual([3, 4]);
+    expect(pagesWith(sent, 'blank_page')).toEqual([]);
+    await expect(page.getByText('همهٔ صفحه‌ها بررسی شد')).toBeVisible();
+    await expect(page.getByText(PANEL_ONLY_WARNINGS)).toHaveCount(0);
+    await expect(page.locator('.jy-note--warning')).toHaveCount(0);
   });
 
   test('اسکنی که در ظاهر یک مهر نشسته هم جای واقعی‌اش سنجیده می‌شود', async ({ page }) => {
+    const analysis = capturedAnalysis(page);
     await page.goto('/');
     await page.setInputFiles('#jozve-file', join(FIXTURES, 'stamp-scan-1.pdf'));
     await expect(page.getByTestId('stat-page-count')).toHaveText('1', { timeout: 15_000 });
     // همان ۱۸ DPI سرور؛ بی دنبال کردن جای حاشیه‌نویسی، تصویر «۱ پوینتی» بود و هشداری نمی‌آمد.
-    await expect(page.getByTestId('warning-low-dpi')).toContainText('صفحهٔ 1', { timeout: 15_000 });
+    expect(pagesWith(await analysis, 'low_dpi')).toEqual([1]);
+    await expect(page.getByText(PANEL_ONLY_WARNINGS)).toHaveCount(0);
   });
 
   test('تغییر تنظیمات قیمت را زنده عوض می‌کند', async ({ page }) => {
@@ -264,6 +294,9 @@ test.describe('Word، پاورپوینت و عکس', () => {
     await expect(page.getByTestId('stat-page-count')).toHaveText('1');
     // ۱ صفحه سیاه‌سفید: ۱,۶۰۰ + صحافی ۴۵,۰۰۰ = ۴۶,۶۰۰ تومان
     await expect(price(page)).toContainText('46,600');
+    // سرور فقط رنگ را به مشتری می‌گوید؛ کیفیت عکس از ۸٫۱ فقط در پنل است (سؤال ۱۸۱).
+    await expect(page.getByText('هر عکس یک صفحهٔ A4 می‌شود. رنگی بودنش بعد از بررسی روی سرور معلوم می‌شود.')).toBeVisible();
+    await expect(page.getByText(/کیفیت/)).toHaveCount(0);
   });
 
   test('Word بدون شمارهٔ صفحه: مسیر سرور، و بدون سرور راه جلو', async ({ page }) => {

@@ -299,79 +299,41 @@ describe('سرویس آپلود', () => {
           { widthPt: 420, heightPt: 595, color: false, blank: true, warnings: ['blank_page', 'tight_margin'] },
         ],
       });
+      // کیفیت اسکن و حاشیه از ۸٫۱ به مرورگر نمی‌روند (سؤال ۱۸۱): صفحه‌های ۱ و ۳ هشدارشان را دارند و نما همان است.
       expect(await view()).toEqual({
         state: 'ready',
         pageCount: 3,
         colorPageCount: 1,
         blankPageCount: 1,
-        lowDpiPageCount: 1,
-        tightMarginPageCount: 1,
         pageSizes: [
           { name: 'A4', count: 2 },
           { name: 'A5', count: 1 },
         ],
         colorPages: [2],
         blankPages: [3],
-        lowDpiPages: [1],
-        tightMarginPages: [3],
         mismatchedFonts: [],
       });
     });
 
-    /** سند آماده با تحلیل سرور؛ هر صفحه حاشیهٔ تنگ دارد. پیش‌فرض: دو صفحهٔ A4. */
-    async function readyWithTightMargins(
-      name: string,
-      conversion: unknown,
-      sizes: [number, number][] = [
-        [595, 842],
-        [595, 842],
-      ],
-    ) {
+    /**
+     * سند آماده با تحلیل سرور: دو صفحهٔ A4 با هشدار حاشیه. قاعدهٔ اسلاید و صفحه‌های هر هشدار پنل در
+     * `packages/analysis/src/warnings.test.ts` است؛ این‌جا فقط آنچه به مرورگر می‌رسد.
+     */
+    async function readyView(name: string, conversion: unknown) {
       const id = await uploaded(name);
       Object.assign(store.rows.get(id)!, { status: 'ready', conversion });
       store.serverAnalyses.set(id, {
         engine: 'server-pymupdf-test',
-        pageCount: sizes.length,
+        pageCount: 2,
         elapsedMs: 40,
-        pages: sizes.map(([widthPt, heightPt]) => ({
-          widthPt,
-          heightPt,
-          color: false,
-          blank: false,
-          warnings: ['tight_margin'],
-        })),
+        pages: [0, 1].map(() => ({ widthPt: 595, heightPt: 842, color: false, blank: false, warnings: ['tight_margin'] })),
       });
       const r = await service.status(ME, id);
       return r.ok ? r.value.analysis : undefined;
     }
 
-    it('پاورپوینت هشدار حاشیه نمی‌گیرد — چه کارگر تشخیص داده باشد، چه پسوند (ADR-029)', async () => {
-      const byFormat = await readyWithTightMargins('اسلاید.pptx', { format: 'pptx', fonts: { mismatched: [] } });
-      expect(byFormat).toMatchObject({ tightMarginPageCount: 0, tightMarginPages: [] });
-      // «docx» که در واقع ارائهٔ ODF بود: محتوا تصمیم می‌گیرد، نه پسوند.
-      const sniffed = await readyWithTightMargins('جزوه.docx', { format: 'odp' });
-      expect(sniffed).toMatchObject({ tightMarginPages: [] });
-      // هنوز تبدیل ثبت نشده (یا کهنه است): پسوند.
-      expect(await readyWithTightMargins('اسلاید.ppt', null)).toMatchObject({ tightMarginPages: [] });
-      // Word همان هشدار را می‌گیرد، با شمارهٔ صفحه‌ها.
-      expect(await readyWithTightMargins('جزوه.docx', { format: 'docx' })).toMatchObject({
-        tightMarginPageCount: 2,
-        tightMarginPages: [1, 2],
-      });
-    });
-
-    it('PDF اسلاید هم: فقط صفحه‌هایی که شکل کاغذ دارند هشدار حاشیه می‌گیرند', async () => {
-      const view = await readyWithTightMargins('اسلایدهای استاد.pdf', null, [
-        [960, 540], // ۱۶:۹
-        [595, 842], // جزوهٔ A4 وسط اسلایدها
-        [720, 540], // ۴:۳
-        [842, 595], // A4 افقی: سند است
-      ]);
-      expect(view).toMatchObject({ tightMarginPageCount: 2, tightMarginPages: [2, 4] });
-    });
-
     it('فونت جایگزین با اندازهٔ دیگر به مرورگر می‌رسد، با نام کوتاه‌شده (ADR-029)', async () => {
-      const view = await readyWithTightMargins('جزوه.docx', {
+      const view = await readyView('جزوه.docx', {
         format: 'docx',
         fonts: {
           requested: ['B Nazanin', 'Times New Roman'],
@@ -380,8 +342,8 @@ describe('سرویس آپلود', () => {
       });
       expect(view?.mismatchedFonts).toEqual(['B Nazanin', 'X'.repeat(60)]);
       // PDF تبدیلی ندارد؛ ستون خراب هم چیزی نمی‌شکند.
-      expect((await readyWithTightMargins('جزوه.pdf', null))?.mismatchedFonts).toEqual([]);
-      const broken = await readyWithTightMargins('جزوه.docx', { format: 'docx', fonts: { mismatched: 'B Nazanin' } });
+      expect((await readyView('جزوه.pdf', null))?.mismatchedFonts).toEqual([]);
+      const broken = await readyView('جزوه.docx', { format: 'docx', fonts: { mismatched: 'B Nazanin' } });
       expect(broken?.mismatchedFonts).toEqual([]);
     });
 

@@ -14,7 +14,7 @@ import { REFUND_NOTE_MAX, hasLiveRefund, readManualRefund, refundAskable, refund
 /** «حالا»: دوشنبه 13 مهر 1405، 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
 const MINUTE = 60_000;
-const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : s.barcode)).join('');
+const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : 'name' in s ? s.name : s.barcode)).join('');
 
 const payment = (over: Partial<PanelPayment> = {}): PanelPayment =>
   ({

@@ -24,6 +24,8 @@ import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } 
 import {
   bindingRateBands,
   cities,
+  documentAnalyses,
+  documentPages,
   documents,
   jobs,
   orderItemSections,
@@ -2512,6 +2514,60 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(waiting!.ticketJob).toBeNull();
       // تازه‌ترین تلاش اول.
       expect(waiting!.payments.map((p) => p.status)).toEqual(['pending', 'pending', 'failed']);
+    });
+
+    it('هشدارهای فایل (۸٫۱): فقط تازه‌ترین تحلیل سرور هر سند، فقط صفحهٔ هشداردار یا خالی و به ترتیب، با conversion سند', async () => {
+      const panel = createPanelOrderStore(conn);
+      const HOUR = 60 * MINUTE;
+      /** یک دور تحلیل، همان شکل ردیف‌های کارگر: صفحه‌های `flagged` با هشدارشان، و `blank_page` یعنی صفحهٔ خالی. */
+      const analyze = async (documentId: string, pages: number, source: 'server' | 'browser', createdAt: Date, flagged: Record<number, string[]>) => {
+        const [row] = await conn.db
+          .insert(documentAnalyses)
+          .values({ documentId, source, engine: `${source}-test`, thresholds: DEFAULT_THRESHOLDS, pageCount: pages, elapsedMs: 10, createdAt })
+          .returning({ id: documentAnalyses.id });
+        await conn.db.insert(documentPages).values(
+          Array.from({ length: pages }, (_, i) => ({
+            analysisId: row!.id,
+            n: i + 1,
+            widthPt: 595,
+            heightPt: 842,
+            color: false,
+            colorRatio: 0,
+            coloredInkRatio: 0,
+            chromaP95: 3,
+            inkRatio: 0.05,
+            paperCast: [250, 250, 248],
+            blank: flagged[i + 1]?.includes('blank_page') ?? false,
+            warnings: flagged[i + 1] ?? [],
+          })),
+        );
+      };
+      const deck = { format: 'pptx', fonts: { requested: ['B Nazanin'], mismatched: ['B Nazanin'] } };
+      try {
+        // قدیمی‌تر سرور و تحلیل مرورگر (تازه‌ترین ردیف سند، ولی مرورگر) هشدارهای دیگری دارند و نباید بیایند.
+        await analyze(docs.a.id, 48, 'server', new Date(NOW.getTime() - 3 * HOUR), { 1: ['low_dpi'] });
+        await analyze(docs.a.id, 48, 'browser', new Date(NOW.getTime() - HOUR), { 2: ['tight_margin'] });
+        await analyze(docs.a.id, 48, 'server', new Date(NOW.getTime() - 2 * HOUR), { 48: ['tight_margin'], 3: ['low_dpi'], 5: ['blank_page'] });
+        await analyze(docs.b.id, 54, 'server', new Date(NOW.getTime() - 2 * HOUR), {});
+        await conn.db.update(documents).set({ conversion: deck }).where(eq(documents.id, docs.b.id));
+
+        const [item] = (await panel.details(ALL_ORDERS, num.today2!))!.items;
+        expect(item!.sections.map((s) => s.flaggedPages)).toEqual([
+          [
+            { n: 3, widthPt: 595, heightPt: 842, blank: false, warnings: ['low_dpi'] },
+            { n: 5, widthPt: 595, heightPt: 842, blank: true, warnings: ['blank_page'] },
+            { n: 48, widthPt: 595, heightPt: 842, blank: false, warnings: ['tight_margin'] },
+          ],
+          [],
+        ]);
+        expect(item!.sections.map((s) => s.conversion)).toEqual([null, deck]);
+        // سفارشی که سندهایش تحلیل سرور ندارند: هیچ.
+        const [gone] = (await panel.details(ALL_ORDERS, num.gone!))!.items;
+        expect(gone!.sections.map((s) => s.flaggedPages)).toEqual([[]]);
+      } finally {
+        await conn.db.delete(documentAnalyses).where(inArray(documentAnalyses.documentId, [docs.a.id, docs.b.id]));
+        await conn.db.update(documents).set({ conversion: null }).where(eq(documents.id, docs.b.id));
+      }
     });
 
     it('دوباره بساز: کاری که در صف یا زیر دست کارگر نیست، با رویداد و کار قبلی در یک تراکنش؛ دو کلیک هم‌زمان یک بار', async () => {

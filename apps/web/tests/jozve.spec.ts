@@ -89,15 +89,24 @@ test.describe('چند فایل در یک جزوه', () => {
     await expect(price(page)).toContainText('70,600', { timeout: 20_000 });
   });
 
-  test('هشدار زیر همان فایل و با شمارهٔ صفحهٔ خود آن فایل', async ({ page }) => {
+  /**
+   * هشدار زیر همان فایل، با شمارهٔ صفحهٔ خود آن فایل (ADR-030): صفحهٔ ۲ فایل سوم «صفحهٔ 2» است، نه ۱۶. کیفیت اسکن و
+   * حاشیهٔ `dpi-mix-4.pdf` از ۸٫۱ فقط در پنل‌اند (سؤال ۱۸۱).
+   */
+  test('هشدار زیر همان فایل و با شمارهٔ صفحهٔ خود آن فایل؛ کیفیت و حاشیه نه (۸٫۱)', async ({ page }) => {
     await page.goto('/');
-    await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('dpi-mix-4.pdf')]);
-    await expect(row(page, 'dpi-mix-4.pdf').getByTestId('warning-low-dpi')).toHaveText(
-      'صفحهٔ 2 کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود.',
-      { timeout: 20_000 },
-    );
-    await expect(row(page, 'dpi-mix-4.pdf').getByTestId('warning-tight-margin')).toContainText('صفحه‌های 3 و 4');
-    await expect(row(page, 'plain-bw-10.pdf').getByTestId('warning-low-dpi')).toHaveCount(0);
+    await page.setInputFiles('#jozve-file', [
+      renamed('plain-bw-10.pdf', 'جلسه 1.pdf'),
+      renamed('dpi-mix-4.pdf', 'جلسه 2.pdf'),
+      renamed('blank-mid-3.pdf', 'جلسه 3.pdf'),
+    ]);
+    await expect(row(page, 'جلسه 3.pdf').getByTestId('warning-blank')).toHaveText('صفحهٔ 2 خالی است و هزینهٔ چاپ می‌گیرد.', {
+      timeout: 20_000,
+    });
+    await expect(page.getByText('همهٔ صفحه‌ها بررسی شد')).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, 'جلسه 1.pdf').getByTestId('warning-blank')).toHaveCount(0);
+    await expect(row(page, 'جلسه 2.pdf').locator('.jy-note--warning')).toHaveCount(0);
+    await expect(page.getByText(/کیفیت اسکن|حاشیهٔ کم/)).toHaveCount(0);
   });
 
   test('PDF، Word و عکس با هم: پیش‌فاکتور فوری، و بدون سرور راه جلو برای هر فایل', async ({ page }) => {
@@ -111,6 +120,9 @@ test.describe('چند فایل در یک جزوه', () => {
     await expect(page.getByTestId('stat-page-count')).toHaveText('23', { timeout: 20_000 });
     await expect(price(page)).toContainText('81,800');
     await expect(row(page, 'jozve-12.docx').getByTestId('section-status')).toContainText('به گفتهٔ خود فایل Word');
+    // عکس: سرور فقط رنگ را به مشتری می‌گوید؛ کیفیت از ۸٫۱ فقط در پنل است (سؤال ۱۸۱).
+    await expect(row(page, 'scan-photo.png').getByTestId('section-status')).toContainText('رنگ بعد از بررسی روی سرور');
+    await expect(page.getByText(/کیفیت/)).toHaveCount(0);
     // استوریج نیست: عدد Word تقریبی می‌ماند و راه جلو گفته می‌شود — نه خطا، نه انتظار بی‌پایان.
     await expect(row(page, 'jozve-12.docx').getByTestId('section-unconfirmed')).toContainText('خروجی PDF', {
       timeout: 20_000,

@@ -56,6 +56,8 @@ import {
   adminUsers,
   bindingTypes,
   cities,
+  documentAnalyses,
+  documentPages,
   documents,
   jobs,
   orderAssignments,
@@ -322,6 +324,16 @@ export interface AssignmentSmsRef {
   sms: ShipmentSms | null;
 }
 
+/** صفحه‌ای از آخرین تحلیل سرور یک سند که هشداری دارد یا خالی است (ADR-029). */
+export interface FlaggedPage {
+  /** شمارهٔ صفحه در خود سند، ۱-مبنا. */
+  n: number;
+  widthPt: number;
+  heightPt: number;
+  blank: boolean;
+  warnings: string[];
+}
+
 export interface PanelSection {
   seq: number;
   documentId: string;
@@ -330,6 +342,13 @@ export interface PanelSection {
   sourceKind: string;
   fileExpiresAt: Date | null;
   fileDeletedAt: Date | null;
+  /** ستون `documents.conversion` کارگر (فرمت و فونت‌ها، ADR-028)، خام؛ `@jozveyar/analysis/warnings` می‌خواندش. */
+  conversion: unknown;
+  /**
+   * صفحه‌های هشداردار یا خالی آخرین تحلیل سرور، به ترتیب (برش ۸٫۱): کیفیت اسکن و حاشیه از ۸٫۱ فقط در پنل‌اند (سؤال ۱۸۱).
+   * تهی یعنی سند بی هشدار است، یا تحلیل سرور ندارد.
+   */
+  flaggedPages: FlaggedPage[];
 }
 
 export interface PanelRule {
@@ -726,6 +745,43 @@ function searchWhere(search: PanelSearch | null): SQL | undefined {
   }
 }
 
+/**
+ * صفحه‌های هشداردار یا خالیِ آخرین تحلیل سرور هر سند این جزوه‌ها (برش ۸٫۱، ADR-029): همان تحلیلی که سایت با آن قیمت داد
+ * (`serverAnalysis` در `documents.ts`)، و فقط صفحه‌هایی که چیزی برای گفتن دارند.
+ */
+function flaggedPagesOf(db: Database['db'], itemIds: string[]) {
+  const latest = db
+    .selectDistinctOn([documentAnalyses.documentId], { id: documentAnalyses.id, documentId: documentAnalyses.documentId })
+    .from(documentAnalyses)
+    .where(
+      and(
+        eq(documentAnalyses.source, 'server'),
+        inArray(
+          documentAnalyses.documentId,
+          db
+            .select({ id: orderItemSections.documentId })
+            .from(orderItemSections)
+            .where(inArray(orderItemSections.orderItemId, itemIds)),
+        ),
+      ),
+    )
+    .orderBy(documentAnalyses.documentId, desc(documentAnalyses.createdAt))
+    .as('latest');
+  return db
+    .select({
+      documentId: latest.documentId,
+      n: documentPages.n,
+      widthPt: documentPages.widthPt,
+      heightPt: documentPages.heightPt,
+      blank: documentPages.blank,
+      warnings: documentPages.warnings,
+    })
+    .from(documentPages)
+    .innerJoin(latest, eq(latest.id, documentPages.analysisId))
+    .where(or(eq(documentPages.blank, true), sql`cardinality(${documentPages.warnings}) > 0`))
+    .orderBy(latest.documentId, documentPages.n);
+}
+
 export function createPanelOrderStore({ db }: Database): PanelOrderStore {
   /**
    * هشدارهای پول پیشخوان (برش ۷٫۲، طرح `m-dash-alerts`): ردِ شروع که کار مالک است، مبلغ ناهمخوان، پولی که نزد درگاه مانده، تأییدشدهٔ
@@ -1120,6 +1176,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         assignmentRows,
         shipmentRows,
         refundRows,
+        flaggedRows,
       ] = await Promise.all([
         itemIds.length === 0
           ? []
@@ -1133,6 +1190,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
                 sourceKind: documents.sourceKind,
                 fileExpiresAt: documents.fileExpiresAt,
                 fileDeletedAt: documents.fileDeletedAt,
+                conversion: documents.conversion,
               })
               .from(orderItemSections)
               .innerJoin(documents, eq(documents.id, orderItemSections.documentId))
@@ -1262,6 +1320,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(adminUsers, eq(adminUsers.id, refunds.adminUserId))
           .where(eq(refunds.orderId, order.id))
           .orderBy(desc(refunds.createdAt), desc(refunds.id)),
+        itemIds.length === 0 ? [] : flaggedPagesOf(db, itemIds),
       ]);
 
       const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
@@ -1289,7 +1348,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           bindingName,
           sections: sectionRows
             .filter((s) => s.orderItemId === item.id)
-            .map(({ orderItemId: _item, ...section }) => section),
+            .map(({ orderItemId: _item, ...section }) => ({
+              ...section,
+              flaggedPages: flaggedRows
+                .filter((page) => page.documentId === section.documentId)
+                .map(({ documentId: _doc, ...page }) => page),
+            })),
           rules: ruleRows
             .filter((r) => r.rule.orderItemId === item.id)
             .map(({ rule, paperName }) => ({

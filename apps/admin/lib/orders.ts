@@ -9,6 +9,7 @@
  */
 
 import { paperSizeName, ptToMm } from '@jozveyar/analysis';
+import { isDeck, mismatchedFonts, pageWarnings } from '@jozveyar/analysis/warnings';
 import type { Breakdown, ItemBreakdown } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
@@ -43,6 +44,7 @@ import {
   formatNumber,
   formatTehranTime,
   formatTomans,
+  pageListParts,
   tehranDayStart,
   toLatinDigits,
 } from '@jozveyar/text';
@@ -52,8 +54,11 @@ import { tehranDay } from './format';
 import { assignmentText } from './partners';
 import { REFUND_INQUIRY_TEXT, REFUND_VIA, rejectionPast, rejectionResult } from './refunds';
 
-/** تکهٔ متن: رشته، عدد (`.num`)، نام لاتین (`bdi`)، یا کد رهگیری پست (`jy-barcode`، برش ۶٫۱). */
-export type Seg = string | { num: string } | { ltr: string } | { barcode: string };
+/**
+ * تکهٔ متن: رشته، عدد (`.num`)، نام لاتین (`bdi` چپ‌به‌راست)، نامی که از مشتری می‌آید و هر خطی دارد (نام فایل و فونت: `bdi` با
+ * جهت خودش، برش ۸٫۱)، یا کد رهگیری پست (`jy-barcode`، برش ۶٫۱).
+ */
+export type Seg = string | { num: string } | { ltr: string } | { name: string } | { barcode: string };
 
 const num = (value: number): Seg => ({ num: formatNumber(value) });
 
@@ -879,7 +884,7 @@ function runRef(item: PanelOrderItem, first: number, last: number): Seg[] {
     start = end + 1;
   }
   if (item.sections.length < 2 || files.length === 0) return pages;
-  if (files.length === 1) return [...pages, ' (فایل ', { ltr: files[0]!.originalName }, ')'];
+  if (files.length === 1) return [...pages, ' (فایل ', { name: files[0]!.originalName }, ')'];
   return [...pages, ' (', num(files.length), ' فایل)'];
 }
 
@@ -974,6 +979,72 @@ export function purgedNote(details: PanelOrderDetails): Seg[] | null {
       : []),
     '. مشخصات، مبلغ و رویدادها می‌مانند.',
   ];
+}
+
+/* ───────────────────────── هشدارهای فایل (برش ۸٫۱) ───────────────────────── */
+
+/**
+ * هشدارهای فایل‌های یک جزوه برای کسی که چاپش می‌کند (برش ۸٫۱؛ ADR-029، سؤال ۱۸۱): کیفیت اسکن و حاشیه از ۸٫۱ فقط این‌جا
+ * دیده می‌شوند، و صفحهٔ خالی و فونت جایگزین هم سایت و هم این‌جا.
+ */
+export type FileWarningKind = 'low-dpi' | 'tight-margin' | 'blank' | 'fonts';
+
+export interface FileWarning {
+  kind: FileWarningKind;
+  segs: Seg[];
+}
+
+/** به ترتیب نمایش، با برچسب هر هشدار. */
+const FILE_WARNINGS: [FileWarningKind, string][] = [
+  ['low-dpi', 'کیفیت اسکن یا عکس پایین، کمی مات چاپ می‌شود'],
+  ['tight-margin', 'حاشیهٔ کم، صحافی ممکن است لبهٔ متن را بگیرد'],
+  ['blank', 'صفحهٔ خالی'],
+  ['fonts', 'فونت جایگزین، ظاهر و تعداد صفحه ممکن است با فایل مشتری فرق کند'],
+];
+
+/** «صفحه‌های 3، 7 و 12»، همان `formatPages` سایت، با هر عدد در `.num` خودش. */
+function pagesSegs(pages: readonly number[]): Seg[] {
+  const list = pageListParts(pages);
+  if (!list) return [];
+  const parts: Seg[][] = list.runs.map(([first, last]) => (first === last ? [num(first)] : [num(first), ' تا ', num(last)]));
+  if (list.rest > 0) parts.push([num(list.rest), ' صفحهٔ دیگر']);
+  return [list.single ? 'صفحهٔ ' : 'صفحه‌های ', ...joined(parts, '، ', ' و ')];
+}
+
+/** بیشترین نام فونتی که نوشته می‌شود؛ بقیه با شمارشان، مثل سایت. */
+const MAX_FONT_NAMES = 3;
+
+function fontsSegs(fonts: readonly string[]): Seg[] {
+  const parts: Seg[][] = fonts.slice(0, MAX_FONT_NAMES).map((name) => [{ name }]);
+  if (fonts.length > MAX_FONT_NAMES) parts.push([num(fonts.length - MAX_FONT_NAMES), ' فونت دیگر']);
+  return joined(parts, '، ', ' و ');
+}
+
+/**
+ * یک یادداشت برای هر هشدار: «کیفیت اسکن یا عکس پایین، کمی مات چاپ می‌شود: صفحهٔ 12 (فایل dpi-mix-4.pdf).» شمارهٔ صفحه
+ * سراسری جزوه است، همان فایل چاپ و «چه عوض شد»؛ نام فایل فقط در جزوهٔ چندفایلی. قاعدهٔ اسلاید و نام فونت همان سایت
+ * (`@jozveyar/analysis/warnings`).
+ */
+export function fileWarnings(item: PanelOrderItem): FileWarning[] {
+  const many = item.sections.length > 1;
+  const found = new Map<FileWarningKind, Seg[][]>();
+  const add = (kind: FileWarningKind, clause: Seg[]) => found.set(kind, [...(found.get(kind) ?? []), clause]);
+  let offset = 0;
+  for (const section of item.sections) {
+    const file: Seg[] = many ? [' (فایل ', { name: section.originalName }, ')'] : [];
+    const pages = pageWarnings(section.flaggedPages, isDeck(section.conversion, section.sourceKind));
+    const global = (list: number[]) => list.map((n) => n + offset);
+    if (pages.lowDpi.length > 0) add('low-dpi', [...pagesSegs(global(pages.lowDpi)), ...file]);
+    if (pages.tightMargin.length > 0) add('tight-margin', [...pagesSegs(global(pages.tightMargin)), ...file]);
+    if (pages.blank.length > 0) add('blank', [...pagesSegs(global(pages.blank)), ...file]);
+    const fonts = mismatchedFonts(section.conversion);
+    if (fonts.length > 0) add('fonts', [...fontsSegs(fonts), ...file]);
+    offset += section.pageCount;
+  }
+  return FILE_WARNINGS.flatMap(([kind, label]) => {
+    const clauses = found.get(kind);
+    return clauses ? [{ kind, segs: [label, ': ', ...joined(clauses, '؛ '), '.'] }] : [];
+  });
 }
 
 /* ───────────────────────── رویدادهای سفارش ───────────────────────── */
