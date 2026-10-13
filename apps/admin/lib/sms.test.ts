@@ -9,7 +9,7 @@ import { partnerSmsView, paymentSmsView, smsCounts, smsCountsText, smsReached, s
 /** «حالا»ی طرح: دوشنبه 13 مهر 1405، 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
 const AT = new Date('2026-10-05T07:40:00Z');
-const text = (segs: readonly Seg[]) => segs.map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? seg.num : 'ltr' in seg ? seg.ltr : seg.barcode)).join('');
+const text = (segs: readonly Seg[]) => segs.map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? seg.num : 'ltr' in seg ? seg.ltr : 'name' in seg ? seg.name : seg.barcode)).join('');
 const sms = (over: Partial<ShipmentSms> = {}): ShipmentSms => ({
   id: 1,
   toMobile: '09152345678',

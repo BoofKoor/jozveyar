@@ -226,6 +226,12 @@ const fixtures = {
     vector: pageContent({ paper: WHITE, ink: GRAPHITE, size: [482, 680] }),
   })),
 
+  /**
+   * صفحهٔ خالی وسط فایل (برش ۸٫۱): صفحهٔ ۲ از ۳ سفید و بی جوهر. هشدار «خالی است» برای مشتری می‌ماند، با شمارهٔ صفحهٔ
+   * خود فایل (ADR-030)؛ کیفیت اسکن و حاشیه فقط در پنل‌اند.
+   */
+  'blank-mid-3.pdf': [0, 1, 2].map((i) => pageContent({ paper: WHITE, ink: GRAPHITE, inkLines: i === 1 ? 0 : 28 })),
+
   /** ۱۰ صفحه که ۳ صفحه‌اش هایلایت رنگی واقعی دارد. */
   'mixed-color-10.pdf': Array.from({ length: 10 }, (_, i) =>
     pageContent({

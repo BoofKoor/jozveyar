@@ -19,6 +19,9 @@
   ناموفق با علت زیبال و انصراف در درگاه، پرداخت دوم سفارش پرداخت‌شده، سقف کد («ارسال کد الان شلوغ است») و مرورگری که جزوه‌ای روی
   سرور ندارد، «ثبت سفارش موقتاً متوقف است» وسط مسیر، نوار پیش‌نمایش مالک، لغو و بازپرداخت در صفحهٔ سفارش، و الگوی صفحهٔ ثابت
   (قدم ۵) با پیوندهای پاورقی. «پیامک نرسید» دیگر تماس صوتی ندارد: sms.ir پیامک صوتی ندارد، پس سؤال ۱۰ بسته است.
+  برش ۸ (docs/UI.md، قدم ۱۱؛ سؤال ۱۸۲): «دو جزوهٔ جدا» در فهرست طرح نمونه، کنار یک‌فایلی و سه‌فایلی: مرور، صفحهٔ سفارش و خلاصه هر
+  جزوه را با فایل‌ها و مشخصات خودش دارند. جمعش همان یک‌فایلی است (دو جلسه با طلق و سیم، و حل تمرین بی صحافی)، پس بقیهٔ عددها همان‌اند.
+  میز سفارش با چند جزوه در desk.html.
   دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/checkout.html
 -->
 <style>@layer base, components;</style>
@@ -260,6 +263,11 @@
   .ck-files-d summary::-webkit-details-marker { display: none; }
   .ck-files-d summary .jy-icon { width: 16px; height: 16px; transition: rotate var(--jy-dur-base) var(--jy-ease); }
   .ck-files-d[open] summary .jy-icon { rotate: 180deg; }
+  /* چند جزوه (برش ۸): هر جزوه نام، فایل‌ها و مشخصات خودش */
+  .ck-jozves > li + li { margin-block-start: 10px; padding-block-start: 10px; border-block-start: 1px solid var(--color-green-100); }
+  .ck-sum-jrow { align-items: flex-start; }
+  .ck-sum__name { display: block; font-weight: 600; color: var(--color-ink); }
+  .ck-sum__spec { display: block; font-size: var(--text-small); }
   .ck-files-d[open] .ck-files { margin-block-start: 8px; }
 
   /* ===== تأیید ===== */
@@ -443,6 +451,11 @@ body:has(#m-contact:checked) .st-contact,
 body:has(:is(#m-city, #m-search):checked) .st-unset { display: contents; }
 body:has(#j-three:checked) .j-three { display: contents; }
 body:has(#j-three:checked) .j-one { display: none; }
+/* دو جزوهٔ جدا (برش ۸): مرور و خلاصه هر جزوه را جدا دارند؛ ردیف‌های خلاصه هم */
+.j-multi, .j-multi-row { display: none; }
+body:has(#j-multi:checked) .j-multi { display: contents; }
+body:has(#j-multi:checked) .j-multi-row { display: flex; }
+body:has(#j-multi:checked) :is(.j-one, .j-solo, .j-solo-row) { display: none; }
 /* ردیف ارسال خلاصه، وقتی شهر معلوم است */
 .ck-ship-row { display: none !important; }
 body:not(:has(:is(#m-city, #m-search):checked)) .ck-ship-row { display: flex !important; }
@@ -480,7 +493,8 @@ body:has(#m-refunded:checked) .mock [for='m-refunded'],
 body:has(#m-page:checked) .mock [for='m-page'],
 body:has(#m-contact:checked) .mock [for='m-contact'],
 body:has(#j-one:checked) .mock [for='j-one'],
-body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-700); }
+body:has(#j-three:checked) .mock [for='j-three'],
+body:has(#j-multi:checked) .mock [for='j-multi'] { background: var(--jy-green-700); }
 </style>
 </head>
 <body>
@@ -512,6 +526,7 @@ body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-70
   <input type="radio" name="m" id="m-contact" tabindex="-1">
   <input type="radio" name="j" id="j-one" checked tabindex="-1">
   <input type="radio" name="j" id="j-three" tabindex="-1">
+  <input type="radio" name="j" id="j-multi" tabindex="-1">
 </div>
 <details class="mock">
   <summary>طرح نمونه · حالت‌ها</summary>
@@ -546,6 +561,7 @@ body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-70
     <hr>
     <label for="j-one">جزوهٔ یک‌فایلی</label>
     <label for="j-three">جزوهٔ سه‌فایلی</label>
+    <label for="j-multi">دو جزوهٔ جدا</label>
   </div>
 </details>
 
@@ -798,7 +814,7 @@ body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-70
             </div>
             <dl class="ck-recap">
               <div>
-                <dt>جزوه</dt>
+                <dt><span class="j-solo">جزوه</span><span class="j-multi">جزوه‌ها</span></dt>
                 <dd>
                   <div class="j-one">
                     <div class="ck-file">
@@ -817,6 +833,25 @@ body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-70
                       <li><span class="ck-files__n num">3</span><span class="ck-files__name" dir="auto">حل تمرین فصل ۱.docx</span><span class="ck-files__pages"><span class="num">18</span> صفحه</span></li>
                     </ol>
                     <p class="ck-file__meta"><span class="nw"><span class="num">120</span> صفحه، پشت‌سرهم با یک صحافی</span>&nbsp;· <span class="nw">سیاه‌سفید، دورو</span>&nbsp;· <span class="nw">طلق و سیم</span>&nbsp;· <span class="nw"><span class="num">1</span> نسخه</span></p>
+                  </div>
+                  <div class="j-multi">
+                    <ol class="ck-jozves">
+                      <li>
+                        <p class="ck-file__name">جزوهٔ ۱ <span class="ck-file__meta">· <span class="num">2</span> فایل</span></p>
+                        <ol class="ck-files">
+                          <li><span class="ck-files__n num">1</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۱.pdf</span><span class="ck-files__pages"><span class="num">48</span> صفحه</span></li>
+                          <li><span class="ck-files__n num">2</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۲.pdf</span><span class="ck-files__pages"><span class="num">54</span> صفحه</span></li>
+                        </ol>
+                        <p class="ck-file__meta"><span class="nw"><span class="num">102</span> صفحه، پشت‌سرهم با یک صحافی</span>&nbsp;· <span class="nw">سیاه‌سفید، دورو، <bdi>A4</bdi></span>&nbsp;· <span class="nw">طلق و سیم</span>&nbsp;· <span class="nw"><span class="num">1</span> نسخه</span></p>
+                      </li>
+                      <li>
+                        <p class="ck-file__name">جزوهٔ ۲</p>
+                        <ol class="ck-files">
+                          <li><span class="ck-files__n num">1</span><span class="ck-files__name" dir="auto">حل تمرین فصل ۱.docx</span><span class="ck-files__pages"><span class="num">18</span> صفحه</span></li>
+                        </ol>
+                        <p class="ck-file__meta"><span class="nw"><span class="num">18</span> صفحه</span>&nbsp;· <span class="nw">سیاه‌سفید، دورو، <bdi>A4</bdi></span>&nbsp;· <span class="nw">بی صحافی</span>&nbsp;· <span class="nw"><span class="num">1</span> نسخه</span></p>
+                      </li>
+                    </ol>
                   </div>
                 </dd>
                 <dd><a class="jy-link ck-edit" href="#">تغییر</a></dd>
@@ -854,7 +889,7 @@ body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-70
             <p class="ck-sub">سفارش <span class="num">1287</span> · <span class="num">374,750</span> تومان پرداخت شد. شمارهٔ سفارش را به <span class="num">0912 345 6789</span> هم پیامک کردیم.</p>
             <ol class="ck-steps">
               <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>پرداخت</b><span class="ck-steps__t">کد پیگیری بانک <span class="num">803114</span></span></li>
-              <li class="is-now" aria-current="step"><span class="ck-steps__dot"></span><b>چاپ و صحافی</b><span class="ck-steps__t">جزوه‌ات در صف چاپ است.</span></li>
+              <li class="is-now" aria-current="step"><span class="ck-steps__dot"></span><b>چاپ و صحافی</b><span class="ck-steps__t"><span class="j-solo">جزوه‌ات در صف چاپ است.</span><span class="j-multi">جزوه‌هایت در صف چاپ‌اند.</span></span></li>
               <li><span class="ck-steps__dot"></span><b>تحویل به پست تا دوشنبه <span class="num">6</span> مهر</b><span class="ck-steps__t">حداکثر <span class="num">2</span> روز کاری بعد از پرداخت.</span></li>
               <li><span class="ck-steps__dot"></span><b>کد رهگیری پست</b><span class="ck-steps__t">با پیامک می‌آید؛ مسیر بسته را با آن می‌بینی.</span></li>
             </ol>
@@ -894,11 +929,34 @@ body:has(#j-three:checked) .mock [for='j-three'] { background: var(--jy-green-70
                 </div>
               </div>
             </div>
+            <div class="j-multi">
+              <div class="ck-file">
+                <img src="../../../apps/web/public/img/page.svg" alt="" width="48" height="64">
+                <div class="ck-file__body">
+                  <p class="ck-file__name"><span class="num">2</span> جزوه، <span class="num">3</span> فایل</p>
+                  <p class="ck-file__meta"><span class="num">120</span> صفحه · هر جزوه صحافی خودش</p>
+                  <details class="ck-files-d">
+                    <summary>نام فایل‌ها<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
+                    <ol class="ck-jozves">
+                      <li><p class="ck-file__meta">جزوهٔ ۱</p><ol class="ck-files">
+                          <li><span class="ck-files__n num">1</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۱.pdf</span><span class="ck-files__pages"><span class="num">48</span> صفحه</span></li>
+                          <li><span class="ck-files__n num">2</span><span class="ck-files__name" dir="auto">ریاضی ۲ - جلسه ۲.pdf</span><span class="ck-files__pages"><span class="num">54</span> صفحه</span></li>
+                        </ol></li>
+                      <li><p class="ck-file__meta">جزوهٔ ۲</p><ol class="ck-files">
+                          <li><span class="ck-files__n num">1</span><span class="ck-files__name" dir="auto">حل تمرین فصل ۱.docx</span><span class="ck-files__pages"><span class="num">18</span> صفحه</span></li>
+                        </ol></li>
+                    </ol>
+                  </details>
+                </div>
+              </div>
+            </div>
           </div>
           <dl class="home-sum__lines">
-            <div><dt>چاپ سیاه‌سفید، دورو · <span class="num">120</span> صفحه</dt><dd class="num">192,000</dd></div>
-            <div><dt>صحافی طلق و سیم · <span class="num">60</span> برگ</dt><dd class="num">45,000</dd></div>
-            <div><dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd></div>
+            <div class="j-solo-row"><dt>چاپ سیاه‌سفید، دورو · <span class="num">120</span> صفحه</dt><dd class="num">192,000</dd></div>
+            <div class="j-solo-row"><dt>صحافی طلق و سیم · <span class="num">60</span> برگ</dt><dd class="num">45,000</dd></div>
+            <div class="j-solo-row"><dt>تعداد</dt><dd><span class="num">1</span> نسخه</dd></div>
+            <div class="j-multi-row ck-sum-jrow"><dt><span class="ck-sum__name">جزوهٔ ۱</span><span class="ck-sum__spec">سیاه‌سفید، دورو، <bdi>A4</bdi>، طلق و سیم · <span class="num">102</span> صفحه</span></dt><dd class="num">208,200</dd></div>
+            <div class="j-multi-row ck-sum-jrow"><dt><span class="ck-sum__name">جزوهٔ ۲</span><span class="ck-sum__spec">سیاه‌سفید، دورو، <bdi>A4</bdi>، بی صحافی · <span class="num">18</span> صفحه</span></dt><dd class="num">28,800</dd></div>
             <div class="ck-ship-row"><dt>ارسال پست پیشتاز به مشهد</dt><dd class="num">137,750</dd></div>
           </dl>
           <div class="home-sum__total">

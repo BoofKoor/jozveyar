@@ -38,7 +38,7 @@ const view = (over: Partial<CheckoutCardView> = {}): CheckoutCardView => ({ mode
 
 /** متن تخت تکه‌ها، برای مقایسه با جملهٔ طرح. */
 const flat = (segs: readonly Seg[] | null) =>
-  (segs ?? []).map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? seg.num : 'ltr' in seg ? seg.ltr : seg.barcode)).join('');
+  (segs ?? []).map((seg) => (typeof seg === 'string' ? seg : 'num' in seg ? seg.num : 'ltr' in seg ? seg.ltr : 'name' in seg ? seg.name : seg.barcode)).join('');
 
 const change = (over: Partial<AudienceChange> = {}): AudienceChange => ({
   at: tehran('2026-10-05 11:15'),

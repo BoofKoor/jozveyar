@@ -1,6 +1,6 @@
 /**
- * وضعیت بررسی یک فایل: حالت اولیه، پیام‌های کارگر، و تجمیع برای کارت هشدار — شمارهٔ
- * صفحه‌ها و قاعدهٔ اسلاید (ADR-029).
+ * وضعیت بررسی یک فایل: حالت اولیه، پیام‌های کارگر، و تجمیع برای کارت — شمارهٔ صفحه‌های خالی (ADR-029). کیفیت اسکن و
+ * حاشیه از ۸٫۱ فقط در پنل‌اند (سؤال ۱۸۱)؛ قاعدهٔ اسلاید و صفحه‌های هر هشدار پنل در `packages/analysis/src/warnings.test.ts`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -53,7 +53,7 @@ function state(pages: PageAnalysis[], pageCount = pages.length, sampleStride = 1
 }
 
 describe('summarize', () => {
-  it('هر هشدار شمارهٔ صفحه‌هایش را دارد، نه فقط تعداد', () => {
+  it('صفحهٔ خالی شمارهٔ صفحه‌هایش را دارد؛ کیفیت اسکن و حاشیه به کارت مشتری نمی‌آیند (۸٫۱)', () => {
     const summary = summarize(
       state([
         page(1, ['low_dpi']),
@@ -63,38 +63,23 @@ describe('summarize', () => {
       ]),
     );
     expect(summary).toMatchObject({
-      lowDpiPages: [1, 4],
-      lowDpiPageCount: 2,
       blankPages: [3],
       blankPageCount: 1,
-      tightMarginPages: [3, 4],
-      tightMarginPageCount: 2,
       mismatchedFonts: [],
       estimated: false,
     });
-  });
-
-  it('حاشیهٔ صفحهٔ اسلاید هشدار نمی‌شود؛ صفحهٔ A4 کنارش می‌شود', () => {
-    const summary = summarize(
-      state([
-        page(1, ['tight_margin'], [960, 540]),
-        page(2, ['tight_margin'], [720, 540]),
-        page(3, ['tight_margin']),
-        page(4, ['tight_margin'], [842, 595]),
-      ]),
-    );
-    expect(summary.tightMarginPages).toEqual([3, 4]);
-    expect(summary.tightMarginPageCount).toBe(2);
+    // تحلیل هر صفحه هشدارش را نگه می‌دارد (و به سرور می‌رود)؛ فقط نمای مشتری بی آنهاست.
+    expect(Object.keys(summary).filter((key) => /dpi|margin/i.test(key))).toEqual([]);
   });
 
   it('سند نمونه‌برداری‌شده: شمارش برآوردی، فهرست فقط صفحه‌های بررسی‌شده', () => {
     // ۳۰ صفحه، یکی از هر ۳ بررسی شد: ۱، ۴، ۷، …
-    const pages = Array.from({ length: 10 }, (_, i) => page(1 + i * 3, i < 4 ? ['low_dpi'] : []));
+    const pages = Array.from({ length: 10 }, (_, i) => page(1 + i * 3, i < 4 ? ['blank_page'] : []));
     const summary = summarize(state(pages, 30, 3));
     expect(summary).toMatchObject({
       estimated: true,
-      lowDpiPages: [1, 4, 7, 10],
-      lowDpiPageCount: 12,
+      blankPages: [1, 4, 7, 10],
+      blankPageCount: 12,
     });
   });
 });

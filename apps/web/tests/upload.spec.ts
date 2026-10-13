@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import postgres from 'postgres';
 
 /**
  * آپلود واقعی: مرورگر ← نکست ← پستگرس و Garage.
@@ -14,7 +15,9 @@ import { join } from 'node:path';
  *   DATABASE_URL=… S3_ENDPOINT=… S3_PUBLIC_ENDPOINT=… S3_ACCESS_KEY=… \
  *   S3_SECRET_KEY=… S3_BUCKET=jozveyar NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3300 \
  *     node scripts/serve-standalone.mjs 3300
- *   E2E_UPLOAD_BASE_URL=http://127.0.0.1:3300 npx playwright test upload
+ *   E2E_UPLOAD_BASE_URL=http://127.0.0.1:3300 DATABASE_URL=… npx playwright test upload
+ *
+ * تست هشدارهای فایل (ADR-029، ۸٫۱) ردیف‌های تحلیل را از همان پستگرس می‌خواند و بی `DATABASE_URL` رد می‌شود.
  *
  * اگر S3_PUBLIC_ENDPOINT مستقیم آدرس Garage باشد، مسیر میان‌مبدأ (CORS، همان
  * که روز انتقال به آروان پیش می‌آید) سنجیده می‌شود؛ اگر پراکسی هم‌مبدأ جلویش
@@ -22,10 +25,35 @@ import { join } from 'node:path';
  */
 
 const BASE = process.env.E2E_UPLOAD_BASE_URL;
+const DATABASE_URL = process.env.DATABASE_URL;
 const FIXTURES = join(process.cwd(), 'tests', 'fixtures');
 
 test.skip(!BASE, 'بدون E2E_UPLOAD_BASE_URL — سرویس‌های واقعی لازم است');
 test.use({ baseURL: BASE });
+
+let sqlClient: ReturnType<typeof postgres> | null = null;
+const sql = () => (sqlClient ??= postgres(DATABASE_URL!, { max: 2, onnotice: () => undefined }));
+
+test.afterAll(async () => {
+  await sqlClient?.end();
+});
+
+/** متن هشدارهایی که از ۸٫۱ فقط پنل نشان می‌دهد (سؤال ۱۸۱)؛ همان نگهبان `flow.spec.ts`. */
+const PANEL_ONLY_WARNINGS = /کیفیت اسکن|حاشیهٔ کم/;
+
+/** صفحه‌هایی که تازه‌ترین تحلیل یک موتور برای این سند با هشدار کیفیت یا حاشیه در `document_pages` گذاشته. */
+async function flaggedPages(documentId: string, source: 'server' | 'browser') {
+  const rows = await sql()<{ n: number; warnings: string[] }[]>`
+    select p.n, p.warnings from document_pages p
+    where p.analysis_id = (
+      select a.id from document_analyses a
+      where a.document_id = ${documentId} and a.source = ${source}
+      order by a.created_at desc limit 1
+    )
+    order by p.n`;
+  const pagesWith = (warning: string) => rows.filter((row) => row.warnings.includes(warning)).map((row) => row.n);
+  return { pages: rows.length, lowDpi: pagesWith('low_dpi'), tightMargin: pagesWith('tight_margin') };
+}
 
 /** PDF واقعی ۱۰ صفحه‌ای، با ~۲۰ مگابایت دنبالهٔ بی‌اثر بعد از %%EOF: سه تکه. */
 function bigPdf() {
@@ -106,15 +134,34 @@ test('رفرش وسط آپلود: همان فایل فقط تکه‌های با�
  * (`python -m docworker` با همان متغیرهای محیطی).
  */
 
-test('هشدار بعد از بررسی سرور همان صفحه‌ها را نام می‌برد که مرورگر (ADR-029)', async ({ page }) => {
+/**
+ * کیفیت اسکن و حاشیه (ADR-029) روی دو موتور واقعی: کارگر (PyMuPDF) همان صفحه‌هایی را نام می‌برد که مرورگر (pdf.js)، و هر دو
+ * در `document_pages` ذخیره می‌شوند؛ بردارهای هم‌ارزی فرمول را قفل کرده‌اند و این یکی خود دو موتور را روی یک فایل. از ۸٫۱
+ * (سؤال ۱۸۱) این دو هشدار فقط در پنل‌اند: پس از «همهٔ صفحات بررسی شد» کارت مشتری عدد سرور را دارد ولی هیچ‌کدام را نه، و
+ * پاسخ `/api/uploads/<id>` که عدد سرور را می‌آورد هم آن‌ها را نمی‌برد.
+ */
+test('کیفیت اسکن و حاشیه: سرور همان صفحه‌های مرورگر را ذخیره می‌کند، و مشتری هیچ‌کدام را نمی‌بیند (ADR-029، ۸٫۱)', async ({ page }) => {
+  test.skip(!DATABASE_URL, 'بدون DATABASE_URL — ردیف‌های تحلیل در پستگرس سنجیده می‌شوند');
+  const created = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/uploads' && r.request().method() === 'POST',
+  );
   await page.goto('/');
   await page.setInputFiles('#jozve-file', join(FIXTURES, 'dpi-mix-4.pdf'));
+  const { documentId } = (await (await created).json()) as { documentId: string };
   await expect(status(page)).toContainText('همهٔ صفحات بررسی شد', { timeout: 60_000 });
-  // حالا کارت عدد سرور را نشان می‌دهد: DPI از PyMuPDF، همان فرمول (بردارهای هم‌ارزی).
-  await expect(page.getByTestId('warning-low-dpi')).toHaveText(
-    'صفحهٔ 2 کیفیت اسکن یا عکس پایینی دارد و کمی مات چاپ می‌شود.',
-  );
-  await expect(page.getByTestId('warning-tight-margin')).toContainText('صفحه‌های 3 و 4');
+
+  // صفحهٔ ۲ اسکن ۱۸ DPI است، و ۳ و ۴ حاشیهٔ زیر ۲ میلی‌متر دارند؛ هر موتور در تازه‌ترین تحلیل خودش.
+  const expected = { pages: 4, lowDpi: [2], tightMargin: [3, 4] };
+  expect(await flaggedPages(documentId, 'server')).toEqual(expected);
+  // تحلیل مرورگر جدا و بی انتظار برای جواب فرستاده می‌شود، پس شاید کمی پس از سرور برسد.
+  await expect.poll(() => flaggedPages(documentId, 'browser')).toEqual(expected);
+
+  await expect(page.getByTestId('warning-low-dpi')).toHaveCount(0);
+  await expect(page.getByTestId('warning-tight-margin')).toHaveCount(0);
+  await expect(page.getByText(PANEL_ONLY_WARNINGS)).toHaveCount(0);
+  const view = await (await page.request.get(`${BASE}/api/uploads/${documentId}`)).json();
+  expect(view.analysis).toMatchObject({ state: 'ready', pageCount: 4 });
+  expect(JSON.stringify(view)).not.toMatch(/dpi|margin/i);
 });
 
 test('بعد از رسیدن فایل، سرور همهٔ صفحات را بررسی می‌کند و قیمت همان می‌ماند', async ({ page }) => {

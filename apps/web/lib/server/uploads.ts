@@ -23,7 +23,8 @@ import {
   type StorageDriver,
 } from '@jozveyar/storage';
 import { tidyFa } from '@jozveyar/text';
-import { isSlidePage, paperSizeName } from '@jozveyar/analysis';
+import { paperSizeName } from '@jozveyar/analysis';
+import { mismatchedFonts } from '@jozveyar/analysis/warnings';
 import { documentAnalysisSchema } from '@jozveyar/contracts';
 
 /** پیشوندی که قاعدهٔ نگهداری باکت رویش است. سفارش پرداخت‌شده باید از اینجا بیرون برود (برش ۳). */
@@ -110,42 +111,18 @@ export interface ServerAnalysisView {
   pageCount?: number;
   colorPageCount?: number;
   blankPageCount?: number;
-  lowDpiPageCount?: number;
-  tightMarginPageCount?: number;
   pageSizes?: { name: string; count: number }[];
   colorPages?: number[];
-  /** شمارهٔ صفحه‌های هر هشدار، از ۱ — هشدار جای مشکل را نشان می‌دهد (ADR-029). */
+  /**
+   * صفحه‌های خالی، از ۱ — هشدار جای مشکل را نشان می‌دهد (ADR-029). کیفیت اسکن و حاشیه از ۸٫۱ به مرورگر نمی‌روند و فقط
+   * پنل نشانشان می‌دهد (سؤال ۱۸۱، ADR-053)؛ در `document_pages` همان‌طور ذخیره‌اند.
+   */
   blankPages?: number[];
-  lowDpiPages?: number[];
-  /** برای اسلاید خالی: اسلاید تقریباً همیشه تا لبه طرح دارد (ADR-029). */
-  tightMarginPages?: number[];
   /**
    * فونت‌هایی که روی سرور نبودند و جایگزینشان اندازهٔ دیگری دارد: ظاهر و تعداد صفحه
    * ممکن است با فایل خود کاربر فرق کند (ADR-029).
    */
   mismatchedFonts?: string[];
-}
-
-/** شکل ستون `documents.conversion` که این لایه لازم دارد (کارگر می‌نویسدش، ADR-028). */
-interface ConversionRecord {
-  format?: string;
-  fonts?: { mismatched?: unknown };
-}
-
-/** اسلاید: فایلی که کارگر پاورپوینت (یا ارائهٔ ODF) تشخیص داد، یا پسوندش این را گفت. */
-const PRESENTATION_FORMATS = new Set(['pptx', 'ppt', 'odp']);
-
-/** همان سقف کارگر برای فونت‌های خواسته‌شده (`formats.requested_fonts`). */
-const MAX_FONTS = 50;
-
-/** نام فونت از داخل فایل کاربر می‌آید: فقط رشته، کوتاه، و نه بی‌شمار. */
-function mismatchedFontsOf(conversion: ConversionRecord | null): string[] {
-  const names = conversion?.fonts?.mismatched;
-  if (!Array.isArray(names)) return [];
-  return names
-    .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
-    .slice(0, MAX_FONTS)
-    .map((name) => name.trim().slice(0, 60));
 }
 
 export interface UploadStatus {
@@ -221,44 +198,26 @@ export function createUploadService(deps: UploadServiceDeps) {
 
     const stored = await deps.store.serverAnalysis(doc.id);
     if (!stored) return { state: 'running' };
-    const conversion = (doc.conversion ?? null) as ConversionRecord | null;
-    // حاشیهٔ اسلاید حساب و ذخیره می‌شود، ولی هشدار نمی‌شود: چه فایل پاورپوینت بوده
-    // باشد، چه PDF‌ای که صفحه‌هایش شکل اسلاید دارند (ADR-029).
-    const deck = PRESENTATION_FORMATS.has(conversion?.format ?? doc.sourceKind);
     const sizes = new Map<string, number>();
     const colorPages: number[] = [];
     const blankPages: number[] = [];
-    const lowDpiPages: number[] = [];
-    const tightMarginPages: number[] = [];
     stored.pages.forEach((page, i) => {
       const name = paperSizeName(page.widthPt, page.heightPt);
       sizes.set(name, (sizes.get(name) ?? 0) + 1);
       if (page.color) colorPages.push(i + 1);
       if (page.blank) blankPages.push(i + 1);
-      if (page.warnings.includes('low_dpi')) lowDpiPages.push(i + 1);
-      if (
-        page.warnings.includes('tight_margin') &&
-        !deck &&
-        !isSlidePage(page.widthPt, page.heightPt)
-      ) {
-        tightMarginPages.push(i + 1);
-      }
     });
     return {
       state: 'ready',
       pageCount: stored.pageCount,
       colorPageCount: colorPages.length,
       blankPageCount: blankPages.length,
-      lowDpiPageCount: lowDpiPages.length,
-      tightMarginPageCount: tightMarginPages.length,
       pageSizes: [...sizes.entries()]
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count),
       colorPages,
       blankPages,
-      lowDpiPages,
-      tightMarginPages,
-      mismatchedFonts: mismatchedFontsOf(conversion),
+      mismatchedFonts: mismatchedFonts(doc.conversion),
     };
   }
 
