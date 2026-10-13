@@ -266,7 +266,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
     { width: 390, height: 844 },
     { width: 1280, height: 800 },
   ]) {
-    test(`ترتیب Tab در ${viewport.width}: ✕، افزودن فایل، رنگ، دورو، شمارنده، «ادامه»، سؤال‌ها، پیوندهای پاورقی و نشان اینماد`, async ({ page }) => {
+    test(`ترتیب Tab در ${viewport.width}: ✕، افزودن فایل، رنگ، دورو، شمارنده، «جزوهٔ تازه»، «از اول»، «ادامه»، سؤال‌ها، پیوندهای پاورقی و نشان اینماد`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await dropReady(page);
@@ -276,7 +276,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
       const order: string[] = [];
       // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد؛ در حالت سفارش همان نام‌ها، در زبانهٔ تازه (`site.spec.ts`).
       const footer = footerGroups().flatMap(({ pages }) => pages.map(({ label }) => label));
-      for (let i = 0; i < 9 + questions.length + footer.length; i++) {
+      for (let i = 0; i < 11 + questions.length + footer.length; i++) {
         await page.keyboard.press('Tab');
         order.push(await focused(page));
       }
@@ -288,6 +288,9 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
         'یکی کمتر',
         'copies',
         'یکی بیشتر',
+        // تنظیمات درون کارت جزوه‌اند (۸٫۲، سؤال ۲۱۷)، و زیر کارت «جزوهٔ تازه» و «از اول» (۲۱۹)
+        'jozve-new',
+        'از اول',
         SOON,
         ...questions.map((q) => q.trim()),
         ...footer,

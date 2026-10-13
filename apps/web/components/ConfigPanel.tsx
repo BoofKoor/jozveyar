@@ -2,19 +2,27 @@
 
 import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
-import type { Breakdown, PriceList } from '@jozveyar/contracts';
+import type { PriceList } from '@jozveyar/contracts';
 import type { Sentence } from '../lib/fileCard';
 import type { OrderConfig } from '../lib/orderConfig';
+
+/** قیمت سفارش و برگ‌های همین جزوه با یک انتخاب، از همان `quote()` قیمت اصلی (`OrderDesk`). */
+export interface ConfigQuote {
+  /** جمع سفارش بی ارسال؛ اثر هر گزینه روی همین جمع است. */
+  totalRials: number;
+  /** برگ‌های یک نسخهٔ همین جزوه. */
+  sheets: number;
+}
 
 interface Props {
   config: OrderConfig;
   onChange: (next: OrderConfig) => void;
   priceList: PriceList;
   /**
-   * قیمت همین جزوه با انتخاب‌های دیگر، با همان `quote()` قیمت اصلی: اثر هر گزینه روی قیمت و برگ‌های
-   * یکرو و دورو از همین می‌آید، نه از حسابی دیگر (قاعدهٔ ۱). null یعنی هنوز صفحه‌ای شمرده نشده.
+   * قیمت سفارش وقتی همین جزوه انتخاب دیگری دارد، با همان `quote()` قیمت اصلی: اثر هر گزینه روی قیمت و برگ‌های یکرو و
+   * دورو از همین می‌آید، نه از حسابی دیگر (قاعدهٔ ۱). null یعنی هنوز صفحه‌ای از این جزوه شمرده نشده.
    */
-  quoteFor: (config: OrderConfig) => Breakdown | null;
+  quoteFor: (config: OrderConfig) => ConfigQuote | null;
   /**
    * صفحه‌های رنگی جزوه، کنار انتخاب رنگ (`colorHint` در lib/fileCard.ts): حکم قطعی فقط بعد از
    * بررسی همهٔ صفحه‌ها. رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030).
@@ -84,6 +92,20 @@ function Tiles<T extends string>({
   );
 }
 
+/** «+48,000 تومان»، «همان قیمت»، «−48,000 تومان»: اثر یک انتخاب روی قیمت، فقط عدد در span خودش. */
+export function PriceDelta({ rials }: { rials: number }) {
+  if (rials === 0) return 'همان قیمت';
+  return (
+    <>
+      <span className="num">
+        {rials > 0 ? '+' : '−'}
+        {formatTomans(Math.abs(rials), false)}
+      </span>{' '}
+      تومان
+    </>
+  );
+}
+
 /** «1,600 تومان هر صفحه»: فقط عدد در span خودش. */
 function perPage(rials: number) {
   return (
@@ -94,8 +116,9 @@ function perPage(rials: number) {
 }
 
 /**
- * «تنظیمات چاپ» (طرح ز، docs/UI.md بخش ۴): رنگ و یکرو یا دورو با کاشی، صحافی به شکل متن وقتی یک
- * گزینه بیشتر ندارد، و شمارندهٔ یک‌تکهٔ تعداد نسخه (`jy-stepper`).
+ * «تنظیمات چاپ» یک جزوه (طرح ز، docs/UI.md بخش ۴): رنگ و یکرو یا دورو با کاشی، صحافی به شکل متن وقتی یک گزینه
+ * بیشتر ندارد، و شمارندهٔ یک‌تکهٔ تعداد نسخه (`jy-stepper`). از ۸٫۲ درون کارت همان جزوه است (سؤال ۲۱۷)، پس سرش را کارت
+ * می‌گذارد (`JozveSettings`)؛ در هر لحظه فقط یکی روی صفحه است، پس شناسه‌ها یکتا می‌مانند.
  */
 export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }: Props) {
   const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) => onChange({ ...config, [key]: value });
@@ -107,21 +130,11 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
     (value: OrderConfig[K]): ReactNode => {
       const other = quoteFor({ ...config, [key]: value });
       if (!current || !other) return null;
-      const deltaRials = other.totalWithoutShippingRials - current.totalWithoutShippingRials;
-      if (deltaRials === 0) return 'همان قیمت';
-      return (
-        <>
-          <span className="num">
-            {deltaRials > 0 ? '+' : '−'}
-            {formatTomans(Math.abs(deltaRials), false)}
-          </span>{' '}
-          تومان
-        </>
-      );
+      return <PriceDelta rials={other.totalRials - current.totalRials} />;
     };
 
   /** برگ‌های جزوه در یکرو یا دورو، از همان `quote()`. */
-  const sheets = (sidesMode: OrderConfig['sidesMode']) => quoteFor({ ...config, sidesMode })?.items[0]?.sheets ?? 0;
+  const sheets = (sidesMode: OrderConfig['sidesMode']) => quoteFor({ ...config, sidesMode })?.sheets ?? 0;
   const [doubleSheets, singleSheets] = [sheets('double'), sheets('single')];
   /**
    * یادداشت کاشی یکرو و دورو، مثل طرح ز: برگ‌ها، و برای گزینهٔ دیگر اثرش روی قیمت در همان خط («120 برگ،
@@ -142,11 +155,7 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
   const papers = Object.entries(priceList.paperTypes);
 
   return (
-    <section className="jy-card" aria-labelledby="print-title">
-      <h2 id="print-title" className="jy-card__title">
-        تنظیمات چاپ
-      </h2>
-
+    <>
       <Tiles
         legend="رنگ چاپ"
         name="jozve-color"
@@ -248,6 +257,6 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
           </button>
         </div>
       </div>
-    </section>
+    </>
   );
 }

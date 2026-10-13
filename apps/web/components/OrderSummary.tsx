@@ -1,12 +1,12 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { formatTomans } from '@jozveyar/text';
+import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
 import { publishDockHeight } from '../lib/dock';
 import type { OrderConfig } from '../lib/orderConfig';
 import { Names, Note } from './AnalysisCard';
-import { SumValue, SummaryLines, printLabel } from './checkout/parts';
+import { JozveLines, SumValue, SummaryLines, printLabel, type JozveLine } from './checkout/parts';
 
 /**
  * «ادامه»ی قدم «جزوه و قیمت»، از دید خلاصه و نوار موبایل (`OrderDesk` حسابش می‌کند):
@@ -109,6 +109,22 @@ interface Props {
   blocked: readonly string[];
   /** فایل‌های جزوهٔ برگشته که منتظر انتخاب دوباره‌اند (۳د)؛ در این قیمت نیستند. */
   waiting: readonly string[];
+  /**
+   * جزوه‌های سفارش چندجزوه، هر کدام با قیمتش (برش ۸٫۲، سؤال ۲۲۵)؛ null در سفارش یک‌جزوه، که ریز قیمت همان یک قلم را دارد.
+   * جزوه‌ای که هنوز صفحه‌ای ندارد اینجا نیست.
+   */
+  jozves: readonly JozveLine[] | null;
+}
+
+/** «جمع»، «جمع · 3 جزوه»، یا «قیمت تا این لحظه». */
+function TotalLabel({ provisional, jozves }: { provisional: boolean; jozves: number | null }) {
+  if (provisional) return 'قیمت تا این لحظه';
+  if (jozves === null) return 'جمع';
+  return (
+    <>
+      جمع <span className="home-sum__count">· <span className="num">{formatNumber(jozves)}</span> جزوه</span>
+    </>
+  );
 }
 
 /**
@@ -126,6 +142,7 @@ export function OrderSummary({
   pending,
   blocked,
   waiting,
+  jozves,
   notes,
   ...action
 }: Props & ActionProps & { config: OrderConfig; priceList: PriceList; notes?: ReactNode }) {
@@ -137,10 +154,16 @@ export function OrderSummary({
       <h2 id="summary-title" className="jy-card__title">
         خلاصهٔ سفارش
       </h2>
-      {item ? <SummaryLines item={item} print={printLabel(config.colorMode, config.sidesMode)} bindingName={binding} /> : null}
+      {jozves ? (
+        <JozveLines jozves={jozves} />
+      ) : item ? (
+        <SummaryLines item={item} print={printLabel(config.colorMode, config.sidesMode)} bindingName={binding} />
+      ) : null}
 
       <div className="home-sum__total">
-        <span className="home-sum__label">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
+        <span className="home-sum__label">
+          <TotalLabel provisional={provisional} jozves={jozves ? jozves.length : null} />
+        </span>
         <SumValue rials={breakdown.totalWithoutShippingRials} testId="summary-total" />
       </div>
 
@@ -197,12 +220,19 @@ export function OrderSummary({
  * `price-total` جمع همین نوار است، چون در موبایل همین همیشه دیده می‌شود؛ در دسکتاپ نوار پنهان است و
  * جمع دیدنی `summary-total` خلاصهٔ سفارش است.
  */
-export function PriceDock({ breakdown, provisional, ...action }: Pick<Props, 'breakdown' | 'provisional'> & ActionProps) {
+export function PriceDock({
+  breakdown,
+  provisional,
+  jozves,
+  ...action
+}: Pick<Props, 'breakdown' | 'provisional'> & ActionProps & { jozves: number | null }) {
   return (
     <div ref={publishDockHeight} className="home-dock" role="region" aria-label="قیمت">
       <div className="site-wrap home-dock__in">
         <p className="home-dock__price">
-          <span className="home-dock__label">{provisional ? 'قیمت تا این لحظه' : 'جمع'}</span>
+          <span className="home-dock__label">
+            <TotalLabel provisional={provisional} jozves={jozves} />
+          </span>
           <SumValue rials={breakdown.totalWithoutShippingRials} testId="price-total" />
           {breakdown.shippingFromRials !== null ? (
             <span className="home-dock__ship">

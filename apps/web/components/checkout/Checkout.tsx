@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/checkout';
 import { PROVINCES, findCity, findProvince, placeIsValid, popularCities, searchCities, type City } from '@jozveyar/geo';
-import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
+import { DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 import { RECIPIENT_LIMITS, checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
@@ -18,11 +18,21 @@ import {
   type CheckoutStore,
 } from '../../lib/checkout/store';
 import { publishDockHeight } from '../../lib/dock';
-import type { JozveView } from '../../lib/jozveView';
-import type { OrderConfig } from '../../lib/orderConfig';
+import type { JozvePart } from '../../lib/jozveView';
 import { Note, SizeNames } from '../AnalysisCard';
-import { FlowNav, SumValue, SummaryLines, Tomans, printLabel } from './parts';
-import { JozveBrief, Pieces, Recap, RecapAddress, RecapDelivery, RecapJozveValue, placeName } from './recap';
+import { FlowNav, JozveLines, SumValue, SummaryLines, Tomans, jozveSpecLabel, printLabel } from './parts';
+import {
+  JozveBrief,
+  JozvesBrief,
+  Pieces,
+  Recap,
+  RecapAddress,
+  RecapDelivery,
+  RecapJozveValue,
+  RecapJozvesValue,
+  placeName,
+  type RecapJozve,
+} from './recap';
 
 /*
  * مسیر خرید در همان صفحه (طرح تأییدشدهٔ docs/ui/mockups/checkout.html؛ ADR-033 تا ADR-035): شهر با یک تپ،
@@ -735,7 +745,7 @@ function CodeStep({ state, now }: { state: CheckoutState; now: number }) {
 function ReviewStep({
   state,
   place,
-  jozve,
+  jozves,
   method,
   slaDays,
   gateway,
@@ -746,7 +756,8 @@ function ReviewStep({
 }: {
   state: CheckoutState;
   place: Place;
-  jozve: Parameters<typeof RecapJozveValue>[0]['jozve'];
+  /** جزوه‌های سفارش، به ترتیب؛ یکی یعنی همان مرور امروز. */
+  jozves: readonly RecapJozve[];
   method: string;
   slaDays: number;
   gateway: GatewayKind;
@@ -766,7 +777,9 @@ function ReviewStep({
       <h1 id="ck-title" ref={title} tabIndex={-1} className="jy-card__title">
         مرور و پرداخت
       </h1>
-      <p className="ck-sub">یک بار دیگر نگاه کن؛ بعد از پرداخت، جزوه به صف چاپ می‌رود.</p>
+      <p className="ck-sub">
+        یک بار دیگر نگاه کن؛ بعد از پرداخت، {jozves.length > 1 ? 'جزوه‌ها به صف چاپ می‌روند.' : 'جزوه به صف چاپ می‌رود.'}
+      </p>
 
       {state.busy === 'pay' ? (
         <div className="ck-card-note">
@@ -842,9 +855,9 @@ function ReviewStep({
       <Recap
         rows={[
           {
-            label: 'جزوه',
+            label: jozves.length > 1 ? 'جزوه‌ها' : 'جزوه',
             testId: 'recap-jozve',
-            value: <RecapJozveValue jozve={jozve} />,
+            value: jozves.length > 1 ? <RecapJozvesValue jozves={jozves} /> : <RecapJozveValue jozve={jozves[0]!} />,
             edit: (
               <button type="button" className="jy-link ck-edit" onClick={onDesk}>
                 تغییر
@@ -934,10 +947,10 @@ interface Props {
   /** قدم جاری؛ هرگز `desk`، که رابط پس از فایل خودش نشان می‌دهد. */
   step: Step;
   go: (step: Step, options?: { replace?: boolean }) => void;
-  /** همان قلم «جزوه و قیمت»: سندهای روی سرور به ترتیب صحافی، و انتخاب‌ها. */
+  /** همان قلم‌های «جزوه و قیمت»، یکی برای هر جزوه: سندهای روی سرور به ترتیب صحافی، و انتخاب‌ها. */
   items: CheckoutItem[];
-  view: JozveView;
-  config: OrderConfig;
+  /** جزوه‌های سفارش، به همان ترتیب قلم‌ها: نمای فایل‌ها (نام و صفحه) و تنظیمات چاپ. */
+  jozves: readonly JozvePart[];
   /** تعرفهٔ صفحه، همان «جزوه و قیمت» (برش ۴٫۴): نام صحافی و روش ارسال. عددها از سرور است. */
   priceList: PriceList;
   /**
@@ -954,7 +967,7 @@ interface Props {
   gateway: GatewayKind;
 }
 
-export function Checkout({ step, go, items, view, config, priceList, slaDays, auth, onAuth, onRestart, gateway }: Props) {
+export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, onAuth, onRestart, gateway }: Props) {
   const store = checkoutStore();
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const withPlace = step !== 'city';
@@ -997,10 +1010,26 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
   const dest = place ? destinationOf(place) : null;
   const breakdown = quote?.breakdown ?? null;
   const item = breakdown?.items[0];
-  const bindingName = priceList.bindingTypes[config.bindingTypeId]?.nameFa ?? '';
+  const multi = jozves.length > 1;
+  const { view, config } = jozves[0]!;
+  const nameOf = (bindingTypeId: string) => priceList.bindingTypes[bindingTypeId]?.nameFa ?? '';
+  /** نام کاغذ فقط وقتی جز کاغذ پیش‌فرض است. */
+  const paperNameOf = (paperTypeId: string) =>
+    paperTypeId === DEFAULT_PAPER_TYPE_ID ? null : (priceList.paperTypes[paperTypeId]?.nameFa ?? null);
+  const bindingName = nameOf(config.bindingTypeId);
   const print = printLabel(config.colorMode, config.sidesMode);
-  const files = view.included.map((s) => ({ name: s.name, pageCount: s.pageCount }));
+  const filesOf = (part: JozvePart) => part.view.included.map((s) => ({ name: s.name, pageCount: s.pageCount }));
+  const files = filesOf(jozves[0]!);
+  /** هر جزوه برای مرور و خلاصه (سؤال ۲۲۵): فایل‌ها، صفحه‌ها، و مشخصات. */
+  const recaps: RecapJozve[] = jozves.map((part) => ({
+    files: filesOf(part),
+    pageCount: part.view.pageCount,
+    print: printLabel(part.config.colorMode, part.config.sidesMode),
+    bindingName: nameOf(part.config.bindingTypeId),
+    copies: part.config.copies,
+  }));
   const shipped = withPlace && breakdown?.shippingRials != null && dest ? breakdown.shippingRials : null;
+  const shippingLine = shipped !== null && dest ? { label: `ارسال ${method} به ${placeName(dest)}`, rials: shipped } : null;
 
   if (fallback) return null;
 
@@ -1075,7 +1104,7 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
       <ReviewStep
         state={state}
         place={place}
-        jozve={{ files, pageCount: view.pageCount, print, bindingName, copies: config.copies }}
+        jozves={recaps}
         method={method}
         slaDays={slaDays}
         gateway={gateway}
@@ -1132,14 +1161,32 @@ export function Checkout({ step, go, items, view, config, priceList, slaDays, au
           <h2 id="summary-title" className="jy-card__title">
             خلاصهٔ سفارش
           </h2>
-          <JozveBrief files={files} pageCount={view.pageCount} meta={brief} />
-          {item ? (
-            <SummaryLines
-              item={item}
-              print={print}
-              bindingName={bindingName}
-              shipping={shipped !== null && dest ? { label: `ارسال ${method} به ${placeName(dest)}`, rials: shipped } : null}
+          {multi ? (
+            <JozvesBrief jozves={recaps} />
+          ) : (
+            <JozveBrief files={files} pageCount={view.pageCount} meta={brief} />
+          )}
+          {multi && breakdown ? (
+            // ریز قیمت سرور: یک قلم برای هر جزوه، به همان ترتیب قلم‌ها (`items`، و `quoteOf` فقط قیمت همین قلم‌ها را می‌دهد)
+            <JozveLines
+              jozves={jozves.flatMap(({ config: c }, i) => {
+                const line = breakdown.items[i];
+                return line
+                  ? [
+                      {
+                        n: i + 1,
+                        spec: jozveSpecLabel(c.colorMode, c.sidesMode, nameOf(c.bindingTypeId), paperNameOf(c.paperTypeId)),
+                        pageCount: line.pageCount,
+                        copies: line.copies,
+                        totalRials: line.totalRials,
+                      },
+                    ]
+                  : [];
+              })}
+              shipping={shippingLine}
             />
+          ) : item ? (
+            <SummaryLines item={item} print={print} bindingName={bindingName} shipping={shippingLine} />
           ) : null}
           <div className="home-sum__total">
             <span className="home-sum__label">جمع</span>

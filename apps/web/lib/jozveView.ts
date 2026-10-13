@@ -2,14 +2,14 @@
  * نمای جزوهٔ چندفایلی — خالص (ADR-030).
  *
  * هر فایل الان چه وضعی دارد و در قیمت چه سهمی (`sectionView`)، جمع جزوه و اینکه قیمت قطعی
- * است یا نه (`jozveView`)، و مشخصات سفارش برای `quote()` (`jozveSpec`). نوبت‌ها و ترتیب صف در
- * `jozve.ts` است.
+ * است یا نه (`jozveView`)، و مشخصات سفارش برای `quote()`: یک قلم برای هر جزوه (`orderSpec`، برش ۸٫۲). نوبت‌ها و
+ * ترتیب صف در `jozve.ts` است، و اینکه هر فایل در کدام جزوه است در `layout.ts`.
  *
  * جدا از صف است چون فقط رابط پس از فایل آن را می‌خواهد، که با اولین فایل بار می‌شود
  * (docs/UI.md، ۴ب)؛ `pricing` هم فقط از همین‌جا به صفحه می‌رسد، نه از باندل اولیه.
  */
 
-import type { OrderSpec } from '@jozveyar/contracts';
+import type { ItemSpec, OrderSpec } from '@jozveyar/contracts';
 import { itemPageCount, wholeDocumentRule } from '@jozveyar/pricing';
 import type { FileKind } from './analysis-protocol';
 import { isFileError, isServerPath, type AnalysisState } from './fileAnalysis';
@@ -221,25 +221,42 @@ export function jozveView(sections: readonly Section[]): JozveView {
 }
 
 /**
- * مشخصات سفارش جزوه برای `quote()`: یک قلم، بخش‌ها به همین ترتیب. فایل آپلودنشده
- * شناسهٔ موقت می‌گیرد؛ قیمت به شناسه بند نیست. null یعنی هنوز صفحه‌ای شمرده نشده.
+ * قلم یک جزوه برای `quote()`: بخش‌ها به همین ترتیب. فایل آپلودنشده شناسهٔ موقت می‌گیرد؛ قیمت به شناسه بند نیست. null یعنی
+ * هنوز صفحه‌ای از این جزوه شمرده نشده.
  */
-export function jozveSpec(view: JozveView, config: OrderConfig): OrderSpec | null {
+export function jozveItem(view: JozveView, config: OrderConfig): ItemSpec | null {
   if (view.pageCount === 0) return null;
   return {
-    items: [
-      {
-        sections: view.included.map((v) => ({
-          documentId: v.documentId ?? `draft-${v.key}`,
-          pageCount: v.pageCount,
-        })),
-        rules: wholeDocumentRule(view.pageCount, config.colorMode, config.paperTypeId),
-        copies: config.copies,
-        sidesMode: config.sidesMode,
-        bindingTypeId: config.bindingTypeId,
-      },
-    ],
-    // شهر در مرحلهٔ آدرس گرفته می‌شود؛ تا آن موقع «ارسال از X تومان».
-    shipping: null,
+    sections: view.included.map((v) => ({
+      documentId: v.documentId ?? `draft-${v.key}`,
+      pageCount: v.pageCount,
+    })),
+    rules: wholeDocumentRule(view.pageCount, config.colorMode, config.paperTypeId),
+    copies: config.copies,
+    sidesMode: config.sidesMode,
+    bindingTypeId: config.bindingTypeId,
   };
+}
+
+/** یک جزوهٔ سفارش، با تنظیمات چاپش. */
+export interface JozvePart {
+  view: JozveView;
+  config: OrderConfig;
+}
+
+/**
+ * مشخصات سفارش برای `quote()` (برش ۸٫۲): یک قلم برای هر جزوه‌ای که صفحه‌ای شمرده، به ترتیب جزوه‌ها؛ `index[i]` جای قلم جزوهٔ i
+ * در ریز قیمت است، یا null وقتی هنوز قلمی ندارد. کرایه یک بار، با وزن همه (همان `quote()`). null یعنی هیچ جزوه‌ای هنوز صفحه‌ای
+ * ندارد.
+ */
+export function orderSpec(parts: readonly JozvePart[]): { spec: OrderSpec; index: (number | null)[] } | null {
+  const items: ItemSpec[] = [];
+  const index = parts.map(({ view, config }) => {
+    const item = jozveItem(view, config);
+    if (!item) return null;
+    items.push(item);
+    return items.length - 1;
+  });
+  // شهر در مرحلهٔ آدرس گرفته می‌شود؛ تا آن موقع «ارسال از X تومان».
+  return items.length > 0 ? { spec: { items, shipping: null }, index } : null;
 }

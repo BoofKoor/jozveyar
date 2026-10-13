@@ -83,6 +83,52 @@ export function JozveBrief({ files, pageCount, meta }: { files: readonly BriefFi
   );
 }
 
+/** یک جزوه در خلاصهٔ مسیر خرید چندجزوه: فایل‌ها و صفحه‌هایش. */
+export interface BriefJozve {
+  files: readonly BriefFile[];
+  pageCount: number;
+}
+
+/**
+ * سر خلاصهٔ سفارش چندجزوه (برش ۸٫۲، سؤال ۲۲۵؛ «دو جزوهٔ جدا» در `checkout.html`): «2 جزوه، 3 فایل»، صفحه‌ها روی هم، و نام فایل‌های
+ * هر جزوه در «نام فایل‌ها».
+ */
+export function JozvesBrief({ jozves }: { jozves: readonly BriefJozve[] }) {
+  const files = jozves.reduce((sum, jozve) => sum + jozve.files.length, 0);
+  const pages = jozves.reduce((sum, jozve) => sum + jozve.pageCount, 0);
+  return (
+    <div className="ck-sum-jozve">
+      <div className="ck-file">
+        <Thumb />
+        <div className="ck-file__body">
+          <p className="ck-file__name">
+            <span className="num">{formatNumber(jozves.length)}</span> جزوه، <span className="num">{formatNumber(files)}</span> فایل
+          </p>
+          <p className="ck-file__meta">
+            <span className="num">{formatNumber(pages)}</span> صفحه · هر جزوه صحافی خودش
+          </p>
+          <details className="ck-files-d">
+            <summary>
+              نام فایل‌ها
+              <span className="jy-icon jy-icon-chevron" aria-hidden="true" />
+            </summary>
+            <ol className="ck-jozves">
+              {jozves.map((jozve, i) => (
+                <li key={i}>
+                  <p className="ck-file__meta">
+                    جزوهٔ <span className="num">{formatNumber(i + 1)}</span>
+                  </p>
+                  <FileList files={jozve.files} />
+                </li>
+              ))}
+            </ol>
+          </details>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** تکه‌های خط اطلاعات که فقط بعد از «·» می‌شکنند (مثل `FileInfo` کارت «جزوهٔ تو»). */
 export function Pieces({ parts }: { parts: readonly ReactNode[] }) {
   return parts.map((part, i) => (
@@ -149,6 +195,46 @@ export function RecapJozveValue({ jozve }: { jozve: RecapJozve }) {
         />
       </p>
     </>
+  );
+}
+
+/**
+ * ردیف «جزوه‌ها»ی مرور سفارش چندجزوه (سؤال ۲۲۵): برای هر جزوه شماره‌اش (و شمار فایل اگر بیش از یکی)، فهرست فایل‌ها، و «102
+ * صفحه، پشت‌سرهم با یک صحافی · سیاه‌سفید، دورو · طلق و سیم · 1 نسخه».
+ */
+export function RecapJozvesValue({ jozves }: { jozves: readonly RecapJozve[] }) {
+  return (
+    <ol className="ck-jozves">
+      {jozves.map((jozve, i) => (
+        <li key={i} data-testid="recap-jozves-item">
+          <p className="ck-file__name">
+            جزوهٔ <span className="num">{formatNumber(i + 1)}</span>
+            {jozve.files.length > 1 ? (
+              <span className="ck-file__meta">
+                {' · '}
+                <span className="num">{formatNumber(jozve.files.length)}</span> فایل
+              </span>
+            ) : null}
+          </p>
+          <FileList files={jozve.files} />
+          <p className="ck-file__meta">
+            <Pieces
+              parts={[
+                <>
+                  <span className="num">{formatNumber(jozve.pageCount)}</span> صفحه
+                  {jozve.files.length > 1 ? '، پشت‌سرهم با یک صحافی' : null}
+                </>,
+                jozve.print,
+                jozve.bindingName,
+                <>
+                  <span className="num">{formatNumber(jozve.copies)}</span> نسخه
+                </>,
+              ]}
+            />
+          </p>
+        </li>
+      ))}
+    </ol>
   );
 }
 

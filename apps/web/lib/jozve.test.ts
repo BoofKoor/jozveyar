@@ -8,7 +8,7 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { INITIAL, type AnalysisState } from './fileAnalysis';
 import { jozveCounted, moveSection, nextAnalysisJob, nextUpload, orderBatch, type Section } from './jozve';
-import { jozveSpec, jozveView, sectionView } from './jozveView';
+import { jozveView, orderSpec, sectionView } from './jozveView';
 import type { UploadSnapshot } from './upload/client';
 
 const CONFIG = {
@@ -112,8 +112,9 @@ describe('جمع جزوه', () => {
 
   it('قیمت: یک قلم، بخش‌ها به همان ترتیب، یک صحافی', () => {
     const view = jozveView([ready('a.pdf', 10), ready('b.pdf', 6), ready('c.pdf', 10)]);
-    const spec = jozveSpec(view, CONFIG)!;
+    const { spec, index } = orderSpec([{ view, config: CONFIG }])!;
     expect(spec.items).toHaveLength(1);
+    expect(index).toEqual([0]);
     expect(spec.items[0]!.sections.map((s) => s.pageCount)).toEqual([10, 6, 10]);
     expect(spec.items[0]!.rules[0]!.pageRanges).toEqual([[1, 26]]);
     // ۲۶ صفحه: ۴۱,۶۰۰ + صحافی ۴۵,۰۰۰ = ۸۶,۶۰۰ تومان — سه سفارش جدا ۱۷۶,۶۰۰ می‌شد.
@@ -121,8 +122,26 @@ describe('جمع جزوه', () => {
     expect(view.provisional).toBe(false);
   });
 
+  it('چند جزوه (۸٫۲): یک قلم برای هر جزوه‌ای که صفحه دارد، و جای هر قلم؛ جمع یکی', () => {
+    const first = jozveView([ready('a.pdf', 10), ready('b.pdf', 6)]);
+    const counting = jozveView([queued('c.pdf')]);
+    const third = jozveView([ready('d.pdf', 10)]);
+    const { spec, index } = orderSpec([
+      { view: first, config: CONFIG },
+      { view: counting, config: CONFIG },
+      { view: third, config: { ...CONFIG, copies: 2 } },
+    ])!;
+    expect(index).toEqual([0, null, 1]);
+    expect(spec.items.map((item) => [item.sections.length, item.copies])).toEqual([[2, 1], [1, 2]]);
+    // ۱۶ صفحه: ۲۵,۶۰۰ + ۴۵,۰۰۰؛ و ۱۰ صفحه دو نسخه: (۱۶,۰۰۰ + ۴۵,۰۰۰) × ۲ — هر جزوه صحافی خودش
+    const breakdown = quote(spec, SEED_PRICE_LIST);
+    expect(breakdown.items.map((item) => item.totalRials)).toEqual([706_000, 1_220_000]);
+    expect(breakdown.totalWithoutShippingRials).toBe(1_926_000);
+  });
+
   it('بی هیچ صفحهٔ شمرده‌شده، قیمتی نیست', () => {
-    expect(jozveSpec(jozveView([queued('a.pdf')]), CONFIG)).toBeNull();
+    expect(orderSpec([{ view: jozveView([queued('a.pdf')]), config: CONFIG }])).toBeNull();
+    expect(orderSpec([])).toBeNull();
   });
 });
 

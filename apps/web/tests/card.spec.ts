@@ -306,25 +306,33 @@ test.describe('هدف لمس روی موبایل', () => {
     expect(box!.height, `بلندی ${name}`).toBeGreaterThanOrEqual(44);
   }
 
-  test('تک‌فایل: ✕ و «افزودن فایل به همین جزوه» حداقل ۴۴×۴۴', async ({ page }) => {
+  test('تک‌فایل: ✕، «افزودن فایل به همین جزوه»، «جزوهٔ تازه» و «از اول» حداقل ۴۴×۴۴', async ({ page }) => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
     await ready(page);
     await expectTarget(card(page).getByRole('button', { name: 'فایل دیگری بینداز' }), '✕');
-    await expectTarget(card(page).locator('label.jy-add'), 'افزودن فایل');
-    await expect(card(page).locator('label.jy-add')).toHaveText('افزودن فایل به همین جزوه');
+    // درون کارت دکمهٔ متنی است؛ تنها کادر خط‌چین «جزوهٔ تازه» زیر کارت (۸٫۲، سؤال ۲۱۹)
+    await expectTarget(card(page).locator('label.home-add'), 'افزودن فایل');
+    await expect(card(page).locator('label.home-add')).toHaveText('افزودن فایل به همین جزوه');
+    await expect(card(page).locator('label.jy-add')).toHaveCount(0);
+    await expectTarget(page.locator('label.jy-add'), 'جزوهٔ تازه');
+    await expect(page.locator('label.jy-add')).toHaveText('جزوهٔ تازهفایل‌های دیگر، با صحافی و تنظیمات خودشان');
+    await expectTarget(page.getByRole('button', { name: 'از اول' }), 'از اول');
   });
 
-  test('جزوه: ↑↓✕ هر فایل، «افزودن فایل» و «از اول» حداقل ۴۴×۴۴', async ({ page }) => {
+  test('جزوه: منوی جابه‌جایی و ✕ هر فایل، کارهای منو، «افزودن فایل» و «از اول» حداقل ۴۴×۴۴', async ({ page }) => {
     await page.goto('/');
     await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
     await ready(page);
     const rowButtons = page.getByTestId('section').getByRole('button');
-    await expect(rowButtons).toHaveCount(6);
+    await expect(rowButtons).toHaveCount(4);
     for (const button of await rowButtons.all()) {
       await expectTarget(button, (await button.getAttribute('aria-label')) ?? 'دکمهٔ ردیف');
     }
-    await expectTarget(card(page).locator('label.jy-add'), 'افزودن فایل');
-    await expectTarget(card(page).getByRole('button', { name: 'از اول' }), 'از اول');
+    await page.getByRole('button', { name: 'جابه‌جایی «image-scan-6.pdf»' }).click();
+    for (const item of await page.getByRole('menuitem').all()) await expectTarget(item, (await item.textContent()) ?? 'کار منو');
+    await page.keyboard.press('Escape');
+    await expectTarget(page.locator('label.home-add'), 'افزودن فایل');
+    await expectTarget(page.getByRole('button', { name: 'از اول' }), 'از اول');
   });
 });

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PriceList } from '@jozveyar/contracts';
+import { MAX_FILES_PER_ORDER, MAX_ITEMS_PER_ORDER } from '@jozveyar/contracts/checkout';
 import type { CheckoutDocument } from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
@@ -212,6 +213,27 @@ describe('مسیر خرید روی سرور', () => {
       expect(await service.quote(ME, { items: [item([scan])], place: { provinceId: 99, cityId: null } })).toMatchObject({ error: 'invalid_place' });
       expect(await service.quote(ME, { items: [item(['not-a-uuid'])] })).toMatchObject({ status: 400, fields: ['items.0.documentIds.0'] });
       expect(await service.quote(ME, { items: [] })).toMatchObject({ status: 400 });
+    });
+
+    it('چند جزوه (۸٫۲): تا ۳۰ جزوه و ۳۰ فایل روی هم؛ هر جزوه قیمت خودش، و جمع یکی', async () => {
+      const thirty = Array.from({ length: MAX_ITEMS_PER_ORDER }, () => item([doc(10)]));
+      const many = await service.quote(ME, { items: thirty });
+      expect(many.ok && many.value.breakdown.items).toHaveLength(MAX_ITEMS_PER_ORDER);
+      expect(await service.quote(ME, { items: [...thirty, item([doc(10)])] })).toMatchObject({ status: 400, fields: ['items'] });
+      // ۳۱ فایل در دو جزوه: هر جزوه زیر سقف خودش، ولی سفارش نه.
+      const files = Array.from({ length: MAX_FILES_PER_ORDER + 1 }, () => doc(4));
+      expect(await service.quote(ME, { items: [item(files.slice(0, 16)), item(files.slice(16))] })).toMatchObject({
+        status: 400,
+        error: 'invalid_request',
+        fields: ['items'],
+      });
+      const two = await service.quote(ME, { items: [item(files.slice(0, 15)), item(files.slice(15, 30), { colorMode: 'color' })] });
+      expect(two.ok).toBe(true);
+      if (!two.ok) return;
+      const [bw, color] = two.value.breakdown.items;
+      expect([bw!.pageCount, color!.pageCount]).toEqual([60, 60]);
+      expect(color!.printRials).toBeGreaterThan(bw!.printRials);
+      expect(two.value.breakdown.subtotalRials).toBe(bw!.totalRials + color!.totalRials);
     });
 
     it('شهری که در فهرست نیست: استان کافی است', async () => {

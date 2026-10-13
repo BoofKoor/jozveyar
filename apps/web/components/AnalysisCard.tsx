@@ -1,15 +1,13 @@
 'use client';
 
-import { Fragment, useRef, type ReactNode } from 'react';
-import { bytesParts, formatNumber, formatPages } from '@jozveyar/text';
-import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
+import { Fragment, type ReactNode } from 'react';
+import { bytesParts, formatNumber, formatPages, formatTomans } from '@jozveyar/text';
 import type { AnalysisSummaryView } from '../lib/fileSummary';
 import { paperSizeLabel } from '../lib/fileCard';
 import type { SectionView } from '../lib/jozveView';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import type { UploadSnapshot } from '../lib/upload/client';
 import { AddFiles } from './AddFiles';
-import { ACCEPT } from './DropZone';
 import { Inline } from './Inline';
 
 /*
@@ -122,13 +120,37 @@ export function FileInfo({ pages, sizes, size }: { pages: number; sizes: readonl
   ));
 }
 
-/** سر کارت: «جزوهٔ تو» و «2 فایل · 26 صفحه». */
-export function CardHead({ files, pages }: { files: number; pages: number }) {
+/** شناسهٔ سر کارت جزوه: اولی `jozve-title` (برگشت از مسیر خرید فوکوس را آنجا می‌آورد)، بقیه با شماره. */
+export const jozveTitleId = (index: number) => (index === 0 ? 'jozve-title' : `jozve-title-${index + 1}`);
+
+/**
+ * سر کارت: «جزوهٔ تو» و «2 فایل · 26 صفحه»؛ در سفارش چندجزوه «جزوهٔ 2» و قیمت همان جزوه هم (طرح میز، سؤال ۲۱۷). نام
+ * گذاشتنی نیست، و شماره از ترتیب جزوه‌هاست.
+ */
+export function CardHead({
+  files,
+  pages,
+  index = 0,
+  multi = false,
+  priceRials = null,
+}: {
+  files: number;
+  pages: number;
+  index?: number;
+  multi?: boolean;
+  priceRials?: number | null;
+}) {
   return (
     <div className="jy-card__head">
-      {/* برگشت از مسیر خرید به «جزوه و قیمت» فوکوس را اینجا می‌آورد (`OrderDesk`) */}
-      <h2 id="jozve-title" className="jy-card__title" tabIndex={-1}>
-        جزوهٔ تو
+      {/* برگشت از مسیر خرید به «جزوه و قیمت» فوکوس را به سر اولین کارت می‌آورد (`OrderDesk`) */}
+      <h2 id={jozveTitleId(index)} className="jy-card__title" tabIndex={-1}>
+        {multi ? (
+          <>
+            جزوهٔ <span className="num">{formatNumber(index + 1)}</span>
+          </>
+        ) : (
+          'جزوهٔ تو'
+        )}
       </h2>
       <p className="jy-card__meta">
         <span className="num">{formatNumber(files)}</span> فایل
@@ -139,6 +161,15 @@ export function CardHead({ files, pages }: { files: number; pages: number }) {
               {formatNumber(pages)}
             </span>{' '}
             صفحه
+          </>
+        ) : null}
+        {multi && priceRials !== null ? (
+          <>
+            {' · '}
+            <span data-testid="jozve-price" className="num">
+              {formatTomans(priceRials, false)}
+            </span>{' '}
+            تومان
           </>
         ) : null}
       </p>
@@ -360,9 +391,13 @@ export function WaitingNote({ names }: { names: readonly string[] }) {
 interface Props {
   section: SectionView;
   onAdd: (files: File[]) => void;
-  /** فایل تازه همان‌جا؛ برای فایل برگشته، همان فایل (`WaitingCard`). */
-  onReplace: (key: string, file: File) => void;
+  /** چند فایل دیگر در سفارش جا دارد. */
+  room: number;
+  /** فایل‌گزین جایگزین همین فایل را باز می‌کند (یکی برای کل میز، `OrderDesk`)؛ برای فایل برگشته، همان فایل. */
+  onPick: (key: string) => void;
   onReset: () => void;
+  /** «تنظیمات چاپ» همین جزوه، ته همین کارت (سؤال ۲۱۷)؛ تا قیمتی نیست، هیچ. */
+  settings?: ReactNode;
 }
 
 /**
@@ -373,10 +408,10 @@ interface Props {
  *    کند دیگر معنا ندارد.
  *  - بقیه: بررسی مرورگر، یا پیش‌فاکتور مسیر سرور (`AnalysisCard`).
  */
-export function SingleFileCard({ section, onAdd, onReplace, onReset }: Props) {
+export function SingleFileCard({ section, onAdd, room, onPick, onReset, settings }: Props) {
   const { state, upload, kind, serverPath, serverReady, serverFailed, estimate, uploadRefused } = section;
 
-  if (section.waiting) return <WaitingCard section={section} onReplace={onReplace} onReset={onReset} />;
+  if (section.waiting) return <WaitingCard section={section} onPick={onPick} onReset={onReset} />;
 
   if (serverPath && !serverReady && (!estimate || serverFailed)) {
     const failure = serverFailed
@@ -408,8 +443,9 @@ export function SingleFileCard({ section, onAdd, onReplace, onReset }: Props) {
         {failure ? (
           <AnotherFileButton onReset={onReset} />
         ) : (
-          <AddFiles onFiles={onAdd} room={MAX_SECTIONS_PER_ITEM - 1} label="افزودن فایل به همین جزوه" className="mt-4" />
+          <AddFiles id="jozve-add" variant="text" onFiles={onAdd} room={room} label="افزودن فایل به همین جزوه" className="home-add--card" />
         )}
+        {settings}
       </section>
     );
   }
@@ -427,12 +463,20 @@ export function SingleFileCard({ section, onAdd, onReplace, onReset }: Props) {
     );
   }
 
-  return <AnalysisCard section={section} serverUnavailable={estimate && uploadRefused} onAdd={onAdd} onReset={onReset} />;
+  return (
+    <AnalysisCard
+      section={section}
+      serverUnavailable={estimate && uploadRefused}
+      onAdd={onAdd}
+      room={room}
+      onReset={onReset}
+      settings={settings}
+    />
+  );
 }
 
 /** جزوهٔ تک‌فایلی که بعد از رفرش برگشت و فایلش روی سرور نرسیده بود: همان فایل، یا فایل دیگر. */
-function WaitingCard({ section, onReplace, onReset }: Omit<Props, 'onAdd'>) {
-  const input = useRef<HTMLInputElement>(null);
+function WaitingCard({ section, onPick, onReset }: Pick<Props, 'section' | 'onPick' | 'onReset'>) {
   return (
     <section data-testid="file-waiting" className="jy-card" aria-labelledby="jozve-title">
       <CardHead files={1} pages={0} />
@@ -441,27 +485,13 @@ function WaitingCard({ section, onReplace, onReset }: Omit<Props, 'onAdd'>) {
         <WaitingNote names={[section.name]} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" onClick={() => input.current?.click()} className="jy-btn jy-btn--primary">
+        <button type="button" onClick={() => onPick(section.key)} className="jy-btn jy-btn--primary">
           همان فایل را انتخاب کن
         </button>
         <button type="button" onClick={onReset} className="jy-btn jy-btn--secondary">
           فایل دیگری بینداز
         </button>
       </div>
-      <input
-        ref={input}
-        id="jozve-replace"
-        type="file"
-        accept={ACCEPT}
-        tabIndex={-1}
-        aria-hidden="true"
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = '';
-          if (file) onReplace(section.key, file);
-        }}
-      />
     </section>
   );
 }
@@ -471,8 +501,10 @@ function AnalysisCard({
   section,
   serverUnavailable,
   onAdd,
+  room,
   onReset,
-}: Omit<Props, 'onReplace'> & {
+  settings,
+}: Omit<Props, 'onPick'> & {
   /** پیش‌فاکتور Word یا عکس که سرور نمی‌تواند تأییدش کند (آپلود پذیرفته نشد). */
   serverUnavailable: boolean;
 }) {
@@ -569,7 +601,8 @@ function AnalysisCard({
         <Warnings summary={summary} program={program} fontsAdvice="همان را بینداز." />
       </div>
 
-      <AddFiles onFiles={onAdd} room={MAX_SECTIONS_PER_ITEM - 1} label="افزودن فایل به همین جزوه" className="mt-4" />
+      <AddFiles id="jozve-add" variant="text" onFiles={onAdd} room={room} label="افزودن فایل به همین جزوه" className="home-add--card" />
+      {settings}
     </section>
   );
 }

@@ -244,6 +244,12 @@
   .nw {
     white-space: nowrap;
   }
+  /* سفارش چندجزوه (برش ۸٫۲، «دو جزوهٔ جدا» در checkout.html): هر جزوه فایل‌ها و مشخصاتش */
+  .ck-jozves > li + li {
+    margin-block-start: 10px;
+    padding-block-start: 10px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
   .ck-files {
     display: flex;
     flex-direction: column;

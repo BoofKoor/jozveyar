@@ -158,3 +158,61 @@ export function SummaryLines({
     </dl>
   );
 }
+
+/** «سیاه‌سفید، دورو، طلق و سیم»؛ کاغذ فقط وقتی جز کاغذ پیش‌فرض است (طرح میز، سؤال ۲۲۵). */
+export function jozveSpecLabel(
+  colorMode: keyof typeof COLOR,
+  sidesMode: keyof typeof SIDES,
+  bindingName: string,
+  paperName: string | null = null,
+): string {
+  return [printLabel(colorMode, sidesMode), paperName, bindingName].filter(Boolean).join('، ');
+}
+
+/** یک جزوه در خلاصهٔ سفارش چندجزوه (برش ۸٫۲). */
+export interface JozveLine {
+  /** شمارهٔ جزوه در سفارش، از ۱؛ جزوه‌ای که هنوز قیمت ندارد در خلاصه نیست، پس شماره از ترتیب ردیف‌ها نمی‌آید. */
+  n: number;
+  /** «سیاه‌سفید، دورو، طلق و سیم» (`jozveSpecLabel`). */
+  spec: string;
+  pageCount: number;
+  copies: number;
+  /** قیمت همین جزوه، همهٔ نسخه‌ها؛ از همان ریز قیمت سفارش. */
+  totalRials: number;
+}
+
+/**
+ * خلاصهٔ سفارش چندجزوه (سؤال ۲۲۵): یک ردیف برای هر جزوه، «جزوهٔ 2» و زیرش مشخصات، صفحه و نسخه اگر بیش از یکی، با قیمت همان
+ * جزوه؛ بعد از شهر ردیف ارسال. همان ریز قیمت سرور، بی حساب تازه (قاعدهٔ ۱).
+ */
+export function JozveLines({ jozves, shipping }: { jozves: readonly JozveLine[]; shipping?: { label: string; rials: number } | null }) {
+  return (
+    <dl className="home-sum__lines home-sum__lines--jozves">
+      {jozves.map((jozve) => (
+        <div key={jozve.n} data-testid="summary-jozve">
+          <dt>
+            <b className="home-sum__name">
+              جزوهٔ <span className="num">{formatNumber(jozve.n)}</span>
+            </b>
+            <span className="home-sum__spec">
+              {jozve.spec} · <span className="num">{formatNumber(jozve.pageCount)}</span> صفحه
+              {jozve.copies > 1 ? (
+                <>
+                  {' · '}
+                  <span className="num">{formatNumber(jozve.copies)}</span> نسخه
+                </>
+              ) : null}
+            </span>
+          </dt>
+          <dd className="num">{formatTomans(jozve.totalRials, false)}</dd>
+        </div>
+      ))}
+      {shipping ? (
+        <div data-testid="summary-shipping">
+          <dt>{shipping.label}</dt>
+          <dd className="num">{formatTomans(shipping.rials, false)}</dd>
+        </div>
+      ) : null}
+    </dl>
+  );
+}
