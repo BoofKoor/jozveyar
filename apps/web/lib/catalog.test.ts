@@ -66,12 +66,25 @@ const CONFIG: OrderConfig = {
 };
 
 describe('گزینه‌های هر اندازه', () => {
-  it('کاغذ و صحافی فقط روشن و با نرخ یا بازهٔ همان اندازه، به ترتیب تعرفه؛ صحافی‌ای که به جزوه نمی‌خورد هم (کاشی خاموش)', () => {
+  it('کاغذ و صحافی فقط روشن و با نرخ یا بازهٔ همان اندازه؛ صحافی‌ای که به جزوه نمی‌خورد هم (کاشی خاموش)', () => {
     expect(papersFor(LIST, 'a4').map(([id]) => id)).toEqual(['tahrir80', 'glossy']);
     expect(papersFor(LIST, 'a5').map(([id]) => id)).toEqual(['tahrir80']);
     expect(bindingsFor(LIST, 'a4').map(([id]) => id)).toEqual(['staple', 'spiral_clear', 'glue']);
     expect(bindingsFor(LIST, 'a5').map(([id]) => id)).toEqual(['staple', 'spiral_clear']);
     expect(bindingsFor(SEED_PRICE_LIST, 'a4').map(([id]) => id)).toEqual(['spiral_clear']);
+  });
+
+  it('ارزان‌تر اول، هر ترتیبی که تعرفه دارد (پیش‌فرض اول، گزینهٔ تازه آخر)؛ هم‌قیمت به ترتیب تعرفه', () => {
+    const { tahrir80, glossy } = LIST.paperTypes;
+    const { staple, spiral_clear, glue } = LIST.bindingTypes;
+    const added: PriceList = {
+      ...LIST,
+      paperTypes: { glossy: glossy!, tahrir80: tahrir80!, thin: { nameFa: 'نازک', gsm: 60, enabled: true, sheetRates: { a4: 0 } } },
+      bindingTypes: { spiral_clear: spiral_clear!, glue: glue!, staple: staple!, none: { ...staple!, nameFa: 'بی صحافی', bands: { a4: [{ minSheets: 1, maxSheets: 50, priceRials: 0 }] } } },
+    };
+    expect(papersFor(added, 'a4').map(([id]) => id)).toEqual(['tahrir80', 'thin', 'glossy']);
+    expect(bindingsFor(added, 'a4').map(([id]) => id)).toEqual(['none', 'staple', 'spiral_clear', 'glue']);
+    expect(bindingsFor(added, 'a5').map(([id]) => id)).toEqual(['staple', 'spiral_clear']);
   });
 });
 

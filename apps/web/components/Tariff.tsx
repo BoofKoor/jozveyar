@@ -69,7 +69,10 @@ function lowest(values: readonly number[]): { rials: number; varies: boolean } {
   return { rials, varies: values.some((value) => value !== rials) };
 }
 
-/** «گلاسه هر برگ 1,500 تومان بیشتر»، «منگنه (تا 50 برگ) از 8,000»: کاغذها و صحافی‌های روشن جز پیش‌فرض. */
+/**
+ * «گلاسه هر برگ 1,500 تومان بیشتر»، «منگنه (تا 50 برگ) از 8,000»: کاغذها و صحافی‌های روشن جز پیش‌فرض؛ ارزان‌تر اول، مثل کاشی‌های
+ * میز (`papersFor` و `bindingsFor`).
+ */
 function others<T extends { nameFa: string; enabled: boolean }>(table: Readonly<Record<string, T>>, skip: string) {
   return Object.entries(table).filter(([id, row]) => id !== skip && row.enabled);
 }
@@ -92,14 +95,18 @@ export function Tariff({ priceList: list }: { priceList: PriceList }) {
       single: list.printRates[size]!.single[color],
     })),
   );
-  const papers = others(list.paperTypes, DEFAULT_PAPER_TYPE_ID).flatMap(([id, row]) => {
-    const rates = Object.values(row.sheetRates);
-    return rates.length > 0 ? [{ id, nameFa: row.nameFa, ...lowest(rates) }] : [];
-  });
-  const bindings = others(list.bindingTypes, DEFAULT_BINDING_TYPE_ID).flatMap(([id, row]) => {
-    const prices = Object.values(row.bands).flatMap((sized) => sized.map((band) => band.priceRials));
-    return prices.length > 0 ? [{ id, row, ...lowest(prices) }] : [];
-  });
+  const papers = others(list.paperTypes, DEFAULT_PAPER_TYPE_ID)
+    .flatMap(([id, row]) => {
+      const rates = sizes.flatMap((size) => (row.sheetRates[size] === undefined ? [] : [row.sheetRates[size]!]));
+      return rates.length > 0 ? [{ id, nameFa: row.nameFa, ...lowest(rates) }] : [];
+    })
+    .sort((a, b) => a.rials - b.rials);
+  const bindings = others(list.bindingTypes, DEFAULT_BINDING_TYPE_ID)
+    .flatMap(([id, row]) => {
+      const prices = sizes.flatMap((size) => (row.bands[size] ?? []).map((band) => band.priceRials));
+      return prices.length > 0 ? [{ id, row, ...lowest(prices) }] : [];
+    })
+    .sort((a, b) => a.rials - b.rials);
   return (
     <section id="tariff" className="home-sec" aria-labelledby="tariff-title">
       <h2 id="tariff-title" className="home-sec__title">

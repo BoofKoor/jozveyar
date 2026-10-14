@@ -30,14 +30,29 @@ export function bindingOffered(binding: BindingType | undefined, size: PaperSize
   return binding !== undefined && binding.enabled && (binding.bands[size]?.length ?? 0) > 0;
 }
 
-/** کاغذهای این اندازه، به ترتیب تعرفه. */
-export function papersFor(list: PriceList, size: PaperSize): [string, PaperType][] {
-  return Object.entries(list.paperTypes).filter(([, paper]) => paperOffered(paper, size));
+/** کمترین قیمت یک جلد این صحافی در این اندازه. */
+export function bindingEntryRials(binding: BindingType, size: PaperSize): number {
+  return Math.min(...(binding.bands[size] ?? []).map((band) => band.priceRials));
 }
 
-/** صحافی‌های این اندازه، به ترتیب تعرفه، آنها که به جزوه نمی‌خورند هم (کاشی خاموش با دلیل). */
+/**
+ * کاغذهای این اندازه، ارزان‌تر اول (طرح میز، قدم ۱۱: «تحریر»، بعد «گلاسه»)، هم‌نرخ به ترتیب تعرفه؛ پس کاشی‌ها با کاغذی که
+ * مالک بعداً می‌افزاید جای منطقی‌شان را دارند، و با صفحهٔ جزوه جابه‌جا نمی‌شوند.
+ */
+export function papersFor(list: PriceList, size: PaperSize): [string, PaperType][] {
+  return Object.entries(list.paperTypes)
+    .filter(([, paper]) => paperOffered(paper, size))
+    .sort(([, a], [, b]) => a.sheetRates[size]! - b.sheetRates[size]!);
+}
+
+/**
+ * صحافی‌های این اندازه، ارزان‌ترین جلد اول (طرح میز: «بی صحافی»، «منگنه»، «طلق و سیم»، «چسب گرم»)، هم‌قیمت به ترتیب تعرفه؛
+ * آنها که به جزوه نمی‌خورند هم (کاشی خاموش با دلیل).
+ */
 export function bindingsFor(list: PriceList, size: PaperSize): [string, BindingType][] {
-  return Object.entries(list.bindingTypes).filter(([, binding]) => bindingOffered(binding, size));
+  return Object.entries(list.bindingTypes)
+    .filter(([, binding]) => bindingOffered(binding, size))
+    .sort(([, a], [, b]) => bindingEntryRials(a, size) - bindingEntryRials(b, size));
 }
 
 /** انتخابی که جایش را به پیش‌فرض همان ردیف داد، و چرا. */

@@ -125,6 +125,10 @@ describe('سنجش', () => {
       checkout: CHECKOUT,
     });
     expect(parseDraft(raw({ ...DRAFT_V1, config: { ...CONFIG, colorMode: 'mixed' } }))?.layout.jozves).toEqual([{ files: 3, config: null }]);
+    // پیش از ۸٫۳ تنظیم اندازه نداشت و همه A4 بود؛ اندازهٔ ناشناس یعنی تنظیم پیش‌فرض، نه حدس.
+    const { paperSize: _size, ...before83 } = CONFIG;
+    expect(parseDraft(raw({ ...DRAFT_V1, config: before83 }))?.layout.jozves).toEqual([{ files: 3, config: { ...CONFIG, paperSize: 'a4' } }]);
+    expect(parseDraft(raw({ ...DRAFT_V1, config: { ...CONFIG, paperSize: 'b5' } }))?.layout.jozves).toEqual([{ files: 3, config: null }]);
     const layout = (value: unknown) => parseDraft(raw({ ...DRAFT, layout: value }))!.layout;
     expect(layout(DRAFT.layout)).toEqual(DRAFT.layout);
     expect(layout({ ...DRAFT.layout, asking: true }).asking).toBe(true);

@@ -401,8 +401,8 @@ test('دو جزوه: هر کدام تنظیمات خودش، قیمت سرور �
   const recap = page.getByTestId('recap-jozve');
   await expect(recap.locator('dt')).toHaveText('جزوه‌ها');
   await expect(recap.getByTestId('recap-jozves-item')).toHaveText([
-    'جزوهٔ 11image-scan-6.pdf6 صفحه6 صفحه · سیاه‌سفید، دورو · طلق و سیم · 1 نسخه',
-    'جزوهٔ 21plain-bw-10.pdf10 صفحه10 صفحه · سیاه‌سفید، دورو · طلق و سیم · 2 نسخه',
+    'جزوهٔ 11image-scan-6.pdf6 صفحه6 صفحه · سیاه‌سفید، دورو، A4 · طلق و سیم · 1 نسخه',
+    'جزوهٔ 21plain-bw-10.pdf10 صفحه10 صفحه · سیاه‌سفید، دورو، A4 · طلق و سیم · 2 نسخه',
   ]);
   await expect(page.locator('.ck-sum-jozve .ck-file__name').first()).toHaveText('2 جزوه، 2 فایل');
   await expect(page.getByTestId('summary-jozve')).toHaveCount(2);

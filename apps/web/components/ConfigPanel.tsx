@@ -7,6 +7,7 @@ import { PAPER_SIZES, bandPriceRials, bindingMisfit, offeredSizes, sheetsOf, vol
 import { bindingsFor, papersFor, type Replacement } from '../lib/catalog';
 import type { Sentence } from '../lib/fileCard';
 import type { OrderConfig } from '../lib/orderConfig';
+import { Inline } from './Inline';
 
 /** قیمت سفارش و برگ‌های همین جزوه با یک انتخاب، از همان `quote()` قیمت اصلی (`OrderDesk`). */
 export interface ConfigQuote {
@@ -41,7 +42,8 @@ interface Props {
 
 interface Option<T extends string> {
   value: T;
-  title: string;
+  /** نام کاغذ و صحافی از تعرفه با `Inline` (رقم لاتین، «تحریر 80 گرم»، مثل صفحهٔ اصلی). */
+  title: ReactNode;
   note?: ReactNode;
   disabled?: boolean;
 }
@@ -178,10 +180,12 @@ function ReplacedHint({ replacement, priceList, sheets }: { replacement: Replace
     const to = priceList.paperTypes[replacement.to]?.nameFa ?? '';
     text = from?.enabled ? (
       <>
-        کاغذ «{from.nameFa}» در این اندازه نیست؛ کاغذ این جزوه «{to}» شد.
+        کاغذ «<Inline text={from.nameFa} />» در این اندازه نیست؛ کاغذ این جزوه «<Inline text={to} />» شد.
       </>
     ) : (
-      <>کاغذ پیشین این جزوه دیگر نیست؛ «{to}» جایش آمد.</>
+      <>
+        کاغذ پیشین این جزوه دیگر نیست؛ «<Inline text={to} />» جایش آمد.
+      </>
     );
   } else {
     const from = priceList.bindingTypes[replacement.from];
@@ -190,14 +194,16 @@ function ReplacedHint({ replacement, priceList, sheets }: { replacement: Replace
     text =
       from && misfit?.reason === 'size' ? (
         <>
-          صحافی «{from.nameFa}» در این اندازه نیست؛ صحافی این جزوه «{to}» شد.
+          صحافی «<Inline text={from.nameFa} />» در این اندازه نیست؛ صحافی این جزوه «<Inline text={to} />» شد.
         </>
       ) : from && misfit ? (
         <>
-          «{from.nameFa}» {misfitNote(misfit, sheets)}؛ صحافی‌اش «{to}» شد.
+          «<Inline text={from.nameFa} />» {misfitNote(misfit, sheets)}؛ صحافی‌اش «<Inline text={to} />» شد.
         </>
       ) : (
-        <>صحافی پیشین این جزوه دیگر نیست؛ «{to}» جایش آمد.</>
+        <>
+          صحافی پیشین این جزوه دیگر نیست؛ «<Inline text={to} />» جایش آمد.
+        </>
       );
   }
   return (
@@ -324,7 +330,11 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
           value={effective.paperTypeId}
           onSelect={(value) => set('paperTypeId', value)}
           effectOf={effectOf('paperTypeId')}
-          options={papers.map(([id, paper]) => ({ value: id, title: paper.nameFa, note: perUnit(paper.sheetRates[size] ?? 0, 'برگ') }))}
+          options={papers.map(([id, paper]) => ({
+            value: id,
+            title: <Inline text={paper.nameFa} />,
+            note: perUnit(paper.sheetRates[size] ?? 0, 'برگ'),
+          }))}
         >
           {hint('paperTypeId')}
         </Tiles>
@@ -344,7 +354,7 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
             const perVolume = bandPriceRials(volumesOf(binding, jozveSheets)[0] ?? 0, binding.bands[size] ?? []);
             return {
               value: id,
-              title: binding.nameFa,
+              title: <Inline text={binding.nameFa} />,
               note: misfit ? misfitNote(misfit, jozveSheets) : perVolume === null ? null : perUnit(perVolume, 'جلد'),
               disabled: misfit !== null,
             };
@@ -358,7 +368,7 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
           <p className="home-field__label">صحافی</p>
           <p className="home-row__value">
             <span className="jy-icon jy-icon-binding" aria-hidden="true" />
-            {priceList.bindingTypes[effective.bindingTypeId]?.nameFa}
+            <Inline text={priceList.bindingTypes[effective.bindingTypeId]?.nameFa ?? ''} />
           </p>
           {hint('bindingTypeId')}
         </div>

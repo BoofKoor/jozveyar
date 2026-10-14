@@ -583,6 +583,9 @@ describe('صحافی‌ها: کمینه، سقف، چند جلد یا «نمی�
     const thick: BindingType = { ...glue, minSheets: 300 };
     // همان ۴۱۰ با کمینهٔ ۳۰۰: جلدهای ۲۰۵ برگی نازک‌ترند.
     expect(bindingMisfit(thick, 'a4', 410)).toEqual({ reason: 'min', minSheets: 300 });
+    // ۴۱۱ برگ دو جلد ۲۰۶ و ۲۰۵ است: کمینهٔ ۲۰۶ را جلد اول دارد و دومی نه.
+    expect(bindingMisfit({ ...glue, minSheets: 206 }, 'a4', 411)).toEqual({ reason: 'min', minSheets: 206 });
+    expect(bindingMisfit({ ...glue, minSheets: 205 }, 'a4', 411)).toBeNull();
     const b = quote(spec({ pageCount: 10, bindingTypeId: 'glue', sidesMode: 'single' }), CATALOG);
     expect(b.warnings).toContain('binding_does_not_fit');
   });
