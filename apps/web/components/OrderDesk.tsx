@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
@@ -316,13 +316,22 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     [jozves, priceList],
   );
 
-  /** پرسش چیدمان (۲۱۵، ۲۱۶): حالت امروز، و قیمت حالت دیگر منهای قیمت امروز. */
+  /*
+   * پرسش چیدمان (۲۱۵، ۲۱۶): حالت امروز، و قیمت حالت دیگر منهای قیمت امروز. هر دو در راه اولین قیمت جزوهٔ چندفایلی‌اند، پس:
+   * کارت پرسش در رسم کم‌اولویت بعدی می‌آید، نه در اولین رسم رابط (که راه‌اندازی کارگر تحلیل رشتهٔ اصلی بیکار می‌خواهد؛
+   * docs/UI.md، ۴ب)؛ و قیمت حالت دیگر فقط وقتی عوض می‌شود که صفحه‌های شمرده یا تنظیمات عوض شوند، نه با هر صفحه‌ای که
+   * بررسی رنگش تمام شد. سنجش در docs/UI.md، «۸٫۲».
+   */
   const asked = synced.asking ? arrangement(synced) : null;
+  const askShown = useDeferredValue(asked, null);
+  const askKey =
+    asked && breakdown ? JSON.stringify([asked, jozves.map((j) => [j.config, j.view.included.map((s) => [s.key, s.pageCount])])]) : null;
   const askDelta = useMemo(() => {
     if (!asked || !breakdown) return null;
     const other = priceOf(jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey), priceList);
     return other ? other.breakdown.totalWithoutShippingRials - breakdown.totalWithoutShippingRials : null;
-  }, [asked, breakdown, synced, byKey, priceList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- فقط صفحه‌های شمرده و تنظیمات؛ همان که `quote()` می‌خواند
+  }, [askKey]);
 
   /*
    * ── تنظیمات باز (۲۱۷) ──
@@ -707,7 +716,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       <FlowNav current={1} />
 
       <div className="home-desk">
-        {asked ? <AskCard files={sections.length} arrangement={asked} onArrange={arrangeAs} deltaRials={askDelta} /> : null}
+        {asked && askShown ? <AskCard files={sections.length} arrangement={asked} onArrange={arrangeAs} deltaRials={askDelta} /> : null}
         {jozves.map((j, index) => {
           const item = priced?.items[index] ?? null;
           const settings = item ? (
