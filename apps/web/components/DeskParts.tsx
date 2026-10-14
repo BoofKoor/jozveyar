@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { formatNumber } from '@jozveyar/text';
 import type { Arrangement } from '../lib/layout';
@@ -16,7 +16,7 @@ import { PriceDelta } from './ConfigPanel';
  * پرسش چیدمان بالای میز (۲۱۵، ۲۱۶): «همه یک جزوه، یک صحافی» از پیش انتخاب‌شده، و قیمت بی کلیک روی صفحه؛ گزینهٔ دیگر اثرش
  * را روی قیمت دارد. تا وقتی چیدمان یکی از همین دوتاست می‌ماند (`lib/layout.ts`).
  */
-export function AskCard({
+function AskCard({
   files,
   arrangement,
   onArrange,
@@ -85,6 +85,38 @@ export function AskCard({
   );
 }
 
+interface AskProps {
+  files: number;
+  arrangement: Arrangement;
+  /** پایدار (`useCallback`)، تا کارت با هر صفحه‌ای که کارگر تحلیل می‌رساند دوباره رسم نشود. */
+  onArrange: (to: Arrangement) => void;
+  /**
+   * هر چه قیمت چیدمان دیگر به آن بند است (صفحه‌های شمرده و تنظیمات هر جزوه)؛ null تا وقتی هنوز صفحه‌ای شمرده نشده. همین
+   * عوض شود، `deltaOf` دوباره حساب می‌شود؛ نه با هر رسم میز.
+   */
+  deltaKey: string | null;
+  /** قیمت سفارش با چیدمان دیگر، منهای قیمت امروز. */
+  deltaOf: () => number | null;
+}
+
+/**
+ * پرسش چیدمان در رسم کم‌اولویت بعدی، نه در اولین رسم میز: آن رسم در راه اولین قیمت است و راه‌اندازی کارگر تحلیل رشتهٔ
+ * اصلی بیکار می‌خواهد (docs/UI.md، ۴ب). تأخیر در خود همین تکه است، پس فقط همین دوباره رسم می‌شود، نه کل میز؛ و جزوهٔ
+ * تک‌فایلی اصلاً سوارش نمی‌کند. سنجش در docs/UI.md، «۸٫۲».
+ */
+export const AskLater = memo(
+  function AskLater({ deltaKey, deltaOf, ...props }: AskProps) {
+    const shown = useDeferredValue(true, false);
+    const deltaRials = useMemo(
+      () => (shown && deltaKey !== null ? deltaOf() : null),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `deltaKey` همهٔ چیزی است که `deltaOf` می‌خواند
+      [shown, deltaKey],
+    );
+    return shown ? <AskCard {...props} deltaRials={deltaRials} /> : null;
+  },
+  (a, b) => a.files === b.files && a.arrangement === b.arrangement && a.onArrange === b.onArrange && a.deltaKey === b.deltaKey,
+);
+
 /** یک کار منوی ردیف: «یکی بالاتر»، «به جزوهٔ 2» با نام فایل اولش، «جزوهٔ تازه با همین فایل». */
 export interface MenuItem {
   label: ReactNode;
@@ -97,10 +129,11 @@ export interface MenuItem {
 
 /**
  * منوی «جابه‌جایی» ردیف فایل (۲۱۸): یک دکمه با آیکون `chevron` کیت به جای دو دکمهٔ بالا و پایین، چون چهار دکمه در ردیفی ۳۲۰
- * پیکسلی جا نمی‌شود و بردن به جزوهٔ دیگر فهرست لازم دارد. بی کار، بی منو. با کلیک بیرون، Esc یا رفتن فوکوس بسته می‌شود؛
- * کلیدهای بالا و پایین میان کارها می‌روند.
+ * پیکسلی جا نمی‌شود و بردن به جزوهٔ دیگر فهرست لازم دارد. کارها فقط وقتی منو باز است ساخته می‌شوند، نه با هر رسم میز؛ هر ردیف
+ * کارت جزوه دست‌کم یک کار دارد (`OrderDesk`). با کلیک بیرون، Esc یا رفتن فوکوس بسته می‌شود؛ کلیدهای بالا و پایین میان کارها
+ * می‌روند.
  */
-export function RowMenu({ name, items }: { name: string; items: readonly MenuItem[] }) {
+export function RowMenu({ name, items }: { name: string; items: () => readonly MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -116,8 +149,8 @@ export function RowMenu({ name, items }: { name: string; items: readonly MenuIte
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
 
-  if (items.length === 0) return null;
   const label = `جابه‌جایی «${name}»`;
+  const list = open ? items() : null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -160,9 +193,9 @@ export function RowMenu({ name, items }: { name: string; items: readonly MenuIte
       >
         <span className="jy-icon jy-icon-chevron" aria-hidden="true" />
       </button>
-      {open ? (
+      {list ? (
         <div id={id} role="menu" aria-label={label} className="home-menu__list" onKeyDown={onKeyDown}>
-          {items.map((item, i) => (
+          {list.map((item, i) => (
             <Fragment key={i}>
               {item.divided ? <hr role="separator" /> : null}
               <button

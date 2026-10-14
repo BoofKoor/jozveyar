@@ -185,8 +185,21 @@ export interface JozveView {
   };
 }
 
+/**
+ * نمای هر فایل، یک بار برای هر شکل فایل: صف هر فایلی را که عوض می‌شود از نو می‌سازد و بقیه را دست نمی‌زند
+ * (`jozveController.ts`)، پس با هر صفحه‌ای که کارگر تحلیل می‌رساند فقط نمای همان یک فایل دوباره حساب می‌شود، نه همهٔ
+ * فایل‌های سفارش؛ و قیمت چیدمان دیگرِ پرسش (برش ۸٫۲) نماها را از نو نمی‌سازد.
+ */
+const sectionViews = new WeakMap<Section, SectionView>();
+
+function viewOf(section: Section): SectionView {
+  let view = sectionViews.get(section);
+  if (!view) sectionViews.set(section, (view = sectionView(section)));
+  return view;
+}
+
 export function jozveView(sections: readonly Section[]): JozveView {
-  const views = sections.map(sectionView);
+  const views = sections.map(viewOf);
   const included = views.filter((v) => v.blocked === null && v.pageCount > 0);
   const sizes = new Map<string, number>();
   for (const v of included) {

@@ -6,7 +6,8 @@ import type { Breakdown, PriceList } from '@jozveyar/contracts';
 import { publishDockHeight } from '../lib/dock';
 import type { OrderConfig } from '../lib/orderConfig';
 import { Names, Note } from './AnalysisCard';
-import { JozveLines, SumValue, SummaryLines, printLabel, type JozveLine } from './checkout/parts';
+import { JozveLines, SummaryLines, printLabel, type JozveLine } from './checkout/parts';
+import { SumValue } from './checkout/sum';
 
 /**
  * «ادامه»ی قدم «جزوه و قیمت»، از دید خلاصه و نوار موبایل (`OrderDesk` حسابش می‌کند):

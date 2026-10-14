@@ -47,6 +47,14 @@ describe('orderGate', () => {
       kind: 'sending',
     });
     expect(orderGate([{ view: view(section('a')), config }, { view: view(failed), config }])).toEqual({ kind: 'stuck', sections: [failed] });
+    // فایل خوانده‌نشده یا منتظر در جزوهٔ دوم هم «ادامه» را می‌بندد، نه فقط در جزوهٔ اول
+    const second = view(section('c'));
+    expect(orderGate([{ view: view(section('a')), config }, { view: { ...second, blocked: [section('x', { serverReady: false })] }, config }])).toEqual({
+      kind: 'blocked',
+    });
+    expect(
+      orderGate([{ view: view(section('a')), config }, { view: { ...second, waiting: [section('y', { serverReady: false, documentId: null })] }, config }]),
+    ).toEqual({ kind: 'waiting' });
     expect(orderGate([{ view: view(section('a')), config }, { view: view(), config }])).toEqual({ kind: 'sending' });
     expect(orderGate([])).toEqual({ kind: 'sending' });
   });

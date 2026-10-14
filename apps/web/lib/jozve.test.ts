@@ -135,6 +135,21 @@ describe('جمع جزوه', () => {
     expect(orderSpec([{ view: jozveView([queued('a.pdf')]), config: CONFIG }])).toBeNull();
     expect(orderSpec([])).toBeNull();
   });
+
+  it('نمای هر فایل یک بار برای هر شکل فایل: فایلی که عوض نشد همان نما، و شکل تازهٔ همان فایل نمای تازه (۸٫۲)', () => {
+    const a = queued('a.pdf', 12);
+    const b = queued('b.pdf');
+    const before = jozveView([a, b]);
+    // صف فقط فایلی را که عوض شد از نو می‌سازد؛ کلید همان است
+    const counted = { ...b, analysis: { ...b.analysis, pageCount: 8 } };
+    const after = jozveView([a, counted]);
+    expect(after.sections[0]).toBe(before.sections[0]);
+    expect(after.sections[1]).not.toBe(before.sections[1]);
+    expect(after.sections[1]!.pageCount).toBe(8);
+    expect(after.pageCount).toBe(20);
+    // همان فایل در جزوهٔ دیگر (قیمت چیدمان دیگرِ پرسش): همان نما
+    expect(jozveView([counted]).sections[0]).toBe(after.sections[1]);
+  });
 });
 
 describe('نوبت کارگر تحلیل', () => {

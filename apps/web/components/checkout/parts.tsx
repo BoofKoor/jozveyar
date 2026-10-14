@@ -6,25 +6,8 @@ import { formatNumber, formatTomans } from '@jozveyar/text';
  * تکه‌های مشترک «جزوه و قیمت» و مسیر خرید (طرح `docs/ui/mockups/checkout.html`، چیدمان در app/checkout.css):
  * قدم‌های سفارش، جمع و ریز قیمت. نه hook دارند و نه API مرورگر، پس هم رابط پس از فایل (کلاینت) آنها را می‌گیرد و
  * هم صفحهٔ سفارش (کامپوننت سرور). تکه‌های مرور جدا در `recap.tsx`اند: این فایل در راه اولین قیمت است و هر خط
- * اضافه‌اش آنجا تجزیه و اجرا می‌شود. رنگ فقط توکن، و `.num` فقط روی خود عدد.
+ * اضافه‌اش آنجا تجزیه و اجرا می‌شود. عدد تومان و جمع درشت در `sum.tsx`اند. رنگ فقط توکن، و `.num` فقط روی خود عدد.
  */
-
-/** «374,750» در span خودش؛ «تومان» بیرون. */
-export function Tomans({ rials }: { rials: number }) {
-  return <span className="num">{formatTomans(rials, false)}</span>;
-}
-
-/** جمع درشت خلاصه و نوار: «374,750» و «تومان» کوچک کنارش. */
-export function SumValue({ rials, testId }: { rials: number | null; testId?: string }) {
-  return (
-    <span className="home-sum__value">
-      <span data-testid={testId} className="num">
-        {rials === null ? '…' : formatTomans(rials, false)}
-      </span>
-      <small>تومان</small>
-    </span>
-  );
-}
 
 const COLOR = { color: 'رنگی', bw: 'سیاه‌سفید', mixed: 'رنگی و سیاه‌سفید' } as const;
 const SIDES = { double: 'دورو', single: 'یکرو' } as const;

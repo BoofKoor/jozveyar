@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
@@ -16,7 +16,7 @@ import type { Section } from '../lib/jozve';
 import type { RestoredSection } from '../lib/jozveController';
 import { RESTORING_ATTR } from '../lib/draftKey';
 import { colorHint } from '../lib/fileCard';
-import { jozveView, matchAwaited, orderSpec, type JozvePart, type SectionView } from '../lib/jozveView';
+import { jozveView, matchAwaited, orderSpec, type JozvePart } from '../lib/jozveView';
 import {
   arrange,
   arrangement,
@@ -37,7 +37,7 @@ import { pageTariff } from '../lib/tariff';
 import type { JozveHandle } from '../lib/useJozve';
 import { Names, Note, SingleFileCard, jozveTitleId } from './AnalysisCard';
 import { ConfigPanel, type ConfigQuote } from './ConfigPanel';
-import { AskCard, JozveSettings, NewJozve, OverflowNote, type MenuItem } from './DeskParts';
+import { AskLater, JozveSettings, NewJozve, OverflowNote, type MenuItem } from './DeskParts';
 import { ACCEPT } from './DropZone';
 import { JozveFiles } from './JozveFiles';
 import { OrderSummary, PriceDock, type DeskAction } from './OrderSummary';
@@ -317,21 +317,18 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   );
 
   /*
-   * پرسش چیدمان (۲۱۵، ۲۱۶): حالت امروز، و قیمت حالت دیگر منهای قیمت امروز. هر دو در راه اولین قیمت جزوهٔ چندفایلی‌اند، پس:
-   * کارت پرسش در رسم کم‌اولویت بعدی می‌آید، نه در اولین رسم رابط (که راه‌اندازی کارگر تحلیل رشتهٔ اصلی بیکار می‌خواهد؛
-   * docs/UI.md، ۴ب)؛ و قیمت حالت دیگر فقط وقتی عوض می‌شود که صفحه‌های شمرده یا تنظیمات عوض شوند، نه با هر صفحه‌ای که
-   * بررسی رنگش تمام شد. سنجش در docs/UI.md، «۸٫۲».
+   * پرسش چیدمان (۲۱۵، ۲۱۶): حالت امروز، و قیمت حالت دیگر منهای قیمت امروز. هر دو در راه اولین قیمت جزوهٔ چندفایلی‌اند، پس
+   * کارت پرسش در رسم کم‌اولویت بعدی می‌آید (`AskLater`)، و قیمت حالت دیگر فقط وقتی دوباره حساب می‌شود که صفحه‌های شمرده یا
+   * تنظیمات عوض شوند (`askKey`)، نه با هر صفحه‌ای که بررسی رنگش تمام شد.
    */
   const asked = synced.asking ? arrangement(synced) : null;
-  const askShown = useDeferredValue(asked, null);
   const askKey =
     asked && breakdown ? JSON.stringify([asked, jozves.map((j) => [j.config, j.view.included.map((s) => [s.key, s.pageCount])])]) : null;
-  const askDelta = useMemo(() => {
+  const askDelta = () => {
     if (!asked || !breakdown) return null;
     const other = priceOf(jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey), priceList);
     return other ? other.breakdown.totalWithoutShippingRials - breakdown.totalWithoutShippingRials : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- فقط صفحه‌های شمرده و تنظیمات؛ همان که `quote()` می‌خواند
-  }, [askKey]);
+  };
 
   /*
    * ── تنظیمات باز (۲۱۷) ──
@@ -457,32 +454,42 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   /** یک فایل‌گزین برای «جایگزین کن» و «همان فایل را انتخاب کن» همهٔ کارت‌ها، تا شناسه‌اش در صفحه یکتا بماند. */
   const replaceInput = useRef<HTMLInputElement>(null);
   const replaceTarget = useRef<string | null>(null);
-  const pick = (key: string) => {
+  const pick = useCallback((key: string) => {
     replaceTarget.current = key;
     replaceInput.current?.click();
-  };
-  const arrangeAs = (to: Arrangement) => {
-    setOpen(null);
-    update((current) => arrange(current, to));
-  };
+  }, []);
+  const arrangeAs = useCallback(
+    (to: Arrangement) => {
+      setOpen(null);
+      update((current) => arrange(current, to));
+    },
+    [update],
+  );
   const configureAt = (index: number, next: OrderConfig) => {
     update((current) => configure(current, jozves[index]!.slot.key, next));
     // جزوهٔ اول: پوسته هم نگهش می‌دارد، تا با «از اول» نرود.
     if (index === 0) onConfig(next);
   };
 
-  /** کارهای منوی ردیف (۲۱۸): درون همان جزوه، به جزوه‌های دیگر با نام فایل اولشان، و جزوهٔ تازه؛ بی کار، بی منو. */
-  const menuFor =
-    (index: number) =>
-    (section: SectionView, row: number): MenuItem[] => {
-      const own = jozves[index]!;
+  /**
+   * کارهای منوی ردیف (۲۱۸)، وقتی منو باز می‌شود: درون همان جزوه، به جزوه‌های دیگر با نام فایل اولشان، و جزوهٔ تازه. از چیدمان
+   * همین حالا (`latest`)، نه از رسمی که ردیف با آن کشیده شد: ردیف فقط وقتی دوباره رسم می‌شود که فایل خودش عوض شود
+   * (`JozveFiles`). ردیف کارت جزوه همیشه دست‌کم یک کار دارد: چند فایل در جزوه یعنی بالا یا پایین، و چند جزوه یعنی جزوهٔ دیگر.
+   */
+  const menuOf = useCallback(
+    (key: string): MenuItem[] => {
+      const { layout, sections } = latest.current;
+      const index = layout.jozves.findIndex((j) => j.sections.includes(key));
+      const own = layout.jozves[index];
+      if (!own) return [];
+      const row = own.sections.indexOf(key);
       const items: MenuItem[] = [];
-      if (row > 0) items.push({ label: 'یکی بالاتر', onSelect: () => update((current) => moveWithin(current, section.key, -1)) });
-      if (row < own.view.sections.length - 1) {
-        items.push({ label: 'یکی پایین‌تر', onSelect: () => update((current) => moveWithin(current, section.key, 1)) });
+      if (row > 0) items.push({ label: 'یکی بالاتر', onSelect: () => update((current) => moveWithin(current, key, -1)) });
+      if (row < own.sections.length - 1) {
+        items.push({ label: 'یکی پایین‌تر', onSelect: () => update((current) => moveWithin(current, key, 1)) });
       }
       const within = items.length;
-      jozves.forEach((other, i) => {
+      layout.jozves.forEach((other, i) => {
         if (i === index) return;
         items.push({
           label: (
@@ -490,27 +497,29 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
               به جزوهٔ <span className="num">{formatNumber(i + 1)}</span>
             </>
           ),
-          detail: other.view.sections[0]?.name,
+          detail: sections.find((section) => section.key === other.sections[0])?.file.name,
           divided: within > 0 && items.length === within,
           onSelect: () => {
-            focusAfter.current = section.key;
-            update((current) => moveTo(current, section.key, other.slot.key));
+            focusAfter.current = key;
+            update((current) => moveTo(current, key, other.key));
           },
         });
       });
-      if (own.view.sections.length > 1) {
+      if (own.sections.length > 1) {
         items.push({
           label: 'جزوهٔ تازه با همین فایل',
           divided: within > 0 && items.length === within,
           onSelect: () => {
-            setOpen({ key: freshKey });
-            focusAfter.current = section.key;
-            update((current) => moveTo(current, section.key, 'new'));
+            setOpen({ key: `j${layout.next}` });
+            focusAfter.current = key;
+            update((current) => moveTo(current, key, 'new'));
           },
         });
       }
       return items;
-    };
+    },
+    [update],
+  );
 
   // کاری که در راه بود (قیمت سرور پس از «ادامه») بعد از «از اول» می‌رسد: رابطی که رفت، نه قدم می‌رود و نه پیش‌نویس جزوهٔ رفته را
   // دوباره می‌نویسد.
@@ -716,7 +725,9 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       <FlowNav current={1} />
 
       <div className="home-desk">
-        {asked && askShown ? <AskCard files={sections.length} arrangement={asked} onArrange={arrangeAs} deltaRials={askDelta} /> : null}
+        {asked ? (
+          <AskLater files={sections.length} arrangement={asked} onArrange={arrangeAs} deltaKey={askKey} deltaOf={askDelta} />
+        ) : null}
         {jozves.map((j, index) => {
           const item = priced?.items[index] ?? null;
           const settings = item ? (
@@ -725,9 +736,11 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
               open={openKey === j.slot.key}
               onToggle={() => setOpen({ key: openKey === j.slot.key ? null : j.slot.key })}
               line={
-                <>
-                  {specOf(j.config)} · <span className="num">{formatNumber(j.config.copies)}</span> نسخه
-                </>
+                multi ? (
+                  <>
+                    {specOf(j.config)} · <span className="num">{formatNumber(j.config.copies)}</span> نسخه
+                  </>
+                ) : null
               }
               id={`jozve-set-${index + 1}`}
             >
@@ -764,7 +777,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
               multi={multi}
               view={j.view}
               priceRials={item?.totalRials ?? null}
-              menuFor={menuFor(index)}
+              menuOf={menuOf}
               room={room}
               onAdd={addTo(j.slot.key)}
               onRemove={jozve.remove}

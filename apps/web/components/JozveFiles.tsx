@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { formatNumber } from '@jozveyar/text';
 import type { JozveView, SectionView } from '../lib/jozveView';
 import { AddFiles } from './AddFiles';
@@ -16,8 +16,8 @@ interface Props {
   view: JozveView;
   /** قیمت همین جزوه، از همان ریز قیمت سفارش؛ null تا وقتی هنوز صفحه‌ای شمرده نشده. */
   priceRials: number | null;
-  /** کارهای منوی ردیف هر فایل (`OrderDesk`)؛ بی کار، بی منو. */
-  menuFor: (section: SectionView, index: number) => MenuItem[];
+  /** کارهای منوی ردیف هر فایل (`OrderDesk`)، وقتی منویش باز می‌شود؛ پایدار، تا ردیف بی تغییر دوباره رسم نشود. */
+  menuOf: (key: string) => MenuItem[];
   /** چند فایل دیگر در سفارش جا دارد. */
   room: number;
   onAdd: (files: File[]) => void;
@@ -35,7 +35,7 @@ interface Props {
  * هشدار زیر همان فایل می‌آید و شمارهٔ صفحهٔ **خود آن فایل** را می‌گوید: کاربر فایل خودش
  * را باز می‌کند و «صفحهٔ 3» را پیدا می‌کند؛ «صفحهٔ 51 جزوه» را در هیچ فایلی نمی‌بیند.
  */
-export function JozveFiles({ index, multi, view, priceRials, menuFor, room, onAdd, onRemove, onPick, settings }: Props) {
+export function JozveFiles({ index, multi, view, priceRials, menuOf, room, onAdd, onRemove, onPick, settings }: Props) {
   const count = view.sections.length;
 
   return (
@@ -52,7 +52,7 @@ export function JozveFiles({ index, multi, view, priceRials, menuFor, room, onAd
 
       <ol className="mt-3">
         {view.sections.map((section, i) => (
-          <SectionRow key={section.key} section={section} index={i} menu={menuFor(section, i)} onRemove={onRemove} onPick={onPick} />
+          <SectionRow key={section.key} section={section} index={i} menuOf={menuOf} onRemove={onRemove} onPick={onPick} />
         ))}
       </ol>
 
@@ -72,16 +72,20 @@ export function JozveFiles({ index, multi, view, priceRials, menuFor, room, onAd
   );
 }
 
-function SectionRow({
+/**
+ * یک ردیف فایل. فقط وقتی دوباره رسم می‌شود که خود فایل، جایش یا کارهای میز عوض شود: نمای هر فایل تا خود فایل عوض نشود همان
+ * است (`jozveView`)، پس پیام‌های کارگر تحلیل برای یک فایل ردیف‌های دیگر را از نو نمی‌کشد.
+ */
+const SectionRow = memo(function SectionRow({
   section,
   index,
-  menu,
+  menuOf,
   onRemove,
   onPick,
 }: {
   section: SectionView;
   index: number;
-  menu: MenuItem[];
+  menuOf: (key: string) => MenuItem[];
   onRemove: (key: string) => void;
   onPick: (key: string) => void;
 }) {
@@ -109,7 +113,7 @@ function SectionRow({
           ) : null}
         </div>
         <div className="-me-2.5 -mt-2 flex shrink-0">
-          <RowMenu name={name} items={menu} />
+          <RowMenu name={name} items={() => menuOf(key)} />
           <button
             type="button"
             aria-label={`«${name}» را از جزوه بردار`}
@@ -193,7 +197,7 @@ function SectionRow({
       </div>
     </li>
   );
-}
+});
 
 /**
  * این فایل الان کجای کار است، اگر هنوز قطعی نیست. تعداد صفحه و حجمش در خط اطلاعات بالای همین

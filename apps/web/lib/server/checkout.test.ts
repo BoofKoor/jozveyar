@@ -216,12 +216,14 @@ describe('مسیر خرید روی سرور', () => {
     });
 
     it('چند جزوه (۸٫۲): تا ۳۰ جزوه و ۳۰ فایل روی هم؛ هر جزوه قیمت خودش، و جمع یکی', async () => {
-      const thirty = Array.from({ length: MAX_ITEMS_PER_ORDER }, () => item([doc(10)]));
+      // عدد خود تصمیم است (سؤال ۱۸۲)، نه ثابت قرارداد: سقفی که بی‌صدا عوض شود، تست را هم با خودش نبرد.
+      expect([MAX_ITEMS_PER_ORDER, MAX_FILES_PER_ORDER]).toEqual([30, 30]);
+      const thirty = Array.from({ length: 30 }, () => item([doc(10)]));
       const many = await service.quote(ME, { items: thirty });
-      expect(many.ok && many.value.breakdown.items).toHaveLength(MAX_ITEMS_PER_ORDER);
+      expect(many.ok && many.value.breakdown.items).toHaveLength(30);
       expect(await service.quote(ME, { items: [...thirty, item([doc(10)])] })).toMatchObject({ status: 400, fields: ['items'] });
       // ۳۱ فایل در دو جزوه: هر جزوه زیر سقف خودش، ولی سفارش نه.
-      const files = Array.from({ length: MAX_FILES_PER_ORDER + 1 }, () => doc(4));
+      const files = Array.from({ length: 31 }, () => doc(4));
       expect(await service.quote(ME, { items: [item(files.slice(0, 16)), item(files.slice(16))] })).toMatchObject({
         status: 400,
         error: 'invalid_request',

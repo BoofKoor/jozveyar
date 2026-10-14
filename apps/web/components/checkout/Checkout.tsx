@@ -20,7 +20,8 @@ import {
 import { publishDockHeight } from '../../lib/dock';
 import type { JozvePart } from '../../lib/jozveView';
 import { Note, SizeNames } from '../AnalysisCard';
-import { FlowNav, JozveLines, SumValue, SummaryLines, Tomans, jozveSpecLabel, printLabel } from './parts';
+import { FlowNav, JozveLines, SummaryLines, jozveSpecLabel, printLabel } from './parts';
+import { SumValue, Tomans } from './sum';
 import {
   JozveBrief,
   JozvesBrief,

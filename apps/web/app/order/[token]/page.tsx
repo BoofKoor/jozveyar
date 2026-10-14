@@ -7,7 +7,8 @@ import { formatCardMask, formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
 import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
 import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
-import { FlowNav, JozveLines, SumValue, SummaryLines, Tomans, jozveSpecLabel, printLabel } from '../../../components/checkout/parts';
+import { FlowNav, JozveLines, SummaryLines, jozveSpecLabel, printLabel } from '../../../components/checkout/parts';
+import { SumValue, Tomans } from '../../../components/checkout/sum';
 import {
   JozveBrief,
   JozvesBrief,
