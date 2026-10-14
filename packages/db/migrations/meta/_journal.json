@@ -260,6 +260,27 @@
       "when": 1791043997414,
       "tag": "0036_partner_sms_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791988162640,
+      "tag": "0037_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791988187561,
+      "tag": "0038_catalog_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791988270224,
+      "tag": "0039_catalog_legacy",
+      "breakpoints": true
     }
   ]
 }

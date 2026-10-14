@@ -26,8 +26,10 @@ import {
   bindingRateBands,
   bindingTypes,
   orders,
+  paperRates,
   paperTypes,
   priceLists,
+  printRates,
   shippingMethods,
   shippingRates,
 } from './schema.js';
@@ -215,19 +217,16 @@ export function createTariffStore({ db }: Database): TariffStore {
         const rows = priceListToRows(input.list, false);
         await tx
           .update(priceLists)
-          .set({
-            label: rows.priceList.label,
-            clickRateColorRials: rows.priceList.clickRateColorRials,
-            clickRateBwRials: rows.priceList.clickRateBwRials,
-            settings: rows.priceList.settings,
-          })
+          .set({ label: rows.priceList.label, settings: rows.priceList.settings })
           .where(eq(priceLists.version, version));
         // ردیف‌های پیش‌نویس از نو: فرزند پیش از پدر، همان ترتیب کلیدهای خارجی.
         await tx.delete(shippingRates).where(eq(shippingRates.priceListVersion, version));
         await tx.delete(shippingMethods).where(eq(shippingMethods.priceListVersion, version));
         await tx.delete(bindingRateBands).where(eq(bindingRateBands.priceListVersion, version));
         await tx.delete(bindingTypes).where(eq(bindingTypes.priceListVersion, version));
+        await tx.delete(paperRates).where(eq(paperRates.priceListVersion, version));
         await tx.delete(paperTypes).where(eq(paperTypes.priceListVersion, version));
+        await tx.delete(printRates).where(eq(printRates.priceListVersion, version));
         await insertPriceListRows(asDb(tx), rows);
         await tx.insert(adminEvents).values(event(input.actor, 'tariff.draft_save', version, input.at, {}));
         return 'ok' as const;

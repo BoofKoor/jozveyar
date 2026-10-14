@@ -15,8 +15,10 @@ import { priceListToRows, rowsToPriceList, type PriceListRows } from './price-li
 import {
   bindingRateBands,
   bindingTypes,
+  paperRates,
   paperTypes,
   priceLists,
+  printRates,
   shippingMethods,
   shippingRates,
 } from './schema.js';
@@ -33,7 +35,9 @@ type Db = Database['db'];
 
 /** ردیف‌های یک نسخه، پس از سرش. ترتیب درج همان ترتیب کلیدهای خارجی است. */
 export async function insertPriceListRows(db: Db, rows: PriceListRows): Promise<void> {
+  if (rows.printRates.length > 0) await db.insert(printRates).values(rows.printRates);
   if (rows.paperTypes.length > 0) await db.insert(paperTypes).values(rows.paperTypes);
+  if (rows.paperRates.length > 0) await db.insert(paperRates).values(rows.paperRates);
   if (rows.bindingTypes.length > 0) await db.insert(bindingTypes).values(rows.bindingTypes);
   if (rows.bindingRateBands.length > 0) await db.insert(bindingRateBands).values(rows.bindingRateBands);
   if (rows.shippingMethods.length > 0) await db.insert(shippingMethods).values(rows.shippingMethods);
@@ -99,8 +103,10 @@ export async function readPriceList(db: Db, version: number): Promise<PriceList 
   const byVersion = <T extends { priceListVersion: unknown }>(t: T) =>
     eq(t.priceListVersion as never, version);
 
-  const [papers, bindings, bands, methods, rates] = await Promise.all([
+  const [prints, papers, sheetRates, bindings, bands, methods, rates] = await Promise.all([
+    db.select().from(printRates).where(byVersion(printRates)),
     db.select().from(paperTypes).where(byVersion(paperTypes)).orderBy(asc(paperTypes.id)),
+    db.select().from(paperRates).where(byVersion(paperRates)),
     db.select().from(bindingTypes).where(byVersion(bindingTypes)).orderBy(asc(bindingTypes.id)),
     db.select().from(bindingRateBands).where(byVersion(bindingRateBands)),
     db.select().from(shippingMethods).where(byVersion(shippingMethods)).orderBy(asc(shippingMethods.id)),
@@ -109,7 +115,9 @@ export async function readPriceList(db: Db, version: number): Promise<PriceList 
 
   return rowsToPriceList({
     priceList: head,
+    printRates: prints,
     paperTypes: papers,
+    paperRates: sheetRates,
     bindingTypes: bindings,
     bindingRateBands: bands,
     shippingMethods: methods,

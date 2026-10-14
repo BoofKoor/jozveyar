@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { OrderSpec } from '@jozveyar/contracts';
+import type { BindingType, OrderSpec, PriceList } from '@jozveyar/contracts';
 import {
   bandPriceRials,
+  bindingMisfit,
   countPages,
   itemPageCount,
+  offeredSizes,
   perPageColorRules,
   quote,
+  sheetAreaM2,
+  sheetsOf,
   shippingFloorRials,
   splitSheets,
   toRanges,
+  volumesOf,
   wholeDocumentRule,
 } from './index.js';
 import {
@@ -38,6 +43,7 @@ function item(
     rules: partial.rules ?? wholeDocumentRule(total, 'bw', DEFAULT_PAPER_TYPE_ID),
     copies: partial.copies ?? 1,
     sidesMode: partial.sidesMode ?? 'double',
+    paperSize: partial.paperSize ?? 'a4',
     bindingTypeId: partial.bindingTypeId ?? DEFAULT_BINDING_TYPE_ID,
   };
 }
@@ -81,12 +87,12 @@ describe('splitSheets — توزیع یکنواخت بین جلدها', () => {
   it('توزیع یکنواخت از توزیع پرکردنی ارزان‌تر است', () => {
     const even = splitSheets(1000, 800);
     const evenPrice = even.reduce(
-      (s, v) => s + (bandPriceRials(v, L.bindingTypes.spiral_clear!.bands) ?? 0),
+      (s, v) => s + (bandPriceRials(v, L.bindingTypes.spiral_clear!.bands.a4!) ?? 0),
       0,
     );
     const greedyPrice =
-      (bandPriceRials(800, L.bindingTypes.spiral_clear!.bands) ?? 0) +
-      (bandPriceRials(200, L.bindingTypes.spiral_clear!.bands) ?? 0);
+      (bandPriceRials(800, L.bindingTypes.spiral_clear!.bands.a4!) ?? 0) +
+      (bandPriceRials(200, L.bindingTypes.spiral_clear!.bands.a4!) ?? 0);
     expect(evenPrice).toBe(T(124_000));
     expect(greedyPrice).toBe(T(128_000));
     expect(evenPrice).toBeLessThan(greedyPrice);
@@ -324,7 +330,7 @@ describe('چند جلد شدن سند بزرگ', () => {
 
   it('وزن صحافی به‌ازای هر جلد اضافه می‌شود', () => {
     const b = quote(spec({ pageCount: 1600, sidesMode: 'single' }), L);
-    const paper = 1600 * 80 * L.settings.sheetAreaM2;
+    const paper = 1600 * 80 * sheetAreaM2('a4');
     expect(b.items[0]!.weightGrams).toBe(Math.round(paper + 60 * 2));
   });
 });
@@ -441,6 +447,164 @@ describe('تعیّن — شرط اجرا در مرورگر و سرور با یک
     for (const item of b.items) {
       for (const value of [item.printRials, item.paperRials, item.bindingRials, item.totalRials]) {
         expect(Number.isInteger(value)).toBe(true);
+      }
+    }
+  });
+});
+
+/* ───────────────────── کاتالوگ چاپ: اندازه، نرخ یکرو و دورو، صحافی‌ها (برش ۸٫۳) ───────────────────── */
+
+/** کاتالوگ نمونهٔ طرح میز (سؤال ۱۸۴): A4 و A5، گلاسه، منگنه تا 50 برگ، و چسب گرم با کمینه. */
+const CATALOG: PriceList = {
+  ...L,
+  printRates: {
+    a4: { single: { bw: T(1_800), color: T(2_200) }, double: { bw: T(1_600), color: T(2_000) } },
+    a5: { single: { bw: T(1_200), color: T(1_500) }, double: { bw: T(1_000), color: T(1_300) } },
+  },
+  paperTypes: {
+    ...L.paperTypes,
+    tahrir80: { ...L.paperTypes.tahrir80!, sheetRates: { a4: 0, a5: 0 } },
+    glossy: { nameFa: 'گلاسه', gsm: 135, enabled: true, sheetRates: { a4: T(1_500) } },
+  },
+  bindingTypes: {
+    spiral_clear: {
+      ...L.bindingTypes.spiral_clear!,
+      bands: { a4: L.bindingTypes.spiral_clear!.bands.a4!, a5: [{ minSheets: 1, maxSheets: 800, priceRials: T(40_000) }] },
+    },
+    staple: {
+      nameFa: 'منگنه',
+      enabled: true,
+      minSheets: 1,
+      maxSheetsPerVolume: 50,
+      splitsVolumes: false,
+      weightPerVolumeGrams: 1,
+      bands: { a4: [{ minSheets: 1, maxSheets: 50, priceRials: T(8_000) }], a5: [{ minSheets: 1, maxSheets: 50, priceRials: T(6_000) }] },
+    },
+    glue: {
+      nameFa: 'چسب گرم',
+      enabled: true,
+      minSheets: 20,
+      maxSheetsPerVolume: 400,
+      splitsVolumes: true,
+      weightPerVolumeGrams: 30,
+      bands: { a4: [{ minSheets: 20, maxSheets: 400, priceRials: T(60_000) }] },
+    },
+  },
+};
+
+describe('اندازهٔ کاغذ و نرخ هر رو (۸٫۳)', () => {
+  it('نرخ هر رو با اندازه و یکرو یا دورو: ۱۰۰ صفحه A4 یکرو ۱,۸۰۰ و دورو ۱,۶۰۰، A5 دورو ۱,۰۰۰', () => {
+    const at = (paperSize: 'a4' | 'a5', sidesMode: 'single' | 'double') =>
+      quote(spec({ pageCount: 100, paperSize, sidesMode }), CATALOG).items[0]!.printRials;
+    expect(at('a4', 'single')).toBe(T(180_000));
+    expect(at('a4', 'double')).toBe(T(160_000));
+    expect(at('a5', 'double')).toBe(T(100_000));
+    expect(at('a5', 'single')).toBe(T(120_000));
+  });
+
+  it('رنگی و سیاه‌سفید هر کدام نرخ همان اندازه و حالت را دارند، قاعده‌به‌قاعده', () => {
+    const b = quote(
+      spec({
+        pageCount: 10,
+        paperSize: 'a5',
+        sidesMode: 'single',
+        rules: [
+          { pageRanges: [[1, 3]], colorMode: 'color', paperTypeId: DEFAULT_PAPER_TYPE_ID },
+          { pageRanges: [[4, 10]], colorMode: 'bw', paperTypeId: DEFAULT_PAPER_TYPE_ID },
+        ],
+      }),
+      CATALOG,
+    );
+    expect(b.items[0]!.printRials).toBe(T(3 * 1_500 + 7 * 1_200));
+    expect(b.warnings).toEqual([]);
+  });
+
+  it('اندازه‌ای که نرخ ندارد ارائه نمی‌شود: هشدار، چاپ صفر، و ریز قیمت همان اندازه را می‌گوید', () => {
+    const b = quote(spec({ pageCount: 20, paperSize: 'a3' }), CATALOG);
+    expect(b.warnings).toContain('paper_size_unavailable');
+    expect(b.items[0]!.printRials).toBe(0);
+    expect(b.items[0]!.paperSize).toBe('a3');
+    expect(offeredSizes(CATALOG)).toEqual(['a4', 'a5']);
+    expect(offeredSizes(L)).toEqual(['a4']);
+  });
+
+  it('کاغذ نرخ هر برگ هر اندازه را دارد: گلاسه A4 ۱,۵۰۰ هر برگ؛ گلاسهٔ A5 نیست', () => {
+    const rules = wholeDocumentRule(100, 'color', 'glossy');
+    const a4 = quote(spec({ pageCount: 100, rules }), CATALOG);
+    expect(a4.items[0]!.paperRials).toBe(T(50 * 1_500));
+    expect(a4.warnings).toEqual([]);
+    const a5 = quote(spec({ pageCount: 100, rules, paperSize: 'a5' }), CATALOG);
+    expect(a5.warnings).toContain('paper_type_unavailable');
+    expect(a5.items[0]!.paperRials).toBe(0);
+  });
+
+  it('وزن از مساحت همان اندازه: A4 همان ۰٫۰۶۲۳۷ پیش از ۸٫۳، A5 نصف‌تر', () => {
+    expect(sheetAreaM2('a4')).toBe(0.06237);
+    expect(sheetAreaM2('a5')).toBeCloseTo(0.03108, 10);
+    expect(sheetAreaM2('a3')).toBeCloseTo(0.12474, 10);
+    const a5 = quote(spec({ pageCount: 200, paperSize: 'a5' }), CATALOG);
+    expect(a5.items[0]!.weightGrams).toBe(Math.round(100 * 80 * sheetAreaM2('a5') + 60));
+  });
+
+  it('تعرفهٔ پایه با شکل تازه همان قیمت پیش از ۸٫۳ را می‌دهد (یکرو و دورو یک نرخ، فقط A4)', () => {
+    const single = quote(spec({ pageCount: 147, sidesMode: 'single' }), L);
+    const double = quote(spec({ pageCount: 147, sidesMode: 'double' }), L);
+    expect(single.items[0]!.printRials).toBe(T(147 * 1_600));
+    expect(double.items[0]!.printRials).toBe(T(147 * 1_600));
+    expect(double.totalRials).toBe(T(280_200));
+  });
+});
+
+describe('صحافی‌ها: کمینه، سقف، چند جلد یا «نمی‌خورد»، و اندازه (۸٫۳)', () => {
+  const staple = CATALOG.bindingTypes.staple!;
+  const glue = CATALOG.bindingTypes.glue!;
+  const spiral = CATALOG.bindingTypes.spiral_clear!;
+
+  it('منگنه تا ۵۰ برگ: ۵۷ برگ نمی‌خورد، با دلیل؛ و قیمت آن هشدار دارد', () => {
+    expect(bindingMisfit(staple, 'a4', 50)).toBeNull();
+    expect(bindingMisfit(staple, 'a4', 57)).toEqual({ reason: 'max', maxSheets: 50 });
+    const b = quote(spec({ pageCount: 113, bindingTypeId: 'staple' }), CATALOG);
+    expect(b.items[0]!.sheets).toBe(57);
+    expect(b.warnings).toContain('binding_does_not_fit');
+    expect(b.items[0]!.volumes).toBe(1);
+  });
+
+  it('صحافی‌ای که چند جلد نمی‌شود هرگز نمی‌شکند؛ طلق و سیم بالای سقف یکنواخت می‌شکند', () => {
+    expect(volumesOf(staple, 57)).toEqual([57]);
+    expect(volumesOf(spiral, 1000)).toEqual([500, 500]);
+    expect(bindingMisfit(spiral, 'a4', 5000)).toBeNull();
+  });
+
+  it('کمینه: چسب گرم دست‌کم ۲۰ برگ؛ ۱۰ برگ نمی‌خورد، و کمینه روی نازک‌ترین جلد است', () => {
+    expect(bindingMisfit(glue, 'a4', 10)).toEqual({ reason: 'min', minSheets: 20 });
+    expect(bindingMisfit(glue, 'a4', 20)).toBeNull();
+    // ۴۱۰ برگ با سقف ۴۰۰ دو جلد ۲۰۵ برگی است؛ هر دو بالای کمینه.
+    expect(bindingMisfit(glue, 'a4', 410)).toBeNull();
+    const thick: BindingType = { ...glue, minSheets: 300 };
+    // همان ۴۱۰ با کمینهٔ ۳۰۰: جلدهای ۲۰۵ برگی نازک‌ترند.
+    expect(bindingMisfit(thick, 'a4', 410)).toEqual({ reason: 'min', minSheets: 300 });
+    const b = quote(spec({ pageCount: 10, bindingTypeId: 'glue', sidesMode: 'single' }), CATALOG);
+    expect(b.warnings).toContain('binding_does_not_fit');
+  });
+
+  it('صحافی‌ای که این اندازه را ندارد نمی‌خورد: چسب گرم A5 ندارد', () => {
+    expect(bindingMisfit(glue, 'a5', 100)).toEqual({ reason: 'size' });
+    const b = quote(spec({ pageCount: 200, paperSize: 'a5', bindingTypeId: 'glue' }), CATALOG);
+    expect(b.warnings).toEqual(expect.arrayContaining(['binding_does_not_fit', 'binding_band_missing']));
+    expect(b.items[0]!.bindingRials).toBe(0);
+  });
+
+  it('قیمت صحافی از بازه‌های همان اندازه: منگنه A5 ۶,۰۰۰ و A4 ۸,۰۰۰', () => {
+    const a5 = quote(spec({ pageCount: 60, paperSize: 'a5', bindingTypeId: 'staple' }), CATALOG);
+    const a4 = quote(spec({ pageCount: 60, bindingTypeId: 'staple' }), CATALOG);
+    expect([a5.items[0]!.bindingRials, a4.items[0]!.bindingRials]).toEqual([T(6_000), T(8_000)]);
+    expect([a5.warnings, a4.warnings]).toEqual([[], []]);
+  });
+
+  it('برگ یک تعریف دارد: sheetsOf همان برگ ریز قیمت', () => {
+    for (const pageCount of [1, 2, 147, 300]) {
+      for (const sidesMode of ['single', 'double'] as const) {
+        expect(sheetsOf(pageCount, sidesMode)).toBe(quote(spec({ pageCount, sidesMode }), L).items[0]!.sheets);
       }
     }
   });
