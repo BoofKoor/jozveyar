@@ -75,6 +75,8 @@ class TicketItem:
     sheets: int
     copies: int
     sides_mode: str
+    # اندازهٔ کاغذ جزوه (۸٫۳): «a4»، «a5» یا «a3».
+    paper_size: str
     color_modes: list[str]
     papers: list[str]
     binding: str
@@ -193,10 +195,13 @@ def _item_html(data: TicketData, item: TicketItem, bold: fitz.Font) -> str:
         )
         parts = f'<tr><td><table>{volume_rows}</table></td><td class="dt">جلدها</td></tr>'
     papers = "، ".join(html.escape(p) for p in item.papers)
-    mode = f"{_color(item.color_modes)} · {SIDES.get(item.sides_mode, item.sides_mode)}"
+    # اندازهٔ کاغذ در همان قاب (۸٫۳): کسی که چاپ می‌کند پیش از هر چیز کاغذ سینی را می‌خواهد.
+    size = item.paper_size.upper()
+    mode = f"{_color(item.color_modes)} · {SIDES.get(item.sides_mode, item.sides_mode)} · "
     # قاب به اندازهٔ متن: جدول MuPDF پهنای خانه را از محتوا درست نمی‌گیرد، پس پهنا با خود قلم اندازه گرفته می‌شود (شکل
     # جداِ حرف‌ها، پس کمی گشادتر از متن پیوسته).
-    width = bold.text_length(mode, fontsize=MODE_SIZE) + 28
+    width = bold.text_length(mode + size, fontsize=MODE_SIZE) + 28
+    mode += _ltr(size)
     return f"""
 <div class="item">
   <table><tr>
@@ -297,7 +302,8 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
         # مثل `prepare_order`: جزوه‌ای که دیگر چاپ نمی‌شود برگه نمی‌خواهد.
         raise PermanentFailure("order_closed", status)
     items = conn.execute(
-        """SELECT i.id::text, i.seq, i.page_count, i.copies, i.sides_mode::text, coalesce(b.name_fa, i.binding_type_id)
+        """SELECT i.id::text, i.seq, i.page_count, i.copies, i.sides_mode::text, i.paper_size::text,
+                  coalesce(b.name_fa, i.binding_type_id)
              FROM order_items i
              JOIN orders o ON o.id = i.order_id
              LEFT JOIN binding_types b ON b.price_list_version = o.price_list_version AND b.id = i.binding_type_id
@@ -332,7 +338,7 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
         shipping=shipping,
         partner=(partner, partner_city) if partner else None,
     )
-    for item_id, seq, pages, copies, sides, binding in items:
+    for item_id, seq, pages, copies, sides, size, binding in items:
         ranges = plan_volumes(breakdown, seq, pages, sides)
         priced = breakdown["items"][seq - 1]
         listed, first = [], 1
@@ -348,6 +354,7 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
                 sheets=priced["sheets"],
                 copies=copies,
                 sides_mode=sides,
+                paper_size=size,
                 color_modes=[mode for mode, _ in item_rules],
                 papers=list(dict.fromkeys(paper for _, paper in item_rules)),
                 binding=binding,

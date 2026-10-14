@@ -204,6 +204,8 @@ export interface PanelOrderLine {
   copies: number;
   colorModes: string[];
   sidesModes: string[];
+  /** اندازه‌های کاغذ جزوه‌ها (۸٫۳)، به ترتیب الفبا. */
+  paperSizes: string[];
   /** کار `prepare_order`؛ null یعنی هنوز نیست (سفارش پرداخت‌نشده). */
   pdfJob: 'queued' | 'running' | 'done' | 'failed' | null;
   /** چاپخانهٔ سفارش (برش ۵٫۲)؛ null یعنی بی چاپخانه. */
@@ -874,6 +876,8 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       colorModes: sql<string[]>`(SELECT coalesce(array_agg(DISTINCT r.color_mode::text), '{}'::text[]) FROM order_items i
         JOIN print_rules r ON r.order_item_id = i.id WHERE i.order_id = ${orders.id})`,
       sidesModes: sql<string[]>`(SELECT coalesce(array_agg(DISTINCT i.sides_mode::text), '{}'::text[])
+        FROM order_items i WHERE i.order_id = ${orders.id})`,
+      paperSizes: sql<string[]>`(SELECT coalesce(array_agg(DISTINCT i.paper_size::text ORDER BY i.paper_size::text), '{}'::text[])
         FROM order_items i WHERE i.order_id = ${orders.id})`,
       pdfJob: jobs.status,
       printPartnerId: orders.printPartnerId,

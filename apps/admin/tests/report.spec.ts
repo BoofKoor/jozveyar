@@ -103,6 +103,7 @@ async function order(
           rules: [{ pageRanges: [[1, pages]], colorMode: 'bw', paperTypeId: 'tahrir80' }],
           copies: 1,
           sidesMode: 'double',
+          paperSize: 'a4',
           bindingTypeId: 'spiral_clear',
         },
       ],
@@ -124,8 +125,8 @@ async function order(
               ${place.provinceId}, ${place.cityId}, ${name}, ${phone}, 'خیابان ولیعصر، پلاک 12', ${new Date(paidAt.getTime() - 30 * MINUTE)})
       RETURNING id, order_number`;
     const [item] = await tx<{ id: string }[]>`
-      INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-      VALUES (${row!.id}, 1, ${pages}, 1, 'double', 'spiral_clear') RETURNING id`;
+      INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, paper_size, binding_type_id)
+      VALUES (${row!.id}, 1, ${pages}, 1, 'double', 'a4', 'spiral_clear') RETURNING id`;
     await tx`INSERT INTO order_item_sections (order_item_id, seq, document_id, page_count) VALUES (${item!.id}, 1, ${docId}, ${pages})`;
     await tx`INSERT INTO print_rules (order_item_id, seq, page_ranges, color_mode, paper_type_id)
              VALUES (${item!.id}, 1, ${tx.json([[1, pages]])}, 'bw', 'tahrir80')`;

@@ -380,13 +380,22 @@ function colorText(modes: readonly string[]): string {
   return color && bw ? 'رنگی و سیاه‌سفید' : color ? 'رنگی' : 'سیاه‌سفید';
 }
 
-/** ستون جزوهٔ ردیف: «3 فایل · 120 صفحه · سیاه‌سفید»، «230 صفحه · سیاه‌سفید، یکرو». دورو پیش‌فرض است و گفته نمی‌شود. */
+/** «A4»، «A5»: نام اندازهٔ کاغذ جزوه (۸٫۳). */
+export function paperSizeText(size: string): string {
+  return size.toUpperCase();
+}
+
+/**
+ * ستون جزوهٔ ردیف: «3 فایل · 120 صفحه · سیاه‌سفید»، «230 صفحه · سیاه‌سفید، یکرو، A5». دورو و A4 پیش‌فرض‌اند و گفته
+ * نمی‌شوند.
+ */
 export function jozveSegs(line: PanelOrderLine): Seg[] {
   const parts: Seg[][] = [];
   if (line.itemCount > 1) parts.push([num(line.itemCount), ' جزوه']);
   if (line.fileCount > 1) parts.push([num(line.fileCount), ' فایل']);
   parts.push([num(line.pageCount), ' صفحه']);
-  parts.push([`${colorText(line.colorModes)}${line.sidesModes.includes('single') ? '، یکرو' : ''}`]);
+  const sizes = line.paperSizes.filter((size) => size !== 'a4').map(paperSizeText);
+  parts.push([`${colorText(line.colorModes)}${line.sidesModes.includes('single') ? '، یکرو' : ''}${sizes.length ? `، ${sizes.join(' و ')}` : ''}`]);
   if (line.copies > 1) parts.push([num(line.copies), ' نسخه']);
   return joined(parts);
 }
@@ -406,8 +415,8 @@ export interface Fact {
 }
 
 /**
- * مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو · تحریر ۸۰ گرم»، صحافی با صفحه و برگ و جلد («دو جلد (413 و 412 برگ)»، طرح برش ۵)، و
- * تعداد.
+ * مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم» (اندازه از ۸٫۳)، صحافی با صفحه و برگ و جلد («دو جلد (413 و 412
+ * برگ)»، طرح برش ۵)، و تعداد.
  */
 export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefined): Fact[] {
   const papers = [...new Set(item.rules.map((rule) => rule.paperName ?? rule.paperTypeId))];
@@ -420,7 +429,10 @@ export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefine
   return [
     {
       label: 'چاپ',
-      value: joined([[`${colorText(item.rules.map((r) => r.colorMode))}، ${SIDES[item.sidesMode] ?? item.sidesMode}`], [papers.join('، ')]]),
+      value: joined([
+        [`${colorText(item.rules.map((r) => r.colorMode))}، ${SIDES[item.sidesMode] ?? item.sidesMode}، ${paperSizeText(item.paperSize)}`],
+        [papers.join('، ')],
+      ]),
     },
     {
       label: 'صحافی',
@@ -899,21 +911,25 @@ function listed<T extends number[]>(runs: T[], clause: (run: T) => Seg[]): Seg[]
 
 /**
  * «چه عوض شد» (طرح پنل): «صفحهٔ 103 تا 120 (فایل حل تمرین فصل ۱.docx) اندازهٔ Letter داشت و روی A4 نشست؛ بقیه بی
- * تغییر.»؛ یا «همهٔ صفحه‌ها A4 عمودی بود؛ فقط به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.»
+ * تغییر.»؛ یا «همهٔ صفحه‌ها A4 عمودی بود؛ فقط به دو جلد تقسیم شد، همان‌طور که صحافی‌اش حساب شده.» اندازه همان اندازهٔ
+ * کاغذ جزوه است (۸٫۳): جزوهٔ A5 «… روی A5 نشست».
  */
 export function changesNote(item: PanelOrderItem): Seg[] {
+  const paper = paperSizeText(item.paperSize);
   const resized = mergedRuns(item.printFiles.flatMap((file) => file.changes?.resized ?? []));
   const rotated = mergedRuns(item.printFiles.flatMap((file) => file.changes?.rotated ?? []));
   const annotated = mergedRuns(item.printFiles.flatMap((file) => file.changes?.annotated ?? []));
   const volumes = item.printFiles.length;
   const split: Seg[] = volumes > 1 ? ['به ', ...volumesSegs(volumes), ' تقسیم شد، همان‌طور که صحافی‌اش حساب شده'] : [];
   const clauses: Seg[][] = [
-    ...listed(resized, ([first, last, w, h]) => [...runRef(item, first!, last!), ` اندازهٔ ${sizeLabel(w!, h!)} داشت و روی A4 نشست`]),
+    ...listed(resized, ([first, last, w, h]) => [...runRef(item, first!, last!), ` اندازهٔ ${sizeLabel(w!, h!)} داشت و روی ${paper} نشست`]),
     ...listed(rotated, ([first, last]) => [...runRef(item, first!, last!), ' افقی بود و چرخید، بالایش لبهٔ چپ کاغذ']),
     ...listed(annotated, ([first, last]) => [...runRef(item, first!, last!), ' حاشیه‌نویسی داشت و جزو صفحه شد']),
   ];
   if (clauses.length === 0) {
-    return volumes > 1 ? ['همهٔ صفحه‌ها A4 عمودی بود؛ فقط ', ...split, '.'] : ['همهٔ صفحه‌ها A4 عمودی بود؛ فایل چاپ همان PDF جزوه است.'];
+    return volumes > 1
+      ? [`همهٔ صفحه‌ها ${paper} عمودی بود؛ فقط `, ...split, '.']
+      : [`همهٔ صفحه‌ها ${paper} عمودی بود؛ فایل چاپ همان PDF جزوه است.`];
   }
   const changed = new Set<number>();
   for (const [first, last] of [...resized, ...rotated, ...annotated]) for (let n = first!; n <= last!; n += 1) changed.add(n);

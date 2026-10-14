@@ -1,13 +1,14 @@
 """
 فایل چاپ هر جلد هر جزوه (برش ۵٫۱، ADR-043)، از روی PDF جزوه. فقط PyMuPDF، بی پایگاه داده و استوریج.
 
-- هر صفحه روی A4 عمودی، با حفظ تناسب و وسط‌چین، مثل «Fit» درایور: A5 بزرگ و A3 کوچک می‌شود.
+- هر صفحه روی اندازهٔ کاغذ جزوه، عمودی، با حفظ تناسب و وسط‌چین، مثل «Fit» درایور: روی A4، صفحهٔ A5 بزرگ و A3 کوچک
+  می‌شود؛ روی A5 برعکس (برش ۸٫۳، سؤال ۱۸۳؛ پیش از آن همیشه A4).
 - صفحهٔ افقی ۹۰ درجه می‌چرخد تا کاغذ را پر کند، همه در یک جهت: بالای صفحه لبهٔ چپ کاغذ (سؤال ۴۱ طرح).
 - حاشیه‌نویسی‌ها و فرم‌ها پیش از چیدن جزو صفحه می‌شوند (`bake`): همان که تحلیل رنگ دید و قیمت شد، چاپ می‌شود.
 - جلدها دقیقاً با `sheetsPerVolume` ریز قیمت منجمد؛ مرز هر جلد مرز برگ است.
-- صفحه‌ای که همین حالا A4 عمودی است و حاشیه‌نویسی ندارد، همان‌طور کپی می‌شود (`insert_pdf`)، نه دوباره چیده.
+- صفحه‌ای که همین حالا به اندازهٔ جزوه و عمودی است و حاشیه‌نویسی ندارد، همان‌طور کپی می‌شود (`insert_pdf`)، نه دوباره چیده.
 
-A4 با همان رواداری ۳٪ `paperSizeName` (`packages/analysis`) شناخته می‌شود، پس صفحه‌ای که پنل «A4» می‌نامد اینجا هم A4 است.
+اندازه با همان رواداری ۳٪ `paperSizeName` (`packages/analysis`) شناخته می‌شود، پس صفحه‌ای که پنل «A4» می‌نامد اینجا هم A4 است.
 صفحهٔ `/Rotate`دار با همان شکلی که دیده می‌شود سنجیده و چیده می‌شود (`remove_rotation` پیش از چیدن).
 """
 
@@ -19,18 +20,27 @@ import fitz  # PyMuPDF
 
 from .jobs import PermanentFailure
 
-A4 = fitz.paper_rect("a4")  # 595 × 842 پوینت
-A4_SHORT, A4_LONG = 595, 842
+# اندازه‌های کاغذ جزوه (`paper_size`، همان `PAPER_SIZES` موتور قیمت)، عمودی، به پوینت: A4 ۵۹۵ × ۸۴۲، A5 ۴۲۰ × ۵۹۵، A3 ۸۴۲ × ۱۱۹۱.
+SIZES = {name: fitz.paper_rect(name) for name in ("a4", "a5", "a3")}
+A4 = SIZES["a4"]
 TOLERANCE = 0.03
+
+
+def paper_rect(size: str) -> fitz.Rect:
+    """برگ عمودی اندازهٔ جزوه؛ اندازهٔ ناشناس شکست قطعی است، نه A4 بی‌صدا."""
+    if size not in SIZES:
+        raise PermanentFailure("paper_size_unknown", repr(size))
+    return SIZES[size]
 
 
 @dataclass(frozen=True)
 class PageState:
-    """یک صفحهٔ جزوه همان‌طور که دیده می‌شود (پس از `/Rotate`)."""
+    """یک صفحهٔ جزوه همان‌طور که دیده می‌شود (پس از `/Rotate`)، و اندازهٔ کاغذی که رویش چاپ می‌شود."""
 
     width: float
     height: float
     annotated: bool
+    size: str = "a4"
 
     @property
     def rotated(self) -> bool:
@@ -39,9 +49,10 @@ class PageState:
 
     @property
     def resized(self) -> bool:
-        """A4 نیست، پس روی A4 می‌نشیند."""
+        """به اندازهٔ کاغذ جزوه نیست، پس روی آن می‌نشیند."""
+        target = SIZES[self.size]
         short, long = sorted((self.width, self.height))
-        return not (abs(short - A4_SHORT) / A4_SHORT < TOLERANCE and abs(long - A4_LONG) / A4_LONG < TOLERANCE)
+        return not (abs(short - target.width) / target.width < TOLERANCE and abs(long - target.height) / target.height < TOLERANCE)
 
     @property
     def reshaped(self) -> bool:
@@ -53,9 +64,10 @@ class PageState:
         return self.reshaped or self.annotated
 
 
-def page_states(doc: fitz.Document) -> list[PageState]:
+def page_states(doc: fitz.Document, size: str = "a4") -> list[PageState]:
+    paper_rect(size)
     return [
-        PageState(page.rect.width, page.rect.height, page.first_annot is not None or page.first_widget is not None)
+        PageState(page.rect.width, page.rect.height, page.first_annot is not None or page.first_widget is not None, size)
         for page in doc
     ]
 
@@ -111,9 +123,10 @@ def changes_of(states: list[PageState], first: int, last: int) -> dict | None:
 
 
 def build_volume(doc: fitz.Document, states: list[PageState], first: int, last: int, out_path: str) -> int:
-    """صفحه‌های `first` تا `last` (یک‌پایه، هر دو سر شامل) در یک PDF، هر کدام A4 عمودی. `doc` پیش‌تر `bake` شده.
+    """صفحه‌های `first` تا `last` (یک‌پایه، هر دو سر شامل) در یک PDF، هر کدام به اندازهٔ کاغذ جزوه و عمودی. `doc` پیش‌تر
+    `bake` شده.
 
-    صفحه‌های پشت‌سرهمی که عوض نمی‌شوند یک‌جا کپی می‌شوند؛ بقیه روی صفحهٔ A4 تازه چیده می‌شوند. خروجی: شمار صفحه‌ها.
+    صفحه‌های پشت‌سرهمی که عوض نمی‌شوند یک‌جا کپی می‌شوند؛ بقیه روی برگ تازهٔ همان اندازه چیده می‌شوند. خروجی: شمار صفحه‌ها.
     """
     out = fitz.open()
     try:
@@ -130,7 +143,8 @@ def build_volume(doc: fitz.Document, states: list[PageState], first: int, last: 
             if page.rotation:
                 # همان شکلی که دیده می‌شود، بی `/Rotate`؛ `show_pdf_page` صفحهٔ چرخیده را بی چرخشش نشان می‌داد.
                 page.remove_rotation()
-            target = out.new_page(width=A4.width, height=A4.height)
+            paper = SIZES[states[index].size]
+            target = out.new_page(width=paper.width, height=paper.height)
             # ۹۰ درجه پادساعت‌گرد: بالای صفحهٔ افقی لبهٔ چپ کاغذ.
             target.show_pdf_page(target.rect, doc, index, keep_proportion=True, rotate=90 if states[index].rotated else 0)
             index += 1

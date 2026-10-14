@@ -105,7 +105,7 @@ async function paidOrder(
   });
   const breakdown = quote(
     {
-      items: specs.map(({ sections, rules }) => ({ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' })),
+      items: specs.map(({ sections, rules }) => ({ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' })),
       shipping: { methodId: 'post', zoneId: 'other' },
     },
     list,
@@ -127,8 +127,8 @@ async function paidOrder(
       RETURNING id, order_number`;
     for (const [i, spec] of specs.entries()) {
       const [item] = await tx<{ id: string }[]>`
-        INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-        VALUES (${row!.id}, ${i + 1}, ${spec.pageCount}, 1, 'double', 'spiral_clear') RETURNING id`;
+        INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, paper_size, binding_type_id)
+        VALUES (${row!.id}, ${i + 1}, ${spec.pageCount}, 1, 'double', 'a4', 'spiral_clear') RETURNING id`;
       for (const [j, s] of spec.sections.entries()) {
         await tx`INSERT INTO order_item_sections (order_item_id, seq, document_id, page_count)
                  VALUES (${item!.id}, ${j + 1}, ${s.documentId}, ${s.pageCount})`;
@@ -254,7 +254,7 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     await ownerPage.reload();
     await expect(side(ownerPage).getByRole('button', { name: 'شروع چاپ' })).toBeVisible();
     await expect(ownerPage.locator('section[aria-labelledby="t-jozve-1"] .jy-card__meta')).toHaveText('دو جلد، هر جلد یک فایل');
-    await expect(ownerPage.locator('.ad-spec dd')).toHaveText(['سیاه‌سفید، دورو · تحریر ۸۰ گرم', 'طلق و سیم · 8 صفحه، 4 برگ، دو جلد (2 و 2 برگ)', '1 نسخه']);
+    await expect(ownerPage.locator('.ad-spec dd')).toHaveText(['سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم', 'طلق و سیم · 8 صفحه، 4 برگ، دو جلد (2 و 2 برگ)', '1 نسخه']);
 
     // جلدها دقیقاً با برگ‌های ریز قیمت منجمد ([2, 2])؛ مرز جلد بعد از صفحهٔ زوج.
     const files = await printFiles(o.P);

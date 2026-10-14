@@ -223,6 +223,39 @@ def test_a_blank_page_of_another_size_becomes_a_blank_a4(tmp_path):
         assert dark(render(out[0]), (0, 0, 1, 1)) == 0
 
 
+def test_on_a5_paper_a5_pages_stay_and_every_other_page_lands_on_a5_portrait(tmp_path):
+    """اندازهٔ کاغذ جزوه (برش ۸٫۳): همان «Fit» روی A5؛ صفحهٔ A5 همان‌طور کپی می‌شود و A4 کوچک می‌شود. شاهد: همان فایل روی A4."""
+    path = pdf(tmp_path, "a5.pdf", [A5, A4, A4L, A5])
+    with fitz.open(path) as doc:
+        states = printfile.page_states(doc, "a5")
+        assert [(s.resized, s.rotated) for s in states] == [(False, False), (True, False), (True, True), (False, False)]
+        assert [s.resized for s in printfile.page_states(doc)] == [True, False, False, True]
+    [volume] = build_print_files(path, [(1, 4)], str(tmp_path), "a5")
+    assert volume["changes"] == {"resized": [[2, 2, 595, 842], [3, 3, 842, 595]], "rotated": [[3, 3]]}
+    with fitz.open(path) as source, fitz.open(volume["path"]) as out:
+        assert [(round(p.rect.width), round(p.rect.height)) for p in out] == [(420, 595)] * 4
+        assert [p.get_text().strip() for p in out] == [f"page-{n}" for n in range(1, 5)]
+        for n in range(4):
+            assert looks_like(source[n], out[n]) < 1.5, n + 1
+
+
+def test_an_a5_jozve_on_a5_paper_in_one_volume_is_the_jozve_itself_and_on_a3_it_is_not(tmp_path):
+    path = pdf(tmp_path, "a5.pdf", [A5] * 3)
+    assert build_print_files(path, [(1, 3)], str(tmp_path), "a5") == [
+        {"volume": 1, "first": 1, "last": 3, "path": None, "changes": None}
+    ]
+    [volume] = build_print_files(path, [(1, 3)], str(tmp_path), "a3")
+    with fitz.open(volume["path"]) as out:
+        assert [(round(p.rect.width), round(p.rect.height)) for p in out] == [(842, 1191)] * 3
+
+
+def test_an_unknown_paper_size_fails_instead_of_printing_a4(tmp_path):
+    path = pdf(tmp_path, "a4.pdf", [A4])
+    with pytest.raises(PermanentFailure) as failure:
+        build_print_files(path, [(1, 1)], str(tmp_path), "b5")
+    assert failure.value.code == "paper_size_unknown"
+
+
 def test_a_jozve_that_is_not_what_the_volumes_cover_is_never_split(tmp_path):
     path = pdf(tmp_path, "short.pdf", [A4] * 4)
     with pytest.raises(PermanentFailure) as failure:
