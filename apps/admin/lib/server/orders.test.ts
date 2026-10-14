@@ -187,6 +187,7 @@ function failedDetails(
     items: [
       {
         seq: 1,
+        paperSize: 'a4',
         printPdfReadyAt: over.jozve ? NOW : null,
         printFiles: [],
         sections: [
@@ -553,6 +554,7 @@ function orderDetails(
     items: [
       {
         seq: 1,
+        paperSize: 'a4',
         printPdfReadyAt: NOW,
         printFiles:
           over.ready === false ? [] : [{ volume: 1, firstPage: 1, lastPage: 20, storageKey: 'orders/10027/jozve-1.pdf', sizeBytes: 1, changes: null, createdAt: NOW }],

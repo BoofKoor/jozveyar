@@ -126,13 +126,14 @@ export async function layoutProblems(page: Page): Promise<{ overflow: number; sm
     [...document.querySelectorAll('main a, main button, main input:not([type=hidden]), nav a, nav summary, header button')]
       .map((el) => ({ el, box: el.getBoundingClientRect() }))
       .filter(({ el, box }) => box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden')
-      // پیوند درون جمله (`.jy-link`، مثل شمارهٔ سفارش در هشدار) از سقف معاف است، مثل WCAG 2.5.8؛ و ورودی پنهانی که برچسب بزرگش
-      // هدف است (`sr-only`، مثل ورودی فایل درون کارت بارگذاری، ۶٫۱).
+      // پیوند درون جمله (`.jy-link`، مثل شمارهٔ سفارش در هشدار) از سقف معاف است، مثل WCAG 2.5.8؛ ورودی پنهانی که برچسب بزرگش
+      // هدف است (`sr-only`، مثل ورودی فایل درون کارت بارگذاری، ۶٫۱)؛ و تیکی که برچسب ۴۴ پیکسلی‌اش هدف است (کاتالوگ تعرفه، ۸٫۳).
       .filter(
         ({ el, box }) =>
           box.height < 44 &&
           !el.closest('.jy-tile') &&
           el.getAttribute('type') !== 'radio' &&
+          !(el.getAttribute('type') === 'checkbox' && (el.closest('label')?.getBoundingClientRect().height ?? 0) >= 44) &&
           !el.classList.contains('jy-link') &&
           !el.classList.contains('sr-only'),
       )
