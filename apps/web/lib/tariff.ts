@@ -44,7 +44,15 @@ export function parseTariff(text: string | null | undefined): SiteTariff {
   if (!text) return SEED_TARIFF;
   try {
     const value = JSON.parse(text) as Partial<SiteTariff> | null;
-    if (value && typeof value.slaDays === 'number' && typeof value.priceList?.version === 'number') return value as SiteTariff;
+    // شکل پیش از ۸٫۳ (`clickRates`، بی `printRates`) هم تعرفهٔ پایه است: صفحه‌ای که هنوز HTML قدیم دارد قیمت می‌دهد.
+    if (
+      value &&
+      typeof value.slaDays === 'number' &&
+      typeof value.priceList?.version === 'number' &&
+      typeof value.priceList.printRates?.a4 === 'object'
+    ) {
+      return value as SiteTariff;
+    }
   } catch {
     // پایین
   }

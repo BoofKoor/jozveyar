@@ -1,5 +1,5 @@
-import type { PriceList } from '@jozveyar/contracts';
-import { quote, wholeDocumentRule } from '@jozveyar/pricing';
+import type { ColorMode, PriceList } from '@jozveyar/contracts';
+import { DEFAULT_PAPER_SIZE, PAPER_SIZES, offeredSizes, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import { Inline } from './Inline';
@@ -10,7 +10,12 @@ import { Inline } from './Inline';
  * هیچ عددی اینجا نوشته نشده: نرخ‌ها، بازه‌های صحافی و کرایه‌ها از همان تعرفهٔ فعال پایگاه داده است که
  * فلوی سفارش با آن قیمت می‌دهد (از ۴٫۴، ADR-040؛ بی پایگاه داده تعرفهٔ پایه)، و مثال را همان `quote()`
  * حساب می‌کند. تعرفه که عوض شد، این بخش هم با همان عوض می‌شود، با بازسازی صفحه (ISR ۶۰ ثانیه).
+ *
+ * از ۸٫۳ همهٔ گزینه‌های روشن (سؤال ۱۸۹): نرخ هر اندازه، یکرو و دورو جدا وقتی فرق دارند، کاغذهای دیگر و صحافی‌های دیگر. تعرفه‌ای
+ * که فقط A4 و یک نرخ برای یکرو و دورو دارد، همان جدول پیش از ۸٫۳ است.
  */
+
+const COLOR: Record<ColorMode, string> = { bw: 'سیاه‌سفید', color: 'رنگی' };
 
 /** نام منطقه‌های کرایه؛ خود تعرفه فقط شناسه دارد. */
 const ZONES = [
@@ -39,6 +44,7 @@ function exampleQuote(list: PriceList) {
           rules: wholeDocumentRule(EXAMPLE_PAGES, 'bw', DEFAULT_PAPER_TYPE_ID),
           copies: 1,
           sidesMode: 'double',
+          paperSize: DEFAULT_PAPER_SIZE,
           bindingTypeId: DEFAULT_BINDING_TYPE_ID,
         },
       ],
@@ -57,13 +63,43 @@ function Tomans({ rials }: { rials: number }) {
   );
 }
 
+/** کمترین عدد، و اینکه همه یکی‌اند یا نه («از» فقط وقتی فرق دارند). */
+function lowest(values: readonly number[]): { rials: number; varies: boolean } {
+  const rials = Math.min(...values);
+  return { rials, varies: values.some((value) => value !== rials) };
+}
+
+/** «گلاسه هر برگ 1,500 تومان بیشتر»، «منگنه (تا 50 برگ) از 8,000»: کاغذها و صحافی‌های روشن جز پیش‌فرض. */
+function others<T extends { nameFa: string; enabled: boolean }>(table: Readonly<Record<string, T>>, skip: string) {
+  return Object.entries(table).filter(([id, row]) => id !== skip && row.enabled);
+}
+
 export function Tariff({ priceList: list }: { priceList: PriceList }) {
   const paper = list.paperTypes[DEFAULT_PAPER_TYPE_ID]!;
   const binding = list.bindingTypes[DEFAULT_BINDING_TYPE_ID]!;
   const shipping = list.shippingMethods[DEFAULT_SHIPPING_METHOD_ID]!;
-  const bands = binding.bands;
+  const bands = binding.bands[DEFAULT_PAPER_SIZE]!;
   const breakdown = exampleQuote(list);
   const example = breakdown.items[0]!;
+  const sizes = offeredSizes(list);
+  /** یک ردیف برای هر اندازه × رنگ؛ نام اندازه فقط وقتی بیش از یکی است. */
+  const printRows = sizes.flatMap((size) =>
+    (['bw', 'color'] as const).map((color) => ({
+      key: `${size}-${color}`,
+      size: sizes.length > 1 ? size : null,
+      color,
+      double: list.printRates[size]!.double[color],
+      single: list.printRates[size]!.single[color],
+    })),
+  );
+  const papers = others(list.paperTypes, DEFAULT_PAPER_TYPE_ID).flatMap(([id, row]) => {
+    const rates = Object.values(row.sheetRates);
+    return rates.length > 0 ? [{ id, nameFa: row.nameFa, ...lowest(rates) }] : [];
+  });
+  const bindings = others(list.bindingTypes, DEFAULT_BINDING_TYPE_ID).flatMap(([id, row]) => {
+    const prices = Object.values(row.bands).flatMap((sized) => sized.map((band) => band.priceRials));
+    return prices.length > 0 ? [{ id, row, ...lowest(prices) }] : [];
+  });
   return (
     <section id="tariff" className="home-sec" aria-labelledby="tariff-title">
       <h2 id="tariff-title" className="home-sec__title">
@@ -77,21 +113,39 @@ export function Tariff({ priceList: list }: { priceList: PriceList }) {
             <h3>چاپ، هر رو</h3>
           </div>
           <dl>
-            <div>
-              <dt>سیاه‌سفید</dt>
-              <dd>
-                <Tomans rials={list.clickRates.bw ?? 0} />
-              </dd>
-            </div>
-            <div>
-              <dt>رنگی</dt>
-              <dd>
-                <Tomans rials={list.clickRates.color ?? 0} />
-              </dd>
-            </div>
+            {printRows.map((row) => (
+              <div key={row.key}>
+                <dt>
+                  {COLOR[row.color]}
+                  {row.size ? (
+                    <>
+                      {' '}
+                      <bdi>{PAPER_SIZES[row.size].label}</bdi>
+                    </>
+                  ) : null}
+                </dt>
+                <dd>
+                  {row.single === row.double ? (
+                    <Tomans rials={row.double} />
+                  ) : (
+                    <>
+                      دورو <span className="num">{formatTomans(row.double, false)}</span>، یکرو{' '}
+                      <span className="num">{formatTomans(row.single, false)}</span> <small>تومان</small>
+                    </>
+                  )}
+                </dd>
+              </div>
+            ))}
           </dl>
           <p className="home-price__note">
-            کاغذ <Inline text={paper.nameFa} />. هر برگ در چاپ دورو دو صفحه است.
+            کاغذ <Inline text={paper.nameFa} />
+            {papers.map((other) => (
+              <span key={other.id}>
+                ؛ <Inline text={other.nameFa} /> هر برگ {other.varies ? 'از ' : null}
+                <span className="num">{formatTomans(other.rials, false)}</span> تومان بیشتر
+              </span>
+            ))}
+            . هر برگ در چاپ دورو دو صفحه است.
           </p>
         </article>
 
@@ -133,6 +187,32 @@ export function Tariff({ priceList: list }: { priceList: PriceList }) {
           <p className="home-price__note">
             بالای <span className="num">{formatNumber(binding.maxSheetsPerVolume)}</span> برگ خودکار چند جلد می‌شود.
           </p>
+          {bindings.length > 0 ? (
+            <p className="home-price__note" data-testid="tariff-bindings">
+              صحافی‌های دیگر:{' '}
+              {bindings.map(({ id, row, rials, varies }, i) => (
+                <span key={id}>
+                  {i > 0 ? '، ' : null}
+                  <Inline text={row.nameFa} />
+                  {row.splitsVolumes ? null : (
+                    <>
+                      {' '}
+                      (تا <span className="num">{formatNumber(row.maxSheetsPerVolume)}</span> برگ)
+                    </>
+                  )}{' '}
+                  {rials === 0 ? (
+                    'بی هزینه'
+                  ) : (
+                    <>
+                      {varies ? 'از ' : null}
+                      <span className="num">{formatTomans(rials, false)}</span>
+                    </>
+                  )}
+                </span>
+              ))}
+              {bindings.some((b) => b.rials > 0) ? ' تومان' : null}.
+            </p>
+          ) : null}
         </article>
 
         <article className="home-price" data-testid="tariff-shipping">

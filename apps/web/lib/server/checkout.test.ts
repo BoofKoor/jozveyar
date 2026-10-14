@@ -171,6 +171,7 @@ describe('مسیر خرید روی سرور', () => {
               rules: [{ pageRanges: [[1, 120]], colorMode: 'bw', paperTypeId: 'tahrir80' }],
               copies: 1,
               sidesMode: 'double',
+              paperSize: 'a4',
               bindingTypeId: 'spiral_clear',
             },
           ],
@@ -184,7 +185,7 @@ describe('مسیر خرید روی سرور', () => {
 
     it('تعرفهٔ فعال پایگاه داده، نه تعرفهٔ درون کد', async () => {
       const scan = doc(100);
-      const dearer: PriceList = { ...SEED_PRICE_LIST, version: 2, clickRates: { color: 30_000, bw: 20_000 } };
+      const dearer: PriceList = { ...SEED_PRICE_LIST, version: 2, printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } } };
       orders.activate(dearer);
       const result = await service.quote(ME, { items: [item([scan])], place: null });
       expect(result.ok && result.value.breakdown.priceListVersion).toBe(2);
@@ -1000,7 +1001,9 @@ describe('مسیر خرید روی سرور', () => {
             sidesMode: 'double',
             colorMode: 'bw',
             bindingName: 'طلق و سیم',
-            paperName: 'تحریر ۸۰ گرم',
+            // کاغذ پیش‌فرض نام نمی‌گیرد (۸٫۳)؛ اندازه همیشه
+            paperName: null,
+            paperSize: 'a4',
             sections: [
               { name: 'ریاضی ۲ - جلسه ۱.pdf', pageCount: 48 },
               { name: 'حل تمرین.docx', pageCount: 18 },

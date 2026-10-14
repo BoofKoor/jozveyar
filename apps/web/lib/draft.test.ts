@@ -28,7 +28,7 @@ const CHECKOUT: CheckoutDraft = {
 };
 
 const FILE: DraftFile = { name: 'جلسه 1.pdf', size: 1234, lastModified: 1_700_000_000_000, documentId: DOC };
-const CONFIG: OrderConfig = { colorMode: 'color', sidesMode: 'single', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 3 };
+const CONFIG: OrderConfig = { colorMode: 'color', sidesMode: 'single', paperSize: 'a5', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 3 };
 const DRAFT: Draft = {
   v: 2,
   files: [FILE, { ...FILE, name: 'جلسه 2.pdf', documentId: null }, { ...FILE, name: 'تمرین.pdf', documentId: null }],

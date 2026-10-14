@@ -15,7 +15,7 @@ const DEARER: SiteTariff = {
     ...SEED_PRICE_LIST,
     version: 2,
     label: 'پاییز </script><script>alert(1)</script> <!-- ۱۴۰۵',
-    clickRates: { color: 30_000, bw: 20_000 },
+    printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } },
   } satisfies PriceList,
   slaDays: 3,
 };

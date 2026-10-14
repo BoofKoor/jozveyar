@@ -219,6 +219,7 @@ interface MemoryItem {
   pageCount: number;
   copies: number;
   sidesMode: 'single' | 'double';
+  paperSize: 'a4' | 'a5' | 'a3';
   bindingTypeId: string;
   sections: { seq: number; documentId: string; pageCount: number }[];
   rules: PrintRuleRow[];
@@ -342,6 +343,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
           pageCount: item.pageCount,
           copies: item.copies,
           sidesMode: item.sidesMode,
+          paperSize: item.paperSize,
           bindingTypeId: item.bindingTypeId,
           printPdfKey: null,
           printPdfBytes: null,
@@ -487,6 +489,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
           pageCount: item.pageCount,
           copies: item.copies,
           sidesMode: item.sidesMode,
+          paperSize: item.paperSize,
           bindingTypeId: item.bindingTypeId,
           sections: item.sections.map((s, j) => ({ seq: j + 1, ...s })),
           rules: item.rules.map((r, j) => ({ id: randomUUID(), orderItemId: id, seq: j + 1, ...r })),

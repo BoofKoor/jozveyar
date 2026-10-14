@@ -1018,14 +1018,14 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
   const paperNameOf = (paperTypeId: string) =>
     paperTypeId === DEFAULT_PAPER_TYPE_ID ? null : (priceList.paperTypes[paperTypeId]?.nameFa ?? null);
   const bindingName = nameOf(config.bindingTypeId);
-  const print = printLabel(config.colorMode, config.sidesMode);
+  const print = printLabel(config.colorMode, config.sidesMode, config.paperSize, paperNameOf(config.paperTypeId));
   const filesOf = (part: JozvePart) => part.view.included.map((s) => ({ name: s.name, pageCount: s.pageCount }));
   const files = filesOf(jozves[0]!);
   /** هر جزوه برای مرور و خلاصه (سؤال ۲۲۵): فایل‌ها، صفحه‌ها، و مشخصات. */
   const recaps: RecapJozve[] = jozves.map((part) => ({
     files: filesOf(part),
     pageCount: part.view.pageCount,
-    print: printLabel(part.config.colorMode, part.config.sidesMode),
+    print: printLabel(part.config.colorMode, part.config.sidesMode, part.config.paperSize, paperNameOf(part.config.paperTypeId)),
     bindingName: nameOf(part.config.bindingTypeId),
     copies: part.config.copies,
   }));
@@ -1176,7 +1176,7 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
                   ? [
                       {
                         n: i + 1,
-                        spec: jozveSpecLabel(c.colorMode, c.sidesMode, nameOf(c.bindingTypeId), paperNameOf(c.paperTypeId)),
+                        spec: jozveSpecLabel(c.colorMode, c.sidesMode, c.paperSize, nameOf(c.bindingTypeId), paperNameOf(c.paperTypeId)),
                         pageCount: line.pageCount,
                         copies: line.copies,
                         totalRials: line.totalRials,

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
+import { DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import { publishDockHeight } from '../lib/dock';
 import type { OrderConfig } from '../lib/orderConfig';
 import { Names, Note } from './AnalysisCard';
@@ -149,6 +150,7 @@ export function OrderSummary({
 }: Props & ActionProps & { config: OrderConfig; priceList: PriceList; notes?: ReactNode }) {
   const item = breakdown.items[0];
   const binding = priceList.bindingTypes[config.bindingTypeId]?.nameFa ?? '';
+  const paper = config.paperTypeId === DEFAULT_PAPER_TYPE_ID ? null : (priceList.paperTypes[config.paperTypeId]?.nameFa ?? null);
 
   return (
     <div className="jy-card home-sum">
@@ -158,7 +160,7 @@ export function OrderSummary({
       {jozves ? (
         <JozveLines jozves={jozves} />
       ) : item ? (
-        <SummaryLines item={item} print={printLabel(config.colorMode, config.sidesMode)} bindingName={binding} />
+        <SummaryLines item={item} print={printLabel(config.colorMode, config.sidesMode, config.paperSize, paper)} bindingName={binding} />
       ) : null}
 
       <div className="home-sum__total">

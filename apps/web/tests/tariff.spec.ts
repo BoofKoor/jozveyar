@@ -41,8 +41,12 @@ const sql = () => (sqlClient ??= postgres(DATABASE_URL!, { max: 2, onnotice: () 
  * پایگاه داده (سفارشی که به نسخهٔ قبلی اشاره می‌کند) گیر نکند.
  */
 const version = randomInt(10_000, 1_000_000);
-const DEARER: PriceList = { ...SEED_PRICE_LIST, version, label: 'تست ۴٫۴ — گران‌تر', clickRates: { color: 24_000, bw: 18_000 } };
-const DEAREST: PriceList = { ...SEED_PRICE_LIST, version: version + 1, label: 'تست ۴٫۴ — گران‌ترین', clickRates: { color: 26_000, bw: 19_000 } };
+/** نرخ A4، یکرو و دورو یکی، مثل تعرفهٔ پایه. */
+const a4Rates = (color: number, bw: number): PriceList['printRates'] => ({ a4: { single: { color, bw }, double: { color, bw } } });
+const DEARER: PriceList = { ...SEED_PRICE_LIST, version, label: 'تست ۴٫۴ — گران‌تر', printRates: a4Rates(24_000, 18_000) };
+const DEAREST: PriceList = { ...SEED_PRICE_LIST, version: version + 1, label: 'تست ۴٫۴ — گران‌ترین', printRates: a4Rates(26_000, 19_000) };
+/** نرخ A4 دوروی یک تعرفه (یکرو همان). */
+const rateOf = (list: PriceList, color: 'bw' | 'color') => list.printRates.a4!.double[color];
 /** روز کاری تحویل به پست در همین تست؛ پیش‌فرض ۲ است. */
 const SLA_DAYS = 3;
 
@@ -50,19 +54,28 @@ const SLA_DAYS = 3;
 async function copyTariff(list: PriceList) {
   await sql().begin(async (tx) => {
     await tx`
-      insert into price_lists (version, label, click_rate_color_rials, click_rate_bw_rials, settings, is_active)
-      select ${list.version}, ${list.label}, ${list.clickRates.color!}, ${list.clickRates.bw!}, settings, false
-      from price_lists where version = 1`;
+      insert into price_lists (version, label, settings, is_active)
+      select ${list.version}, ${list.label}, settings, false from price_lists where version = 1`;
     await tx`
-      insert into paper_types (price_list_version, id, name_fa, gsm, enabled, rate_per_sheet_rials)
-      select ${list.version}, id, name_fa, gsm, enabled, rate_per_sheet_rials from paper_types where price_list_version = 1`;
+      insert into print_rates (price_list_version, paper_size, sides_mode, color_mode, rate_rials)
+      select ${list.version}, paper_size, sides_mode, color_mode,
+             case color_mode when 'color' then ${rateOf(list, 'color')}::bigint else ${rateOf(list, 'bw')}::bigint end
+      from print_rates where price_list_version = 1`;
     await tx`
-      insert into binding_types (price_list_version, id, name_fa, enabled, max_sheets_per_volume, weight_per_volume_grams)
-      select ${list.version}, id, name_fa, enabled, max_sheets_per_volume, weight_per_volume_grams
+      insert into paper_types (price_list_version, id, name_fa, gsm, enabled)
+      select ${list.version}, id, name_fa, gsm, enabled from paper_types where price_list_version = 1`;
+    await tx`
+      insert into paper_rates (price_list_version, paper_type_id, paper_size, rate_rials)
+      select ${list.version}, paper_type_id, paper_size, rate_rials from paper_rates where price_list_version = 1`;
+    await tx`
+      insert into binding_types (price_list_version, id, name_fa, enabled, min_sheets, max_sheets_per_volume, splits_volumes,
+                                 weight_per_volume_grams)
+      select ${list.version}, id, name_fa, enabled, min_sheets, max_sheets_per_volume, splits_volumes, weight_per_volume_grams
       from binding_types where price_list_version = 1`;
     await tx`
-      insert into binding_rate_bands (price_list_version, binding_type_id, min_sheets, max_sheets, price_rials)
-      select ${list.version}, binding_type_id, min_sheets, max_sheets, price_rials from binding_rate_bands where price_list_version = 1`;
+      insert into binding_rate_bands (price_list_version, binding_type_id, paper_size, min_sheets, max_sheets, price_rials)
+      select ${list.version}, binding_type_id, paper_size, min_sheets, max_sheets, price_rials
+      from binding_rate_bands where price_list_version = 1`;
     await tx`
       insert into shipping_methods (price_list_version, id, name_fa, enabled)
       select ${list.version}, id, name_fa, enabled from shipping_methods where price_list_version = 1`;
@@ -107,6 +120,7 @@ function tenPages(list: PriceList, zoneId: 'other' | null) {
           rules: wholeDocumentRule(10, 'bw', DEFAULT_PAPER_TYPE_ID),
           copies: 1,
           sidesMode: 'double',
+          paperSize: 'a4',
           bindingTypeId: DEFAULT_BINDING_TYPE_ID,
         },
       ],
@@ -162,17 +176,17 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
     expect(response.headers()['cache-control']).toMatch(/\bs-maxage=60\b/);
     expect(tariff!.slaDays).toBe(SLA_DAYS);
     expect(tariff!.priceList.label).toBe(DEARER.label);
-    expect(tariff!.priceList.clickRates).toEqual(DEARER.clickRates);
+    expect(tariff!.priceList.printRates).toEqual(DEARER.printRates);
     // همان تعرفه، همان عدد: `quote()` با JSON صفحه و با تعرفهٔ ساختهٔ تست یکی است، کرایه هم
     expect(tenPages(tariff!.priceList, 'other')).toEqual(tenPages(DEARER, 'other'));
     // سؤال‌ها در JSON-LD هم با همان عددها
-    expect(html).toContain(`سیاه‌سفید ${formatTomans(DEARER.clickRates.bw!)} و رنگی ${formatTomans(DEARER.clickRates.color!)}`);
+    expect(html).toContain(`سیاه‌سفید ${formatTomans(rateOf(DEARER, 'bw'))} و رنگی ${formatTomans(rateOf(DEARER, 'color'))}`);
     expect(html).toContain(`حداکثر ${SLA_DAYS} روز کاری`);
 
     await page.goto('/');
     await expect(page.getByTestId('tariff-print').locator('dd')).toHaveText([
-      `${toman(DEARER.clickRates.bw!)} تومان`,
-      `${toman(DEARER.clickRates.color!)} تومان`,
+      `${toman(rateOf(DEARER, 'bw'))} تومان`,
+      `${toman(rateOf(DEARER, 'color'))} تومان`,
     ]);
     const example = quote(
       {
@@ -182,6 +196,7 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
             rules: wholeDocumentRule(120, 'bw', DEFAULT_PAPER_TYPE_ID),
             copies: 1,
             sidesMode: 'double',
+            paperSize: 'a4',
             bindingTypeId: DEFAULT_BINDING_TYPE_ID,
           },
         ],
@@ -195,7 +210,7 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
     await expect(page.locator('.home-trust')).toContainText(`تحویل پست تا ${SLA_DAYS} روز کاری`);
     await expect(page.locator('#how')).toContainText(`تا ${SLA_DAYS} روز کاری بعد، جزوه تحویل پست`);
     await expect(page.locator('#faq')).toContainText(`حداکثر ${SLA_DAYS} روز کاری پس از پرداخت`);
-    await expect(page.locator('#faq')).toContainText(`سیاه‌سفید ${toman(DEARER.clickRates.bw!)} تومان`);
+    await expect(page.locator('#faq')).toContainText(`سیاه‌سفید ${toman(rateOf(DEARER, 'bw'))} تومان`);
   });
 
   let context: BrowserContext;

@@ -16,7 +16,7 @@
 import { z } from 'zod';
 
 import { MAX_SECTIONS_PER_ITEM } from './constants.js';
-import { colorModeSchema, sidesModeSchema, type Breakdown } from './index.js';
+import { colorModeSchema, paperSizeSchema, sidesModeSchema, type Breakdown, type PaperSize } from './index.js';
 
 /** حالت مسیر خرید (ADR-035). `off` پیش‌فرض و حالت سایت زنده تا برش ۷. */
 export type CheckoutMode = 'off' | 'mock' | 'live';
@@ -36,6 +36,11 @@ export const checkoutItemSchema = z.object({
   colorMode: colorModeSchema,
   paperTypeId: z.string().min(1).max(40),
   sidesMode: sidesModeSchema,
+  /**
+   * اندازهٔ کاغذ (برش ۸٫۳). نبودنش A4 است: زبانه‌ای که پیش از استقرار ۸٫۳ باز بود اندازه نمی‌فرستد، و همه A4 بود؛ اندازهٔ
+   * ناشناس ۴۰۰ است و اندازه‌ای که تعرفه ندارد `quote_warnings`.
+   */
+  paperSize: paperSizeSchema.default('a4'),
   bindingTypeId: z.string().min(1).max(40),
   copies: z.number().int().positive().max(1000),
 });
@@ -209,9 +214,12 @@ export interface OrderViewItem {
   pageCount: number;
   copies: number;
   sidesMode: 'single' | 'double';
+  /** اندازهٔ کاغذ جزوه (۸٫۳). */
+  paperSize: PaperSize;
   colorMode: 'color' | 'bw' | 'mixed';
   bindingName: string;
-  paperName: string;
+  /** نام کاغذ وقتی جز کاغذ پیش‌فرض است، وگرنه null (برش ۸٫۳). */
+  paperName: string | null;
   sections: OrderViewSection[];
 }
 

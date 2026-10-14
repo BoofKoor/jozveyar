@@ -596,6 +596,11 @@
   .home-row__value .jy-icon {
     color: var(--color-green-600);
   }
+  /* یادداشت گزینه‌ای که جایش را داد (۸٫۳)، زیر ردیف تک‌گزینه: خط خودش */
+  .home-row > .home-field__hint {
+    flex-basis: 100%;
+    margin-block-start: 0;
+  }
 
   /* ===== میز چندجزوه (برش ۸٫۲؛ طرح docs/ui/mockups/desk.html؛ components/DeskParts.tsx) ===== */
   /* «افزودن فایل به همین جزوه»: دکمهٔ متنی درون کارت، نه کادر خط‌چین (سؤال ۲۱۹) */

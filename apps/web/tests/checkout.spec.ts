@@ -54,6 +54,7 @@ function priceOf(pages: number, zoneId: 'tehran' | 'other' | null): Breakdown {
           rules: wholeDocumentRule(pages, 'bw', DEFAULT_PAPER_TYPE_ID),
           copies: 1,
           sidesMode: 'double',
+          paperSize: 'a4',
           bindingTypeId: DEFAULT_BINDING_TYPE_ID,
         },
       ],
@@ -387,6 +388,7 @@ test('دو جزوه: هر کدام تنظیمات خودش، قیمت سرور �
     rules: wholeDocumentRule(pages, 'bw', DEFAULT_PAPER_TYPE_ID),
     copies,
     sidesMode: 'double' as const,
+    paperSize: 'a4' as const,
     bindingTypeId: DEFAULT_BINDING_TYPE_ID,
   });
   const two = (zoneId: 'other' | null) =>

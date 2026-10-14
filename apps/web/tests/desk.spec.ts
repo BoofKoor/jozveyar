@@ -54,6 +54,7 @@ function quoteFor(
           rules: wholeDocumentRule(pages, colorMode, DEFAULT_PAPER_TYPE_ID),
           copies,
           sidesMode,
+          paperSize: 'a4',
           bindingTypeId: DEFAULT_BINDING_TYPE_ID,
         },
       ],

@@ -15,7 +15,7 @@ import {
 } from './layout';
 import type { OrderConfig } from './orderConfig';
 
-const BW: OrderConfig = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 1 };
+const BW: OrderConfig = { colorMode: 'bw', sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 1 };
 const COLOR: OrderConfig = { ...BW, colorMode: 'color', copies: 2 };
 
 /** شکل خلاصهٔ چیدمان: کلید فایل‌های هر جزوه. */

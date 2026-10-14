@@ -346,7 +346,7 @@ describe('جزوهٔ برگشته بعد از رفرش (۳د)', () => {
   const onServer = (name: string, id: string, pageCount?: number) => restoredSection(draftFile(name, id), arrived(pageCount));
   const partial = (name: string, id: string) => restoredSection(draftFile(name, id), { kind: 'partial' });
   const never = (name: string) => restoredSection(draftFile(name, null), null);
-  const INITIAL = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 1 } as const;
+  const INITIAL = { colorMode: 'bw', sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 1 } as const;
 
   it('فایل روی سرور: عدد از سرور، بی کارگر تحلیل و بی آپلود؛ بررسی نیمه‌کارهٔ سرور تا نتیجه دنبال می‌شود', async () => {
     const h = harness({});
