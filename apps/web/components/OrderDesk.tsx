@@ -1,27 +1,47 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
+import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { quote } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
+import { formatNumber } from '@jozveyar/text';
 import type { ApiFailure } from '../lib/checkout/api';
 import { orderGate, retryable } from '../lib/checkout/gate';
 import { isStep, type Step } from '../lib/checkout/steps';
 import type { CheckoutDraft } from '../lib/checkout/store';
-import { draftOf, tabStorage, writeDraft } from '../lib/draft';
+import { draftOf, tabStorage, writeDraft, type DraftLayout } from '../lib/draft';
+import type { Section } from '../lib/jozve';
 import type { RestoredSection } from '../lib/jozveController';
 import { RESTORING_ATTR } from '../lib/draftKey';
 import { colorHint } from '../lib/fileCard';
-import { jozveSpec, jozveView, matchAwaited } from '../lib/jozveView';
+import { jozveView, matchAwaited, orderSpec, type JozvePart } from '../lib/jozveView';
+import {
+  arrange,
+  arrangement,
+  configure,
+  moveTo,
+  moveWithin,
+  place,
+  reconcile,
+  restoredLayout,
+  startLayout,
+  type Arrangement,
+  type DeskLayout,
+  type JozveSlot,
+} from '../lib/layout';
 import type { OrderConfig } from '../lib/orderConfig';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import { pageTariff } from '../lib/tariff';
 import type { JozveHandle } from '../lib/useJozve';
-import { Names, Note, SingleFileCard } from './AnalysisCard';
-import { ConfigPanel } from './ConfigPanel';
+import { Names, Note, SingleFileCard, jozveTitleId } from './AnalysisCard';
+import { ConfigPanel, type ConfigQuote } from './ConfigPanel';
+import { AskLater, JozveSettings, NewJozve, OverflowNote, type MenuItem } from './DeskParts';
+import { ACCEPT } from './DropZone';
 import { JozveFiles } from './JozveFiles';
 import { OrderSummary, PriceDock, type DeskAction } from './OrderSummary';
-import { FlowNav } from './checkout/parts';
+import { FlowNav, jozveSpecLabel, type JozveLine } from './checkout/parts';
 
 /** انتخاب‌های پیش‌فرض، از تعرفه: سیاه‌سفید، دورو، یک نسخه. */
 export const INITIAL_CONFIG: OrderConfig = {
@@ -125,16 +145,36 @@ export function primeStep(mark: HistoryMark | null) {
 }
 
 /**
- * برای برگشت بعد از رفرش: تنظیمی که تعرفهٔ امروز دارد (تعرفهٔ تازه یعنی پیش‌فرض)، و قلم جزوهٔ برگشته اگر همه روی
- * سرور و شمرده‌اند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین تکه بمانند.
+ * چیدمان جزوهٔ برگشته (`Restore.tsx`، ۸٫۲): شمار فایل هر جزوه به ترتیب، تنظیماتش، و پرسش چیدمان؛ `OrderDesk` با سوار شدن
+ * برمی‌دارد، مثل قدم (`primeStep`).
  */
-export function restoredOrder(sections: readonly RestoredSection[], config: OrderConfig | null) {
+let restoredJozves: DraftLayout | null = null;
+
+/** چیدمان جزوهٔ برگشته، پیش از سوار شدن رابط. */
+export function primeLayout(layout: DraftLayout | null) {
+  restoredJozves = layout;
+}
+
+/** تنظیمی که تعرفهٔ امروز دارد، وگرنه null (پیش‌فرض‌ها): خود جدول، نه نام‌های ارث‌رسیده («constructor» پیش‌نویس دستکاری‌شده). */
+function knownConfig(config: OrderConfig | null, priceList: PriceList): OrderConfig | null {
   const has = (table: object, id: string) => Object.prototype.hasOwnProperty.call(table, id);
+  return config && has(priceList.bindingTypes, config.bindingTypeId) && has(priceList.paperTypes, config.paperTypeId) ? config : null;
+}
+
+/**
+ * برای برگشت بعد از رفرش: تنظیم هر جزوه که تعرفهٔ امروز دارد (تعرفهٔ تازه یعنی پیش‌فرض)، و قلم‌های جزوه‌های برگشته اگر همه
+ * روی سرور و شمرده‌اند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین تکه بمانند.
+ */
+export function restoredOrder(jozves: readonly { sections: readonly RestoredSection[]; config: OrderConfig | null }[]) {
   const { priceList } = pageTariff();
-  // خود جدول، نه نام‌های ارث‌رسیده («constructor» پیش‌نویس دستکاری‌شده)
-  const known = config && has(priceList.bindingTypes, config.bindingTypeId) && has(priceList.paperTypes, config.paperTypeId) ? config : null;
-  const gate = orderGate(jozveView(sections.map((section, i) => ({ ...section, key: `r${i}` }))), known ?? INITIAL_CONFIG);
-  return { config: known, items: gate.kind === 'ready' ? gate.items : null };
+  const configs = jozves.map((jozve) => knownConfig(jozve.config, priceList));
+  let at = 0;
+  const parts = jozves.map((jozve, i) => ({
+    view: jozveView(jozve.sections.map((section) => ({ ...section, key: `r${(at += 1)}` }))),
+    config: configs[i] ?? INITIAL_CONFIG,
+  }));
+  const gate = orderGate(parts);
+  return { configs, items: gate.kind === 'ready' ? gate.items : null };
 }
 
 export { fetchStatus, loadCheckout, markOf, type HistoryMark };
@@ -180,21 +220,50 @@ export function Restore(props: RestoreProps) {
   return module ? <module.Restore {...props} /> : null;
 }
 
+
 interface Props {
   jozve: JozveHandle;
-  /** null یعنی کاربر هنوز چیزی را عوض نکرده: پیش‌فرض‌ها. حالت در پوسته است، تا با «از اول» نرود. */
+  /**
+   * تنظیم جزوهٔ اول که پوسته نگه می‌دارد، تا با «از اول» نرود؛ null یعنی پیش‌فرض‌ها. جزوه‌های دیگر تنظیمشان را در چیدمان
+   * همین‌جا دارند (`lib/layout.ts`).
+   */
   config: OrderConfig | null;
   onConfig: (next: OrderConfig) => void;
 }
 
+/** یک جزوهٔ میز: جایش در چیدمان، نمای فایل‌هایش، و تنظیمات چاپش. */
+interface DeskJozve extends JozvePart {
+  slot: JozveSlot;
+}
+
+function jozvesOf(layout: DeskLayout, byKey: ReadonlyMap<string, Section>): DeskJozve[] {
+  return layout.jozves.map((slot) => ({
+    slot,
+    view: jozveView(slot.sections.map((key) => byKey.get(key)!)),
+    config: slot.config ?? INITIAL_CONFIG,
+  }));
+}
+
 /**
- * رابط پس از فایل (طرح ز، docs/UI.md ۴ب): قدم‌های سفارش، کارت «جزوهٔ تو»، «تنظیمات چاپ»، خلاصهٔ سفارش و
- * نوار قیمت موبایل. تکهٔ JS جداست و با اولین فایل بار می‌شود (`OrderFlow`)؛ پس `quote()`، تعرفه و همهٔ
- * متن‌های کارت‌ها در باندل اولیه نیستند.
+ * ریز قیمت سفارش با همان `quote()`، و قلم هر جزوه در آن (null تا وقتی صفحه‌ای ندارد): یک قلم برای هر جزوه، کرایه یک بار با
+ * وزن همه، و جمع یکی (سؤال ۱۸۲).
+ */
+function priceOf(parts: readonly JozvePart[], priceList: PriceList) {
+  const order = orderSpec(parts);
+  if (!order) return null;
+  const breakdown = quote(order.spec, priceList);
+  return { breakdown, items: order.index.map((at) => (at === null ? null : breakdown.items[at]!)) };
+}
+
+/**
+ * رابط پس از فایل (طرح ز، docs/UI.md ۴ب؛ میز چندجزوه، قدم ۱۱ و برش ۸٫۲): قدم‌های سفارش، پرسش چیدمان، یک کارت برای هر
+ * جزوه با فایل‌ها و «تنظیمات چاپ» خودش، «جزوهٔ تازه»، خلاصهٔ سفارش و نوار قیمت موبایل. تکهٔ JS جداست و با اولین فایل بار
+ * می‌شود (`OrderFlow`)؛ پس `quote()`، تعرفه و همهٔ متن‌های کارت‌ها در باندل اولیه نیستند.
  *
- * هر تکه یک خانهٔ شبکهٔ سفارش است (home.css): قدم‌ها بالای شبکه، کارت‌ها در ستون اصلی، خلاصه در
- * ستون کنار، و سؤال‌ها (از پوسته) زیر کارت‌ها. قیمت در هر دو حالت یک قلم است — صفحه‌های همهٔ فایل‌ها
- * جمع و یک صحافی (ADR-030) — با همان `quote()`.
+ * هر تکه یک خانهٔ شبکهٔ سفارش است (home.css): قدم‌ها بالای شبکه، کارت‌ها در ستون اصلی، خلاصه در ستون کنار، و سؤال‌ها
+ * (از پوسته) زیر کارت‌ها. صف همهٔ فایل‌های سفارش را یک‌جا دارد (نوبت کارگر تحلیل و آپلود روی کل سفارش)؛ اینکه هر فایل در
+ * کدام جزوه است در چیدمان همین تکه است. قیمت یک قلم برای هر جزوه است، صفحه‌های فایل‌هایش جمع و یک صحافی (ADR-030)، با همان
+ * `quote()`.
  *
  * «ادامه» مسیر خرید را در همان صفحه باز می‌کند (ADR-034، برش ۳ج): قدم‌های آدرس و پرداخت در تکهٔ جدای
  * `checkout/Checkout`، هر کدام یک خانه در تاریخچهٔ مرورگر؛ جزوه، آپلود و کارگر تحلیل همین‌جا زنده می‌مانند.
@@ -203,21 +272,87 @@ interface Props {
  * یک بار در هر بار سوار شدن خوانده می‌شود.
  */
 export function OrderDesk({ jozve, config, onConfig }: Props) {
-  const current = config ?? INITIAL_CONFIG;
-  const view = useMemo(() => jozveView(jozve.sections), [jozve.sections]);
   const [{ priceList, slaDays }] = useState(pageTariff);
 
-  const quoteFor = useCallback(
-    (next: OrderConfig) => {
-      const spec = jozveSpec(view, next);
-      return spec ? quote(spec, priceList) : null;
-    },
-    [view, priceList],
+  /*
+   * ── چیدمان جزوه‌ها (۸٫۲، `lib/layout.ts`) ──
+   * همیشه با فایل‌های امروز صف همگام (`reconcile`)، هم در نمایش و هم پیش از هر کار؛ جزوهٔ برگشته بعد از رفرش با چیدمان خودش.
+   */
+  const keys = useMemo(() => jozve.sections.map((section) => section.key), [jozve.sections]);
+  const keysRef = useRef(keys);
+  useLayoutEffect(() => {
+    keysRef.current = keys;
+  }, [keys]);
+  const [primed] = useState(() => restoredJozves);
+  const [layout, setLayout] = useState<DeskLayout>(
+    () => (primed && restoredLayout(keys, primed.jozves, primed.asking)) || startLayout(keys, config),
   );
-  const breakdown = useMemo(() => quoteFor(current), [quoteFor, current]);
+  const synced = useMemo(() => reconcile(layout, keys), [layout, keys]);
+  const update = useCallback((change: (layout: DeskLayout) => DeskLayout) => {
+    setLayout((current) => change(reconcile(current, keysRef.current)));
+  }, []);
+  const byKey = useMemo(() => new Map(jozve.sections.map((section) => [section.key, section])), [jozve.sections]);
+  const jozves = useMemo(() => jozvesOf(synced, byKey), [synced, byKey]);
+  const multi = jozves.length > 1;
+  const priced = useMemo(() => priceOf(jozves, priceList), [jozves, priceList]);
+  const breakdown = priced?.breakdown ?? null;
 
-  const pending = view.pending.filter((s) => s.serverPath).map((s) => s.name);
-  const blocked = view.blocked.map((s) => s.name);
+  const sections = useMemo(() => jozves.flatMap((j) => j.view.sections), [jozves]);
+  const provisional = jozves.some((j) => j.view.provisional);
+  const pending = sections.filter((s) => s.pending && s.serverPath).map((s) => s.name);
+  const blocked = sections.filter((s) => s.blocked !== null).map((s) => s.name);
+  const waiting = sections.filter((s) => s.waiting).map((s) => s.name);
+
+  /** قیمت سفارش وقتی جزوهٔ `index` انتخاب دیگری دارد (`ConfigPanel`): اثر هر گزینه روی جمع، و برگ‌های همان جزوه. */
+  const quoteFor = useCallback(
+    (index: number) =>
+      (next: OrderConfig): ConfigQuote | null => {
+        const order = orderSpec(jozves.map((j, i) => (i === index ? { ...j, config: next } : j)));
+        if (!order) return null;
+        const other = quote(order.spec, priceList);
+        const at = order.index[index];
+        return { totalRials: other.totalWithoutShippingRials, sheets: at == null ? 0 : other.items[at]!.sheets };
+      },
+    [jozves, priceList],
+  );
+
+  /*
+   * پرسش چیدمان (۲۱۵، ۲۱۶): حالت امروز، و قیمت حالت دیگر منهای قیمت امروز. هر دو در راه اولین قیمت جزوهٔ چندفایلی‌اند، پس
+   * کارت پرسش در رسم کم‌اولویت بعدی می‌آید (`AskLater`)، و قیمت حالت دیگر فقط وقتی دوباره حساب می‌شود که صفحه‌های شمرده یا
+   * تنظیمات عوض شوند (`askKey`)، نه با هر صفحه‌ای که بررسی رنگش تمام شد.
+   */
+  const asked = synced.asking ? arrangement(synced) : null;
+  const askKey =
+    asked && breakdown ? JSON.stringify([asked, jozves.map((j) => [j.config, j.view.included.map((s) => [s.key, s.pageCount])])]) : null;
+  const askDelta = () => {
+    if (!asked || !breakdown) return null;
+    const other = priceOf(jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey), priceList);
+    return other ? other.breakdown.totalWithoutShippingRials - breakdown.totalWithoutShippingRials : null;
+  };
+
+  /*
+   * ── تنظیمات باز (۲۱۷) ──
+   * چند جزوه: در هر لحظه یکی باز؛ پیش‌فرض جزوهٔ اول، جزوهٔ تازه همان که تازه ساخته شد، و «بستن» همه را می‌بندد.
+   */
+  const [open, setOpen] = useState<{ key: string | null } | null>(null);
+  const openKey = !multi
+    ? null
+    : open?.key === null
+      ? null
+      : open && jozves.some((j) => j.slot.key === open.key)
+        ? open.key
+        : jozves[0]!.slot.key;
+  /** کلید جزوه‌ای که کار بعدی چیدمان می‌سازد. */
+  const freshKey = `j${synced.next}`;
+  /** فایلی که با منوی ردیف به جزوهٔ دیگر رفت: فوکوس به سر همان جزوه، نه گم شدن با ردیفی که از جایش رفت. */
+  const focusAfter = useRef<string | null>(null);
+  useEffect(() => {
+    const key = focusAfter.current;
+    if (!key) return;
+    focusAfter.current = null;
+    const index = jozves.findIndex((j) => j.slot.sections.includes(key));
+    if (index >= 0) document.getElementById(jozveTitleId(index))?.focus();
+  }, [jozves]);
 
   /*
    * ── حالت مسیر خرید، وقتی قیمت نهایی شد ──
@@ -227,7 +362,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
    * می‌کند؛ پس درخواست بعد از رسم همان قیمت می‌رود.
    */
   const [status, setStatus] = useState<CheckoutStatus | 'error' | null>(statusCache);
-  const settled = breakdown !== null && !view.provisional;
+  const settled = breakdown !== null && !provisional;
   useEffect(() => {
     if (!settled || status !== null) return;
     // درخواستی که رفته، اگر جزوه در همین حین دوباره در بررسی شد، باز هم پاسخش می‌نشیند
@@ -254,6 +389,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   useLayoutEffect(() => document.documentElement.removeAttribute(RESTORING_ATTR), []);
   useEffect(() => {
     restoredMark = null;
+    restoredJozves = null;
     history.replaceState({ ...history.state, jy: { step: restored?.step ?? 'desk', desk: mount } satisfies HistoryMark }, '');
     const onPop = (event: PopStateEvent) => {
       const mark = markOf(event.state);
@@ -271,15 +407,15 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   }, [mount, restored]);
 
   /*
-   * ── پیش‌نویس همین زبانه (۳د، ADR-036) ──
+   * ── پیش‌نویس همین زبانه (۳د، ADR-036؛ چیدمان از ۸٫۲) ──
    * وقتی صفحه پنهان می‌شود یا می‌رود (رفرش، رفتن به برنامهٔ پیامک، درگاه) و با هر قدم؛ هرگز در راه اولین قیمت.
    */
-  const latest = useRef({ sections: jozve.sections, config });
+  const latest = useRef({ sections: jozve.sections, layout: synced });
   useEffect(() => {
-    latest.current = { sections: jozve.sections, config };
+    latest.current = { sections: jozve.sections, layout: synced };
   });
   const saveDraft = useCallback(() => {
-    writeDraft(tabStorage(), draftOf(latest.current.sections, latest.current.config, checkoutDraft()));
+    writeDraft(tabStorage(), draftOf(latest.current.sections, latest.current.layout, checkoutDraft()));
   }, []);
   useEffect(() => {
     const onHide = () => {
@@ -292,22 +428,98 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       window.removeEventListener('pagehide', saveDraft);
     };
   }, [saveDraft]);
-  /** «از اول» و «فایل دیگری بینداز»: جزوه و پیش‌نویسش با هم می‌روند. */
+  /** «از اول» و «فایل دیگری بینداز»: جزوه‌ها و پیش‌نویسشان با هم می‌روند. */
   const reset = () => {
     writeDraft(tabStorage(), null);
     jozve.reset();
   };
+
+  /* ── کارهای کاربر روی فایل‌ها و جزوه‌ها ── */
+
   /**
-   * جزوه‌ای که بعد از رفرش برگشت (۳د): همان فایلی که بخشی منتظرش است سر جای خودش می‌نشیند و آپلودش از همان تکه
-   * ادامه می‌دهد (`matchAwaited`)؛ فایل دیگر جایگزینی است، یا فایل تازه ته جزوه.
+   * فایل‌های تازه: هر فایلی که بخشی از جزوهٔ برگشته منتظرش است سر جای خودش (`matchAwaited`؛ آپلودش از همان تکه ادامه
+   * می‌دهد)، و بقیه ته همان جزوه، یا یک جزوهٔ تازه با تنظیمات خودش (۲۱۹).
    */
-  const replace = (key: string, file: File) =>
-    jozve.replace(key, file, matchAwaited(jozve.sections, [file]).resumed[0]?.key === key);
-  const add = (files: File[]) => {
+  const addTo = (target: string | 'new') => (files: File[]) => {
     const { resumed, rest } = matchAwaited(jozve.sections, files);
     for (const { key, file } of resumed) jozve.replace(key, file, true);
-    if (rest.length > 0) jozve.add(rest);
+    if (rest.length === 0) return;
+    if (target === 'new') setOpen({ key: freshKey });
+    const fresh = jozve.add(rest);
+    update((current) => place(current, fresh, target));
   };
+  /** همان فایلی که بخشی منتظرش است سر جای خودش و آپلودش از همان تکه؛ فایل دیگر جایگزینی است. */
+  const replace = (key: string, file: File) =>
+    jozve.replace(key, file, matchAwaited(jozve.sections, [file]).resumed[0]?.key === key);
+  /** یک فایل‌گزین برای «جایگزین کن» و «همان فایل را انتخاب کن» همهٔ کارت‌ها، تا شناسه‌اش در صفحه یکتا بماند. */
+  const replaceInput = useRef<HTMLInputElement>(null);
+  const replaceTarget = useRef<string | null>(null);
+  const pick = useCallback((key: string) => {
+    replaceTarget.current = key;
+    replaceInput.current?.click();
+  }, []);
+  const arrangeAs = useCallback(
+    (to: Arrangement) => {
+      setOpen(null);
+      update((current) => arrange(current, to));
+    },
+    [update],
+  );
+  const configureAt = (index: number, next: OrderConfig) => {
+    update((current) => configure(current, jozves[index]!.slot.key, next));
+    // جزوهٔ اول: پوسته هم نگهش می‌دارد، تا با «از اول» نرود.
+    if (index === 0) onConfig(next);
+  };
+
+  /**
+   * کارهای منوی ردیف (۲۱۸)، وقتی منو باز می‌شود: درون همان جزوه، به جزوه‌های دیگر با نام فایل اولشان، و جزوهٔ تازه. از چیدمان
+   * همین حالا (`latest`)، نه از رسمی که ردیف با آن کشیده شد: ردیف فقط وقتی دوباره رسم می‌شود که فایل خودش عوض شود
+   * (`JozveFiles`). ردیف کارت جزوه همیشه دست‌کم یک کار دارد: چند فایل در جزوه یعنی بالا یا پایین، و چند جزوه یعنی جزوهٔ دیگر.
+   */
+  const menuOf = useCallback(
+    (key: string): MenuItem[] => {
+      const { layout, sections } = latest.current;
+      const index = layout.jozves.findIndex((j) => j.sections.includes(key));
+      const own = layout.jozves[index];
+      if (!own) return [];
+      const row = own.sections.indexOf(key);
+      const items: MenuItem[] = [];
+      if (row > 0) items.push({ label: 'یکی بالاتر', onSelect: () => update((current) => moveWithin(current, key, -1)) });
+      if (row < own.sections.length - 1) {
+        items.push({ label: 'یکی پایین‌تر', onSelect: () => update((current) => moveWithin(current, key, 1)) });
+      }
+      const within = items.length;
+      layout.jozves.forEach((other, i) => {
+        if (i === index) return;
+        items.push({
+          label: (
+            <>
+              به جزوهٔ <span className="num">{formatNumber(i + 1)}</span>
+            </>
+          ),
+          detail: sections.find((section) => section.key === other.sections[0])?.file.name,
+          divided: within > 0 && items.length === within,
+          onSelect: () => {
+            focusAfter.current = key;
+            update((current) => moveTo(current, key, other.key));
+          },
+        });
+      });
+      if (own.sections.length > 1) {
+        items.push({
+          label: 'جزوهٔ تازه با همین فایل',
+          divided: within > 0 && items.length === within,
+          onSelect: () => {
+            setOpen({ key: `j${layout.next}` });
+            focusAfter.current = key;
+            update((current) => moveTo(current, key, 'new'));
+          },
+        });
+      }
+      return items;
+    },
+    [update],
+  );
 
   // کاری که در راه بود (قیمت سرور پس از «ادامه») بعد از «از اول» می‌رسد: رابطی که رفت، نه قدم می‌رود و نه پیش‌نویس جزوهٔ رفته را
   // دوباره می‌نویسد.
@@ -331,7 +543,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     [mount, saveDraft],
   );
 
-  // هر قدم از بالای صفحه؛ برگشت به «جزوه و قیمت» فوکوس را به کارت «جزوهٔ تو» می‌آورد.
+  // هر قدم از بالای صفحه؛ برگشت به «جزوه و قیمت» فوکوس را به سر اولین کارت جزوه می‌آورد.
   useEffect(() => {
     if (!moved.current) return;
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -339,21 +551,21 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   }, [step]);
 
   /* ── «ادامه» ── */
-  const gate = useMemo(() => orderGate(view, current), [view, current]);
+  const gate = useMemo(() => orderGate(jozves), [jozves]);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const mode = status === null || status === 'error' ? null : status.mode;
-  const open = mode === 'mock' || mode === 'live' || status === 'error';
+  const isOpen = mode === 'mock' || mode === 'live' || status === 'error';
 
   // ثبت سفارش باز است و فایل‌ها رسیده‌اند: کاربر احتمالاً ادامه می‌دهد، و رشتهٔ اصلی بیکار است.
   useEffect(() => {
-    if (open && gate.kind === 'ready') preloadCheckout();
-  }, [open, gate.kind]);
+    if (isOpen && gate.kind === 'ready') preloadCheckout();
+  }, [isOpen, gate.kind]);
 
   const action: DeskAction =
     gate.kind === 'waiting'
       ? 'waiting'
-      : view.provisional || status === null
+      : provisional || status === null
       ? 'checking'
       : blocked.length > 0
         ? 'blocked'
@@ -415,8 +627,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
         step={step}
         go={go}
         items={gate.items}
-        view={view}
-        config={current}
+        jozves={jozves}
         priceList={priceList}
         slaDays={slaDays}
         auth={status !== null && status !== 'error' ? status.auth : null}
@@ -492,40 +703,113 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     </>
   );
 
+  const room = MAX_SECTIONS_PER_ITEM - jozve.sections.length;
+  /** «سیاه‌سفید، دورو، طلق و سیم» یک جزوه. */
+  const specOf = ({ colorMode, sidesMode, bindingTypeId, paperTypeId }: OrderConfig) =>
+    jozveSpecLabel(
+      colorMode,
+      sidesMode,
+      priceList.bindingTypes[bindingTypeId]?.nameFa ?? '',
+      paperTypeId === DEFAULT_PAPER_TYPE_ID ? null : (priceList.paperTypes[paperTypeId]?.nameFa ?? null),
+    );
+  /** خلاصهٔ سفارش چندجزوه (۲۲۵): فقط جزوه‌هایی که قیمت دارند، هر کدام با شمارهٔ خودش. */
+  const lines: JozveLine[] | null = multi
+    ? jozves.flatMap((j, i) => {
+        const item = priced?.items[i];
+        return item ? [{ n: i + 1, spec: specOf(j.config), pageCount: item.pageCount, copies: item.copies, totalRials: item.totalRials }] : [];
+      })
+    : null;
+
   return (
     <>
       <FlowNav current={1} />
 
       <div className="home-desk">
-        {view.sections.length === 1 ? (
-          <SingleFileCard section={view.sections[0]!} onAdd={add} onReplace={replace} onReset={reset} />
-        ) : (
-          <JozveFiles
-            view={view}
-            overflow={jozve.overflow}
-            onAdd={add}
-            onMove={jozve.move}
-            onRemove={jozve.remove}
-            onReplace={replace}
-            onReset={reset}
-          />
-        )}
-        {breakdown ? (
-          <ConfigPanel
-            config={current}
-            onChange={onConfig}
-            priceList={priceList}
-            quoteFor={quoteFor}
-            // صفحه‌های رنگی جای خودشان را دارند، کنار انتخاب رنگ؛ حکم «تماماً» فقط بعد از بررسی همه.
-            colorHint={colorHint({
-              colorPages: view.summary.colorPageCount,
-              unknown: view.summary.colorUnknown,
-              pending: view.provisional || view.blocked.length > 0,
-              estimated: view.summary.estimated,
-              jozve: view.sections.length > 1,
-            })}
-          />
+        {asked ? (
+          <AskLater files={sections.length} arrangement={asked} onArrange={arrangeAs} deltaKey={askKey} deltaOf={askDelta} />
         ) : null}
+        {jozves.map((j, index) => {
+          const item = priced?.items[index] ?? null;
+          const settings = item ? (
+            <JozveSettings
+              multi={multi}
+              open={openKey === j.slot.key}
+              onToggle={() => setOpen({ key: openKey === j.slot.key ? null : j.slot.key })}
+              line={
+                multi ? (
+                  <>
+                    {specOf(j.config)} · <span className="num">{formatNumber(j.config.copies)}</span> نسخه
+                  </>
+                ) : null
+              }
+              id={`jozve-set-${index + 1}`}
+            >
+              <ConfigPanel
+                config={j.config}
+                onChange={(next) => configureAt(index, next)}
+                priceList={priceList}
+                quoteFor={quoteFor(index)}
+                // صفحه‌های رنگی جای خودشان را دارند، کنار انتخاب رنگ؛ حکم «تماماً» فقط بعد از بررسی همه.
+                colorHint={colorHint({
+                  colorPages: j.view.summary.colorPageCount,
+                  unknown: j.view.summary.colorUnknown,
+                  pending: j.view.provisional || j.view.blocked.length > 0,
+                  estimated: j.view.summary.estimated,
+                  jozve: j.view.sections.length > 1,
+                })}
+              />
+            </JozveSettings>
+          ) : null;
+          return !multi && j.view.sections.length === 1 ? (
+            <SingleFileCard
+              key={j.slot.key}
+              section={j.view.sections[0]!}
+              onAdd={addTo(j.slot.key)}
+              room={room}
+              onPick={pick}
+              onReset={reset}
+              settings={settings}
+            />
+          ) : (
+            <JozveFiles
+              key={j.slot.key}
+              index={index}
+              multi={multi}
+              view={j.view}
+              priceRials={item?.totalRials ?? null}
+              menuOf={menuOf}
+              room={room}
+              onAdd={addTo(j.slot.key)}
+              onRemove={jozve.remove}
+              onPick={pick}
+              settings={settings}
+            />
+          );
+        })}
+        <OverflowNote names={jozve.overflow}>
+          <Names names={jozve.overflow} />
+        </OverflowNote>
+        <NewJozve room={room} onFiles={addTo('new')} onReset={reset} />
+        <input
+          ref={replaceInput}
+          id="jozve-replace"
+          type="file"
+          accept={ACCEPT}
+          tabIndex={-1}
+          aria-hidden="true"
+          className="sr-only"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            const target = replaceTarget.current;
+            replaceTarget.current = null;
+            if (!file) return;
+            // بی دکمهٔ ردیف (فایل‌گزینی که خود مرورگر دوباره باز کرد): همان فایلی که بخشی منتظرش است، وگرنه تنها فایل سفارش.
+            const key =
+              target ?? matchAwaited(jozve.sections, [file]).resumed[0]?.key ?? (jozve.sections.length === 1 ? jozve.sections[0]!.key : null);
+            if (key) replace(key, file);
+          }}
+        />
       </div>
 
       {breakdown ? (
@@ -533,24 +817,26 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           <aside className="home-side" aria-labelledby="summary-title">
             <OrderSummary
               breakdown={breakdown}
-              config={current}
+              config={jozves[0]!.config}
               priceList={priceList}
-              provisional={view.provisional}
+              provisional={provisional}
               pending={pending}
               blocked={blocked}
-              waiting={view.waiting.map((s) => s.name)}
+              waiting={waiting}
+              jozves={lines}
               notes={notes}
               action={action}
               onContinue={onContinue}
-              onIntent={open ? preloadCheckout : () => undefined}
+              onIntent={isOpen ? preloadCheckout : () => undefined}
             />
           </aside>
           <PriceDock
             breakdown={breakdown}
-            provisional={view.provisional}
+            provisional={provisional}
+            jozves={multi ? jozves.length : null}
             action={action}
             onContinue={onContinue}
-            onIntent={open ? preloadCheckout : () => undefined}
+            onIntent={isOpen ? preloadCheckout : () => undefined}
           />
         </>
       ) : null}

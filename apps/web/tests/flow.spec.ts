@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -117,6 +118,21 @@ test.describe('سئو و بار اولیه', () => {
     ] as const) {
       expect(code.includes(Buffer.from(marker).toString('latin1')), `${module} در باندل اولیه آمده`).toBe(false);
     }
+  });
+
+  /**
+   * رابط پس از فایل با یک درخواست می‌آید (۸٫۲): ماژولی که صفحهٔ دیگری هم در مرورگر می‌خواهد، اگر سهم مشترکشان از ۲۰ کیلوبایت
+   * بگذرد، webpack تکهٔ جدایی می‌شود و رابط پس از فایل با درخواست دومی در راه اولین قیمت می‌آید؛ همین با `parts.tsx` و صفحهٔ
+   * سفارش پیش آمد (`checkout/sum.tsx`). نقشهٔ importهای پویای build همان فایل‌هایی است که مرورگر برای هر import بار می‌کند.
+   */
+  test('رابط پس از فایل یک تکه است، با یک درخواست', () => {
+    const manifest = JSON.parse(readFileSync(join(process.cwd(), '.next', 'react-loadable-manifest.json'), 'utf8')) as Record<
+      string,
+      { files: string[] }
+    >;
+    const desk = Object.entries(manifest).filter(([from]) => from.endsWith('-> ./OrderDesk'));
+    expect(desk).toHaveLength(1);
+    expect(desk[0]![1].files.filter((file) => file.endsWith('.js'))).toHaveLength(1);
   });
 
   test('pdf.js در باندل اولیه نیست', async ({ page }) => {

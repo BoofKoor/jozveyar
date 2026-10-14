@@ -7,8 +7,8 @@ import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { INITIAL, type AnalysisState } from './fileAnalysis';
-import { jozveCounted, moveSection, nextAnalysisJob, nextUpload, orderBatch, type Section } from './jozve';
-import { jozveSpec, jozveView, sectionView } from './jozveView';
+import { jozveCounted, nextAnalysisJob, nextUpload, orderBatch, type Section } from './jozve';
+import { jozveView, orderSpec, sectionView } from './jozveView';
 import type { UploadSnapshot } from './upload/client';
 
 const CONFIG = {
@@ -50,14 +50,6 @@ describe('ترتیب فایل‌هایی که با هم انداخته شده‌
       'جلسه 10.pdf',
       'فصل ۳.docx',
     ]);
-  });
-
-  it('جابه‌جایی با همسایه؛ لبهٔ فهرست بی‌اثر است', () => {
-    const list = [{ key: 'a' }, { key: 'b' }, { key: 'c' }];
-    expect(moveSection(list, 'c', -1).map((s) => s.key)).toEqual(['a', 'c', 'b']);
-    expect(moveSection(list, 'a', 1).map((s) => s.key)).toEqual(['b', 'a', 'c']);
-    expect(moveSection(list, 'a', -1).map((s) => s.key)).toEqual(['a', 'b', 'c']);
-    expect(moveSection(list, 'c', 1).map((s) => s.key)).toEqual(['a', 'b', 'c']);
   });
 });
 
@@ -112,8 +104,9 @@ describe('جمع جزوه', () => {
 
   it('قیمت: یک قلم، بخش‌ها به همان ترتیب، یک صحافی', () => {
     const view = jozveView([ready('a.pdf', 10), ready('b.pdf', 6), ready('c.pdf', 10)]);
-    const spec = jozveSpec(view, CONFIG)!;
+    const { spec, index } = orderSpec([{ view, config: CONFIG }])!;
     expect(spec.items).toHaveLength(1);
+    expect(index).toEqual([0]);
     expect(spec.items[0]!.sections.map((s) => s.pageCount)).toEqual([10, 6, 10]);
     expect(spec.items[0]!.rules[0]!.pageRanges).toEqual([[1, 26]]);
     // ۲۶ صفحه: ۴۱,۶۰۰ + صحافی ۴۵,۰۰۰ = ۸۶,۶۰۰ تومان — سه سفارش جدا ۱۷۶,۶۰۰ می‌شد.
@@ -121,8 +114,41 @@ describe('جمع جزوه', () => {
     expect(view.provisional).toBe(false);
   });
 
+  it('چند جزوه (۸٫۲): یک قلم برای هر جزوه‌ای که صفحه دارد، و جای هر قلم؛ جمع یکی', () => {
+    const first = jozveView([ready('a.pdf', 10), ready('b.pdf', 6)]);
+    const counting = jozveView([queued('c.pdf')]);
+    const third = jozveView([ready('d.pdf', 10)]);
+    const { spec, index } = orderSpec([
+      { view: first, config: CONFIG },
+      { view: counting, config: CONFIG },
+      { view: third, config: { ...CONFIG, copies: 2 } },
+    ])!;
+    expect(index).toEqual([0, null, 1]);
+    expect(spec.items.map((item) => [item.sections.length, item.copies])).toEqual([[2, 1], [1, 2]]);
+    // ۱۶ صفحه: ۲۵,۶۰۰ + ۴۵,۰۰۰؛ و ۱۰ صفحه دو نسخه: (۱۶,۰۰۰ + ۴۵,۰۰۰) × ۲ — هر جزوه صحافی خودش
+    const breakdown = quote(spec, SEED_PRICE_LIST);
+    expect(breakdown.items.map((item) => item.totalRials)).toEqual([706_000, 1_220_000]);
+    expect(breakdown.totalWithoutShippingRials).toBe(1_926_000);
+  });
+
   it('بی هیچ صفحهٔ شمرده‌شده، قیمتی نیست', () => {
-    expect(jozveSpec(jozveView([queued('a.pdf')]), CONFIG)).toBeNull();
+    expect(orderSpec([{ view: jozveView([queued('a.pdf')]), config: CONFIG }])).toBeNull();
+    expect(orderSpec([])).toBeNull();
+  });
+
+  it('نمای هر فایل یک بار برای هر شکل فایل: فایلی که عوض نشد همان نما، و شکل تازهٔ همان فایل نمای تازه (۸٫۲)', () => {
+    const a = queued('a.pdf', 12);
+    const b = queued('b.pdf');
+    const before = jozveView([a, b]);
+    // صف فقط فایلی را که عوض شد از نو می‌سازد؛ کلید همان است
+    const counted = { ...b, analysis: { ...b.analysis, pageCount: 8 } };
+    const after = jozveView([a, counted]);
+    expect(after.sections[0]).toBe(before.sections[0]);
+    expect(after.sections[1]).not.toBe(before.sections[1]);
+    expect(after.sections[1]!.pageCount).toBe(8);
+    expect(after.pageCount).toBe(20);
+    // همان فایل در جزوهٔ دیگر (قیمت چیدمان دیگرِ پرسش): همان نما
+    expect(jozveView([counted]).sections[0]).toBe(after.sections[1]);
   });
 });
 

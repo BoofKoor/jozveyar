@@ -5,13 +5,14 @@ import type { CheckoutItem } from '@jozveyar/contracts/checkout';
 import { tabStorage, writeDraft } from '../lib/draft';
 import { RESTORING_ATTR } from '../lib/draftKey';
 import type { FollowDocument, RestoredSection } from '../lib/jozveController';
-import type { OrderConfig } from '../lib/orderConfig';
-import { documentStatus, readDraft, restoredSections } from '../lib/restore';
+import type { DraftLayout } from '../lib/draft';
+import { documentStatus, readDraft, restoredJozves, restoredSections } from '../lib/restore';
 import {
   fetchStatus,
   loadCheckout,
   markOf,
   primeCheckout,
+  primeLayout,
   primeStep,
   restoredOrder,
   type HistoryMark,
@@ -63,7 +64,7 @@ async function openStep(mark: HistoryMark, desk: HistoryMark, items: CheckoutIte
   }
 }
 
-type Restored = { sections: RestoredSection[]; config: OrderConfig | null } | 'lost' | null;
+type Restored = { sections: RestoredSection[]; layout: DraftLayout } | 'lost' | null;
 
 /**
  * پیش‌نویس، وضعیت سندها از سرور، و قدم؛ یک بار در هر بار صفحه. پیش‌نویسی که برنگشت پاک می‌شود، تا دفعهٔ بعد
@@ -82,11 +83,15 @@ async function restoreDraft(): Promise<Restored> {
     writeDraft(storage, null);
     return 'lost';
   }
-  const { config, items } = restoredOrder(sections, draft.config);
+  // جزوه‌ها با شمار فایل هر کدام (۸٫۲)؛ تنظیمی که تعرفهٔ امروز ندارد، پیش‌فرض‌ها.
+  const { configs, items } = restoredOrder(restoredJozves(sections, draft.layout));
   // مسیر خرید پیش از قدم: قدم خرید تکهٔ مسیر خرید را می‌آورد و قیمت سرور را با همان جای برگشته می‌گیرد.
   primeCheckout(draft.checkout);
   primeStep(await restoredStep(items));
-  return { sections, config };
+  return {
+    sections,
+    layout: { jozves: draft.layout.jozves.map((jozve, i) => ({ files: jozve.files, config: configs[i] ?? null })), asking: draft.layout.asking },
+  };
 }
 
 let restoring: Promise<Restored> | null = null;
@@ -130,7 +135,11 @@ export function Restore({ state, jozve, onConfig, onDone }: RestoreProps) {
     void restoring.then((restored) => {
       if (!live) return;
       if (restored && restored !== 'lost') {
-        if (restored.config) onConfig(restored.config);
+        // کاربر در همین فاصله فایل تازه‌ای انداخت و رابط با همان سوار شد (نشانه را برداشت): جزوهٔ تازه‌اش می‌ماند، و صف هم
+        // برگشته را نمی‌پذیرد؛ چیدمان برگشته به سوار شدن بعدی نمی‌رسد.
+        if (document.documentElement.hasAttribute(RESTORING_ATTR)) primeLayout(restored.layout);
+        const first = restored.layout.jozves[0]?.config;
+        if (first) onConfig(first);
         jozve.restore(restored.sections, followDocument);
         return;
       }

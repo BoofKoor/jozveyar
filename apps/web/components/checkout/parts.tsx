@@ -6,25 +6,8 @@ import { formatNumber, formatTomans } from '@jozveyar/text';
  * تکه‌های مشترک «جزوه و قیمت» و مسیر خرید (طرح `docs/ui/mockups/checkout.html`، چیدمان در app/checkout.css):
  * قدم‌های سفارش، جمع و ریز قیمت. نه hook دارند و نه API مرورگر، پس هم رابط پس از فایل (کلاینت) آنها را می‌گیرد و
  * هم صفحهٔ سفارش (کامپوننت سرور). تکه‌های مرور جدا در `recap.tsx`اند: این فایل در راه اولین قیمت است و هر خط
- * اضافه‌اش آنجا تجزیه و اجرا می‌شود. رنگ فقط توکن، و `.num` فقط روی خود عدد.
+ * اضافه‌اش آنجا تجزیه و اجرا می‌شود. عدد تومان و جمع درشت در `sum.tsx`اند. رنگ فقط توکن، و `.num` فقط روی خود عدد.
  */
-
-/** «374,750» در span خودش؛ «تومان» بیرون. */
-export function Tomans({ rials }: { rials: number }) {
-  return <span className="num">{formatTomans(rials, false)}</span>;
-}
-
-/** جمع درشت خلاصه و نوار: «374,750» و «تومان» کوچک کنارش. */
-export function SumValue({ rials, testId }: { rials: number | null; testId?: string }) {
-  return (
-    <span className="home-sum__value">
-      <span data-testid={testId} className="num">
-        {rials === null ? '…' : formatTomans(rials, false)}
-      </span>
-      <small>تومان</small>
-    </span>
-  );
-}
 
 const COLOR = { color: 'رنگی', bw: 'سیاه‌سفید', mixed: 'رنگی و سیاه‌سفید' } as const;
 const SIDES = { double: 'دورو', single: 'یکرو' } as const;
@@ -149,6 +132,64 @@ export function SummaryLines({
           <span className="num">{formatNumber(item.copies)}</span> نسخه
         </dd>
       </div>
+      {shipping ? (
+        <div data-testid="summary-shipping">
+          <dt>{shipping.label}</dt>
+          <dd className="num">{formatTomans(shipping.rials, false)}</dd>
+        </div>
+      ) : null}
+    </dl>
+  );
+}
+
+/** «سیاه‌سفید، دورو، طلق و سیم»؛ کاغذ فقط وقتی جز کاغذ پیش‌فرض است (طرح میز، سؤال ۲۲۵). */
+export function jozveSpecLabel(
+  colorMode: keyof typeof COLOR,
+  sidesMode: keyof typeof SIDES,
+  bindingName: string,
+  paperName: string | null = null,
+): string {
+  return [printLabel(colorMode, sidesMode), paperName, bindingName].filter(Boolean).join('، ');
+}
+
+/** یک جزوه در خلاصهٔ سفارش چندجزوه (برش ۸٫۲). */
+export interface JozveLine {
+  /** شمارهٔ جزوه در سفارش، از ۱؛ جزوه‌ای که هنوز قیمت ندارد در خلاصه نیست، پس شماره از ترتیب ردیف‌ها نمی‌آید. */
+  n: number;
+  /** «سیاه‌سفید، دورو، طلق و سیم» (`jozveSpecLabel`). */
+  spec: string;
+  pageCount: number;
+  copies: number;
+  /** قیمت همین جزوه، همهٔ نسخه‌ها؛ از همان ریز قیمت سفارش. */
+  totalRials: number;
+}
+
+/**
+ * خلاصهٔ سفارش چندجزوه (سؤال ۲۲۵): یک ردیف برای هر جزوه، «جزوهٔ 2» و زیرش مشخصات، صفحه و نسخه اگر بیش از یکی، با قیمت همان
+ * جزوه؛ بعد از شهر ردیف ارسال. همان ریز قیمت سرور، بی حساب تازه (قاعدهٔ ۱).
+ */
+export function JozveLines({ jozves, shipping }: { jozves: readonly JozveLine[]; shipping?: { label: string; rials: number } | null }) {
+  return (
+    <dl className="home-sum__lines home-sum__lines--jozves">
+      {jozves.map((jozve) => (
+        <div key={jozve.n} data-testid="summary-jozve">
+          <dt>
+            <b className="home-sum__name">
+              جزوهٔ <span className="num">{formatNumber(jozve.n)}</span>
+            </b>
+            <span className="home-sum__spec">
+              {jozve.spec} · <span className="num">{formatNumber(jozve.pageCount)}</span> صفحه
+              {jozve.copies > 1 ? (
+                <>
+                  {' · '}
+                  <span className="num">{formatNumber(jozve.copies)}</span> نسخه
+                </>
+              ) : null}
+            </span>
+          </dt>
+          <dd className="num">{formatTomans(jozve.totalRials, false)}</dd>
+        </div>
+      ))}
       {shipping ? (
         <div data-testid="summary-shipping">
           <dt>{shipping.label}</dt>

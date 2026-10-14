@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { Logo } from '@jozveyar/ui';
 import { GateActions } from '../../../../components/checkout/GateActions';
-import { Tomans } from '../../../../components/checkout/parts';
+import { Tomans } from '../../../../components/checkout/sum';
 import { mockCheckoutService, mockGatewayOpen } from '../../../../lib/server/checkoutContext';
 
 export const dynamic = 'force-dynamic';

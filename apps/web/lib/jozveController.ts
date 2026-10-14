@@ -1,5 +1,6 @@
 /**
- * صف جزوهٔ چندفایلی — کارگر تحلیل و آپلودگر را به نوبت اجرا می‌کند (ADR-030).
+ * صف جزوهٔ چندفایلی — کارگر تحلیل و آپلودگر را به نوبت اجرا می‌کند (ADR-030). از برش ۸٫۲ همهٔ فایل‌های سفارش، در هر
+ * جزوه‌ای که باشند، در همین یک صف‌اند (چیدمان جزوه‌ها در `layout.ts`، با رابط پس از فایل).
  *
  * تصمیم‌ها (کدام فایل نوبت کیست) خالص‌اند و در `jozve.ts`؛ این ماژول فقط اجرایشان می‌کند و
  * هر وابستگی به مرورگر (Worker، خواندن فایل، آپلودگر) را تزریقی می‌گیرد، تا کل صف بی
@@ -23,7 +24,6 @@ import {
 } from './analysis-protocol';
 import { applyWorkerMessage, initialAnalysis, toServerPath, type AnalysisState } from './fileAnalysis';
 import {
-  moveSection,
   nextAnalysisJob,
   nextUpload,
   orderBatch,
@@ -269,10 +269,11 @@ export function createJozve(deps: JozveDeps) {
     },
 
     /**
-     * فایل‌های تازه ته جزوه، به ترتیب نام (`orderBatch`). بیش از سقف اضافه نمی‌شود و
-     * نامشان در `overflow` می‌ماند تا کاربر بداند.
+     * فایل‌های تازه ته صف، به ترتیب نام (`orderBatch`). سقف روی کل سفارش است (۸٫۲، `MAX_FILES_PER_ORDER`، همان عدد)؛
+     * بیشتر اضافه نمی‌شود و نامشان در `overflow` می‌ماند تا کاربر بداند. کلید فایل‌های تازه برمی‌گردد، تا رابط هر کدام را
+     * در جزوهٔ خودش بنشاند (`lib/layout.ts`).
      */
-    add(files: readonly File[]) {
+    add(files: readonly File[]): string[] {
       const room = Math.max(0, MAX_SECTIONS_PER_ITEM - snapshot.sections.length);
       const ordered = orderBatch(files);
       const fresh = ordered.slice(0, room).map(createSection);
@@ -282,11 +283,7 @@ export function createJozve(deps: JozveDeps) {
       });
       fresh.forEach(estimateOffice);
       pump();
-    },
-
-    /** یکی بالاتر یا پایین‌تر. فقط ترتیب صحافی عوض می‌شود؛ قیمت همان است. */
-    move(key: string, delta: -1 | 1) {
-      commit({ sections: moveSection(snapshot.sections, key, delta) });
+      return fresh.map((section) => section.key);
     },
 
     remove(key: string) {
@@ -299,13 +296,14 @@ export function createJozve(deps: JozveDeps) {
 
     /**
      * فایل تازه همان‌جای جزوه — راه جلوی تقریباً هر شکست: «خروجی PDF بگیر و جایش بگذار». `keep`: همان فایلی که
-     * جزوهٔ برگشته بعد از رفرش منتظرش بود (۳د)؛ سندش روی سرور می‌ماند تا آپلود از همان تکه ادامه دهد (ADR-024).
+     * جزوهٔ برگشته بعد از رفرش منتظرش بود (۳د)؛ سندش روی سرور می‌ماند تا آپلود از همان تکه ادامه دهد (ADR-024). کلید همان
+     * می‌ماند، پس فایل در همان جزوه و همان جاست (۸٫۲)؛ کار دیررس فایل قبلی با خود فایل شناخته می‌شود (`current`)، نه با کلید.
      */
     replace(key: string, file: File, keep?: boolean) {
       if (!find(key)) return;
       cancelAnalysis(key);
       discardUpload(key, keep);
-      const fresh = createSection(file);
+      const fresh = { ...createSection(file), key };
       commit({ sections: snapshot.sections.map((s) => (s.key === key ? fresh : s)) });
       estimateOffice(fresh);
       pump();

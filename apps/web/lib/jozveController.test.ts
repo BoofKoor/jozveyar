@@ -299,14 +299,22 @@ describe('کارهای کاربر', () => {
     expect(h.uploads[0]!.cancelled).toEqual({ discard: true });
   });
 
-  it('جابه‌جایی فقط ترتیب است، قیمت همان', async () => {
-    const h = harness({ 'a.pdf': 10, 'b.pdf': 6 });
-    h.jozve.add(files('a.pdf', 'b.pdf'));
+  it('افزودن کلید فایل‌های تازه را می‌دهد، و جایگزین همان کلید را نگه می‌دارد (۸٫۲)؛ پاسخ دیررس فایل قبلی نمی‌نشیند', async () => {
+    const h = harness({ 'a.pdf': 10, 'b.pdf': 6, 'c.pdf': 4 });
+    const keys = h.jozve.add(files('b.pdf', 'a.pdf'));
+    expect(keys).toEqual(h.jozve.getSnapshot().sections.map((s) => s.key));
+    expect(h.names()).toEqual(['a.pdf', 'b.pdf']);
     await settle();
-    const [, b] = h.jozve.getSnapshot().sections;
-    h.jozve.move(b!.key, -1);
-    expect(h.names()).toEqual(['b.pdf', 'a.pdf']);
-    expect(h.view().pageCount).toBe(16);
+    // آپلود a در راه است؛ همان لحظه a جایگزین می‌شود.
+    const late = h.upload('a.pdf');
+    h.jozve.replace(keys[0]!, files('c.pdf')[0]!);
+    expect(h.jozve.getSnapshot().sections.map((s) => s.key)).toEqual(keys);
+    late.finish(99);
+    await settle();
+    expect(h.names()).toEqual(['c.pdf', 'b.pdf']);
+    expect(h.jozve.getSnapshot().sections[0]!.upload?.documentId).not.toBe('doc-a.pdf');
+    expect(late.cancelled).toEqual({ discard: true });
+    expect(h.view().pageCount).toBe(10);
   });
 
   it('بیش از سی فایل اضافه نمی‌شود، و نام بقیه گفته می‌شود', () => {
@@ -348,12 +356,12 @@ describe('جزوهٔ برگشته بعد از رفرش (۳د)', () => {
     expect(h.stats.workersCreated).toBe(0);
     expect(h.view()).toMatchObject({ pageCount: 10, provisional: true, waiting: [] });
     expect(h.view().pending.map((v) => v.name)).toEqual(['b.docx']);
-    expect(orderGate(h.view(), INITIAL).kind).toBe('sending');
+    expect(orderGate([{ view: h.view(), config: INITIAL }]).kind).toBe('sending');
 
     h.follow(DOC.b).ready(6);
     await settle();
     expect(h.view()).toMatchObject({ pageCount: 16, provisional: false });
-    const gate = orderGate(h.view(), INITIAL);
+    const gate = orderGate([{ view: h.view(), config: INITIAL }]);
     expect(gate.kind === 'ready' && gate.items[0]!.documentIds).toEqual([DOC.a, DOC.b]);
   });
 
@@ -364,7 +372,7 @@ describe('جزوهٔ برگشته بعد از رفرش (۳د)', () => {
     const view = h.view();
     expect(view.waiting.map((v) => v.name)).toEqual(['b.pdf']);
     expect(view).toMatchObject({ pageCount: 10, provisional: true, blocked: [], pending: [] });
-    expect(orderGate(view, INITIAL).kind).toBe('waiting');
+    expect(orderGate([{ view, config: INITIAL }]).kind).toBe('waiting');
     expect(h.log).toEqual([`follow ${DOC.a}`]);
   });
 

@@ -4,9 +4,9 @@
  *
  * - **کجا:** sessionStorage همین زبانه (تصمیم ۱۴۰۵/۰۷/۰۴): با بستن زبانه پاک می‌شود، پس نام و نشانی روی رایانهٔ
  *   مشترک نمی‌ماند؛ و زبانهٔ تازه جزوهٔ تازه است. قدم در `history.state` است، که با رفرش می‌ماند (`OrderDesk`).
- * - **چه:** نشانی هر فایل (نام، حجم، تاریخ تغییر) و سندش روی سرور، به ترتیب صحافی؛ تنظیمات چاپ؛ و مسیر خرید
- *   (`CheckoutDraft`). عددی دربارهٔ صفحه یا رنگ نه: آن را سرور می‌گوید (`GET /api/uploads/<id>`)، که منبع حقیقت
- *   است (قاعدهٔ ۲).
+ * - **چه:** نشانی هر فایل (نام، حجم، تاریخ تغییر) و سندش روی سرور، جزوه به جزوه و به ترتیب صحافی؛ چیدمان جزوه‌ها
+ *   با تنظیمات چاپ هر کدام (از نسخهٔ ۲، برش ۸٫۲)؛ و مسیر خرید (`CheckoutDraft`). عددی دربارهٔ صفحه یا رنگ نه: آن را سرور
+ *   می‌گوید (`GET /api/uploads/<id>`)، که منبع حقیقت است (قاعدهٔ ۲).
  *
  * اینجا فقط نوشتن است، که با رابط پس از فایل می‌آید؛ خواندن و برگرداندن در `lib/restore.ts` است، تکه‌ای که فقط
  * وقتی پیش‌نویسی هست بار می‌شود، تا راه اولین قیمت سنگین‌تر نشود. خالص، بی React: حافظه (`Storage`) تزریقی است.
@@ -15,10 +15,14 @@
 import type { CheckoutDraft } from './checkout/store';
 import { DRAFT_KEY } from './draftKey';
 import type { Section } from './jozve';
+import type { DeskLayout } from './layout';
 import type { OrderConfig } from './orderConfig';
 
-/** نسخهٔ شکل پیش‌نویس؛ شکل تازه نسخهٔ تازه می‌خواهد، و پیش‌نویس نسخهٔ دیگر نادیده گرفته می‌شود. */
-export const DRAFT_VERSION = 1;
+/**
+ * نسخهٔ شکل پیش‌نویس؛ شکل تازه نسخهٔ تازه می‌خواهد. نسخهٔ ۲ (برش ۸٫۲) چیدمان جزوه‌ها را دارد؛ خواندن نسخهٔ ۱ را هم می‌خواند،
+ * یک جزوه با همان تنظیمات (`lib/restore.ts`)، تا زبانه‌ای که پیش از استقرار باز بود جزوه‌اش را گم نکند.
+ */
+export const DRAFT_VERSION = 2;
 
 /** یک فایل جزوه در پیش‌نویس: همان اثر انگشت آپلودگر (ADR-024)، و سندش روی سرور اگر آپلودش شروع شده بود. */
 export interface DraftFile {
@@ -28,30 +32,48 @@ export interface DraftFile {
   documentId: string | null;
 }
 
+/**
+ * چیدمان جزوه‌ها در پیش‌نویس (۸٫۲): شمار فایل هر جزوه به ترتیب، که فایل‌هایش پشت‌سرهم در `files` آمده‌اند، با تنظیمات چاپش؛
+ * و اینکه پرسش چیدمان هنوز بالای میز است.
+ */
+export interface DraftLayout {
+  jozves: { files: number; config: OrderConfig | null }[];
+  asking: boolean;
+}
+
 export interface Draft {
   v: typeof DRAFT_VERSION;
-  /** به ترتیب صحافی؛ ۱ تا سقف جزوه. */
+  /** همهٔ فایل‌های سفارش، جزوه به جزوه و به ترتیب صحافی؛ ۱ تا سقف فایل‌های سفارش. */
   files: DraftFile[];
-  /** null: پیش‌فرض‌های تعرفه. */
-  config: OrderConfig | null;
+  /** شمار فایل‌های جزوه‌هایش روی هم همان `files` است. تنظیم null: پیش‌فرض‌های تعرفه. */
+  layout: DraftLayout;
   /** null: کاربر هنوز به مسیر خرید نرسیده. */
   checkout: CheckoutDraft | null;
 }
 
 /* ─────────────────────────── نوشتن ─────────────────────────── */
 
-/** پیش‌نویس همین حالِ جزوه؛ null یعنی جزوه خالی است و پیش‌نویسی نمی‌ماند. */
-export function draftOf(sections: readonly Section[], config: OrderConfig | null, checkout: CheckoutDraft | null): Draft | null {
-  if (sections.length === 0) return null;
+/**
+ * پیش‌نویس همین حالِ سفارش: فایل‌ها به ترتیب چیدمان (همگام با صف، `reconcile`)؛ null یعنی سفارش خالی است و پیش‌نویسی
+ * نمی‌ماند.
+ */
+export function draftOf(sections: readonly Section[], layout: DeskLayout, checkout: CheckoutDraft | null): Draft | null {
+  const byKey = new Map(sections.map((section) => [section.key, section]));
+  const jozves = layout.jozves
+    .map((jozve) => ({ files: jozve.sections.flatMap((key) => byKey.get(key) ?? []), config: jozve.config }))
+    .filter((jozve) => jozve.files.length > 0);
+  if (jozves.length === 0) return null;
   return {
     v: DRAFT_VERSION,
-    files: sections.map(({ file, upload }) => ({
-      name: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      documentId: upload?.documentId ?? (file instanceof File ? null : file.documentId),
-    })),
-    config,
+    files: jozves.flatMap((jozve) =>
+      jozve.files.map(({ file, upload }) => ({
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        documentId: upload?.documentId ?? (file instanceof File ? null : file.documentId),
+      })),
+    ),
+    layout: { jozves: jozves.map((jozve) => ({ files: jozve.files.length, config: jozve.config })), asking: layout.asking },
     checkout,
   };
 }

@@ -15,7 +15,7 @@ import type { Place } from '@jozveyar/contracts/checkout';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { fileKind } from './analysis-protocol';
 import type { CheckoutDraft, Otp } from './checkout/store';
-import { DRAFT_VERSION, type Draft, type DraftFile } from './draft';
+import { DRAFT_VERSION, type Draft, type DraftFile, type DraftLayout } from './draft';
 import { DRAFT_KEY } from './draftKey';
 import { INITIAL, type AnalysisState } from './fileAnalysis';
 import type { RestoredSection } from './jozveController';
@@ -104,7 +104,22 @@ function checkoutOf(value: unknown): CheckoutDraft | null {
   };
 }
 
-/** پیش‌نویس سنجیده، یا null. */
+/**
+ * چیدمان نسخهٔ ۲ (۸٫۲): هر جزوه دست‌کم یک فایل، و همه روی هم همان شمار فایل‌ها؛ تنظیم خراب یک جزوه فقط همان تنظیم را
+ * کنار می‌گذارد (پیش‌فرض‌ها). چیدمانی که نمی‌خواند null است، و خواننده همه را یک جزوه می‌کند: فایل‌ها گم نمی‌شوند.
+ */
+function layoutOf(value: unknown, files: number): DraftLayout | null {
+  if (!isObject(value) || !Array.isArray(value.jozves) || typeof value.asking !== 'boolean') return null;
+  if (value.jozves.length === 0 || value.jozves.length > files) return null;
+  const jozves: DraftLayout['jozves'] = [];
+  for (const jozve of value.jozves) {
+    if (!isObject(jozve) || !isId(jozve.files)) return null;
+    jozves.push({ files: jozve.files, config: jozve.config == null ? null : configOf(jozve.config) });
+  }
+  return jozves.reduce((sum, jozve) => sum + jozve.files, 0) === files ? { jozves, asking: value.asking } : null;
+}
+
+/** پیش‌نویس سنجیده، یا null. نسخهٔ ۱ (پیش از ۸٫۲) یک جزوه است با همان تنظیمات. */
 export function parseDraft(raw: string | null): Draft | null {
   if (!raw) return null;
   let value: unknown;
@@ -113,16 +128,30 @@ export function parseDraft(raw: string | null): Draft | null {
   } catch {
     return null;
   }
-  if (!isObject(value) || value.v !== DRAFT_VERSION || !Array.isArray(value.files)) return null;
+  if (!isObject(value) || (value.v !== 1 && value.v !== DRAFT_VERSION) || !Array.isArray(value.files)) return null;
   if (value.files.length === 0 || value.files.length > MAX_SECTIONS_PER_ITEM) return null;
   const files = value.files.map(fileOf);
   if (files.some((file) => file === null)) return null;
+  const single = (config: unknown): DraftLayout => ({
+    jozves: [{ files: files.length, config: config == null ? null : configOf(config) }],
+    asking: false,
+  });
   return {
     v: DRAFT_VERSION,
     files: files as DraftFile[],
-    config: value.config == null ? null : configOf(value.config),
+    layout: value.v === 1 ? single(value.config) : (layoutOf(value.layout, files.length) ?? single(null)),
     checkout: value.checkout == null ? null : checkoutOf(value.checkout),
   };
+}
+
+/** فایل‌های برگشته، جزوه به جزوه با شمار فایل هر کدام در چیدمان پیش‌نویس. */
+export function restoredJozves<T>(sections: readonly T[], layout: DraftLayout): { sections: T[]; config: OrderConfig | null }[] {
+  let at = 0;
+  return layout.jozves.map((jozve) => {
+    const part = sections.slice(at, at + jozve.files);
+    at += jozve.files;
+    return { sections: part, config: jozve.config };
+  });
 }
 
 /* ─────────────────────────── برگشت ─────────────────────────── */

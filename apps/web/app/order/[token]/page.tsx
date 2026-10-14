@@ -7,8 +7,18 @@ import { formatCardMask, formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
 import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
 import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
-import { FlowNav, SumValue, SummaryLines, Tomans, printLabel } from '../../../components/checkout/parts';
-import { JozveBrief, Recap, RecapAddress, RecapDelivery, RecapJozveValue } from '../../../components/checkout/recap';
+import { FlowNav, JozveLines, SummaryLines, jozveSpecLabel, printLabel } from '../../../components/checkout/parts';
+import { SumValue, Tomans } from '../../../components/checkout/sum';
+import {
+  JozveBrief,
+  JozvesBrief,
+  Recap,
+  RecapAddress,
+  RecapDelivery,
+  RecapJozveValue,
+  RecapJozvesValue,
+  type RecapJozve,
+} from '../../../components/checkout/recap';
 import { formatMobile } from '../../../lib/checkout/format';
 import { AUTH_COOKIE, authTokenFrom, orderViewOf } from '../../../lib/server/checkoutContext';
 import { configuredMode } from '../../../lib/server/checkoutMode';
@@ -220,6 +230,8 @@ function TrackingStep({ parcels, phone }: { parcels: OrderViewDetails['parcels']
  * همان چهار گام «ثبت شد»، هر کدام به جای خودش.
  */
 function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetails }) {
+  /** سفارش چندجزوه (برش ۸٫۲، سؤال ۲۲۵): متن‌ها جمع. */
+  const many = details.items.length > 1;
   const payment = (
     <Step
       state="done"
@@ -328,7 +340,7 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
       <section className="jy-card" aria-labelledby="order-title" data-testid="order-handed">
         <span className="jy-icon jy-icon-truck ck-done__icon" aria-hidden="true" />
         <h1 id="order-title" className="ck-done__title">
-          جزوه‌ات به پست رسید
+          {many ? 'جزوه‌هایت به پست رسیدند' : 'جزوه‌ات به پست رسید'}
         </h1>
         <p className="ck-sub">
           سفارش <span className="num">{view.number}</span> {handed ? <Inline text={handed.day} /> : null} تحویل پست شد.
@@ -368,7 +380,7 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
         <span className="jy-icon jy-icon-success ck-done__icon" aria-hidden="true" />
       )}
       <h1 id="order-title" className="ck-done__title">
-        {printing ? 'جزوه‌ات در حال چاپ است' : 'سفارش ثبت شد'}
+        {printing ? (many ? 'جزوه‌هایت در حال چاپ‌اند' : 'جزوه‌ات در حال چاپ است') : 'سفارش ثبت شد'}
       </h1>
       <p className="ck-sub">
         سفارش <span className="num">{view.number}</span> · <Tomans rials={details.totalRials} /> تومان پرداخت شد.
@@ -384,7 +396,15 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
         <Step
           state="now"
           title="چاپ و صحافی"
-          text={printing ? 'جزوه‌ات در حال چاپ و صحافی است.' : 'جزوه‌ات در صف چاپ است.'}
+          text={
+            printing
+              ? many
+                ? 'جزوه‌هایت در حال چاپ و صحافی‌اند.'
+                : 'جزوه‌ات در حال چاپ و صحافی است.'
+              : many
+                ? 'جزوه‌هایت در صف چاپ‌اند.'
+                : 'جزوه‌ات در صف چاپ است.'
+          }
         />
         {handoffDue}
         {tracking}
@@ -556,9 +576,20 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
   const breakdown = details.breakdown;
   const item = details.items[0]!;
   const lineItem = breakdown.items[0]!;
+  const many = details.items.length > 1;
   const place = details.shipping.cityName ?? `استان ${details.shipping.provinceName}`;
   const print = printLabel(item.colorMode, item.sidesMode);
   const files = item.sections.map((section) => ({ name: section.name, pageCount: section.pageCount }));
+  /** هر جزوهٔ سفارش برای مرور و خلاصه (برش ۸٫۲، سؤال ۲۲۵). */
+  const recaps: RecapJozve[] = details.items.map((jozve) => ({
+    files: jozve.sections.map((section) => ({ name: section.name, pageCount: section.pageCount })),
+    pageCount: jozve.pageCount,
+    print: printLabel(jozve.colorMode, jozve.sidesMode),
+    bindingName: jozve.bindingName,
+    copies: jozve.copies,
+  }));
+  const shippingLine =
+    breakdown.shippingRials !== null ? { label: `ارسال ${details.shipping.methodName} به ${place}`, rials: breakdown.shippingRials } : null;
   const last = details.lastPayment;
   const checking = !paid && details.checking !== null;
 
@@ -602,12 +633,8 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
                 <Recap
                   rows={[
                     {
-                      label: 'جزوه',
-                      value: (
-                        <RecapJozveValue
-                          jozve={{ files, pageCount: item.pageCount, print, bindingName: item.bindingName, copies: item.copies }}
-                        />
-                      ),
+                      label: many ? 'جزوه‌ها' : 'جزوه',
+                      value: many ? <RecapJozvesValue jozves={recaps} /> : <RecapJozveValue jozve={recaps[0]!} />,
                     },
                     {
                       label: 'ارسال به',
@@ -645,17 +672,34 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
             <h2 id="summary-title" className="jy-card__title">
               خلاصهٔ سفارش
             </h2>
-            <JozveBrief files={files} pageCount={item.pageCount} />
-            <SummaryLines
-              item={lineItem}
-              print={print}
-              bindingName={item.bindingName}
-              shipping={
-                breakdown.shippingRials !== null
-                  ? { label: `ارسال ${details.shipping.methodName} به ${place}`, rials: breakdown.shippingRials }
-                  : null
-              }
-            />
+            {many ? (
+              <>
+                <JozvesBrief jozves={recaps} />
+                {/* ریز قیمت منجمد سفارش: یک قلم برای هر جزوه، به همان ترتیب */}
+                <JozveLines
+                  jozves={details.items.flatMap((jozve, i) => {
+                    const line = breakdown.items[i];
+                    return line
+                      ? [
+                          {
+                            n: i + 1,
+                            spec: jozveSpecLabel(jozve.colorMode, jozve.sidesMode, jozve.bindingName),
+                            pageCount: line.pageCount,
+                            copies: line.copies,
+                            totalRials: line.totalRials,
+                          },
+                        ]
+                      : [];
+                  })}
+                  shipping={shippingLine}
+                />
+              </>
+            ) : (
+              <>
+                <JozveBrief files={files} pageCount={item.pageCount} />
+                <SummaryLines item={lineItem} print={print} bindingName={item.bindingName} shipping={shippingLine} />
+              </>
+            )}
             <div className="home-sum__total">
               {/* لغوشده: همان مبلغ پرداخت‌شده برمی‌گردد (سؤال ۲۷)؛ از ۷٫۳ «در حال برگشت» و «برگشت داده شد». */}
               <span className="home-sum__label">

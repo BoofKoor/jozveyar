@@ -21,8 +21,14 @@ import { colorModeSchema, sidesModeSchema, type Breakdown } from './index.js';
 /** حالت مسیر خرید (ADR-035). `off` پیش‌فرض و حالت سایت زنده تا برش ۷. */
 export type CheckoutMode = 'off' | 'mock' | 'live';
 
-/** سقف جزوه‌های یک سفارش. امروز رابط یک جزوه می‌فرستد؛ مدل داده چند قلم را از اول دارد. */
-export const MAX_ITEMS_PER_ORDER = 10;
+/** سقف جزوه‌های یک سفارش (برش ۸٫۲، سؤال ۱۸۲؛ تا ۸٫۱ ده، وقتی رابط یک جزوه می‌فرستاد). */
+export const MAX_ITEMS_PER_ORDER = 30;
+
+/**
+ * سقف فایل‌های یک سفارش، روی همهٔ جزوه‌هایش (سؤال ۱۸۲): همان سقف امروزِ فایل‌های جزوه، که صف مرورگر از اول روی کل سفارش
+ * می‌سنجد (`MAX_SECTIONS_PER_ITEM`). هر جزوه دست‌کم یک فایل دارد، پس سقف جزوه‌ها از همین هم بسته است.
+ */
+export const MAX_FILES_PER_ORDER = 30;
 
 /** یک جزوه: سندهایش به ترتیب صحافی، و انتخاب‌های چاپ. */
 export const checkoutItemSchema = z.object({
@@ -35,6 +41,15 @@ export const checkoutItemSchema = z.object({
 });
 export type CheckoutItem = z.infer<typeof checkoutItemSchema>;
 
+/** جزوه‌های سفارش، به ترتیب: ۱ تا سقف جزوه‌ها، و همهٔ سندها روی هم تا سقف فایل‌ها. */
+const checkoutItemsSchema = z
+  .array(checkoutItemSchema)
+  .min(1)
+  .max(MAX_ITEMS_PER_ORDER)
+  .refine((items) => items.reduce((files, item) => files + item.documentIds.length, 0) <= MAX_FILES_PER_ORDER, {
+    message: 'too_many_files',
+  });
+
 /** جای ارسال: استان همیشه؛ شهر اگر در فهرست بود (ADR-034). */
 export const placeSchema = z.object({
   provinceId: z.number().int().positive(),
@@ -44,7 +59,7 @@ export type Place = z.infer<typeof placeSchema>;
 
 /** قیمت سرور، برای قدم شهر و مرور. بی جای ارسال، کرایه null است. */
 export const checkoutQuoteRequestSchema = z.object({
-  items: z.array(checkoutItemSchema).min(1).max(MAX_ITEMS_PER_ORDER),
+  items: checkoutItemsSchema,
   place: placeSchema.nullable().default(null),
 });
 export type CheckoutQuoteRequest = z.infer<typeof checkoutQuoteRequestSchema>;
@@ -68,7 +83,7 @@ export type Recipient = z.infer<typeof recipientSchema>;
  * - `quoteSnapshot`: ریز قیمتی که مرورگر نشان داده بود، فقط برای سنجیدن اختلاف (`orders.quote_snapshot`).
  */
 export const placeOrderRequestSchema = z.object({
-  items: z.array(checkoutItemSchema).min(1).max(MAX_ITEMS_PER_ORDER),
+  items: checkoutItemsSchema,
   place: placeSchema,
   recipient: recipientSchema,
   checkoutKey: z.uuid(),

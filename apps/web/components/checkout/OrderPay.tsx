@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { formatTehranTime } from '@jozveyar/text';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
 import { publishDockHeight } from '../../lib/dock';
-import { SumValue } from './parts';
+import { SumValue } from './sum';
 
 /*
  * «دوباره پرداخت کن» صفحهٔ سفارش (۳ج): تلاش تازهٔ پرداخت با همان قیمت منجمد (ADR-034)، و رفتن به درگاه.

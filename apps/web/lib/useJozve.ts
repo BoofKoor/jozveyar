@@ -57,7 +57,6 @@ export function useJozve() {
     sections: snapshot.sections,
     overflow: snapshot.overflow,
     add: jozve.add,
-    move: jozve.move,
     remove: jozve.remove,
     replace: jozve.replace,
     restore: jozve.restore,

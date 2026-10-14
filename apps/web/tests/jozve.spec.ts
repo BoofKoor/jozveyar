@@ -22,6 +22,12 @@ const price = (page: Page) => page.getByTestId('price-total');
 const rows = (page: Page) => page.getByTestId('section');
 const row = (page: Page, name: string) => rows(page).filter({ has: page.getByTestId('section-name').getByText(name, { exact: true }) });
 const names = (page: Page) => page.getByTestId('section-name').allTextContents();
+/** منوی «جابه‌جایی» ردیف یک فایل (۸٫۲، سؤال ۲۱۸)، و یکی از کارهایش. */
+const menuOf = (page: Page, name: string) => page.getByRole('button', { name: `جابه‌جایی «${name}»` });
+async function moveFile(page: Page, name: string, action: string) {
+  await menuOf(page, name).click();
+  await page.getByRole('menuitem', { name: action }).click();
+}
 /**
  * «ادامه» وقتی جزوه کامل و بی فایل خوانده‌نشده است. این تست‌ها بی پایگاه داده اجرا می‌شوند، پس مسیر خرید
  * خاموش است و «ادامه» همان «ثبت سفارش آنلاین به‌زودی» (ADR-035، برش ۳ج)؛ مسیر خرید باز در `checkout.spec.ts`.
@@ -59,10 +65,19 @@ test.describe('چند فایل در یک جزوه', () => {
     // ۲۶ صفحه: ۴۱,۶۰۰ + ۴۵,۰۰۰
     await expect(price(page)).toContainText('86,600', { timeout: 20_000 });
 
-    await page.getByRole('button', { name: '«جلسه 10.pdf» یکی بالاتر' }).click();
+    await moveFile(page, 'جلسه 10.pdf', 'یکی بالاتر');
     await expect.poll(() => names(page)).toEqual(['جلسه ۱.pdf', 'جلسه 10.pdf', 'جلسه 2.pdf']);
     await expect(price(page)).toContainText('86,600');
-    await expect(page.getByRole('button', { name: '«جلسه ۱.pdf» یکی بالاتر' })).toBeDisabled();
+    // ردیف در همان جزوه ماند: فوکوس به دکمهٔ منویش برمی‌گردد
+    await expect(menuOf(page, 'جلسه 10.pdf')).toBeFocused();
+    // فایل اول «یکی بالاتر» ندارد، و آخری «یکی پایین‌تر»؛ Esc منو را می‌بندد و فوکوس به دکمه‌اش برمی‌گردد
+    await menuOf(page, 'جلسه ۱.pdf').click();
+    await expect(page.getByRole('menuitem')).toHaveText(['یکی پایین‌تر', 'جزوهٔ تازه با همین فایل']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(menuOf(page, 'جلسه ۱.pdf')).toBeFocused();
+    await menuOf(page, 'جلسه 2.pdf').click();
+    await expect(page.getByRole('menuitem')).toHaveText(['یکی بالاتر', 'جزوهٔ تازه با همین فایل']);
   });
 
   test('حذف قیمت را عوض می‌کند؛ با یک فایل کارت همیشگی برمی‌گردد، با صفر محل انداختن', async ({ page }) => {
@@ -194,6 +209,135 @@ test.describe('چند فایل در یک جزوه', () => {
   });
 });
 
+/**
+ * چند جزوه در یک سفارش (برش ۸٫۲، سؤال ۱۸۲؛ طرح میز، سؤال‌های ۲۱۵ تا ۲۲۵): پرسش چیدمان، کارت و تنظیمات هر جزوه، منوی ردیف،
+ * «جزوهٔ تازه»، و خلاصه با قیمت هر جزوه. همه با تحلیل مرورگر، بی سرور. تعرفهٔ پایه: هر رو سیاه‌سفید ۱,۶۰۰ و رنگی ۲,۰۰۰ تومان،
+ * طلق و سیم ۴۵,۰۰۰ هر جلد.
+ */
+const ask = (page: Page) => page.getByTestId('jozve-ask');
+const arrangeTile = (page: Page, title: string) => ask(page).locator('label.jy-tile').filter({ hasText: title });
+const cards = (page: Page) => page.getByTestId('jozve');
+const titles = (page: Page) => cards(page).getByRole('heading', { level: 2 }).allTextContents();
+const cardPrices = (page: Page) => cards(page).getByTestId('jozve-price').allTextContents();
+const settingsButtons = (page: Page) => page.getByRole('button', { name: /^تنظیمات چاپ/ });
+const expanded = (page: Page) => settingsButtons(page).evaluateAll((els) => els.map((el) => el.getAttribute('aria-expanded')));
+const summaryTotal = (page: Page) => page.getByTestId('summary-total');
+const optionTile = (page: Page, title: string) => page.locator('label.jy-tile').filter({ has: page.getByText(title, { exact: true }) });
+
+test.describe('چند جزوه در یک سفارش (۸٫۲)', () => {
+  const three = () => [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf'), fixture('mixed-color-10.pdf')];
+
+  test('سه فایل با هم: «همه یک جزوه» از پیش، و «هر فایل جدا» سه جزوه، هر کدام قیمت و تنظیمات خودش؛ جمع یکی', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', three());
+    // یک جزوه: ۲۶ صفحه و یک صحافی
+    await expect(price(page)).toContainText('86,600', { timeout: 20_000 });
+    await expect(ask(page).getByRole('heading')).toHaveText('3 فایل انداختی؛ چطور صحافی شوند؟');
+    await expect(arrangeTile(page, 'همه یک جزوه، یک صحافی').locator('input')).toBeChecked();
+    // دو صحافی دیگر
+    await expect(arrangeTile(page, 'هر فایل جزوهٔ جدا')).toContainText('+90,000 تومان');
+    await expect(arrangeTile(page, 'همه یک جزوه، یک صحافی')).not.toContainText('تومان');
+
+    await arrangeTile(page, 'هر فایل جزوهٔ جدا').click();
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2', 'جزوهٔ 3']);
+    expect(await names(page)).toEqual(['image-scan-6.pdf', 'mixed-color-10.pdf', 'plain-bw-10.pdf']);
+    await expect.poll(() => cardPrices(page)).toEqual(['54,600', '61,000', '61,000']);
+    await expect(summaryTotal(page)).toHaveText('176,600');
+    await expect(price(page)).toContainText('176,600');
+    await expect(page.getByTestId('summary-jozve')).toHaveText([
+      'جزوهٔ 1سیاه‌سفید، دورو، طلق و سیم · 6 صفحه54,600',
+      'جزوهٔ 2سیاه‌سفید، دورو، طلق و سیم · 10 صفحه61,000',
+      'جزوهٔ 3سیاه‌سفید، دورو، طلق و سیم · 10 صفحه61,000',
+    ]);
+    await expect(page.locator('.home-sum__label')).toHaveText('جمع · 3 جزوه');
+    await expect(page.locator('.home-dock__label')).toHaveText('جمع · 3 جزوه');
+    // پرسش می‌ماند، حالا با اثر برگشت
+    await expect(arrangeTile(page, 'هر فایل جزوهٔ جدا').locator('input')).toBeChecked();
+    await expect(arrangeTile(page, 'همه یک جزوه، یک صحافی')).toContainText('با تنظیمات جزوهٔ 1، پشت‌سرهم');
+    await expect(arrangeTile(page, 'همه یک جزوه، یک صحافی')).toContainText('−90,000 تومان');
+
+    // تنظیمات: در هر لحظه یکی باز، و فقط همان روی صفحه
+    await expect.poll(() => expanded(page)).toEqual(['true', 'false', 'false']);
+    await expect(page.getByRole('radio', { name: 'رنگی' })).toHaveCount(1);
+    await settingsButtons(page).nth(1).click();
+    await expect.poll(() => expanded(page)).toEqual(['false', 'true', 'false']);
+    await optionTile(page, 'رنگی').click();
+    // جزوهٔ ۲ رنگی: ۱۰ × ۲,۰۰۰ + ۴۵,۰۰۰؛ بقیه همان
+    await expect.poll(() => cardPrices(page)).toEqual(['54,600', '65,000', '61,000']);
+    await expect(summaryTotal(page)).toHaveText('180,600');
+    await settingsButtons(page).nth(1).click();
+    await expect.poll(() => expanded(page)).toEqual(['false', 'false', 'false']);
+    await expect(settingsButtons(page).nth(1)).toHaveText(/رنگی، دورو، طلق و سیم · 1 نسخه/);
+
+    // «همه یک جزوه»: یک کارت با تنظیمات جزوهٔ ۱، و خلاصهٔ یک‌جزوه
+    await arrangeTile(page, 'همه یک جزوه، یک صحافی').click();
+    await expect(cards(page)).toHaveCount(1);
+    await expect(cards(page).getByRole('heading', { level: 2 })).toHaveText('جزوهٔ تو');
+    await expect(price(page)).toContainText('86,600');
+    await expect(page.getByTestId('summary-jozve')).toHaveCount(0);
+    await expect(page.locator('.home-sum__label')).toHaveText('جمع');
+  });
+
+  test('بردن فایل به جزوهٔ دیگر یا جزوهٔ تازه: پرسش می‌رود و برنمی‌گردد؛ جزوهٔ خالی می‌رود', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', three());
+    await expect(price(page)).toContainText('86,600', { timeout: 20_000 });
+    await arrangeTile(page, 'هر فایل جزوهٔ جدا').click();
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2', 'جزوهٔ 3']);
+
+    // تنها فایل یک جزوه: فقط به جزوه‌های دیگر، با نام فایل اولشان
+    await menuOf(page, 'plain-bw-10.pdf').click();
+    await expect(page.getByRole('menuitem')).toHaveText(['به جزوهٔ 1image-scan-6.pdf', 'به جزوهٔ 2mixed-color-10.pdf']);
+    await page.getByRole('menuitem', { name: /به جزوهٔ 1/ }).click();
+    await expect(ask(page)).toHaveCount(0);
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2']);
+    // ردیف به جزوهٔ دیگر رفت: فوکوس به سر همان جزوه، نه گم
+    await expect(cards(page).first().getByRole('heading', { level: 2 })).toBeFocused();
+    expect(await names(page)).toEqual(['image-scan-6.pdf', 'plain-bw-10.pdf', 'mixed-color-10.pdf']);
+    // جزوهٔ ۱: ۱۶ صفحه و یک صحافی
+    await expect.poll(() => cardPrices(page)).toEqual(['70,600', '61,000']);
+    await expect(summaryTotal(page)).toHaveText('131,600');
+    await expect(cards(page).first()).toContainText('به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند.');
+
+    // دوباره هر فایل یک جزوه، ولی پرسش برنمی‌گردد؛ جزوهٔ تازه تنظیماتش باز است
+    await menuOf(page, 'plain-bw-10.pdf').click();
+    await expect(page.getByRole('menuitem')).toHaveText(['یکی بالاتر', 'به جزوهٔ 2mixed-color-10.pdf', 'جزوهٔ تازه با همین فایل']);
+    await page.getByRole('menuitem', { name: 'جزوهٔ تازه با همین فایل' }).click();
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2', 'جزوهٔ 3']);
+    expect(await names(page)).toEqual(['image-scan-6.pdf', 'mixed-color-10.pdf', 'plain-bw-10.pdf']);
+    await expect(ask(page)).toHaveCount(0);
+    await expect.poll(() => expanded(page)).toEqual(['false', 'false', 'true']);
+
+    // ✕ تنها فایل یک جزوه، آن جزوه را هم می‌برد
+    await page.getByRole('button', { name: '«mixed-color-10.pdf» را از جزوه بردار' }).click();
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2']);
+    await expect.poll(() => cardPrices(page)).toEqual(['54,600', '61,000']);
+  });
+
+  test('«جزوهٔ تازه»: فایل‌هایش یک جزوهٔ تازه با پیش‌فرض‌ها، تنظیماتش باز و بی پرسش؛ افزودن به همان جزوه', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(price(page)).toContainText('61,000', { timeout: 15_000 });
+    await expect(ask(page)).toHaveCount(0);
+    await optionTile(page, 'رنگی').click();
+    await expect(price(page)).toContainText('65,000');
+
+    await page.setInputFiles('#jozve-new', fixture('image-scan-6.pdf'));
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2']);
+    await expect(ask(page)).toHaveCount(0);
+    await expect.poll(() => cardPrices(page)).toEqual(['65,000', '54,600']);
+    await expect.poll(() => expanded(page)).toEqual(['false', 'true']);
+    await expect(optionTile(page, 'سیاه‌سفید').locator('input')).toBeChecked();
+    await expect(settingsButtons(page).first()).toHaveText(/رنگی، دورو، طلق و سیم · 1 نسخه/);
+
+    // افزودن به همان جزوه: جزوهٔ ۲ دو فایل، پشت‌سرهم با یک صحافی
+    await page.setInputFiles('#jozve-add-2', fixture('mixed-color-10.pdf'));
+    await expect.poll(() => names(page)).toEqual(['plain-bw-10.pdf', 'image-scan-6.pdf', 'mixed-color-10.pdf']);
+    await expect.poll(() => cardPrices(page)).toEqual(['65,000', '70,600']);
+    await expect(summaryTotal(page)).toHaveText('135,600');
+  });
+});
+
 test.describe('چند فایل روی موبایل', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -213,6 +357,32 @@ test.describe('چند فایل روی موبایل', () => {
     await page.mouse.wheel(0, 3000);
     await expect(price(page)).toBeInViewport();
   });
+
+  for (const width of [320, 390]) {
+    test(`چند جزوه در ${width} پیکسل: بی اسکرول افقی، منوی ردیف درون صفحه، هدف لمسی ۴۴، و جمع چندجزوه در نوار`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto('/');
+      await page.setInputFiles('#jozve-file', [
+        renamed('plain-bw-10.pdf', 'Thermodynamics lecture 01 - introduction and first law.pdf'),
+        renamed('image-scan-6.pdf', 'image-scan-6.pdf'),
+      ]);
+      await expect(price(page)).toContainText('70,600', { timeout: 20_000 });
+      await arrangeTile(page, 'هر فایل جزوهٔ جدا').click();
+      await expect(price(page)).toContainText('115,600');
+      await expect(page.locator('.home-dock__label')).toHaveText('جمع · 2 جزوه');
+      const menu = menuOf(page, 'Thermodynamics lecture 01 - introduction and first law.pdf');
+      await menu.click();
+      const list = await page.getByRole('menu').boundingBox();
+      expect(list!.x).toBeGreaterThanOrEqual(0);
+      expect(list!.x + list!.width).toBeLessThanOrEqual(width);
+      for (const target of [menu, ...(await page.getByRole('menuitem').all()), ...(await settingsButtons(page).all())]) {
+        const box = await target.boundingBox();
+        expect(box!.height, (await target.textContent()) ?? '').toBeGreaterThanOrEqual(44);
+      }
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+    });
+  }
 
   /**
    * سنجهٔ تک‌فایل (زیر ۲ ثانیه تا اولین قیمت با پردازندهٔ ۴× کند)، برای کل جزوه: قیمت کامل
@@ -257,7 +427,7 @@ test.describe('برگشت بعد از رفرش (۳د)، بی سرور', () => {
     await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf'), fixture('mixed-color-10.pdf')]);
     await expect(price(page)).toContainText('86,600', { timeout: 20_000 });
     // ترتیبی که کاربر ساخت، و تنظیمی که عوض کرد، هر دو باید برگردند
-    await page.getByRole('button', { name: '«plain-bw-10.pdf» یکی بالاتر' }).click();
+    await moveFile(page, 'plain-bw-10.pdf', 'یکی بالاتر');
     await expect.poll(() => names(page)).toEqual(['image-scan-6.pdf', 'plain-bw-10.pdf', 'mixed-color-10.pdf']);
     await tile(page, 'رنگی').click();
     const order = await names(page);
@@ -348,7 +518,7 @@ test.describe('برگشت بعد از رفرش (۳د)، بی سرور', () => {
       const raw = sessionStorage.getItem('jy.draft');
       if (!raw) return;
       const draft = JSON.parse(raw);
-      draft.config = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'constructor', paperTypeId: 'constructor', copies: 1 };
+      draft.layout.jozves[0].config = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'constructor', paperTypeId: 'constructor', copies: 1 };
       sessionStorage.setItem('jy.draft', JSON.stringify(draft));
     });
     await page.goto('/');
@@ -359,6 +529,52 @@ test.describe('برگشت بعد از رفرش (۳د)، بی سرور', () => {
     await page.setInputFiles('#jozve-replace', fixture('plain-bw-10.pdf'));
     await expect(price(page)).toContainText('61,000', { timeout: 20_000 });
     expect(errors).toEqual([]);
+  });
+
+  test('چند جزوه (۸٫۲): چیدمان، تنظیمات هر جزوه و پرسش چیدمان برمی‌گردند', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
+    await expect(price(page)).toContainText('70,600', { timeout: 20_000 });
+    await arrangeTile(page, 'هر فایل جزوهٔ جدا').click();
+    await settingsButtons(page).nth(1).click();
+    await tile(page, 'رنگی').click();
+    // ۶ صفحه سیاه‌سفید و ۱۰ صفحه رنگی، هر کدام صحافی خودش
+    await expect(summaryTotal(page)).toHaveText('119,600');
+
+    await page.reload();
+    await expect.poll(() => titles(page)).toEqual(['جزوهٔ 1', 'جزوهٔ 2']);
+    await expect(page.getByTestId('jozve-waiting')).toHaveCount(2);
+    await expect(arrangeTile(page, 'هر فایل جزوهٔ جدا').locator('input')).toBeChecked();
+    // همه یک‌جا، از کارت اول: هر فایل سر جای خودش در جزوهٔ خودش
+    await page.setInputFiles('#jozve-add', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
+    await expect(summaryTotal(page)).toHaveText('119,600', { timeout: 20_000 });
+    expect(await names(page)).toEqual(['image-scan-6.pdf', 'plain-bw-10.pdf']);
+    await expect.poll(() => cardPrices(page)).toEqual(['54,600', '65,000']);
+    await expect(page.getByTestId('jozve-waiting')).toHaveCount(0);
+  });
+
+  test('پیش‌نویس نسخهٔ ۱ (زبانه‌ای که پیش از ۸٫۲ باز بود): یک جزوه با همان تنظیمات برمی‌گردد', async ({ page }) => {
+    // همان پیش‌نویسی که صفحه با رفرش می‌نویسد، پیش از هر اسکریپت صفحه به شکل نسخهٔ ۱
+    await page.addInitScript(() => {
+      const raw = sessionStorage.getItem('jy.draft');
+      const draft = raw ? JSON.parse(raw) : null;
+      if (draft?.v !== 2) return;
+      sessionStorage.setItem('jy.draft', JSON.stringify({ v: 1, files: draft.files, config: draft.layout.jozves[0].config, checkout: draft.checkout }));
+    });
+    await page.goto('/');
+    await page.setInputFiles('#jozve-file', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
+    await expect(price(page)).toContainText('70,600', { timeout: 20_000 });
+    await tile(page, 'رنگی').click();
+    // ۱۶ صفحه رنگی: ۳۲,۰۰۰ + ۴۵,۰۰۰
+    await expect(price(page)).toContainText('77,000');
+
+    await page.reload();
+    await expect(page.getByTestId('jozve-waiting')).toContainText('همان فایل‌ها را دوباره انتخاب کن');
+    await page.setInputFiles('#jozve-add', [fixture('plain-bw-10.pdf'), fixture('image-scan-6.pdf')]);
+    await expect(price(page)).toContainText('77,000', { timeout: 20_000 });
+    await expect(tile(page, 'رنگی').locator('input')).toBeChecked();
+    await expect(cards(page)).toHaveCount(1);
+    await expect(ask(page)).toHaveCount(0);
   });
 
   test('حافظهٔ بستهٔ سایت: صفحهٔ معمول، بی خطا', async ({ page }) => {

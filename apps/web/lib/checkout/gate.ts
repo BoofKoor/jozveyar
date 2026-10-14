@@ -9,11 +9,10 @@
 
 import type { CheckoutItem } from '@jozveyar/contracts/checkout';
 
-import type { JozveView, SectionView } from '../jozveView';
-import type { OrderConfig } from '../orderConfig';
+import type { JozvePart, SectionView } from '../jozveView';
 
 export type OrderGate =
-  /** همه روی سرور و شمرده؛ همین قلم به مسیر خرید می‌رود. */
+  /** همه روی سرور و شمرده؛ همین قلم‌ها، یکی برای هر جزوه، به مسیر خرید می‌روند. */
   | { kind: 'ready'; items: CheckoutItem[] }
   /** فایلی هنوز در راه سرور است، یا سرور هنوز بررسی‌اش می‌کند. */
   | { kind: 'sending' }
@@ -25,30 +24,29 @@ export type OrderGate =
   | { kind: 'blocked' };
 
 /**
- * «همه روی سرور و شمرده» یعنی **همهٔ** فایل‌های جزوه، نه فقط آنها که در قیمت‌اند: فایلی که منتظر انتخاب دوباره
- * است، خوانده نشد یا هنوز شمرده نشده، در `included` نیست، ولی سفارش بی آن فصل ساخته نمی‌شود. رابط «ادامه» را برای
- * همین‌ها جدا می‌بندد؛ برگشت بعد از رفرش (۳د) فقط به همین دروازه تکیه دارد.
+ * «همه روی سرور و شمرده» یعنی **همهٔ** فایل‌های **همهٔ** جزوه‌ها، نه فقط آنها که در قیمت‌اند: فایلی که منتظر انتخاب دوباره
+ * است، خوانده نشد یا هنوز شمرده نشده، در `included` نیست، ولی سفارش بی آن فصل ساخته نمی‌شود. رابط «ادامه» را برای همین‌ها
+ * جدا می‌بندد؛ برگشت بعد از رفرش (۳د) فقط به همین دروازه تکیه دارد. یک قلم برای هر جزوه، به ترتیب جزوه‌ها (برش ۸٫۲).
  */
-export function orderGate(view: JozveView, config: OrderConfig): OrderGate {
-  if (view.waiting.length > 0) return { kind: 'waiting' };
-  if (view.blocked.length > 0) return { kind: 'blocked' };
-  const stuck = view.included.filter((s) => !s.serverReady && (s.uploadRefused || s.serverFailed));
+export function orderGate(parts: readonly JozvePart[]): OrderGate {
+  const views = parts.map((part) => part.view);
+  if (views.some((view) => view.waiting.length > 0)) return { kind: 'waiting' };
+  if (views.some((view) => view.blocked.length > 0)) return { kind: 'blocked' };
+  const stuck = views.flatMap((view) => view.included.filter((s) => !s.serverReady && (s.uploadRefused || s.serverFailed)));
   if (stuck.length > 0) return { kind: 'stuck', sections: stuck };
-  if (view.pending.length > 0 || view.included.length === 0 || view.included.some((s) => !s.serverReady || !s.documentId)) {
-    return { kind: 'sending' };
-  }
+  const sending = (view: JozvePart['view']) =>
+    view.pending.length > 0 || view.included.length === 0 || view.included.some((s) => !s.serverReady || !s.documentId);
+  if (views.length === 0 || views.some(sending)) return { kind: 'sending' };
   return {
     kind: 'ready',
-    items: [
-      {
-        documentIds: view.included.map((s) => s.documentId!),
-        colorMode: config.colorMode,
-        paperTypeId: config.paperTypeId,
-        sidesMode: config.sidesMode,
-        bindingTypeId: config.bindingTypeId,
-        copies: config.copies,
-      },
-    ],
+    items: parts.map(({ view, config }) => ({
+      documentIds: view.included.map((s) => s.documentId!),
+      colorMode: config.colorMode,
+      paperTypeId: config.paperTypeId,
+      sidesMode: config.sidesMode,
+      bindingTypeId: config.bindingTypeId,
+      copies: config.copies,
+    })),
   };
 }
 

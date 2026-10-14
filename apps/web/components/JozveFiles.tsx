@@ -1,46 +1,47 @@
 'use client';
 
-import { useRef, type ReactNode } from 'react';
-import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
+import { memo, type ReactNode } from 'react';
 import { formatNumber } from '@jozveyar/text';
 import type { JozveView, SectionView } from '../lib/jozveView';
 import { AddFiles } from './AddFiles';
-import { CardHead, DoneBadge, FileInfo, FileName, Names, Note, WaitingNote, Warnings, uploadLine } from './AnalysisCard';
-import { ACCEPT } from './DropZone';
+import { CardHead, DoneBadge, FileInfo, FileName, Note, WaitingNote, Warnings, jozveTitleId, uploadLine } from './AnalysisCard';
+import { RowMenu, type MenuItem } from './DeskParts';
 import { Inline } from './Inline';
 
 interface Props {
+  /** شمارهٔ جزوه در سفارش، از صفر. */
+  index: number;
+  /** سفارش بیش از یک جزوه دارد: «جزوهٔ N» با قیمت خودش (سؤال ۲۱۷). */
+  multi: boolean;
   view: JozveView;
-  /** فایل‌هایی که از سقف جزوه بیشتر بودند و اضافه نشدند. */
-  overflow: readonly string[];
+  /** قیمت همین جزوه، از همان ریز قیمت سفارش؛ null تا وقتی هنوز صفحه‌ای شمرده نشده. */
+  priceRials: number | null;
+  /** کارهای منوی ردیف هر فایل (`OrderDesk`)، وقتی منویش باز می‌شود؛ پایدار، تا ردیف بی تغییر دوباره رسم نشود. */
+  menuOf: (key: string) => MenuItem[];
+  /** چند فایل دیگر در سفارش جا دارد. */
+  room: number;
   onAdd: (files: File[]) => void;
-  onMove: (key: string, delta: -1 | 1) => void;
   onRemove: (key: string) => void;
-  onReplace: (key: string, file: File) => void;
-  onReset: () => void;
+  /** فایل‌گزین جایگزین همین فایل (یکی برای کل میز، `OrderDesk`). */
+  onPick: (key: string) => void;
+  /** «تنظیمات چاپ» همین جزوه، ته کارت؛ تا قیمتی نیست، هیچ. */
+  settings: ReactNode;
 }
 
 /**
- * جزوهٔ چندفایلی در کارت «جزوهٔ تو»: فایل‌ها به ترتیب صحافی، هر کدام با وضع و هشدارهای خودش
- * (ADR-030).
+ * کارت یک جزوه با چند فایل، یا هر جزوهٔ سفارش چندجزوه (ADR-030؛ برش ۸٫۲، سؤال‌های ۲۱۷ تا ۲۱۹): فایل‌ها به ترتیب صحافی،
+ * هر کدام با وضع و هشدارهای خودش و منوی «جابه‌جایی»؛ «افزودن فایل به همین جزوه»؛ و «تنظیمات چاپ» همین جزوه.
  *
  * هشدار زیر همان فایل می‌آید و شمارهٔ صفحهٔ **خود آن فایل** را می‌گوید: کاربر فایل خودش
  * را باز می‌کند و «صفحهٔ 3» را پیدا می‌کند؛ «صفحهٔ 51 جزوه» را در هیچ فایلی نمی‌بیند.
  */
-export function JozveFiles({ view, overflow, onAdd, onMove, onRemove, onReplace, onReset }: Props) {
-  const replaceInput = useRef<HTMLInputElement>(null);
-  const replaceTarget = useRef<string | null>(null);
+export function JozveFiles({ index, multi, view, priceRials, menuOf, room, onAdd, onRemove, onPick, settings }: Props) {
   const count = view.sections.length;
 
-  const askReplace = (key: string) => {
-    replaceTarget.current = key;
-    replaceInput.current?.click();
-  };
-
   return (
-    <section data-testid="jozve" className="jy-card" aria-labelledby="jozve-title">
-      <CardHead files={count} pages={view.pageCount} />
-      <p className="mt-1 text-small text-muted">به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند.</p>
+    <section data-testid="jozve" className="jy-card" aria-labelledby={jozveTitleId(index)}>
+      <CardHead files={count} pages={view.pageCount} index={index} multi={multi} priceRials={priceRials} />
+      {count > 1 ? <p className="mt-1 text-small text-muted">به همین ترتیب، پشت‌سرهم در یک جزوه صحافی می‌شوند.</p> : null}
 
       {/* جزوهٔ برگشته بعد از رفرش (۳د): چرا و چه کنی، یک بار برای همه؛ هر ردیف فقط دکمهٔ خودش را دارد */}
       {view.waiting.length > 0 ? (
@@ -50,72 +51,43 @@ export function JozveFiles({ view, overflow, onAdd, onMove, onRemove, onReplace,
       ) : null}
 
       <ol className="mt-3">
-        {view.sections.map((section, index) => (
-          <SectionRow
-            key={section.key}
-            section={section}
-            index={index}
-            last={index === count - 1}
-            onMove={onMove}
-            onRemove={onRemove}
-            onReplace={askReplace}
-          />
+        {view.sections.map((section, i) => (
+          <SectionRow key={section.key} section={section} index={i} menuOf={menuOf} onRemove={onRemove} onPick={onPick} />
         ))}
       </ol>
 
       {/* یک نشان برای کل جزوه: همهٔ فایل‌ها قطعی، هیچ‌کدام برآوردی یا خوانده‌نشده. */}
       {!view.provisional && view.blocked.length === 0 && !view.summary.estimated ? <DoneBadge className="mt-3" /> : null}
 
-      {overflow.length > 0 ? (
-        <div className="mt-4">
-          <Note tone="warning" testId="jozve-overflow">
-            جزوه بیش از <span className="num">{formatNumber(MAX_SECTIONS_PER_ITEM)}</span> فایل نمی‌گیرد؛ این‌ها اضافه
-            نشدند: <Names names={overflow} />. چند فایل را از برنامهٔ خودشان یک PDF کن و همان را بینداز.
-          </Note>
-        </div>
-      ) : null}
-
-      <div className="mt-4 flex items-center gap-2">
-        <AddFiles onFiles={onAdd} room={MAX_SECTIONS_PER_ITEM - count} label="افزودن فایل" className="min-w-0 flex-1" />
-        <button type="button" onClick={onReset} className="jy-btn jy-btn--text shrink-0">
-          از اول
-        </button>
-      </div>
-
-      <input
-        ref={replaceInput}
-        id="jozve-replace"
-        type="file"
-        accept={ACCEPT}
-        tabIndex={-1}
-        aria-hidden="true"
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = '';
-          const key = replaceTarget.current;
-          replaceTarget.current = null;
-          if (file && key) onReplace(key, file);
-        }}
+      <AddFiles
+        id={index === 0 ? 'jozve-add' : `jozve-add-${index + 1}`}
+        variant="text"
+        onFiles={onAdd}
+        room={room}
+        label="افزودن فایل به همین جزوه"
+        className="home-add--card"
       />
+      {settings}
     </section>
   );
 }
 
-function SectionRow({
+/**
+ * یک ردیف فایل. فقط وقتی دوباره رسم می‌شود که خود فایل، جایش یا کارهای میز عوض شود: نمای هر فایل تا خود فایل عوض نشود همان
+ * است (`jozveView`)، پس پیام‌های کارگر تحلیل برای یک فایل ردیف‌های دیگر را از نو نمی‌کشد.
+ */
+const SectionRow = memo(function SectionRow({
   section,
   index,
-  last,
-  onMove,
+  menuOf,
   onRemove,
-  onReplace,
+  onPick,
 }: {
   section: SectionView;
   index: number;
-  last: boolean;
-  onMove: (key: string, delta: -1 | 1) => void;
+  menuOf: (key: string) => MenuItem[];
   onRemove: (key: string) => void;
-  onReplace: (key: string) => void;
+  onPick: (key: string) => void;
 }) {
   const { key, name, blocked, waiting, summary, state } = section;
   const program = section.kind === 'slides' ? 'پاورپوینت' : 'Word';
@@ -141,15 +113,16 @@ function SectionRow({
           ) : null}
         </div>
         <div className="-me-2.5 -mt-2 flex shrink-0">
-          <RowButton label={`«${name}» یکی بالاتر`} disabled={index === 0} onClick={() => onMove(key, -1)}>
-            <span className="jy-icon jy-icon-arrow jy-icon--up" aria-hidden="true" />
-          </RowButton>
-          <RowButton label={`«${name}» یکی پایین‌تر`} disabled={last} onClick={() => onMove(key, 1)}>
-            <span className="jy-icon jy-icon-arrow jy-icon--down" aria-hidden="true" />
-          </RowButton>
-          <RowButton label={`«${name}» را از جزوه بردار`} onClick={() => onRemove(key)}>
+          <RowMenu name={name} items={() => menuOf(key)} />
+          <button
+            type="button"
+            aria-label={`«${name}» را از جزوه بردار`}
+            title={`«${name}» را از جزوه بردار`}
+            onClick={() => onRemove(key)}
+            className="jy-btn jy-btn--text jy-btn--icon"
+          >
             <span className="jy-icon jy-icon-close" aria-hidden="true" />
-          </RowButton>
+          </button>
         </div>
       </div>
 
@@ -164,7 +137,7 @@ function SectionRow({
             </p>
             <p className="mt-1">تا تکلیف این فایل روشن نشود، قیمت بدون آن است.</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" onClick={() => onReplace(key)} className="jy-btn jy-btn--primary">
+              <button type="button" onClick={() => onPick(key)} className="jy-btn jy-btn--primary">
                 جایگزین کن
               </button>
               <button type="button" onClick={() => onRemove(key)} className="jy-btn jy-btn--secondary">
@@ -176,7 +149,7 @@ function SectionRow({
 
         {waiting ? (
           <div>
-            <button type="button" onClick={() => onReplace(key)} className="jy-btn jy-btn--secondary" data-testid="section-waiting">
+            <button type="button" onClick={() => onPick(key)} className="jy-btn jy-btn--secondary" data-testid="section-waiting">
               همان فایل را انتخاب کن
             </button>
           </div>
@@ -213,7 +186,7 @@ function SectionRow({
             fontsAdvice={
               <>
                 با{' '}
-                <button type="button" onClick={() => onReplace(key)} className="jy-link">
+                <button type="button" onClick={() => onPick(key)} className="jy-link">
                   جایگزین کن
                 </button>{' '}
                 جای همین بگذار.
@@ -224,7 +197,7 @@ function SectionRow({
       </div>
     </li>
   );
-}
+});
 
 /**
  * این فایل الان کجای کار است، اگر هنوز قطعی نیست. تعداد صفحه و حجمش در خط اطلاعات بالای همین
@@ -263,29 +236,4 @@ function sectionState(section: SectionView): ReactNode {
     default:
       return null;
   }
-}
-
-function RowButton({
-  label,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="jy-btn jy-btn--text jy-btn--icon"
-    >
-      {children}
-    </button>
-  );
 }

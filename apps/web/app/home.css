@@ -597,6 +597,143 @@
     color: var(--color-green-600);
   }
 
+  /* ===== میز چندجزوه (برش ۸٫۲؛ طرح docs/ui/mockups/desk.html؛ components/DeskParts.tsx) ===== */
+  /* «افزودن فایل به همین جزوه»: دکمهٔ متنی درون کارت، نه کادر خط‌چین (سؤال ۲۱۹) */
+  .home-add {
+    cursor: pointer;
+  }
+  .home-add--card {
+    margin-block-start: 8px;
+    margin-inline-start: -12px;
+  }
+  .home-add.is-dragover {
+    background: var(--color-green-100);
+  }
+  .home-add:has(input:focus-visible) {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--jy-focus-inner);
+  }
+  /* منوی «جابه‌جایی» ردیف فایل (سؤال ۲۱۸) */
+  .home-menu {
+    position: relative;
+  }
+  .home-menu > [aria-expanded='true'] {
+    background: var(--color-green-100);
+  }
+  .home-menu__list {
+    position: absolute;
+    inset-block-start: calc(100% + 4px);
+    inset-inline-end: 0;
+    z-index: 10;
+    width: max-content;
+    min-width: 220px;
+    max-width: min(300px, calc(100vw - 2 * var(--jy-gutter)));
+    padding: 6px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+  }
+  .home-menu__item {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 12px;
+    text-align: start;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .home-menu__item:hover,
+  .home-menu__item:focus-visible {
+    background: var(--color-green-50);
+  }
+  .home-menu__item span {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .home-menu__list hr {
+    margin-block: 4px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  /* «تنظیمات چاپ» درون کارت جزوه (سؤال ۲۱۷): یک جزوه همیشه باز، چند جزوه یکی باز و بقیه یک خط */
+  .home-set {
+    margin-block-start: 20px;
+    padding-block-start: 4px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .home-set--fixed {
+    padding-block-start: 20px;
+  }
+  .home-set__title {
+    font-size: var(--text-h4);
+    font-weight: 600;
+  }
+  .home-set__title + .home-field {
+    margin-block-start: 16px;
+  }
+  .home-set__sum {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 12px;
+    width: 100%;
+    min-height: 52px;
+    padding-block: 8px;
+    padding-inline-end: 32px;
+    text-align: start;
+    cursor: pointer;
+  }
+  .home-set__label {
+    font-weight: 600;
+  }
+  .home-set__value {
+    flex: 1 1 14em;
+    min-width: 0;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .home-set__chev {
+    position: absolute;
+    inset-inline-end: 0;
+    inset-block-start: calc(50% - 10px);
+    color: var(--color-green-700);
+    transition: rotate var(--jy-dur-fast) var(--jy-ease);
+  }
+  .home-set.is-open .home-set__chev {
+    rotate: 180deg;
+  }
+  .home-set__body > .home-field:first-child {
+    margin-block-start: 8px;
+  }
+  /* زیر کارت‌ها: تنها کادر خط‌چین «جزوهٔ تازه»، و «از اول» */
+  .home-new {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .home-new__add {
+    flex: 1;
+    min-width: 0;
+    min-height: 64px;
+    padding: 8px 16px;
+    background: var(--color-paper);
+  }
+  .home-new__text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.5;
+  }
+  .home-new__text small {
+    font-size: var(--text-small);
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+
   /* ===== خلاصهٔ سفارش (components/OrderSummary.tsx) ===== */
   .home-sum__lines {
     margin-block-start: 12px;
@@ -609,6 +746,26 @@
     padding-block: 6px;
   }
   .home-sum__lines dt {
+    color: var(--color-muted);
+  }
+  /* خلاصهٔ چندجزوه (سؤال ۲۲۵): هر جزوه یک ردیف، نام و مشخصات زیر هم */
+  .home-sum__lines--jozves > div {
+    align-items: flex-start;
+  }
+  .home-sum__lines--jozves > div + div {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .home-sum__name {
+    display: block;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .home-sum__spec {
+    display: block;
+    font-size: var(--text-small);
+  }
+  .home-sum__count {
+    font-weight: 400;
     color: var(--color-muted);
   }
   .home-sum__total {

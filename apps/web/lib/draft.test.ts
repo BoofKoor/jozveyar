@@ -1,16 +1,18 @@
 /**
- * پیش‌نویس سفارش همین زبانه (۳د، ADR-036): نوشتن از حال جزوه (`draft.ts`)، و خواندن با سنجش دست‌نویس و برگرداندن
- * فایل‌ها با آنچه سرور درباره‌شان می‌گوید (`restore.ts`). بی مرورگر: حافظه و درخواست‌ها ساختگی‌اند.
+ * پیش‌نویس سفارش همین زبانه (۳د، ADR-036؛ نسخهٔ ۲ با چیدمان جزوه‌ها، ۸٫۲): نوشتن از حال جزوه‌ها (`draft.ts`)، و خواندن با
+ * سنجش دست‌نویس و برگرداندن فایل‌ها با آنچه سرور درباره‌شان می‌گوید (`restore.ts`). بی مرورگر: حافظه و درخواست‌ها ساختگی‌اند.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import type { CheckoutDraft } from './checkout/store';
 import { draftOf, writeDraft, type Draft, type DraftFile } from './draft';
-import { documentStatus, parseDraft, readDraft, restoredSection, restoredSections, type DocumentStatus } from './restore';
+import { documentStatus, parseDraft, readDraft, restoredJozves, restoredSection, restoredSections, type DocumentStatus } from './restore';
 import { initialAnalysis } from './fileAnalysis';
 import type { Section } from './jozve';
 import { jozveView } from './jozveView';
+import { moveTo, startLayout } from './layout';
+import type { OrderConfig } from './orderConfig';
 
 const DOC = 'a0000000-0000-4000-8000-000000000001';
 const ORDER = 'f0000000-0000-4000-8000-00000000000f';
@@ -26,12 +28,15 @@ const CHECKOUT: CheckoutDraft = {
 };
 
 const FILE: DraftFile = { name: 'جلسه 1.pdf', size: 1234, lastModified: 1_700_000_000_000, documentId: DOC };
+const CONFIG: OrderConfig = { colorMode: 'color', sidesMode: 'single', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 3 };
 const DRAFT: Draft = {
-  v: 1,
-  files: [FILE, { ...FILE, name: 'جلسه 2.pdf', documentId: null }],
-  config: { colorMode: 'color', sidesMode: 'single', bindingTypeId: 'spiral_clear', paperTypeId: 'tahrir80', copies: 3 },
+  v: 2,
+  files: [FILE, { ...FILE, name: 'جلسه 2.pdf', documentId: null }, { ...FILE, name: 'تمرین.pdf', documentId: null }],
+  layout: { jozves: [{ files: 2, config: CONFIG }, { files: 1, config: null }], asking: false },
   checkout: CHECKOUT,
 };
+/** همان پیش‌نویس به شکل نسخهٔ ۱ (پیش از ۸٫۲): یک جزوه، و تنظیمات کنار فایل‌ها. */
+const DRAFT_V1 = { v: 1, files: DRAFT.files, config: CONFIG, checkout: CHECKOUT };
 
 /** حافظهٔ ساختگی، مثل sessionStorage؛ `broken` یعنی مرورگر اجازه نمی‌دهد. */
 function memory(broken = false) {
@@ -48,7 +53,7 @@ function memory(broken = false) {
 }
 
 describe('نوشتن', () => {
-  it('از حال جزوه: هر فایل با اثر انگشتش و سندش، به ترتیب صحافی؛ تنظیمات و مسیر خرید کنارش', () => {
+  it('از حال جزوه‌ها: هر فایل با اثر انگشتش و سندش، جزوه به جزوه و به ترتیب صحافی؛ چیدمان و مسیر خرید کنارش', () => {
     const live = new File(['%PDF'], 'b.pdf', { lastModified: 42 });
     const sections: Section[] = [
       {
@@ -61,16 +66,24 @@ describe('نوشتن', () => {
       // برگشته و هنوز منتظر: سند نیمه‌کاره‌اش از خود نشانی فایل
       { key: 's2', file: { ...FILE, name: 'a.pdf' }, kind: 'pdf', analysis: initialAnalysis(FILE), upload: null },
     ];
-    expect(draftOf(sections, null, CHECKOUT)).toEqual({
-      v: 1,
+    expect(draftOf(sections, startLayout(['s1', 's2'], null), CHECKOUT)).toEqual({
+      v: 2,
       files: [
         { name: 'b.pdf', size: 4, lastModified: 42, documentId: DOC },
         { name: 'a.pdf', size: 1234, lastModified: 1_700_000_000_000, documentId: DOC },
       ],
-      config: null,
+      layout: { jozves: [{ files: 2, config: null }], asking: true },
       checkout: CHECKOUT,
     });
-    expect(draftOf([], null, CHECKOUT)).toBeNull();
+    // دو جزوه، به ترتیب چیدمان نه ترتیب صف؛ تنظیم هر جزوه با خودش
+    const two = moveTo(startLayout(['s2', 's1'], CONFIG), 's2', 'new');
+    expect(draftOf(sections, two, null)).toMatchObject({
+      files: [{ name: 'b.pdf' }, { name: 'a.pdf' }],
+      layout: { jozves: [{ files: 1, config: CONFIG }, { files: 1, config: CONFIG }], asking: false },
+    });
+    // فایلی که در صف نیست در پیش‌نویس هم نیست؛ جزوهٔ خالی هم
+    expect(draftOf(sections.slice(0, 1), two, null)).toMatchObject({ files: [{ name: 'b.pdf' }], layout: { jozves: [{ files: 1 }] } });
+    expect(draftOf([], startLayout([], null), CHECKOUT)).toBeNull();
   });
 
   it('رفت و برگشت از حافظه همان است؛ جزوهٔ خالی پیش‌نویس را پاک می‌کند', () => {
@@ -95,12 +108,42 @@ describe('سنجش', () => {
   const withFile = (patch: Partial<Record<keyof DraftFile, unknown>>) => raw({ ...DRAFT, files: [{ ...FILE, ...patch }] });
 
   it('شکل ناجور یعنی پیش‌نویسی نیست، نه خطا', () => {
-    for (const text of [null, '', '{', '[]', 'null', raw({ ...DRAFT, v: 2 }), raw({ ...DRAFT, files: [] }), raw({ ...DRAFT, files: 'x' })]) {
+    for (const text of [null, '', '{', '[]', 'null', raw({ ...DRAFT, v: 3 }), raw({ ...DRAFT, files: [] }), raw({ ...DRAFT, files: 'x' })]) {
       expect(parseDraft(text), String(text)).toBeNull();
     }
-    // سقف جزوه ۳۰ فایل است
-    expect(parseDraft(raw({ ...DRAFT, files: Array.from({ length: 31 }, () => FILE) }))).toBeNull();
-    expect(parseDraft(raw({ ...DRAFT, files: Array.from({ length: 30 }, () => FILE) }))?.files).toHaveLength(30);
+    // سقف فایل‌های سفارش ۳۰ است
+    const thirty = { jozves: [{ files: 30, config: null }], asking: false };
+    expect(parseDraft(raw({ ...DRAFT, files: Array.from({ length: 31 }, () => FILE), layout: { ...thirty, jozves: [{ files: 31, config: null }] } }))).toBeNull();
+    expect(parseDraft(raw({ ...DRAFT, files: Array.from({ length: 30 }, () => FILE), layout: thirty }))?.files).toHaveLength(30);
+  });
+
+  it('نسخهٔ ۱ (پیش از ۸٫۲) یک جزوه است با همان تنظیمات؛ چیدمان ناجور نسخهٔ ۲ همه را یک جزوه می‌کند، فایل‌ها گم نمی‌شوند', () => {
+    expect(parseDraft(raw(DRAFT_V1))).toEqual({
+      v: 2,
+      files: DRAFT.files,
+      layout: { jozves: [{ files: 3, config: CONFIG }], asking: false },
+      checkout: CHECKOUT,
+    });
+    expect(parseDraft(raw({ ...DRAFT_V1, config: { ...CONFIG, colorMode: 'mixed' } }))?.layout.jozves).toEqual([{ files: 3, config: null }]);
+    const layout = (value: unknown) => parseDraft(raw({ ...DRAFT, layout: value }))!.layout;
+    expect(layout(DRAFT.layout)).toEqual(DRAFT.layout);
+    expect(layout({ ...DRAFT.layout, asking: true }).asking).toBe(true);
+    const single = { jozves: [{ files: 3, config: null }], asking: false };
+    for (const bad of [
+      null,
+      { jozves: [{ files: 2, config: null }], asking: false },
+      { jozves: [{ files: 2, config: null }, { files: 2, config: null }], asking: false },
+      { jozves: [{ files: 3, config: null }, { files: 0, config: null }], asking: false },
+      { jozves: [], asking: false },
+      { jozves: [{ files: 3, config: null }], asking: 'yes' },
+    ]) {
+      expect(layout(bad), JSON.stringify(bad)).toEqual(single);
+    }
+    // تنظیم ناجور یک جزوه فقط همان را پیش‌فرض می‌کند
+    expect(layout({ jozves: [{ files: 2, config: { ...CONFIG, copies: 0 } }, { files: 1, config: CONFIG }], asking: false }).jozves).toEqual([
+      { files: 2, config: null },
+      { files: 1, config: CONFIG },
+    ]);
   });
 
   it('هر فایل: نام، حجم، تاریخ تغییر، و شناسهٔ سند به شکل سرور یا null', () => {
@@ -119,11 +162,12 @@ describe('سنجش', () => {
   });
 
   it('تنظیمات یا مسیر خرید ناجور فقط همان تکه را کنار می‌گذارد', () => {
-    const config = (patch: object) => parseDraft(raw({ ...DRAFT, config: { ...DRAFT.config, ...patch } }))!;
-    expect(config({}).config).toEqual(DRAFT.config);
-    expect(config({ colorMode: 'mixed' })).toMatchObject({ config: null, files: DRAFT.files });
-    expect(config({ copies: 0 }).config).toBeNull();
-    expect(config({ copies: 1001 }).config).toBeNull();
+    const config = (patch: object) =>
+      parseDraft(raw({ ...DRAFT, layout: { ...DRAFT.layout, jozves: [{ files: 2, config: { ...CONFIG, ...patch } }, { files: 1, config: null }] } }))!;
+    expect(config({}).layout.jozves[0]!.config).toEqual(CONFIG);
+    expect(config({ colorMode: 'mixed' })).toMatchObject({ layout: { jozves: [{ config: null }, { config: null }] }, files: DRAFT.files });
+    expect(config({ copies: 0 }).layout.jozves[0]!.config).toBeNull();
+    expect(config({ copies: 1001 }).layout.jozves[0]!.config).toBeNull();
 
     const checkout = (patch: object) => parseDraft(raw({ ...DRAFT, checkout: { ...CHECKOUT, ...patch } }))!.checkout;
     expect(checkout({})).toEqual(CHECKOUT);
@@ -173,6 +217,13 @@ describe('برگشت', () => {
     const asked: string[] = [];
     await restoredSections([{ ...FILE, documentId: null }], async (id) => (asked.push(id), ready));
     expect(asked).toEqual([]);
+  });
+
+  it('فایل‌های برگشته، جزوه به جزوه با شمار فایل هر کدام (۸٫۲)', () => {
+    expect(restoredJozves(['a', 'b', 'c'], DRAFT.layout)).toEqual([
+      { sections: ['a', 'b'], config: CONFIG },
+      { sections: ['c'], config: null },
+    ]);
   });
 
   it('وضعیت سند از همان مسیر ادامهٔ آپلود؛ ۴۰۴ یعنی رفته، و شبکه یک بار دیگر', async () => {
