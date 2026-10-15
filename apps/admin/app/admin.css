@@ -551,6 +551,155 @@
     }
   }
 
+  /*
+   * فهرست جمع‌وجور «سفارش‌ها» (برش ۹٫۱، طرح `m-l91`): هر ردیف details است و کل ردیف summary؛ فلش کنار شماره، و مشخصات فایل‌ها زیر
+   * ردیف باز روی green-50، یک کارت برای هر جزوه. چاپخانه زیر وضعیت فقط برای مالک و متصدی.
+   */
+  .ad-list--fold :is(.ad-cols, .ad-row) {
+    grid-template-columns: 84px minmax(0, 1.1fr) minmax(0, 1.5fr) 96px 128px 148px;
+  }
+  .ad-list--fold.ad-list--nosum :is(.ad-cols, .ad-row) {
+    grid-template-columns: 84px minmax(0, 1.2fr) minmax(0, 1.4fr) 112px 148px;
+  }
+  .ad-fold > summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .ad-fold > summary::-webkit-details-marker {
+    display: none;
+  }
+  .ad-fold > summary:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+  .ad-fold .ad-row__id {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ad-fold .ad-row__id .jy-icon {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    color: var(--color-muted);
+    transition: rotate var(--jy-dur-base) var(--jy-ease);
+  }
+  .ad-fold[open] .ad-row__id .jy-icon {
+    rotate: 180deg;
+  }
+  .ad-fold[open] > summary {
+    background: var(--color-green-50);
+  }
+  .ad-row__status {
+    grid-area: state;
+    min-width: 0;
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  .ad-row__status .ad-row__state {
+    display: block;
+  }
+  .ad-row__prt {
+    display: block;
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .ad-fold__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 24px 20px;
+    background: var(--color-green-50);
+  }
+  .ad-jz {
+    padding: 12px 16px;
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ad-jz__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 12px;
+  }
+  .ad-jz__head b {
+    font-weight: 600;
+  }
+  .ad-jz__spec {
+    min-width: 0;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .ad-jz .ad-files {
+    margin-block-start: 4px;
+  }
+  .ad-jz__sum {
+    margin-block-start: 4px;
+    padding-block-start: 4px;
+    border-block-start: 1px solid var(--color-green-100);
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-jz .ad-warnings {
+    margin-block: 8px 0;
+  }
+  .ad-zip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+  }
+  .ad-zip__meta {
+    flex: 1;
+    min-width: 12rem;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-zip__page {
+    margin-inline-start: auto;
+  }
+  /* ستون کنار صفحهٔ سفارش: zip زیر کار بعدی */
+  .ad-zip91 {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  @media (width <= 860px) {
+    .ad-list--fold .ad-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: 'id who due' 'what what what' 'sum state state';
+    }
+    .ad-list--fold.ad-list--nosum .ad-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: 'id who due' 'what what what' 'state state state';
+    }
+    .ad-row__status {
+      justify-self: end;
+      text-align: end;
+    }
+    .ad-list--nosum .ad-row__status {
+      justify-self: start;
+      text-align: start;
+    }
+    .ad-fold__body {
+      padding: 4px 16px 16px;
+    }
+    .ad-jz {
+      padding: 12px;
+    }
+    .ad-zip > .jy-btn:first-child {
+      flex: 1 1 100%;
+    }
+    .ad-zip__page {
+      margin-inline-start: 0;
+    }
+  }
+
   /* ===== جست‌وجو ===== */
   .ad-search {
     position: relative;

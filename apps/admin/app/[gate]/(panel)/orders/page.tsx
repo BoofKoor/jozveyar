@@ -5,7 +5,7 @@ import type { PanelBucket } from '@jozveyar/db';
 import { formatNumber } from '@jozveyar/text';
 
 import { NoAccess } from '../../../../components/NoAccess';
-import { OrderRows } from '../../../../components/OrderRows';
+import { OrderFolds } from '../../../../components/OrderRows';
 import { Segments } from '../../../../components/Segments';
 import { panelPath } from '../../../../lib/gate';
 import { BUCKET_LABELS } from '../../../../lib/orders';
@@ -63,8 +63,10 @@ export default async function OrdersPage({
     untracked: one(query.untracked),
   });
   if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
-  const { buckets, bucket, q, counts, page, pages, rows, bounds, untracked } = result.value;
+  const { buckets, bucket, q, counts, page, pages, rows, specs, canZip, bounds, untracked } = result.value;
   const money = can(session, 'orders.money');
+  // نام چاپخانه زیر وضعیت (۹٫۱): کاربر چاپخانه فقط سفارش‌های خودش را دارد.
+  const staff = session.partner === null;
   const base = panelPath(gate, '/orders');
   const hrefOf = (params: Record<string, string | number | undefined>) => {
     const search = new URLSearchParams(
@@ -112,7 +114,7 @@ export default async function OrdersPage({
           ))}
         </nav>
       )}
-      <section className={`jy-card ad-list${money ? '' : ' ad-list--nosum'}`} aria-label={`سفارش‌های ${BUCKET_LABELS[bucket]}`}>
+      <section className={`jy-card ad-list ad-list--fold${money ? '' : ' ad-list--nosum'}`} aria-label={`سفارش‌های ${BUCKET_LABELS[bucket]}`}>
         {rows.length > 0 ? (
           <>
             <div className="ad-cols" aria-hidden="true">
@@ -120,10 +122,19 @@ export default async function OrdersPage({
               <span>گیرنده</span>
               <span>جزوه</span>
               {money ? <span>مبلغ (تومان)</span> : null}
-              <span>وضعیت</span>
+              <span>{staff ? 'وضعیت و چاپخانه' : 'وضعیت'}</span>
               <span>{last.head}</span>
             </div>
-            <OrderRows gate={gate} rows={rows} bounds={bounds} dates={last.dates} money={money} />
+            <OrderFolds
+              gate={gate}
+              rows={rows}
+              specs={specs}
+              bounds={bounds}
+              dates={last.dates}
+              money={money}
+              partner={staff}
+              canZip={canZip}
+            />
           </>
         ) : (
           <p className="ad-empty">

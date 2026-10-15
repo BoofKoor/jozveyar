@@ -14,6 +14,7 @@ import { Barcode } from '../../../../../components/Barcode';
 import { NoAccess } from '../../../../../components/NoAccess';
 import { InquiryForm } from '../../../../../components/InquiryForm';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
+import { FileWarnings } from '../../../../../components/FileWarnings';
 import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RefundGatewayForm, RefundManualForm } from '../../../../../components/RefundForms';
 import { RefundInquiryForm } from '../../../../../components/RefundInquiryForm';
@@ -24,6 +25,7 @@ import { ResendSmsForm } from '../../../../../components/ResendSmsForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
 import { VoidShipmentForm } from '../../../../../components/VoidShipmentForm';
+import { ZipButton } from '../../../../../components/ZipButton';
 import { dayHeading, dayText, tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
@@ -38,7 +40,6 @@ import {
   breakdownOf,
   dueCard,
   filesUntil,
-  fileWarnings,
   lastMoveTo,
   orderNumberOf,
   orderState,
@@ -61,6 +62,7 @@ import {
   timelineWhen,
   volumeFileName,
   volumesSegs,
+  zipView,
   type JobFailure,
 } from '../../../../../lib/orders';
 import { can } from '../../../../../lib/server/auth';
@@ -76,6 +78,7 @@ export async function generateMetadata({ params }: { params: Promise<{ number: s
 /** خطاهایی که «دوباره بساز»، دانلود و کارهای وضعیت با برگشت به همین صفحه می‌گویند (`?e=`). */
 const PAGE_ERRORS = new Set([
   'pdf_not_ready',
+  'zip_not_ready',
   'pdf_not_failed',
   'ticket_not_ready',
   'ticket_not_failed',
@@ -190,27 +193,6 @@ const Size = ({ bytes }: { bytes: number }) => {
     </>
   );
 };
-
-/**
- * هشدارهای فایل‌های جزوه (برش ۸٫۱؛ ADR-029، سؤال ۱۸۱): کیفیت اسکن و حاشیه از ۸٫۱ فقط این‌جا دیده می‌شوند، و صفحهٔ خالی و
- * فونت جایگزین هم سایت و هم این‌جا؛ برای مالک، متصدی و چاپخانه، که چاپ می‌کند.
- */
-function FileWarnings({ item }: { item: PanelOrderItem }) {
-  const warnings = fileWarnings(item);
-  if (warnings.length === 0) return null;
-  return (
-    <ul className="ad-warnings" aria-label="هشدارهای فایل">
-      {warnings.map((warning) => (
-        <li key={warning.kind} className="jy-note jy-note--warning" data-testid={`file-warning-${warning.kind}`}>
-          <span className="jy-icon jy-icon-warning" aria-hidden="true" />
-          <span>
-            <Segments segs={warning.segs} />
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 /**
  * فایل چاپ یک جزوه (طرح پنل، ADR-043): هر جلد یک ردیف با دانلود، و «چه عوض شد» با پیوند PDF اصلی جزوه؛ در حال ساختن؛ یا
@@ -446,6 +428,14 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
     />
   );
   const revert = mode === 'revert' && canRevert && revertTo ? reasonForm('revert', revertTo) : null;
+  // «همهٔ فایل‌ها (zip)» زیر کار بعدی (برش ۹٫۱، سؤال ۲۳۲): در صف و در حال چاپ، و پس از پست و لغو هم تا فایل‌ها پاک نشده.
+  const zipState = view.canDownload ? zipView(details, now) : null;
+  const zip =
+    zipState && (zipState.kind === 'ready' || zipState.kind === 'waiting' || zipState.kind === 'failed') ? (
+      <div className="ad-zip91">
+        <ZipButton gate={gate} orderNumber={order.orderNumber} view={zipState} block />
+      </div>
+    ) : null;
   const revertLink =
     canRevert && revertTo ? <ModeLink href={`${self}?do=revert`}>برگرداندن به «{STATUS_LABELS[revertTo]}»</ModeLink> : null;
   const onlyRevert = revert ?? (revertLink ? <div className="ad-status__actions">{revertLink}</div> : null);
@@ -491,6 +481,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
               اول فایل چاپ ساخته شود
             </button>
           ) : null}
+          {zip}
           {canCancel ? <ModeLink href={`${self}?do=cancel`}>لغو سفارش</ModeLink> : null}
           {revertLink}
         </div>
@@ -514,7 +505,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
         ) : order.paidAt ? (
           <p className="ad-meta ad-gap">پرداخت شد {whenText(order.paidAt, now)}</p>
         ) : null}
-        {actions}
+        {actions ?? (mode === null && zip ? <div className="ad-status__actions">{zip}</div> : null)}
       </section>
     );
   }
@@ -568,6 +559,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
         ) : (
           <p className="jy-note ad-gap">کد رهگیری را فایل پست می‌آورد و به موبایل مشتری پیامک می‌شود.</p>
         )}
+        {zip ? <div className="ad-status__actions">{zip}</div> : null}
         {view.revertBlockedBy ? (
           <p className="ad-hint ad-gap">
             با کد رهگیری به «در حال چاپ» برنمی‌گردد؛ اگر کد اشتباه است، از کارت «بستهٔ پستی» کنارش بگذار، یا اگر کل فایل اشتباه بود،
@@ -602,6 +594,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
         ) : null}
         {/* چاپخانه (۵٫۳) دلیل را نمی‌بیند، که برگشت پول را می‌گوید؛ کار بعدی‌اش همین است */}
         {view.partnerView ? <p className="jy-note ad-gap">این سفارش چاپ نمی‌شود؛ اگر چاپش کرده‌ای، کنار بگذار.</p> : null}
+        {zip ? <div className="ad-status__actions">{zip}</div> : null}
         {onlyRevert}
       </section>
     );

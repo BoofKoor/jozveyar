@@ -1421,8 +1421,11 @@ export function withoutPartnerSms(details: PanelOrderDetails): PanelOrderDetails
 /** ردیف‌های فهرست و صف پیشخوان بی مبلغ؛ همان `withoutMoney`. */
 export const linesWithoutMoney = (lines: readonly PanelOrderLine[]): PanelOrderLine[] => lines.map(zeroRials);
 
+/** مشخصات فهرست جمع‌وجور (۹٫۱) بی مبلغ: هر مبلغ سفارش و ریز قیمت منجمدش صفر؛ برگ و جلد می‌مانند، چون مشخصات چاپ‌اند. */
+export const specWithoutMoney = (spec: PanelOrderSpec): PanelOrderSpec => ({ ...spec, order: zeroRials(spec.order) });
+
 /** جزئیات رویدادهای ادمین که رویدادهای سفارش لازم دارد؛ بقیه (مقدار پیشین گیرنده، دلیل‌ها) از چشم چاپخانه نه. */
-const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed', 'barcode', 'outcome'];
+const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed', 'barcode', 'outcome', 'files'];
 
 /**
  * جزئیات از چشم چاپخانه (برش ۵٫۳، ADR-042): یادداشت‌های درونی نه (دلیل لغو، که برگشت پول را می‌گوید، و دلیل برگرداندن و

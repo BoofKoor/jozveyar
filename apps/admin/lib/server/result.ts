@@ -40,6 +40,8 @@ export type AdminErrorCode =
   | 'recipient_locked'
   /** فایل چاپ، برگه و نگهداری (۵٫۱). */
   | 'ticket_not_ready'
+  /** همهٔ فایل‌ها (zip، ۹٫۱): فایل چاپی یا برگه‌ای هنوز آماده یا تازه نیست. */
+  | 'zip_not_ready'
   | 'ticket_not_failed'
   | 'files_deleted'
   /** چاپخانهٔ سفارش و جابه‌جایی (۵٫۲). */
