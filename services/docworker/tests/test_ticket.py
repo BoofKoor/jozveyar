@@ -1,154 +1,35 @@
 """
-برگهٔ سفارش (برش ۵٫۱، ADR-043): PDF یک برگ A4 با وزیرمتن، و کار `prepare_ticket` روی پستگرس و Garage واقعی (بی
-`DATABASE_URL` و `S3_*` رد می‌شود، مثل `test_orders.py`).
+برگه‌های سفارش (برش ۵٫۱، ADR-043؛ از ۹٫۲ از قالب، ADR-057): کار `prepare_ticket` و پیش‌نمایش قالب روی پستگرس و Garage واقعی (بی
+`DATABASE_URL` و `S3_*` رد می‌شود، مثل `test_orders.py`). ساختن خود قالب، دیوارهایش و قالب‌های پیش‌فرض در `test_ticket_render.py`.
 
-متن فارسی را PyMuPDF به شکل‌های نمایشی حرف‌ها برمی‌گرداند، پس سنجش‌ها روی عددها، جای‌شان روی برگه، دادهٔ ساختن، و اثر
-انگشت‌اند.
+متن فارسی را PyMuPDF به شکل‌های نمایشی حرف‌ها برمی‌گرداند، پس سنجش‌ها روی عددها، نشانه‌های لاتین قالب، دادهٔ ساختن و اثر انگشت‌اند.
 """
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 import fitz
 import pytest
-from PIL import Image
 
 from docworker import ticket
 from docworker.jobs import PermanentFailure
-from docworker.ticket import PREPARE_TICKET, TicketData, TicketItem, render_ticket, ticket_html, ticket_keys
+from docworker.ticket import PREPARE_TICKET, PREVIEW_TICKET_TEMPLATE, preview_key_of, template_preview_keys, ticket_keys
 
 DUE = datetime.fromisoformat("2026-10-06T00:00:00+03:30")  # «تا پایان دوشنبه 13 مهر»
 PAID = datetime.fromisoformat("2026-10-03T14:05:00+03:30")
 
 
-def sample(**over) -> TicketData:
-    data = TicketData(
-        order_number=10027,
-        due=DUE,
-        paid=PAID,
-        recipient_name="مریم کاظمی",
-        recipient_phone="09152345678",
-        address="خراسان رضوی، مشهد، بلوار سجاد، سجاد 18، پلاک 42، واحد 6",
-        postal_code="9187654321",
-        shipping="پست پیشتاز",
-        partner=("چاپ نور", "مشهد"),
-        items=[
-            TicketItem(1, 120, 60, 1, "double", "a4", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم",
-                       [("ریاضی ۲ - جلسه ۱.pdf", 1, 48), ("ریاضی ۲ - جلسه ۲.pdf", 49, 102), ("حل تمرین فصل ۱.docx", 103, 120)],
-                       [(1, 120, 60)]),
-        ],
-    )
-    for key, value in over.items():
-        setattr(data, key, value)
-    return data
-
-
-def words(page):
-    return [(w[4], w[0], w[1]) for w in page.get_text("words")]
-
-
-def test_a_ticket_is_one_a4_page_with_the_label_at_the_bottom(tmp_path):
-    pdf, png = str(tmp_path / "t.pdf"), str(tmp_path / "t.png")
-    render_ticket(sample(), pdf, png)
-    with fitz.open(pdf) as doc:
-        assert doc.page_count == 1
-        page = doc[0]
-        assert (round(page.rect.width), round(page.rect.height)) == (595, 842)
-        found = words(page)
-        # شمارهٔ سفارش دو جا: درشت بالا، و کنار نام گیرنده در برچسب پایین برگه.
-        numbers = sorted(y for text, _, y in found if text == "10027")
-        assert len(numbers) == 2 and numbers[0] < 100 and numbers[1] > 600
-        # موبایل چپ‌به‌راست، مثل پنل: بی LRE/PDF سه تکه از راست به چپ می‌نشستند.
-        phone = {text: x for text, x, _ in found if text in ("0915", "234", "5678")}
-        assert phone["0915"] < phone["234"] < phone["5678"]
-        assert {"9187654321", "1405", "14:05", "120", "jozve-10027-1.pdf"} <= {text for text, _, _ in found}
-    # پیش‌نمایش پنل: همان صفحه، ۱۵۰ DPI، خاکستری.
-    with Image.open(png) as image:
-        assert (image.size, image.mode) == ((1240, 1755), "L")
-
-
-def test_the_longest_name_and_address_shrink_into_the_label(tmp_path):
-    # بیشترین نام و نشانی مسیر خرید (`RECIPIENT_LIMITS`: ۱۰۰ و ۵۰۰ نویسه) با استان و شهر: برچسب کوچک می‌شود، نه اینکه برگه
-    # ساخته نشود (شاهد: بی کوچک شدن، همین برگه `ticket_overflow` بود)؛ هنوز پایین برگه، با شماره کنار نام و ردیف آخرش.
-    data = sample(
-        recipient_name=("صادقی‌نیا " * 10)[:100],
-        address="تهران، تهران، " + ("خیابان ولیعصر، کوچهٔ بهار، پلاک 12، " * 14)[:500],
-    )
-    pdf, png = str(tmp_path / "t.pdf"), str(tmp_path / "t.png")
-    render_ticket(data, pdf, png)
-    with fitz.open(pdf) as doc:
-        assert doc.page_count == 1
-        found = words(doc[0])
-        numbers = sorted(y for text, _, y in found if text == "10027")
-        assert len(numbers) == 2 and numbers[0] < 100 and numbers[1] > 450
-        last = {text: y for text, _, y in found if text in ("9187654321", "5678")}
-        assert last.keys() == {"9187654321", "5678"} and min(last.values()) > numbers[1]
-        assert max(last.values()) < 842 - ticket.MARGIN
-
-
-def test_the_print_partner_sits_under_the_deadline():
-    # طرح `m-ticket`: «چاپ نور، مشهد · پرداخت شنبه 11 مهر، 14:05»، زیر مهلت (برش ۵٫۲).
-    top, _ = ticket_html(sample(), ticket.font_dir())
-    assert '<p class="k">چاپ نور، مشهد · پرداخت شنبه 11 مهر، 14:05</p>' in top
-    assert top.index("تحویل به پست تا") < top.index("چاپ نور، مشهد")
-    # شاهد: سفارش بی چاپخانه فقط پرداخت را دارد، بی جداکنندهٔ تنها.
-    top, _ = ticket_html(sample(partner=None), ticket.font_dir())
-    assert '<p class="k">پرداخت شنبه 11 مهر، 14:05</p>' in top and "چاپ نور" not in top
-
-
-def test_the_paper_size_sits_in_the_mode_box(tmp_path):
-    """اندازهٔ کاغذ جزوه در قاب حالت چاپ (برش ۸٫۳)، چپ‌به‌راست: کسی که چاپ می‌کند اول کاغذ سینی را می‌خواهد."""
-    data = sample()
-    data.items[0].paper_size = "a5"
-    top, _ = ticket_html(data, ticket.font_dir())
-    assert '<div class="mode">سیاه‌سفید · دورو · &#x202A;A5&#x202C;</div>' in top
-    pdf, png = str(tmp_path / "t.pdf"), str(tmp_path / "t.png")
-    render_ticket(data, pdf, png)
-    with fitz.open(pdf) as doc:
-        assert "A5" in {text for text, _, _ in words(doc[0])}
-    # شاهد: A4 هم گفته می‌شود، همان‌جا.
-    top, _ = ticket_html(sample(), ticket.font_dir())
-    assert '<div class="mode">سیاه‌سفید · دورو · &#x202A;A4&#x202C;</div>' in top
-
-
-def test_every_string_from_a_person_is_escaped():
-    data = sample(recipient_name='<img src="x">مریم', address="تهران & <b>شمال</b>", shipping="پست <i>")
-    data.partner = ("<s>چاپ</s> & نور", "مشهد")
-    data.items[0].sections = [('<script>a</script>.pdf', 1, 120)]
-    data.items[0].binding = "طلق & سیم"
-    data.items[0].papers = ["<u>تحریر</u>"]
-    top, bottom = ticket_html(data, ticket.font_dir())
-    html = top + bottom
-    for raw in ("<img", "<b>", "<i>", "<script>", "<u>", "<s>"):
-        assert raw not in html
-    assert "&lt;s&gt;چاپ&lt;/s&gt; &amp; نور، مشهد" in html
-    assert "&lt;img src=&quot;x&quot;&gt;مریم" in html and "&lt;script&gt;a&lt;/script&gt;.pdf" in html
-
-
-def test_many_volumes_and_files_stay_on_one_page(tmp_path):
-    many = [(f"جلسه {n}.pdf", 2 * n - 1, 2 * n) for n in range(1, 31)]
-    data = sample(items=[
-        TicketItem(1, 60, 30, 2, "double", "a4", ["color"], ["تحریر ۸۰ گرم"], "طلق و سیم", many, [(1, 60, 30)]),
-        TicketItem(2, 1650, 825, 1, "double", "a4", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم", [("Statistics.pdf", 1, 1650)],
-                   [(1, 826, 413), (827, 1650, 412)]),
-    ])
-    top, _ = ticket_html(data, ticket.font_dir())
-    # دوازده فایل نام برده می‌شوند و بقیه با شمارشان (شاهد: فایل دوازدهم هست و سیزدهم نه).
-    assert "جلسه 12.pdf" in top and "جلسه 13.pdf" not in top and "و 18 فایل دیگر" in top
-    pdf, png = str(tmp_path / "t.pdf"), str(tmp_path / "t.png")
-    render_ticket(data, pdf, png)
-    with fitz.open(pdf) as doc:
-        assert doc.page_count == 1
-        found = {text for text, _, _ in words(doc[0])}
-        assert {"jozve-10027-2-jeld-1.pdf", "jozve-10027-2-jeld-2.pdf", "1,650"} <= found
-
-
-def test_ticket_keys_carry_the_stamp():
-    assert ticket_keys(10027, "0123456789abcdef0123456789abcdef") == (
-        "orders/10027/ticket-0123456789abcdef.pdf",
-        "orders/10027/ticket-0123456789abcdef.png",
-    )
+def test_ticket_keys_carry_the_stamp_and_every_page_has_a_preview():
+    pdf, png = ticket_keys(10027, "0123456789abcdef0123456789abcdef")
+    assert (pdf, png) == ("orders/10027/ticket-0123456789abcdef.pdf", "orders/10027/ticket-0123456789abcdef.png")
+    # صفحهٔ اول همان کلید پیش از ۹٫۲؛ بقیه کنارش.
+    assert [preview_key_of(png, n) for n in (1, 2, 3)] == [
+        png,
+        "orders/10027/ticket-0123456789abcdef-2.png",
+        "orders/10027/ticket-0123456789abcdef-3.png",
+    ]
+    assert template_preview_keys(7) == ("ticket-templates/7/preview.pdf", "ticket-templates/7/preview.png")
 
 
 def test_without_vazirmatn_the_ticket_fails_clearly(monkeypatch, tmp_path):
@@ -171,6 +52,10 @@ services = pytest.mark.skipif(not ENABLED, reason="DATABASE_URL و S3_* لازم
 def conn():
     with psycopg.connect(os.environ["DATABASE_URL"]) as c:
         yield c
+        # قالب فعال برگهٔ تست‌های بعد را عوض می‌کرد؛ نسخه پاک نمی‌شود (`ticket_templates_append_only`)، پس فقط غیرفعال.
+        c.rollback()
+        c.execute("UPDATE ticket_templates SET is_active = false WHERE is_active")
+        c.commit()
 
 
 @pytest.fixture
@@ -236,6 +121,33 @@ def paid_order(conn, *, status="paid"):
     return order_id, number
 
 
+def template(conn, kind: str, html: str, *, active: bool = False) -> int:
+    """نسخهٔ تازهٔ قالب، همان که پنل بارگذاری می‌کند؛ `active` همان که فعال کردن می‌کند."""
+    import hashlib
+
+    owner = conn.execute(
+        """INSERT INTO admin_users (username, display_name) VALUES ('ticket_owner', 'مالک تست')
+           ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name RETURNING id"""
+    ).fetchone()[0]
+    template_id = conn.execute(
+        """INSERT INTO ticket_templates (kind, version, html, sha256, file_name, created_by)
+           VALUES (%s, (SELECT coalesce(max(version), 0) + 1 FROM ticket_templates WHERE kind = %s), %s, %s, 'template.html', %s)
+           RETURNING id""",
+        (kind, kind, html, hashlib.sha256(html.encode()).hexdigest(), owner),
+    ).fetchone()[0]
+    if active:
+        activate(conn, template_id, kind)
+    conn.commit()
+    return template_id
+
+
+def activate(conn, template_id: int, kind: str) -> None:
+    conn.execute("UPDATE ticket_templates SET is_active = false WHERE kind = %s AND is_active", (kind,))
+    conn.execute(
+        "UPDATE ticket_templates SET is_active = true, activated_at = coalesce(activated_at, now()) WHERE id = %s", (template_id,)
+    )
+
+
 def drain(worker, conn):
     for _ in range(20):
         if not worker.run_once(conn):
@@ -250,22 +162,37 @@ def ticket_job(conn, order_id):
 
 def ticket_row(conn, order_id):
     return conn.execute(
-        """SELECT t.storage_key, t.preview_key, t.size_bytes, t.stamp, t.stamp = order_ticket_stamp(o)
+        """SELECT t.storage_key, t.preview_key, t.size_bytes, t.stamp, t.stamp = order_ticket_stamp(o), t.page_count,
+                  t.bijak_template_id, t.first_page_template_id
              FROM order_tickets t JOIN orders o ON o.id = t.order_id WHERE t.order_id = %s""",
         (order_id,),
     ).fetchone()
 
 
+def pdf_text(worker, key, tmp_path) -> list[str]:
+    path = str(tmp_path / f"{uuid.uuid4().hex}.pdf")
+    worker.storage.download(key, path)
+    with fitz.open(path) as doc:
+        return [page.get_text() for page in doc]
+
+
+def requeue(conn, order_id):
+    conn.execute("UPDATE jobs SET status = 'queued', finished_at = NULL WHERE order_id = %s AND kind = %s", (order_id, PREPARE_TICKET))
+    conn.commit()
+
+
 @services
-def test_a_paid_order_gets_its_ticket_and_preview_under_orders(tmp_path, conn, worker, monkeypatch):
+def test_a_paid_order_gets_the_bijak_and_a_first_page_with_a_preview_of_each(tmp_path, conn, worker, monkeypatch):
     rendered = []
     real = ticket.render_ticket
-    monkeypatch.setattr(ticket, "render_ticket", lambda data, *paths: (rendered.append(data), real(data, *paths)))
+    monkeypatch.setattr(ticket, "render_ticket", lambda data, *rest: (rendered.append(data), real(data, *rest))[1])
     order_id, number = paid_order(conn)
     drain(worker, conn)
     assert ticket_job(conn, order_id) == ("done", 1, None)
-    key, preview, size, stamp, fresh = ticket_row(conn, order_id)
+    key, preview, size, stamp, fresh, pages, bijak_id, first_id = ticket_row(conn, order_id)
+    # بیجک و برگهٔ اول تنها جزوه، با قالب‌های پیش‌فرض (بی نسخهٔ فعال).
     assert fresh and (key, preview) == ticket_keys(number, stamp)
+    assert (pages, bijak_id, first_id) == (2, None, None)
     # دادهٔ برگه همان سفارش: شهر و استان، فایل‌ها با بازهٔ صفحه، کاغذ و صحافی همان نسخهٔ تعرفه، و مهلت.
     [data] = rendered
     assert (data.recipient_name, data.address, data.postal_code, data.shipping) == (
@@ -277,17 +204,64 @@ def test_a_paid_order_gets_its_ticket_and_preview_under_orders(tmp_path, conn, w
     assert data.due == DUE and data.paid == PAID
     [item] = data.items
     assert item.sections == [("ریاضی ۲ - جلسه ۱.pdf", 1, 48), ("حل تمرین.docx", 49, 120)]
-    assert (item.sheets, item.volumes, item.papers, item.binding, item.color_modes, item.paper_size) == (
-        60, [(1, 120, 60)], ["تحریر ۸۰ گرم"], "طلق و سیم", ["bw"], "a5"
+    assert (item.sheets, item.volumes, item.papers, item.binding, item.binding_id, item.color_modes, item.paper_size) == (
+        60, [(1, 120, 60)], ["تحریر ۸۰ گرم"], "طلق و سیم", "spiral_clear", ["bw"], "a5"
     )
+    texts = pdf_text(worker, key, tmp_path)
+    assert len(texts) == 2 and all(str(number) in text for text in texts)
     path = str(tmp_path / "ticket.pdf")
     worker.storage.download(key, path)
     assert os.path.getsize(path) == size
-    with fitz.open(path) as doc:
-        assert doc.page_count == 1 and str(number) in doc[0].get_text()
-    worker.storage.download(preview, str(tmp_path / "ticket.png"))
-    with open(tmp_path / "ticket.png", "rb") as f:
-        assert f.read(8) == b"\x89PNG\r\n\x1a\n"
+    for n in (1, 2):
+        worker.storage.download(preview_key_of(preview, n), str(tmp_path / f"{n}.png"))
+        with open(tmp_path / f"{n}.png", "rb") as f:
+            assert f.read(8) == b"\x89PNG\r\n\x1a\n"
+
+
+@services
+def test_an_active_template_builds_its_pages_and_is_recorded_on_the_ticket(tmp_path, conn, worker):
+    bijak = template(conn, "bijak", "<p>BIJAK-V-{{ order.number }}-{{ total_copies }}</p>", active=True)
+    first = template(conn, "first_page", "<p>FIRST-{{ jozve.seq }}-{{ print_info.file_info.pages }}</p>", active=True)
+    order_id, number = paid_order(conn)
+    drain(worker, conn)
+    key, _, _, _, fresh, pages, bijak_id, first_id = ticket_row(conn, order_id)
+    assert fresh and (pages, bijak_id, first_id) == (2, bijak, first)
+    texts = pdf_text(worker, key, tmp_path)
+    assert f"BIJAK-V-{number}-1" in texts[0] and "FIRST-1-120" in texts[1]
+
+
+@services
+def test_a_template_activated_while_the_ticket_is_built_rebuilds_it(conn, worker, monkeypatch):
+    """فعال کردن قالب وسط ساختن (کار در دست کارگر، پس فعال کردن آن را دوباره در صف نمی‌گذارد): کارگر پیش از ثبت قالب‌های فعال را
+    زیر قفل می‌سنجد و برگه را با قالب تازه از نو می‌سازد. شاهد: بی فعال کردن، یک بار."""
+    order_id, _ = paid_order(conn)
+    late = template(conn, "bijak", "<p>LATE {{ order.number }}</p>")
+    used = []
+    real = ticket.render_ticket
+
+    def render(data, templates, *paths):
+        used.append(templates["bijak"].id)
+        if len(used) == 1:
+            with psycopg.connect(os.environ["DATABASE_URL"]) as other:
+                activate(other, late, "bijak")
+        return real(data, templates, *paths)
+
+    monkeypatch.setattr(ticket, "render_ticket", render)
+    drain(worker, conn)
+    assert used == [None, late]
+    assert ticket_job(conn, order_id) == ("done", 1, None)
+    assert ticket_row(conn, order_id)[6] == late
+
+
+@services
+def test_a_broken_active_template_fails_the_ticket_with_its_template_and_line(conn, worker):
+    template(conn, "first_page", "<p>یک</p>\n<p>{{ 1 + 'a' }}</p>", active=True)
+    order_id, _ = paid_order(conn)
+    drain(worker, conn)
+    status, _, error = ticket_job(conn, order_id)
+    # شکست قطعی با نوع قالب: پنل «برگه ساخته نشد» را با همین می‌گوید، و پس از قالب درست «دوباره بساز».
+    assert status == "failed" and error.startswith("template_error: first_page") and "TypeError" in error
+    assert ticket_row(conn, order_id) is None
 
 
 @services
@@ -298,12 +272,12 @@ def test_an_edit_that_arrives_while_the_ticket_is_built_rebuilds_it(conn, worker
     names = []
     real = ticket.render_ticket
 
-    def render(data, *paths):
+    def render(data, *rest):
         names.append(data.recipient_name)
         if len(names) == 1:
             with psycopg.connect(os.environ["DATABASE_URL"]) as other:
                 other.execute("UPDATE orders SET recipient_name = 'مریم کاظمی‌نژاد' WHERE id = %s", (order_id,))
-        real(data, *paths)
+        return real(data, *rest)
 
     monkeypatch.setattr(ticket, "render_ticket", render)
     drain(worker, conn)
@@ -312,9 +286,8 @@ def test_an_edit_that_arrives_while_the_ticket_is_built_rebuilds_it(conn, worker
     assert ticket_row(conn, order_id)[4] is True
 
     names.clear()
-    conn.execute("UPDATE jobs SET status = 'queued', finished_at = NULL WHERE order_id = %s AND kind = %s", (order_id, PREPARE_TICKET))
-    conn.commit()
-    monkeypatch.setattr(ticket, "render_ticket", lambda data, *paths: (names.append(data.recipient_name), real(data, *paths)))
+    requeue(conn, order_id)
+    monkeypatch.setattr(ticket, "render_ticket", lambda data, *rest: (names.append(data.recipient_name), real(data, *rest))[1])
     drain(worker, conn)
     assert names == ["مریم کاظمی‌نژاد"]
 
@@ -338,7 +311,7 @@ def test_the_ticket_names_the_print_partner_and_a_new_partner_rebuilds_it(conn, 
     و ساختن دوباره چاپخانه را دارد. شاهد: پیش از تخصیص، بی چاپخانه."""
     rendered = []
     real = ticket.render_ticket
-    monkeypatch.setattr(ticket, "render_ticket", lambda data, *paths: (rendered.append(data.partner), real(data, *paths)))
+    monkeypatch.setattr(ticket, "render_ticket", lambda data, *rest: (rendered.append(data.partner), real(data, *rest))[1])
     order_id, _ = paid_order(conn)
     drain(worker, conn)
     assert rendered == [None] and ticket_row(conn, order_id)[4] is True
@@ -353,9 +326,58 @@ def test_the_ticket_names_the_print_partner_and_a_new_partner_rebuilds_it(conn, 
         """INSERT INTO order_assignments (order_id, to_partner_id, actor, rule) VALUES (%s, %s, 'system', 'city')""",
         (order_id, partner_id),
     )
-    conn.execute("UPDATE jobs SET status = 'queued', finished_at = NULL WHERE order_id = %s AND kind = %s", (order_id, PREPARE_TICKET))
-    conn.commit()
+    requeue(conn, order_id)
     assert ticket_row(conn, order_id)[4] is False
     drain(worker, conn)
     assert rendered == [None, (name, "مشهد")]
     assert ticket_row(conn, order_id)[4] is True
+
+
+def preview_job(conn, template_id: int, payload: dict | None = None) -> None:
+    """همان کاری که «پیش‌نمایش» پنل می‌کند: یک کار برای هر نسخه، که بار دوم دوباره در صف می‌رود."""
+    conn.execute(
+        """INSERT INTO jobs (kind, ticket_template_id, payload) VALUES (%s, %s, %s)
+           ON CONFLICT (ticket_template_id, kind) DO UPDATE
+              SET status = 'queued', attempts = 0, payload = excluded.payload, run_after = now(), last_error = NULL,
+                  finished_at = NULL, locked_by = NULL, locked_until = NULL, updated_at = now()""",
+        (PREVIEW_TICKET_TEMPLATE, template_id, Jsonb(payload or {})),
+    )
+    conn.commit()
+
+
+def preview_row(conn, template_id):
+    return conn.execute(
+        """SELECT preview_order_number, preview_pages, preview_blocked, preview_error, preview_at IS NOT NULL
+             FROM ticket_templates WHERE id = %s""",
+        (template_id,),
+    ).fetchone()
+
+
+@services
+def test_a_template_preview_with_sample_or_real_data_and_its_errors(tmp_path, conn, worker):
+    first = template(conn, "first_page", '<p>PREVIEW-{{ jozve.seq }}</p><img src="https://example.com/logo.png">')
+    # دادهٔ ساختگی: دو جزوه، پس دو برگهٔ اول؛ نشانی بیرونی گزارش، نه واکشی.
+    preview_job(conn, first)
+    drain(worker, conn)
+    assert preview_row(conn, first) == (None, 2, ["https://example.com/logo.png"], None, True)
+    pdf, png = template_preview_keys(first)
+    texts = pdf_text(worker, pdf, tmp_path)
+    assert ["PREVIEW-1" in texts[0], "PREVIEW-2" in texts[1]] == [True, True]
+    worker.storage.download(preview_key_of(png, 2), str(tmp_path / "p2.png"))
+
+    # همان نسخه با یک سفارش واقعی: یک جزوه؛ نتیجه جای قبلی را می‌گیرد.
+    _, number = paid_order(conn)
+    preview_job(conn, first, {"orderNumber": number})
+    drain(worker, conn)
+    assert preview_row(conn, first)[:2] == (number, 1)
+
+    # خطای قالب شکست کار نیست: پیش‌نمایش همان را با نوع و خط می‌گوید.
+    broken = template(conn, "bijak", "<p>یک</p>\n{% for %}")
+    preview_job(conn, broken)
+    drain(worker, conn)
+    number_used, pages, _, error, done = preview_row(conn, broken)
+    assert (number_used, pages, done) == (None, None, True) and error.startswith("bijak خط 2:")
+    status = conn.execute(
+        "SELECT status::text FROM jobs WHERE ticket_template_id = %s AND kind = %s", (broken, PREVIEW_TICKET_TEMPLATE)
+    ).fetchone()[0]
+    assert status == "done"

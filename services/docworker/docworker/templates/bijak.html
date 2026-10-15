@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>بیجک سفارش {{ order.number }}</title>
+{#- نام یا نشانی بلند (تا ۱۰۰ و ۵۰۰ نویسه): قلم کوچک‌تر و جای بیشتر برای برچسب، تا با فهرست جزوه‌ها روی هم نیفتد. #}
+{%- set long = order.label_name|length > 40 or order.address|length > 140 %}
+<style>
+  /* قالب پیش‌فرض بیجک جزوه‌یار (برش ۹٫۲): همان سر و برچسب پست برگهٔ سفارش ۵٫۱، با فهرست جزوه‌ها. فقط سیاه، برای چاپ تک‌رنگ. */
+  @page { size: A4; margin: 15mm; }
+  /* برچسب پست همیشه پایین صفحهٔ اول، برای بریدن: در حاشیهٔ پایین همان صفحه، و فهرست بالای آن (و اگر بلند است، صفحهٔ بعد). */
+  @page :first {
+    margin-bottom: {{ '152mm' if long else '118mm' }};
+    @bottom-center { content: element(label); vertical-align: bottom; }
+  }
+  * { color: #000000; }
+  html { font-family: Vazirmatn, sans-serif; font-size: 13pt; line-height: 1.6; }
+  body { margin: 0; }
+  p { margin: 0; }
+  .ltr { direction: ltr; unicode-bidi: isolate; }
+  .k { font-size: 12pt; }
+  .no { font-size: 60pt; font-weight: 600; line-height: 1.05; }
+  .due { font-size: 18pt; font-weight: 600; margin-top: 10pt; }
+  .rule { border-top: 1.8pt solid #000000; margin: 14pt 0 10pt; }
+  table { border-collapse: collapse; width: 100%; }
+  tr { break-inside: avoid; }
+  th { font-size: 11pt; font-weight: 600; text-align: start; padding: 0 0 4pt; border-bottom: 1pt solid #000000; }
+  td { vertical-align: top; padding: 5pt 6pt 5pt 0; border-bottom: 0.6pt solid #000000; }
+  td.n { font-weight: 600; width: 22pt; }
+  .c { white-space: nowrap; text-align: end; }
+  .file { font-size: 10pt; }
+  .total { margin-top: 8pt; font-weight: 600; }
+  .bottom { position: running(label); width: 100%; padding-bottom: 15mm; }
+  .cutline { border-top: 1.8pt dashed #000000; margin-bottom: 3pt; }
+  .cut { font-size: 11pt; text-align: center; margin-bottom: 10pt; }
+  .label { border: 2.4pt solid #000000; padding: 14pt 18pt; }
+  .name { font-size: 24pt; font-weight: 600; line-height: 1.4; }
+  .addr { font-size: 17pt; margin-top: 4pt; }
+  .long .name { font-size: 18pt; }
+  .long .addr { font-size: 12pt; }
+  .row { font-size: 17pt; margin-top: 6pt; }
+  .row span { white-space: nowrap; margin-inline-end: 24pt; }
+  .foot { font-size: 10pt; margin-top: 6pt; }
+</style>
+</head>
+<body>
+  {#- برچسب اول می‌آید تا صفحهٔ اول بگیردش (`position: running`)، هر قدر فهرست بلند باشد. #}
+  <div class="bottom">
+    <div class="cutline"></div>
+    <p class="cut">برچسب پست: از اینجا ببر</p>
+    <div class="label{% if long %} long{% endif %}">
+      <p class="k">گیرنده</p>
+      <p class="name">{{ order.label_name }}</p>
+      <p class="addr">{{ order.address }}</p>
+      <p class="row">
+        {%- if order.postal_code %}<span>کد پستی {{ order.postal_code }}</span>{% endif -%}
+        <span>موبایل <bdi class="ltr">{{ order.phone_display }}</bdi></span><span>{{ order.shipping }}</span>
+      </p>
+    </div>
+    <p class="foot">شمارهٔ کنار نام را متصدی پست در نام گیرنده می‌نویسد؛ کد رهگیری با همین پیدا می‌شود.</p>
+  </div>
+
+  <p class="k">جزوه‌یار · بیجک سفارش</p>
+  <p class="no">{{ order.number }}</p>
+  <p class="due">تحویل به پست تا {{ order.due_day }}</p>
+  <p class="k">
+    {%- if order.partner %}{{ order.partner.name }}، {{ order.partner.city }}{% endif -%}
+    {%- if order.partner and order.paid_at %} · {% endif -%}
+    {%- if order.paid_at %}پرداخت {{ order.paid_at }}{% endif -%}
+  </p>
+  <div class="rule"></div>
+  <table>
+    <tr><th></th><th>جزوه</th><th>چاپ</th><th>صحافی</th><th class="c">تعداد</th></tr>
+    {%- for f in order.files %}
+    <tr>
+      <td class="n">{{ f.seq }}</td>
+      <td>{{ f.file_count }} فایل، {{ f.pages }} صفحه<br><span class="file ltr">{{ f.saved_file_name }}</span></td>
+      <td>{{ f.mode }}<br><span class="file">{{ f.papers }}</span></td>
+      <td>{{ f.binding }}{% if f.volume_count > 1 %} · {{ f.volume_words }} جلد{% endif %}</td>
+      <td class="c">{{ f.copies }} نسخه</td>
+    </tr>
+    {%- endfor %}
+  </table>
+  <p class="total">{{ order.jozve_count }} جزوه · {{ total_copies }} نسخه</p>
+</body>
+</html>

@@ -1,22 +1,25 @@
 """
-برگهٔ سفارش (برش ۵٫۱، ADR-043): یک برگ A4، سیاه روی سفید، جدا از فایل‌های جزوه (نه در قیمت، نه در صحافی).
+برگه‌های سفارش (برش ۵٫۱، ADR-043؛ از ۹٫۲ از قالب HTML، ADR-057): یک PDF برای هر سفارش، جدا از فایل‌های جزوه (نه در قیمت، نه در صحافی).
+اول بیجک، یکی برای سفارش، روی بسته: شمارهٔ سفارش، مهلت تحویل به پست، چاپخانه، فهرست جزوه‌ها و برچسب پست با نام گیرنده و شمارهٔ
+سفارش کنارش («مریم کاظمی 10027»)، همان که متصدی پست در «نام گ» می‌نویسد و برش ۶ کد رهگیری را با آن پیدا می‌کند (ADR-010). بعد
+برگهٔ اول هر جزوه، روی دستهٔ همان جزوه: فایل‌ها با بازهٔ صفحه، رنگ، یکرو یا دورو، اندازه، کاغذ، صحافی و جلدها، و نسخه. بی مبلغ.
 
-بالا: شمارهٔ سفارش درشت، مهلت تحویل به پست، چاپخانهٔ سفارش با شهرش (از برش ۵٫۲، ADR-042)، و برای هر جزوه فایل‌ها با بازهٔ
-صفحه، صفحه و برگ، دورو یا یکرو، رنگ، کاغذ، صحافی و جلدها، و تعداد نسخه. پایین، برای بریدن: برچسب پست با نام گیرنده و شمارهٔ
-سفارش کنارش («مریم کاظمی 10027»)، همان که متصدی پست در «نام گ» می‌نویسد و برش ۶ کد رهگیری را با آن پیدا می‌کند (ADR-010)؛
-نشانی، کد پستی و موبایل. بی مبلغ.
+هر نوع از قالب فعال خودش (`ticket_templates`، که مالک از پنل بارگذاری و فعال می‌کند)، وگرنه از قالب پیش‌فرض همین بسته
+(`templates/`)؛ دادهٔ هر دو از `ticket_context`. ساختن در پردازهٔ جدا و مهارشده است (`ticket_render.py`، `sandbox.run_confined`)، چون قالب
+HTML، CSS و فونت ناشناس دارد. پیش‌نمایش PNG هر صفحه برای پنل.
 
-کار جدای `prepare_ticket`، تا شکستش PDF جزوه را «ساخته نشد» نکند. PDF با وزیرمتن همان ایمیج (`insert_htmlbox`)، و پیش‌نمایش
-PNG همان صفحه برای پنل. برگه با دادهٔ امروز سفارش ساخته می‌شود: اثر انگشت آن داده (`order_ticket_stamp`، مهاجرت 0016، و از 0018
-با نام و شهر چاپخانه) پیش از ثبت، زیر قفل اشتراکی ردیف سفارش، دوباره سنجیده می‌شود؛ ویرایشی که وسط ساختن رسید برگه را از نو
-می‌سازد، و ویرایشی که بعد از ثبت برسد کار را خودش دوباره در صف می‌گذارد (`packages/db/src/panel.ts` و `partners.ts`).
+کار جدای `prepare_ticket`، تا شکستش PDF جزوه را «ساخته نشد» نکند. برگه با دادهٔ امروز سفارش ساخته می‌شود: اثر انگشت آن داده
+(`order_ticket_stamp`، مهاجرت 0016، و از 0018 با نام و شهر چاپخانه) و قالب‌های فعال پیش از ثبت، زیر قفل اشتراکی ردیف سفارش و ردیف
+قالب‌ها، دوباره سنجیده می‌شوند؛ ویرایش یا قالبی که وسط ساختن رسید برگه را از نو می‌سازد، و آنچه بعد از ثبت برسد کار را خودش دوباره
+در صف می‌گذارد (`packages/db/src/panel.ts`، `partners.ts` و `templates.ts`).
 """
 
 from __future__ import annotations
 
 import hashlib
-import html
+import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -24,21 +27,30 @@ from datetime import datetime
 import fitz  # PyMuPDF
 import psycopg
 
-from . import jalali
+from . import sandbox
 from .jobs import PermanentFailure
 from .orders import ORDERS_PREFIX, PRINTABLE, UNPAID, plan_volumes
 from .storage import S3Storage
+from .ticket_context import contexts, sample
 
 PREPARE_TICKET = "prepare_ticket"
+PREVIEW_TICKET_TEMPLATE = "preview_ticket_template"
 
-A4 = fitz.paper_rect("a4")
-MARGIN = 42  # حدود ۱۵ میلی‌متر
-# برچسب پست و خط بریدن در پایین برگه، همیشه همان‌جا؛ بیشترین بلندی، با نشانی دوخطی در اندازهٔ طرح. نام و نشانی بلندتر
-# (تا ۱۰۰ و ۵۰۰ نویسه، `RECIPIENT_LIMITS`) کوچک می‌شوند تا جا شوند، نه اینکه برگه ساخته نشود.
-LABEL_HEIGHT = 290
+# دو نوع قالب، به ترتیب صفحه‌ها در PDF: اول بیجک، بعد برگهٔ اول هر جزوه (سؤال ۱۹۴).
+KINDS = ("bijak", "first_page")
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+RENDERER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ticket_render.py")
+# بزرگ‌ترین قالب، همان سقف پایگاه داده (`ticket_templates_size`): قالب‌های نمونه با فونت و لوگوی درونی حدود ۲۷۰ کیلوبایت‌اند.
+MAX_TEMPLATE_BYTES = 2 * 1024 * 1024
+# قفس پردازهٔ قالب: یک سفارش ۳۰ جزوه‌ای (`MAX_ITEMS_PER_ORDER`) حدود ده ثانیه است؛ حافظه و فایل خیلی بالاتر از هر برگهٔ واقعی.
+RENDER_TIMEOUT = float(os.environ.get("DOCWORKER_TICKET_TIMEOUT", "90"))
+RENDER_MEMORY = 1536 * 1024 * 1024
+RENDER_MAX_FILE = 64 * 1024 * 1024
 PREVIEW_DPI = 150
 # ویرایشی که وسط هر ساختن برسد، ساختن را از نو می‌کند؛ بیش از این یعنی چیزی غیرعادی است و کار بعداً دوباره امتحان می‌شود.
 MAX_REBUILDS = 3
+# پیش‌نمایش قالب‌ها، بیرون از `orders/` تا نگهداری فایل‌های سفارش (ADR-044) دستشان نزند.
+TEMPLATES_PREFIX = "ticket-templates/"
 
 # وزیرمتن، فقط ۴۰۰ و ۶۰۰ (CLAUDE.md): در ایمیج پایه کنار فونت‌های LibreOffice، و در مخزن برای تست بیرون ایمیج.
 FONT_DIRS = (
@@ -47,25 +59,18 @@ FONT_DIRS = (
 )
 FONT_FILES = ("Vazirmatn-Regular.ttf", "Vazirmatn-SemiBold.ttf")
 
-VOLUME_WORDS = {1: "یک", 2: "دو", 3: "سه", 4: "چهار", 5: "پنج"}
-SIDES = {"double": "دورو", "single": "یکرو"}
-# بیشترین فایلی که برگه نام می‌برد؛ بقیه با شمارشان. فایل چاپ همه را دارد، و برگه یک برگ است.
-MAX_LISTED_SECTIONS = 12
-# اندازهٔ قلم قاب «سیاه‌سفید · دورو»، همان `.mode` در CSS.
-MODE_SIZE = 19
-
 
 def ticket_keys(order_number: int, stamp: str) -> tuple[str, str]:
-    """PDF و پیش‌نمایش برگه، به نام اثر انگشت داده‌اش: فایلی که زیر یک کلید نشست دیگر عوض نمی‌شود، پس ردیفی که به آن اشاره
-    می‌کند هیچ‌وقت فایل دادهٔ دیگری را نمی‌دهد، حتی وسط ساختن دوباره. برگه‌های کهنه با بقیهٔ فایل‌های سفارش پاک می‌شوند
-    (ADR-044)."""
+    """PDF و پیش‌نمایش صفحهٔ اول برگه، به نام اثر انگشت داده‌اش: فایلی که زیر یک کلید نشست دیگر عوض نمی‌شود، پس ردیفی که به آن
+    اشاره می‌کند هیچ‌وقت فایل دادهٔ دیگری را نمی‌دهد، حتی وسط ساختن دوباره. صفحهٔ n ام (از ۲) `-n.png` (`preview_key_of`). برگه‌های
+    کهنه با بقیهٔ فایل‌های سفارش پاک می‌شوند (ADR-044)."""
     base = f"{ORDERS_PREFIX}{order_number}/ticket-{stamp[:16]}"
     return f"{base}.pdf", f"{base}.png"
 
 
-def jozve_file_name(order_number: int, seq: int, volume: int, volumes: int) -> str:
-    """نام فایل چاپ، همان که پنل با آن دانلود می‌کند (`apps/admin/lib/orders.ts`)."""
-    return f"jozve-{order_number}-{seq}.pdf" if volumes == 1 else f"jozve-{order_number}-{seq}-jeld-{volume}.pdf"
+def preview_key_of(first: str, page: int) -> str:
+    """پیش‌نمایش صفحهٔ `page` (از ۱) کنار پیش‌نمایش صفحهٔ اول، همان که پنل می‌خواند (`apps/admin/lib/orders.ts`)."""
+    return first if page == 1 else f"{first[: -len('.png')]}-{page}.png"
 
 
 @dataclass
@@ -80,6 +85,8 @@ class TicketItem:
     color_modes: list[str]
     papers: list[str]
     binding: str
+    # شناسهٔ صحافی در تعرفهٔ سفارش (۹٫۲): پرچم‌های قالب‌های امروز صاحب پروژه از این است (`ticket_context.BINDING_FLAGS`).
+    binding_id: str
     # (نام فایل، از صفحه، تا صفحه)
     sections: list[tuple[str, int, int]]
     # (از صفحه، تا صفحه، برگ)
@@ -93,12 +100,38 @@ class TicketData:
     paid: datetime | None
     recipient_name: str
     recipient_phone: str
-    address: str
+    province: str
+    city: str | None
+    address_line: str
     postal_code: str | None
     shipping: str
     items: list[TicketItem] = field(default_factory=list)
     # چاپخانهٔ سفارش (برش ۵٫۲): (نام، شهر)؛ None یعنی بی چاپخانه (هنگام پرداخت هیچ چاپخانهٔ فعالی نبود، یا پیش از ۵٫۲).
     partner: tuple[str, str] | None = None
+
+    @property
+    def address(self) -> str:
+        """استان، شهر و نشانی، همان که برچسب پست دارد."""
+        return "، ".join(part for part in (self.province, self.city, self.address_line) if part)
+
+
+@dataclass
+class Template:
+    """قالب یک نوع: شناسهٔ ردیف `ticket_templates`، یا None برای قالب پیش‌فرض همین بسته."""
+
+    kind: str
+    id: int | None
+    html: str
+
+
+class TemplateFailure(PermanentFailure):
+    """قالبی که ساخته نشد: خطای Jinja2 یا WeasyPrint، با نوع قالب و خط، برای پیش‌نمایش پنل و `last_error` کار برگه."""
+
+    def __init__(self, error: dict, template: Template | None) -> None:
+        self.error = error
+        self.template = template
+        where = f" خط {error['line']}" if error.get("line") else ""
+        super().__init__("template_error", f"{error.get('template')}{where}: {error.get('message')}")
 
 
 def font_dir() -> str:
@@ -108,178 +141,96 @@ def font_dir() -> str:
     raise PermanentFailure("font_missing", "وزیرمتن پیدا نشد")
 
 
-def _ltr(text: str) -> str:
-    """متن چپ‌به‌راست درون متن فارسی (موبایل با فاصله، نام فایل لاتین)، escape‌شده. موتور HTML MuPDF `direction` و
-    `unicode-bidi` یک span را نمی‌خواند و LRI/PDI را هم نه، ولی LRE/PDF را درست می‌خواند؛ بی آن «0915 234 5678» سه
-    تکهٔ جدا از راست به چپ می‌شد."""
-    return f"&#x202A;{html.escape(text)}&#x202C;"
+def default_template(kind: str) -> Template:
+    with open(os.path.join(TEMPLATES_DIR, f"{kind}.html"), encoding="utf-8") as f:
+        return Template(kind, None, f.read())
 
 
-def _keep(text: str) -> str:
-    """یک تکه که روی یک خط می‌ماند: فاصله‌هایش نشکن. MuPDF در خواندن متن باز همان‌جا واژه‌ها را جدا می‌کند."""
-    return text.replace(" ", "&#160;")
+def active_templates(conn: psycopg.Connection, *, lock: bool = False) -> dict[str, Template]:
+    """قالب فعال هر نوع، وگرنه پیش‌فرض. `lock`: زیر قفل اشتراکی همان ردیف‌ها، تا فعال کردن هم‌زمان پشت ثبت برگه بماند."""
+    rows = conn.execute(
+        "SELECT id, kind, html FROM ticket_templates WHERE is_active" + (" FOR SHARE" if lock else "")
+    ).fetchall()
+    found = {kind: Template(kind, template_id, html) for template_id, kind, html in rows}
+    return {kind: found.get(kind) or default_template(kind) for kind in KINDS}
 
 
-# فاصلهٔ میان تکه‌های ردیف برچسب (طرح: ۵cqi، حدود ۳۰ پوینت) با یک جای شکستن در آخرش.
-ROW_GAP = "&#160;" * 6 + " "
+@dataclass
+class Rendered:
+    """PDFهای هر صفحهٔ برگه به ترتیب، شمار صفحهٔ هر کدام، و نشانی‌هایی که قالب خواست و رد شد (فقط `data:`)."""
+
+    pdfs: list[str]
+    pages: list[int]
+    blocked: list[str]
 
 
-def _phone(phone: str) -> str:
-    """«0915 234 5678»، مثل `phoneText` پنل."""
-    return f"{phone[:4]} {phone[4:7]} {phone[7:]}" if len(phone) == 11 and phone.isdigit() else phone
-
-
-def _color(modes: list[str]) -> str:
-    """مثل `colorText` پنل."""
-    color, bw = "color" in modes, "bw" in modes
-    return "رنگی و سیاه‌سفید" if color and bw else "رنگی" if color else "سیاه‌سفید"
-
-
-def _pages(first: int, last: int) -> str:
-    return f"صفحهٔ {first:,}" if first == last else f"صفحهٔ {first:,} تا {last:,}"
-
-
-# جدول‌های MuPDF ستون‌ها را همیشه از چپ به راست می‌چینند، پس هر ردیف به ترتیب دیداری نوشته شده: ستون راست آخر.
-# اندازه‌ها همان طرح (`m-ticket`، `docs/ui/mockups/admin.html`): آنجا بر حسب cqi، یک درصد پهنای برگ، که روی A4 ۵٫۹۵ پوینت است.
-CSS = """
-@font-face { font-family: vz; src: url(Vazirmatn-Regular.ttf); }
-@font-face { font-family: vz; src: url(Vazirmatn-SemiBold.ttf); font-weight: bold; }
-* { font-family: vz; color: #000000; } /* print-black برند: فقط چاپ تک‌رنگ */
-body { direction: rtl; font-size: 14pt; line-height: 1.6; margin: 0; }
-p { margin: 0; }
-.k { font-size: 13pt; }
-.no { font-size: 65pt; font-weight: bold; line-height: 1.05; }
-.due { font-size: 19pt; font-weight: bold; margin-top: 12pt; }
-.rule { border-top: 1.8pt solid #000000; margin: 18pt 0 14pt 0; }
-.item { margin-bottom: 18pt; }
-.title { font-size: 18pt; font-weight: bold; }
-.mode { font-size: 19pt; font-weight: bold; border: 2.1pt solid #000000; padding: 2pt 0; text-align: center; }
-table { border-collapse: collapse; width: 100%; }
-td { vertical-align: top; padding: 2pt 0; }
-td.dt { font-weight: bold; width: 95pt; }
-td.l { text-align: left; white-space: nowrap; }
-.cutline { border-top: 1.8pt dashed #000000; margin-bottom: 3pt; }
-.cut { font-size: 12pt; text-align: center; margin-bottom: 12pt; }
-.label { border: 2.4pt solid #000000; padding: 16pt 20pt; }
-.label .k { font-size: 12pt; }
-.name { font-size: 25pt; font-weight: bold; line-height: 1.4; }
-.addr { font-size: 18pt; margin-top: 6pt; }
-.row { font-size: 18pt; margin-top: 8pt; }
-.foot { font-size: 11pt; margin-top: 8pt; }
-"""
-
-
-def _item_html(data: TicketData, item: TicketItem, bold: fitz.Font) -> str:
-    volumes = len(item.volumes)
-    listed = item.sections[:MAX_LISTED_SECTIONS]
-    rows = "".join(
-        f'<tr><td class="l">{_pages(first, last)}</td><td>{n}. {html.escape(name)}</td></tr>'
-        for n, (name, first, last) in enumerate(listed, start=1)
+def render(templates: dict[str, Template], pages: list[tuple[str, dict]], workdir: str) -> Rendered:
+    """`pages`: (نوع قالب، داده) هر صفحه. ساختن در پردازهٔ جدا (`ticket_render.py`): محیط تمیز بی رمز، سقف زمان، حافظه و حجم فایل."""
+    kinds = sorted({kind for kind, _ in pages})
+    for kind in kinds:
+        with open(os.path.join(workdir, f"{kind}.html"), "w", encoding="utf-8") as f:
+            f.write(templates[kind].html)
+    job = {
+        "fonts": font_dir(),
+        "templates": {kind: f"{kind}.html" for kind in kinds},
+        "pages": [{"template": kind, "context": context} for kind, context in pages],
+    }
+    with open(os.path.join(workdir, "job.json"), "w", encoding="utf-8") as f:
+        json.dump(job, f, ensure_ascii=False)
+    outcome = sandbox.run_confined(
+        [sys.executable, "-I", RENDERER, workdir],
+        cwd=workdir,
+        timeout=RENDER_TIMEOUT,
+        max_file_bytes=RENDER_MAX_FILE,
+        max_memory_bytes=RENDER_MEMORY,
     )
-    if len(item.sections) > len(listed):
-        rest = item.sections[len(listed):]
-        rows += f'<tr><td class="l">{_pages(rest[0][1], rest[-1][2])}</td><td>و {len(rest)} فایل دیگر</td></tr>'
-    count = VOLUME_WORDS.get(volumes, str(volumes))
-    binding = f"{html.escape(item.binding)} · {count} جلد"
-    parts = ""
-    if volumes == 1:
-        # یک جلد: فایل چاپ همان نام جزوه است، در سر.
-        title = _ltr(jozve_file_name(data.order_number, item.seq, 1, 1))
-    else:
-        # هر جلد ردیف خودش در ردیف «جلدها»، هم‌تراز فایل‌ها: دو نام لاتین در یک خط فارسی را MuPDF جابه‌جا می‌چید.
-        title = f"{count} جلد، هر جلد یک فایل"
-        volume_rows = "".join(
-            f'<tr><td class="l">{_pages(first, last)} · {sheets:,} برگ</td>'
-            f"<td>جلد {n} · {_ltr(jozve_file_name(data.order_number, item.seq, n, volumes))}</td></tr>"
-            for n, (first, last, sheets) in enumerate(item.volumes, start=1)
-        )
-        parts = f'<tr><td><table>{volume_rows}</table></td><td class="dt">جلدها</td></tr>'
-    papers = "، ".join(html.escape(p) for p in item.papers)
-    # اندازهٔ کاغذ در همان قاب (۸٫۳): کسی که چاپ می‌کند پیش از هر چیز کاغذ سینی را می‌خواهد.
-    size = item.paper_size.upper()
-    mode = f"{_color(item.color_modes)} · {SIDES.get(item.sides_mode, item.sides_mode)} · "
-    # قاب به اندازهٔ متن: جدول MuPDF پهنای خانه را از محتوا درست نمی‌گیرد، پس پهنا با خود قلم اندازه گرفته می‌شود (شکل
-    # جداِ حرف‌ها، پس کمی گشادتر از متن پیوسته).
-    width = bold.text_length(mode + size, fontsize=MODE_SIZE) + 28
-    mode += _ltr(size)
-    return f"""
-<div class="item">
-  <table><tr>
-    <td class="l" style="width: {width:.0f}pt"><div class="mode">{mode}</div></td>
-    <td><p class="title">جزوهٔ {item.seq} از {len(data.items)} · {title}</p></td>
-  </tr></table>
-  <table>
-    <tr><td><table>{rows}</table></td><td class="dt">فایل‌ها</td></tr>
-    <tr><td>{item.page_count:,} صفحه، {item.sheets:,} برگ · {papers}</td><td class="dt">چاپ</td></tr>
-    <tr><td>{binding}</td><td class="dt">صحافی</td></tr>
-    {parts}
-    <tr><td>{item.copies:,} نسخه</td><td class="dt">تعداد</td></tr>
-  </table>
-</div>"""
+    result_path = os.path.join(workdir, "result.json")
+    if outcome.timed_out:
+        raise TemplateFailure({"kind": "timeout", "template": "", "message": f"بیش از {RENDER_TIMEOUT:.0f} ثانیه"}, None)
+    if outcome.returncode != 0 or not os.path.isfile(result_path):
+        # حافظه یا فایلی که از سقف گذشت هم اینجاست: قالب خیلی سنگین است، نه کارگر خراب.
+        heavy = outcome.oom_killed or outcome.returncode in (-9, -25) or "MemoryError" in outcome.stderr
+        message = "قالب از سقف حافظه یا حجم فایل گذشت" if heavy else f"پردازهٔ قالب افتاد ({outcome.returncode})"
+        raise TemplateFailure({"kind": "crash", "template": "", "message": message}, None)
+    with open(result_path, encoding="utf-8") as f:
+        result = json.load(f)
+    if not result["ok"]:
+        error = result["error"]
+        raise TemplateFailure(error, templates.get(error.get("template")))
+    return Rendered([os.path.join(workdir, f"out-{i}.pdf") for i in range(len(pages))], result["pages"], result["blocked"])
 
 
-def ticket_html(data: TicketData, fonts: str) -> tuple[str, str]:
-    """دو تکهٔ برگه: بالا (سر و جزوه‌ها) و پایین (برچسب پست). هر رشته‌ای که از کاربر یا ادمین آمده escape می‌شود."""
-    bold = fitz.Font(fontfile=os.path.join(fonts, FONT_FILES[1]))
-    paid = f"پرداخت {jalali.format_weekday(data.paid)}، {jalali.format_time(data.paid)}" if data.paid else ""
-    # زیر مهلت، مثل طرح: «چاپ نور، مشهد · پرداخت شنبه 11 مهر، 14:05». نام چاپخانه را مالک نوشته، پس escape.
-    partner = f"{html.escape(data.partner[0])}، {html.escape(data.partner[1])}" if data.partner else ""
-    top = f"""
-<p class="k">جزوه‌یار · برگهٔ سفارش</p>
-<p class="no">{data.order_number}</p>
-<p class="due">تحویل به پست تا {jalali.deadline_day(data.due)}</p>
-<p class="k">{" · ".join(part for part in (partner, paid) if part)}</p>
-<div class="rule"></div>
-{"".join(_item_html(data, item, bold) for item in data.items)}"""
-    # هر تکه یکجا (فاصلهٔ نشکن) و شکستن فقط میان تکه‌ها، مثل ردیف flex-wrap طرح: «پست / پیشتاز» دو خط نمی‌شود.
-    row = [_keep(f"کد پستی {html.escape(data.postal_code)}")] if data.postal_code else []
-    row += [_keep(f"موبایل {_ltr(_phone(data.recipient_phone))}"), _keep(html.escape(data.shipping))]
-    bottom = f"""
-<div class="cutline"></div>
-<p class="cut">برچسب پست: از اینجا ببر</p>
-<div class="label">
-  <p class="k">گیرنده</p>
-  <p class="name">{html.escape(data.recipient_name)} {data.order_number}</p>
-  <p class="addr">{html.escape(data.address)}</p>
-  <p class="row">{ROW_GAP.join(row)}</p>
-</div>
-<p class="foot">شمارهٔ کنار نام را متصدی پست در نام گیرنده می‌نویسد؛ کد رهگیری با همین پیدا می‌شود.</p>"""
-    return top, bottom
+def ticket_pages(data: TicketData, kinds: tuple[str, ...] = KINDS) -> list[tuple[str, dict]]:
+    """صفحه‌های برگه به ترتیب: بیجک، بعد برگهٔ اول هر جزوه."""
+    bijak, firsts = contexts(data)
+    return ([("bijak", bijak)] if "bijak" in kinds else []) + ([("first_page", c) for c in firsts] if "first_page" in kinds else [])
 
 
-def render_ticket(data: TicketData, pdf_path: str, png_path: str) -> None:
-    fonts = font_dir()
-    top, bottom = ticket_html(data, fonts)
-    archive = fitz.Archive(fonts)
+def merge(rendered: Rendered, pdf_path: str, png_base: str, title: str) -> int:
+    """همهٔ صفحه‌ها در یک PDF، و پیش‌نمایش خاکستری هر صفحه (`preview_key_of` همان نام‌ها). خروجی: شمار صفحه."""
     doc = fitz.open()
     try:
-        # برچسب همیشه پایین برگه: اول روی سند جدا اندازه گرفته می‌شود، بعد جایش را از پایین می‌گیرد. نام و نشانی بلند تا
-        # نصف کوچک می‌شوند (`scale`)، و روی برگه هم همان مقیاس.
-        region = fitz.Rect(MARGIN, A4.height - MARGIN - LABEL_HEIGHT, A4.width - MARGIN, A4.height - MARGIN)
-        with fitz.open() as scratch:
-            spare, scale = scratch.new_page(width=A4.width, height=A4.height).insert_htmlbox(
-                region, bottom, css=CSS, archive=archive, scale_low=0.5
-            )
-        if spare < 0:
-            raise PermanentFailure("ticket_overflow", "برچسب پست در جایش نشد")
-        # دو پوینت جای بیشتر: همان اندازهٔ درست گاهی با گرد کردن جا نمی‌شد و MuPDF هیچ چیز نمی‌نوشت. کوچک‌شده همهٔ جا را
-        # گرفته، پس به جای جای بیشتر، کمی کوچک‌تر.
-        label = fitz.Rect(region.x0, region.y0 + max(spare - 2, 0), region.x1, region.y1)
-        page = doc.new_page(width=A4.width, height=A4.height)
-        low = 1 if scale >= 1 else max(scale - 0.02, 0.48)
-        if page.insert_htmlbox(label, bottom, css=CSS, archive=archive, scale_low=low)[0] < 0:
-            raise PermanentFailure("ticket_overflow", "برچسب پست در جایش نشد")
-        # سر و جزوه‌ها بالای آن؛ اگر جا نشدند (جزوه‌های زیاد) کوچک می‌شوند.
-        page.insert_htmlbox(fitz.Rect(MARGIN, MARGIN, A4.width - MARGIN, label.y0 - 12), top, css=CSS, archive=archive)
-        doc.set_metadata({"title": f"برگهٔ سفارش {data.order_number}", "creator": "jozveyar"})
+        for path in rendered.pdfs:
+            with fitz.open(path) as part:
+                doc.insert_pdf(part)
+        doc.set_metadata({"title": title, "creator": "jozveyar"})
         doc.save(pdf_path, garbage=3, deflate=True)
-        page.get_pixmap(dpi=PREVIEW_DPI, colorspace=fitz.csGRAY).save(png_path)
+        for n, page in enumerate(doc, start=1):
+            page.get_pixmap(dpi=PREVIEW_DPI, colorspace=fitz.csGRAY).save(preview_key_of(png_base, n))
+        return doc.page_count
     finally:
         doc.close()
 
 
-def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
-    """دادهٔ برگه و اثر انگشتش، در یک تراکنش."""
+def render_ticket(data: TicketData, templates: dict[str, Template], pdf_path: str, png_path: str) -> int:
+    """برگهٔ کامل سفارش: بیجک و برگهٔ اول هر جزوه، با قالب‌های داده‌شده. خروجی: شمار صفحه."""
+    with tempfile.TemporaryDirectory(prefix="docworker-render-") as workdir:
+        rendered = render(templates, ticket_pages(data), workdir)
+        return merge(rendered, pdf_path, png_path, f"برگه‌های سفارش {data.order_number}")
+
+
+def _load(conn: psycopg.Connection, order_id: str, *, closed_ok: bool = False) -> tuple[TicketData, str]:
+    """دادهٔ برگه و اثر انگشتش، در یک تراکنش. `closed_ok`: پیش‌نمایش قالب با سفارشی که پست یا لغو شد هم."""
     order = conn.execute(
         """SELECT o.order_number, o.status::text, o.post_handoff_due_at, o.paid_at, o.recipient_name, o.recipient_phone,
                   o.address_text, o.postal_code, p.name_fa, c.name_fa, coalesce(m.name_fa, o.shipping_method_id),
@@ -298,12 +249,12 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
     number, status, due, paid, name, phone, address, postal, province, city, shipping, breakdown, stamp, partner, partner_city = order
     if status in UNPAID:
         raise PermanentFailure("order_not_paid")
-    if status not in PRINTABLE:
+    if status not in PRINTABLE and not closed_ok:
         # مثل `prepare_order`: جزوه‌ای که دیگر چاپ نمی‌شود برگه نمی‌خواهد.
         raise PermanentFailure("order_closed", status)
     items = conn.execute(
         """SELECT i.id::text, i.seq, i.page_count, i.copies, i.sides_mode::text, i.paper_size::text,
-                  coalesce(b.name_fa, i.binding_type_id)
+                  coalesce(b.name_fa, i.binding_type_id), i.binding_type_id
              FROM order_items i
              JOIN orders o ON o.id = i.order_id
              LEFT JOIN binding_types b ON b.price_list_version = o.price_list_version AND b.id = i.binding_type_id
@@ -333,12 +284,14 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
         paid=paid,
         recipient_name=name,
         recipient_phone=phone,
-        address="، ".join(part for part in (province, city, address) if part),
+        province=province,
+        city=city,
+        address_line=address,
         postal_code=postal,
         shipping=shipping,
         partner=(partner, partner_city) if partner else None,
     )
-    for item_id, seq, pages, copies, sides, size, binding in items:
+    for item_id, seq, pages, copies, sides, size, binding, binding_id in items:
         ranges = plan_volumes(breakdown, seq, pages, sides)
         priced = breakdown["items"][seq - 1]
         listed, first = [], 1
@@ -358,6 +311,7 @@ def _load(conn: psycopg.Connection, order_id: str) -> tuple[TicketData, str]:
                 color_modes=[mode for mode, _ in item_rules],
                 papers=list(dict.fromkeys(paper for _, paper in item_rules)),
                 binding=binding,
+                binding_id=binding_id,
                 sections=listed,
                 volumes=[(a, b, sheets) for (a, b), sheets in zip(ranges, priced["sheetsPerVolume"])],
             )
@@ -370,36 +324,95 @@ def _sha256(path: str) -> str:
         return hashlib.sha256(f.read()).hexdigest()
 
 
+def _ids(templates: dict[str, Template]) -> tuple[int | None, int | None]:
+    return templates["bijak"].id, templates["first_page"].id
+
+
 def prepare_ticket(conn: psycopg.Connection, storage: S3Storage, order_id: str) -> dict:
     for _ in range(MAX_REBUILDS):
         data, stamp = _load(conn, order_id)
+        templates = active_templates(conn)
         # پیش از ساختن و بارگذاری: کار تراکنش بازی نگه نمی‌دارد.
         conn.commit()
         pdf_key, png_key = ticket_keys(data.order_number, stamp)
         with tempfile.TemporaryDirectory(prefix="docworker-ticket-") as workdir:
             pdf, png = os.path.join(workdir, "ticket.pdf"), os.path.join(workdir, "ticket.png")
-            render_ticket(data, pdf, png)
+            pages = render_ticket(data, templates, pdf, png)
             size, digest = os.path.getsize(pdf), _sha256(pdf)
             storage.upload(pdf_key, pdf, "application/pdf")
-            storage.upload(png_key, png, "image/png")
-        # زیر قفل اشتراکی ردیف سفارش تا «انجام شد»: ویرایش گیرنده (FOR UPDATE) پشت این می‌ماند و بعد کار را خودش دوباره در
-        # صف می‌گذارد؛ ویرایشی که پیش‌تر رسید، اینجا دیده می‌شود و برگه از نو ساخته می‌شود.
+            for n in range(1, pages + 1):
+                storage.upload(preview_key_of(png_key, n), preview_key_of(png, n), "image/png")
+        # زیر قفل اشتراکی ردیف سفارش و قالب‌های فعال تا «انجام شد»: ویرایش گیرنده (FOR UPDATE) و فعال کردن قالب پشت این می‌مانند و
+        # بعد کار را خودشان دوباره در صف می‌گذارند؛ آنچه پیش‌تر رسید، اینجا دیده می‌شود و برگه از نو ساخته می‌شود.
         current = conn.execute(
             "SELECT order_ticket_stamp(o) FROM orders o WHERE o.id = %s FOR SHARE", (order_id,)
         ).fetchone()
         if current is None:
             raise PermanentFailure("order_missing")
-        if current[0] != stamp:
+        if current[0] != stamp or _ids(active_templates(conn, lock=True)) != _ids(templates):
             conn.rollback()
             continue
+        bijak_id, first_id = _ids(templates)
+        # کلید برگه از اثر انگشت داده است، نه قالب: قالب تازه همان کلید را بازنویسی می‌کند، پس هر صفحه‌ای که دیگر نیست پاک
+        # نمی‌شود ولی با `page_count` دیده نمی‌شود.
         conn.execute(
-            """INSERT INTO order_tickets (order_id, storage_key, size_bytes, sha256, preview_key, stamp, built_at)
-               VALUES (%s, %s, %s, %s, %s, %s, now())
+            """INSERT INTO order_tickets (order_id, storage_key, size_bytes, sha256, preview_key, stamp, built_at, page_count,
+                                          bijak_template_id, first_page_template_id)
+               VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, %s)
                ON CONFLICT (order_id) DO UPDATE
                   SET storage_key = excluded.storage_key, size_bytes = excluded.size_bytes, sha256 = excluded.sha256,
-                      preview_key = excluded.preview_key, stamp = excluded.stamp, built_at = excluded.built_at""",
-            (order_id, pdf_key, size, digest, png_key, stamp),
+                      preview_key = excluded.preview_key, stamp = excluded.stamp, built_at = excluded.built_at,
+                      page_count = excluded.page_count, bijak_template_id = excluded.bijak_template_id,
+                      first_page_template_id = excluded.first_page_template_id""",
+            (order_id, pdf_key, size, digest, png_key, stamp, pages, bijak_id, first_id),
         )
-        return {"orderNumber": data.order_number, "key": pdf_key, "bytes": size}
+        return {"orderNumber": data.order_number, "key": pdf_key, "bytes": size, "pages": pages}
     # گذرا: کارگر کمی بعد دوباره امتحان می‌کند.
     raise RuntimeError(f"دادهٔ برگهٔ سفارش {order_id} {MAX_REBUILDS} بار وسط ساختن عوض شد")
+
+
+def template_preview_keys(template_id: int) -> tuple[str, str]:
+    """PDF و پیش‌نمایش صفحهٔ اول پیش‌نمایش یک نسخهٔ قالب؛ صفحهٔ n ام با `preview_key_of`."""
+    base = f"{TEMPLATES_PREFIX}{template_id}/preview"
+    return f"{base}.pdf", f"{base}.png"
+
+
+def preview_ticket_template(conn: psycopg.Connection, storage: S3Storage, template_id: int, payload: dict) -> dict:
+    """پیش‌نمایش یک نسخهٔ قالب (۹٫۲، پیش از فعال کردن): با دادهٔ سفارشی که مالک داد (`payload.orderNumber`) یا دادهٔ ساختگی، فقط
+    صفحه‌های همان نوع. نتیجه روی ردیف همان نسخه: شمار صفحه و نشانی‌های ردشده، یا خطای قالب با خط. خطای قالب شکست کار نیست:
+    پیش‌نمایش همان را گزارش می‌کند."""
+    row = conn.execute("SELECT kind, html FROM ticket_templates WHERE id = %s", (template_id,)).fetchone()
+    if row is None:
+        raise PermanentFailure("template_missing")
+    kind, html = row
+    number = payload.get("orderNumber")
+    if number is None:
+        data = sample()
+    else:
+        found = conn.execute("SELECT id::text FROM orders WHERE order_number = %s", (number,)).fetchone()
+        if found is None:
+            raise PermanentFailure("order_missing", str(number))
+        data, _ = _load(conn, found[0], closed_ok=True)
+    conn.commit()
+    templates = {kind: Template(kind, template_id, html)}
+    pdf_key, png_key = template_preview_keys(template_id)
+    pages, blocked, error = 0, [], None
+    with tempfile.TemporaryDirectory(prefix="docworker-preview-") as workdir:
+        try:
+            rendered = render(templates, ticket_pages(data, (kind,)), workdir)
+        except TemplateFailure as failure:
+            error = str(failure)
+        else:
+            pdf, png = os.path.join(workdir, "preview.pdf"), os.path.join(workdir, "preview.png")
+            pages = merge(rendered, pdf, png, f"پیش‌نمایش قالب {template_id}")
+            blocked = rendered.blocked
+            storage.upload(pdf_key, pdf, "application/pdf")
+            for n in range(1, pages + 1):
+                storage.upload(preview_key_of(png_key, n), preview_key_of(png, n), "image/png")
+    conn.execute(
+        """UPDATE ticket_templates
+              SET preview_at = now(), preview_order_number = %s, preview_pages = %s, preview_blocked = %s, preview_error = %s
+            WHERE id = %s""",
+        (number, pages if error is None else None, blocked, error, template_id),
+    )
+    return {"template": template_id, "pages": pages, "error": error}

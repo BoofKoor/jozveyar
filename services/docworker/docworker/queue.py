@@ -29,6 +29,8 @@ class Job:
     order_id: str | None = None
     # ورود فایل پست (`read_post_file`، برش ۶٫۱)؛ هدف سوم همان محدودیت.
     shipment_import_id: str | None = None
+    # نسخهٔ قالب برگه (`preview_ticket_template`، برش ۹٫۲)؛ هدف چهارم.
+    ticket_template_id: int | None = None
 
 
 CLAIM_SQL = """
@@ -46,7 +48,8 @@ UPDATE jobs
          ORDER BY run_after, id
          LIMIT 1
          FOR UPDATE SKIP LOCKED)
-RETURNING id, kind, document_id::text, payload, attempts, max_attempts, order_id::text, shipment_import_id::text
+RETURNING id, kind, document_id::text, payload, attempts, max_attempts, order_id::text, shipment_import_id::text,
+          ticket_template_id
 """
 
 

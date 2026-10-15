@@ -35,6 +35,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  serial,
   smallint,
   text,
   timestamp,
@@ -473,6 +474,8 @@ export const jobs = pgTable(
     orderId: uuid('order_id').references(() => orders.id, { onDelete: 'cascade' }),
     /** ورود فایل پستی که کار رویش است: خواندن جدول‌هایش (`read_post_file`، برش ۶٫۱، ADR-045). */
     shipmentImportId: uuid('shipment_import_id').references(() => shipmentImports.id, { onDelete: 'cascade' }),
+    /** نسخهٔ قالب برگه‌ای که کار رویش است: پیش‌نمایشش (`preview_ticket_template`، برش ۹٫۲، ADR-057). */
+    ticketTemplateId: integer('ticket_template_id').references(() => ticketTemplates.id, { onDelete: 'cascade' }),
     payload: jsonb('payload').notNull().default({}),
     status: jobStatus('status').notNull().default('queued'),
     attempts: integer('attempts').notNull().default(0),
@@ -494,8 +497,13 @@ export const jobs = pgTable(
     uniqueIndex('jobs_order_kind').on(t.orderId, t.kind),
     /** و برای ورود فایل پست: یک فایل یک بار خوانده می‌شود. */
     uniqueIndex('jobs_shipment_import_kind').on(t.shipmentImportId, t.kind),
-    /** هر کار مال یک چیز است: سند، سفارش یا ورود فایل پست. */
-    check('jobs_one_target', sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}) <= 1`),
+    /** و برای نسخهٔ قالب: یک کار پیش‌نمایش، که پیش‌نمایش دوباره همان را دوباره در صف می‌گذارد. */
+    uniqueIndex('jobs_ticket_template_kind').on(t.ticketTemplateId, t.kind),
+    /** هر کار مال یک چیز است: سند، سفارش، ورود فایل پست یا نسخهٔ قالب. */
+    check(
+      'jobs_one_target',
+      sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}, ${t.ticketTemplateId}) <= 1`,
+    ),
   ],
 );
 
@@ -962,12 +970,21 @@ export const orderTickets = pgTable(
     previewKey: text('preview_key').notNull(),
     stamp: text('stamp').notNull(),
     builtAt: timestamp('built_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * صفحه‌های PDF (برش ۹٫۲): بیجک و برگهٔ اول هر جزوه. پیش‌نمایش صفحهٔ n ام کنار `preview_key` با `-n.png` است؛ برگهٔ پیش از ۹٫۲
+     * یک صفحه بود.
+     */
+    pageCount: integer('page_count').notNull().default(1),
+    /** نسخهٔ قالب بیجک و برگهٔ اولی که برگه با آن ساخته شد؛ null یعنی قالب پیش‌فرض کارگر (برش ۹٫۲). */
+    bijakTemplateId: integer('bijak_template_id').references(() => ticketTemplates.id),
+    firstPageTemplateId: integer('first_page_template_id').references(() => ticketTemplates.id),
   },
   (t) => [
     check(
       'order_tickets_file',
       sql`${t.storageKey} LIKE 'orders/%' AND ${t.previewKey} LIKE 'orders/%' AND ${t.sizeBytes} > 0 AND ${t.sha256} ~ '^[0-9a-f]{64}$'`,
     ),
+    check('order_tickets_pages', sql`${t.pageCount} BETWEEN 1 AND 200`),
   ],
 );
 
@@ -1738,5 +1755,65 @@ export const shipments = pgTable(
       sql`(${t.voidedAt} IS NULL) = (${t.voidedBy} IS NULL) AND (${t.voidedAt} IS NULL) = (${t.voidReason} IS NULL)`,
     ),
     check('shipments_void_reason', sql`${t.voidReason} IS NULL OR length(btrim(${t.voidReason})) BETWEEN 1 AND 500`),
+  ],
+);
+
+/* ──────────────────────────── قالب برگه‌ها (برش ۹٫۲) ──────────────────────────── */
+
+/** بیجک یکی برای هر سفارش، روی بسته؛ برگهٔ اول یکی برای هر جزوه، روی دستهٔ همان (ADR-057، سؤال ۱۹۴). */
+export const ticketTemplateKind = pgEnum('ticket_template_kind', ['bijak', 'first_page']);
+
+/** بزرگ‌ترین قالب (سؤال ۱۹۳): قالب‌های نمونه با فونت و لوگوی درونی حدود ۲۷۰ کیلوبایت‌اند. */
+export const TICKET_TEMPLATE_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * قالب‌های HTML برگه‌ها که مالک از پنل بارگذاری می‌کند (برش ۹٫۲، ADR-057). هر بارگذاری نسخهٔ تازهٔ همان نوع است و دیگر عوض و پاک
+ * نمی‌شود (`ticket_templates_frozen`، 0041)؛ عوض‌شدنی فقط فعال بودن و نتیجهٔ آخرین پیش‌نمایش است. یک نسخهٔ فعال برای هر نوع، برای
+ * همهٔ چاپخانه‌ها؛ بی نسخهٔ فعال، قالب پیش‌فرض کارگر (`services/docworker/docworker/templates/`). برگشت = فعال کردن نسخهٔ قبل یا پیش‌فرض.
+ *
+ * پیش‌نمایش را کارگر می‌سازد (`preview_ticket_template`، با دادهٔ ساختگی یا یک سفارش واقعی) و نتیجه‌اش همین‌جاست: شمار صفحه و نشانی‌های
+ * ردشده (فقط `data:` بار می‌شود)، یا خطای قالب با خط.
+ */
+export const ticketTemplates = pgTable(
+  'ticket_templates',
+  {
+    id: serial('id').primaryKey(),
+    kind: ticketTemplateKind('kind').notNull(),
+    /** شمارهٔ نسخه در همان نوع، از ۱. */
+    version: integer('version').notNull(),
+    html: text('html').notNull(),
+    sha256: text('sha256').notNull(),
+    /** نام فایلی که مالک بارگذاری کرد، فقط برای نمایش. */
+    fileName: text('file_name').notNull(),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    isActive: boolean('is_active').notNull().default(false),
+    /** اولین فعال شدن؛ یک بار نوشته می‌شود. */
+    activatedAt: timestamp('activated_at', { withTimezone: true }),
+    previewAt: timestamp('preview_at', { withTimezone: true }),
+    /** سفارشی که پیش‌نمایش با دادهٔ آن ساخته شد؛ null یعنی دادهٔ ساختگی. */
+    previewOrderNumber: integer('preview_order_number'),
+    previewPages: integer('preview_pages'),
+    previewBlocked: text('preview_blocked').array().notNull().default(sql`'{}'::text[]`),
+    previewError: text('preview_error'),
+  },
+  (t) => [
+    uniqueIndex('ticket_templates_version').on(t.kind, t.version),
+    /** یک نسخهٔ فعال برای هر نوع. */
+    uniqueIndex('ticket_templates_one_active').on(t.kind).where(sql`${t.isActive}`),
+    check('ticket_templates_size', sql`octet_length(${t.html}) BETWEEN 1 AND ${sql.raw(String(TICKET_TEMPLATE_MAX_BYTES))}`),
+    check('ticket_templates_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+    check('ticket_templates_version_positive', sql`${t.version} >= 1`),
+    check('ticket_templates_file_name', sql`length(${t.fileName}) BETWEEN 1 AND 200`),
+    /** فعال یعنی دست‌کم یک بار فعال شده. */
+    check('ticket_templates_activated', sql`NOT ${t.isActive} OR ${t.activatedAt} IS NOT NULL`),
+    /** پیش‌نمایش یا صفحه دارد یا خطا، هرگز هر دو؛ و هیچ‌کدام بی زمان پیش‌نمایش. */
+    check(
+      'ticket_templates_preview',
+      sql`(${t.previewAt} IS NULL AND ${t.previewPages} IS NULL AND ${t.previewError} IS NULL)
+          OR (${t.previewAt} IS NOT NULL AND (${t.previewPages} IS NULL) <> (${t.previewError} IS NULL))`,
+    ),
   ],
 );

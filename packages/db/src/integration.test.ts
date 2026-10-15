@@ -1928,7 +1928,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -2329,7 +2329,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -2808,7 +2808,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -3737,7 +3737,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -4174,7 +4174,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -5466,7 +5466,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -5842,7 +5842,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -6316,7 +6316,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -8099,7 +8099,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();

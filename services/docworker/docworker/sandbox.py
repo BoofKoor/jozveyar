@@ -99,7 +99,12 @@ def reap_orphans() -> None:
             return
 
 
-def run_confined(cmd: list[str], *, cwd: str, timeout: float, max_file_bytes: int) -> Outcome:
+def run_confined(
+    cmd: list[str], *, cwd: str, timeout: float, max_file_bytes: int, max_memory_bytes: int | None = None
+) -> Outcome:
+    """`max_memory_bytes`: سقف فضای نشانی (RLIMIT_AS) برای پردازه‌ای که حافظه‌اش اندازه دارد، مثل ساختن قالب برگه (۹٫۲)؛
+    LibreOffice بی آن، چون نقشهٔ حافظه‌اش بزرگ‌تر از مصرفش است و `oom_score_adj` همان کار را می‌کند."""
+
     def child() -> None:
         try:
             with open("/proc/self/oom_score_adj", "w", encoding="ascii") as f:
@@ -108,6 +113,8 @@ def run_confined(cmd: list[str], *, cwd: str, timeout: float, max_file_bytes: in
             pass
         resource.setrlimit(resource.RLIMIT_FSIZE, (max_file_bytes, max_file_bytes))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        if max_memory_bytes is not None:
+            resource.setrlimit(resource.RLIMIT_AS, (max_memory_bytes, max_memory_bytes))
 
     before = _oom_kills()
     # stderr در فایل، نه لوله: نوه‌ای که لوله را باز نگه دارد، انتظار را تا سقف زمان
