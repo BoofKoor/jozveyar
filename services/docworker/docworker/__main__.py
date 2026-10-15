@@ -10,8 +10,9 @@
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
 S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
 مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، از برش ۳ب
-ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، و از ۶٫۱ خواندن فایل پست)، DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛
-پیش‌فرض ۳۰۰)، DOCWORKER_RETENTION_SECONDS (اختیاری؛ فاصلهٔ دورهای پاک کردن فایل‌های سفارش بسته، پیش‌فرض ۶۰۰).
+ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، از ۶٫۱ خواندن فایل پست، و از ۹٫۲ پیش‌نمایش قالب برگه)،
+DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰)، DOCWORKER_TICKET_TIMEOUT (اختیاری، ثانیه؛ ساختن برگه از قالب، پیش‌فرض ۹۰)،
+DOCWORKER_RETENTION_SECONDS (اختیاری؛ فاصلهٔ دورهای پاک کردن فایل‌های سفارش بسته، پیش‌فرض ۶۰۰).
 
 نودی که کار سفارش (`prepare_order`) برمی‌دارد، بین کارها فایل‌های سفارش‌های بسته را هم پس از روزهای نگهداری پاک می‌کند
 (ADR-044)، و از ۶٫۱ فایل پست خام و متن سطرهایی که سفارش ما نشدند (ADR-045)؛ نود فقط‌تحلیل نه.
@@ -40,7 +41,7 @@ from .orders import PREPARE_ORDER, prepare_order
 from .retention import sweep
 from .shipments import READ_POST_FILE, mark_import_failed, read_post_file
 from .storage import S3Storage
-from .ticket import PREPARE_TICKET, prepare_ticket
+from .ticket import PREPARE_TICKET, PREVIEW_TICKET_TEMPLATE, prepare_ticket, preview_ticket_template
 
 log = logging.getLogger("docworker")
 
@@ -48,7 +49,7 @@ log = logging.getLogger("docworker")
 # سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
 
-KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET, READ_POST_FILE)
+KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET, READ_POST_FILE, PREVIEW_TICKET_TEMPLATE)
 # شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
 EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
 
@@ -120,6 +121,7 @@ class Worker:
         target = (
             f"سفارش {job.order_id}" if job.order_id
             else f"ورود فایل پست {job.shipment_import_id}" if job.shipment_import_id
+            else f"قالب {job.ticket_template_id}" if job.ticket_template_id
             else f"سند {job.document_id}"
         )
         log.info("کار %s (%s) %s — تلاش %s", job.id, job.kind, target, job.attempts)
@@ -132,6 +134,8 @@ class Worker:
                 result = prepare_ticket(conn, self.storage, job.order_id)
             elif job.kind == READ_POST_FILE:
                 result = read_post_file(conn, job.shipment_import_id)
+            elif job.kind == PREVIEW_TICKET_TEMPLATE:
+                result = preview_ticket_template(conn, self.storage, job.ticket_template_id, job.payload)
             else:
                 result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)

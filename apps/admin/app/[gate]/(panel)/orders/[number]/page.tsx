@@ -317,9 +317,17 @@ function TicketRow({ gate, details, now, canDownload }: { gate: string; details:
   const view = ticketView(details);
   const orderNumber = details.order.orderNumber;
   if (view.kind === 'unpaid' || view.kind === 'purged') return null;
+  // از ۹٫۲ بیجک و برگهٔ اول هر جزوه (ADR-057)؛ برگهٔ پیش از آن یک صفحه بود.
+  const pages = details.ticket?.pageCount ?? 1;
   const meta =
     view.kind === 'ready'
-      ? 'شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه'
+      ? pages > 1
+        ? (
+            <>
+              بیجک و برگهٔ اول هر جزوه · <span className="num">{pages}</span> برگ A4، جدا از جزوه
+            </>
+          )
+        : 'شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه'
       : view.kind === 'updating'
         ? `در حال به‌روز شدن ${TICKET_UPDATING_WITH[view.cause]}…`
         : view.kind === 'building'

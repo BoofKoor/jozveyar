@@ -9,3 +9,7 @@ psycopg[binary]==3.2.13
 # عکس به PDF (برش ۲ب): PyMuPDF خودش WebP و HEIC را نمی‌خواند.
 pillow==12.3.0
 pillow-heif==1.8.0
+# برگه‌ها از قالب HTML (برش ۹٫۲، ADR-057): فقط در پردازهٔ جدای `docworker/ticket_render.py`؛ کارگر خودش import‌شان نمی‌کند، چون
+# WeasyPrint `LOAD_TRUNCATED_IMAGES` Pillow را سراسری روشن می‌کند.
+weasyprint==70.0
+jinja2==3.1.6

@@ -1112,3 +1112,72 @@ export async function previewLinkAction(_state: PreviewState, form: FormData): P
   if (!result.ok) return { error: result.error };
   return { link: { url: result.value.url, until: formatTehranTime(result.value.expiresAt) } };
 }
+
+/* ───────────────────────── قالب برگه‌ها (۹٫۲) ───────────────────────── */
+
+export interface TemplateUploadState {
+  error?: AdminErrorCode;
+}
+
+/**
+ * بارگذاری نسخهٔ تازهٔ قالب (۹٫۲، ADR-057): موفق به صفحهٔ همان نسخه، که تا کارگر پیش‌نمایش با دادهٔ نمونه را بسازد «در حال ساختن» است؛
+ * فایل نادرست همین‌جا. کد تازه نمی‌خواهد: تا فعال کردن هیچ برگه‌ای عوض نمی‌شود. بدنهٔ کار حداکثر ۳ مگابایت است (`next.config.ts`)،
+ * کمی بیش از سقف قالب.
+ */
+export async function uploadTemplateAction(_state: TemplateUploadState, form: FormData): Promise<TemplateUploadState> {
+  const gate = field(form, 'gate');
+  const { templates } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const file = form.get('file');
+  const picked = file instanceof File && file.size > 0 ? file : null;
+  const result = await templates.upload(
+    session,
+    { kind: field(form, 'kind'), file: picked ? { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) } : null },
+    await requestIp(),
+  );
+  if (result.ok) redirect(`${panelPath(gate, `/settings/templates/${result.value.id}`)}?done=upload`);
+  return { error: result.error };
+}
+
+/**
+ * پیش‌نمایش دوباره، با دادهٔ نمونه یا یک سفارش (۹٫۲): برگشت به صفحهٔ همان نسخه، که تا کارگر بسازدش «در حال ساختن» است، یا با پیامش و
+ * شماره‌ای که نوشته شد. کد تازه نمی‌خواهد.
+ */
+export async function previewTemplateAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { templates } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const order = field(form, 'order').trim().slice(0, 20);
+  const result = await templates.preview(session, id, { order }, await requestIp());
+  const back = panelPath(gate, `/settings/templates/${encodeURIComponent(id)}`);
+  redirect(result.ok ? `${back}?done=preview&${doneMark()}` : `${back}?e=${result.error}&o=${encodeURIComponent(order)}&${doneMark()}`);
+}
+
+/** خطاهایی که «فعال کن» قالب با برگشت به همان صفحه می‌گوید، تا وضع تازه را از نو نشان دهد. */
+const TEMPLATE_PAGE_ERRORS: AdminErrorCode[] = ['template_changed', 'template_not_found', 'template_no_preview', 'forbidden'];
+
+/**
+ * فعال کردن یک نسخهٔ قالب، یا برگشت به قالب پیش‌فرض، با کد تازه (۹٫۲، کار حساس): خطای کد همین‌جا؛ قالبی که همین حالا عوض شد به همان
+ * صفحه با پیامش. موفق به «قالب برگه‌ها» با نوع، نسخه و شمار برگه‌هایی که از نو ساخته می‌شوند.
+ */
+export async function activateTemplateAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { templates } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const result = await templates.activate(
+    session,
+    id,
+    { active: field(form, 'active'), seen: field(form, 'seen'), code: form.get('code') },
+    await requestIp(),
+  );
+  if (result.ok) {
+    const { kind, version, requeued } = result.value;
+    redirect(`${panelPath(gate, '/settings/templates')}?done=${version === null ? 'default' : 'activate'}&k=${kind}&v=${version ?? ''}&r=${requeued}`);
+  }
+  if (TEMPLATE_PAGE_ERRORS.includes(result.error)) {
+    redirect(`${panelPath(gate, `/settings/templates/${encodeURIComponent(id)}/activate`)}?e=${result.error}`);
+  }
+  return failure(result);
+}

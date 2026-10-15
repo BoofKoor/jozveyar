@@ -883,12 +883,14 @@ describe('دانلود فایل چاپ و برگه', () => {
     previewKey: 'orders/10040/ticket-0123456789abcdef.png',
     bytes: 9,
     fresh: true,
+    pageCount: 2,
   };
   const stored = () => {
     const storage = new MemoryDriver();
     storage.putObject(VOLUME.key!, new TextEncoder().encode('%PDF-1.4 jeld-2'));
     storage.putObject(TICKET.key!, new TextEncoder().encode('%PDF-1.4 '));
-    storage.putObject(TICKET.previewKey!, new TextEncoder().encode('png'));
+    storage.putObject(TICKET.previewKey!, new TextEncoder().encode('png-1'));
+    storage.putObject('orders/10040/ticket-0123456789abcdef-2.png', new TextEncoder().encode('png-2'));
     return storage;
   };
 
@@ -932,6 +934,17 @@ describe('دانلود فایل چاپ و برگه', () => {
     };
     expect(await run(TICKET, 'pdf')).toEqual(['barge-sefaresh-10040.pdf', ['orders.ticket_download']]);
     expect(await run(TICKET, 'preview')).toEqual(['barge-sefaresh-10040.png', []]);
+    // هر صفحه پیش‌نمایش خودش را دارد (۹٫۲)، و صفحه‌ای بیرون از برگه نیست.
+    const page = async (n: number) => {
+      const { orders } = service({ ticketFile: async () => TICKET }, stored());
+      const result = await orders.downloadTicket(session(), '10040', 'preview', 'ip', n);
+      return result.ok ? [result.value.fileName, await new Response(result.value.body).text()] : `${result.status} ${result.error}`;
+    };
+    expect(await page(1)).toEqual(['barge-sefaresh-10040.png', 'png-1']);
+    expect(await page(2)).toEqual(['barge-sefaresh-10040-2.png', 'png-2']);
+    expect(await page(3)).toBe('404 order_not_found');
+    expect(await page(0)).toBe('404 order_not_found');
+    expect(await page(1.5)).toBe('404 order_not_found');
     // با نام یا نشانی تازه در حال به‌روز شدن: فایلش هست، ولی داده نمی‌شود (شاهد: تازه‌اش داده شد).
     expect(await run({ ...TICKET, fresh: false }, 'pdf')).toEqual(['409 ticket_not_ready', []]);
     expect(await run({ ...TICKET, fresh: false }, 'preview')).toEqual(['409 ticket_not_ready', []]);

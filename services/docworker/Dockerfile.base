@@ -22,7 +22,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     LANG=C.UTF-8
 
-# LibreOffice بدون رابط گرافیکی: فقط Writer (Word) و Impress (پاورپوینت).
+# LibreOffice بدون رابط گرافیکی: فقط Writer (Word) و Impress (پاورپوینت). Pango و HarfBuzz برای WeasyPrint،
+# که برگه‌ها را از قالب HTML می‌سازد (برش ۹٫۲، ADR-057).
 #
 # فونت‌ها: جایگزین هم‌اندازهٔ Times/Arial/Courier (Liberation) و Calibri/Cambria
 # (Carlito/Caladea)، نسخ عربی Noto، فونت‌های فارسی‌وب (Nazli، Titr، Homa) و
@@ -33,6 +34,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       libreoffice-writer-nogui libreoffice-impress-nogui \
+      libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
       fontconfig fonts-dejavu-core fonts-liberation fonts-crosextra-carlito \
       fonts-crosextra-caladea fonts-noto-core fonts-farsiweb fonts-wine \
  && tahoma="$(dpkg -L fonts-wine | grep -E '/tahoma(bd)?\.ttf$')" \
@@ -74,6 +76,7 @@ RUN check() { got="$(fc-match -f '%{family[0]}' "$1")"; [ "$got" = "$2" ] \
  && check Arial 'Liberation Sans' \
  && check Calibri Carlito \
  && check Cambria Caladea \
- && soffice --version
+ && soffice --version \
+ && python -c "import weasyprint, jinja2; print('weasyprint', weasyprint.__version__, 'jinja2', jinja2.__version__)"
 
 WORKDIR /app

@@ -19,6 +19,7 @@ import { Segments } from '../../../../components/Segments';
 import { StatusButton } from '../../../../components/StatusButton';
 import { TemplateKeyForm } from '../../../../components/TemplateKeyForm';
 import { AUDIENCE_NAMES } from '../../../../lib/checkout';
+import { KIND_NAMES } from '../../../../lib/ticketTemplates';
 import { panelPath } from '../../../../lib/gate';
 import { messageOf } from '../../../../lib/messages';
 import { can } from '../../../../lib/server/auth';
@@ -145,12 +146,15 @@ function SourceBadge({ source }: { source: KeyView['source'] }) {
 export default async function SettingsPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
   const query = await searchParams;
-  const { settings } = requirePanel(gate);
+  const { settings, templates } = requirePanel(gate);
   const session = await requireSession(gate);
   if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} partner={session.partner} />;
   const result = await settings.overview(session);
   if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
   const { now, values, keys, otpUsage, credit, checkout } = result.value;
+  // قالب برگه‌ها (۹٫۲): فقط مالک (`templates.manage`)؛ کارت کوتاه با قالب فعال هر نوع، و پیوند صفحهٔ خودش.
+  const tickets = can(session, 'templates.manage') ? await templates.overview(session) : null;
+  const ticketKinds = tickets?.ok ? tickets.value.kinds : null;
   const card = credit ? creditCard(credit, now) : null;
 
   const home = panelPath(gate, '/settings');
@@ -352,6 +356,36 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                 maxPagesError={`صفحهٔ هر فایل عدد صحیح ${formatNumber(MAX_PAGES.minValue ?? 1)} تا ${formatNumber(MAX_PAGES.maxValue ?? 1500)} باشد.`}
               />
             </div>
+
+            {ticketKinds ? (
+              <section id="ticket-templates" className="jy-card" aria-labelledby="t-tpl">
+                <div className="jy-card__head">
+                  <h2 id="t-tpl" className="jy-card__title">
+                    قالب برگه‌ها
+                  </h2>
+                  <Link href={panelPath(gate, '/settings/templates')} className="jy-btn jy-btn--secondary">
+                    قالب‌ها و نسخه‌ها
+                  </Link>
+                </div>
+                <ul className="ad-changes" data-ticket-templates="">
+                  {ticketKinds.map(({ kind, active }) => (
+                    <li key={kind}>
+                      <span className="ad-changes__k">{KIND_NAMES[kind]}</span>
+                      <span>
+                        {active ? (
+                          <>
+                            نسخهٔ <span className="num">{active.version}</span> · <bdi>{active.fileName}</bdi>
+                          </>
+                        ) : (
+                          'قالب پیش‌فرض جزوه‌یار'
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="ad-hint">بیجک روی بسته و برگهٔ اول روی دستهٔ هر جزوه؛ قالب HTML خودت را بارگذاری کن، پیش‌نمایشش را ببین، و با کد تازه فعالش کن.</p>
+              </section>
+            ) : null}
 
             <section id="holidays" className="jy-card" aria-labelledby="t-hol">
               <div className="jy-card__head">

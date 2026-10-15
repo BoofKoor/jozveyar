@@ -80,6 +80,7 @@ import {
   shippingMethods,
   shippingZones,
   smsMessages,
+  ticketTemplates,
 } from './schema.js';
 import type { PanelRefund } from './refunds.js';
 import { shipmentSmsFields, shipmentSmsOf, type ShipmentSms } from './sms.js';
@@ -403,6 +404,10 @@ export interface PanelTicket {
   builtAt: Date;
   /** با دادهٔ امروز سفارش ساخته شده (`order_ticket_stamp`)؛ نه یعنی کهنه، تا کارگر دوباره بسازدش. */
   fresh: boolean;
+  /** شمار صفحه‌ها: بیجک، بعد برگهٔ اول هر جزوه (۹٫۲)؛ برگهٔ پیش از ۹٫۲ یک صفحه. */
+  pageCount: number;
+  /** شمارهٔ نسخهٔ قالبی که هر نوع با آن ساخته شد (۹٫۲، `ticket_templates`)؛ null یعنی قالب پیش‌فرض. */
+  templates: { bijak: number | null; firstPage: number | null };
 }
 
 export interface PanelPdfJob {
@@ -567,9 +572,11 @@ export interface PanelVolumeFile extends PanelFileOwner {
 /** برگهٔ سفارش برای دانلود و پیش‌نمایش؛ `key` null یعنی هنوز ساخته نشده. */
 export interface PanelTicketFile extends PanelFileOwner {
   key: string | null;
+  /** PNG صفحهٔ اول؛ صفحهٔ n ام کنارش (`-n.png`، ۹٫۲). */
   previewKey: string | null;
   bytes: number | null;
   fresh: boolean;
+  pageCount: number | null;
 }
 
 /**
@@ -1017,19 +1024,28 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         }
       : null;
 
-  /** برگهٔ سفارش‌ها، و اینکه هر کدام با دادهٔ امروز همان سفارش ساخته شده (`order_ticket_stamp`). */
-  const ticketsOf = (orderIds: readonly string[]) =>
-    db
-      .select({
-        orderId: orderTickets.orderId,
-        storageKey: orderTickets.storageKey,
-        sizeBytes: orderTickets.sizeBytes,
-        builtAt: orderTickets.builtAt,
-        fresh: sql<boolean>`${orderTickets.stamp} = order_ticket_stamp(${orders})`,
-      })
-      .from(orderTickets)
-      .innerJoin(orders, eq(orders.id, orderTickets.orderId))
-      .where(inArray(orderTickets.orderId, [...orderIds]));
+  /** برگهٔ سفارش‌ها، و اینکه هر کدام با دادهٔ امروز همان سفارش ساخته شده (`order_ticket_stamp`)، با شمارهٔ نسخهٔ قالب‌هایش. */
+  const bijakTemplate = alias(ticketTemplates, 'bijak_template');
+  const firstPageTemplate = alias(ticketTemplates, 'first_page_template');
+  const ticketsOf = async (orderIds: readonly string[]) =>
+    (
+      await db
+        .select({
+          orderId: orderTickets.orderId,
+          storageKey: orderTickets.storageKey,
+          sizeBytes: orderTickets.sizeBytes,
+          builtAt: orderTickets.builtAt,
+          fresh: sql<boolean>`${orderTickets.stamp} = order_ticket_stamp(${orders})`,
+          pageCount: orderTickets.pageCount,
+          bijak: bijakTemplate.version,
+          firstPage: firstPageTemplate.version,
+        })
+        .from(orderTickets)
+        .innerJoin(orders, eq(orders.id, orderTickets.orderId))
+        .leftJoin(bijakTemplate, eq(bijakTemplate.id, orderTickets.bijakTemplateId))
+        .leftJoin(firstPageTemplate, eq(firstPageTemplate.id, orderTickets.firstPageTemplateId))
+        .where(inArray(orderTickets.orderId, [...orderIds]))
+    ).map(({ bijak, firstPage, ...ticket }) => ({ ...ticket, templates: { bijak, firstPage } }));
 
   return {
     async dueSummary(scope, { at, tomorrowStart, dayAfterStart }) {
@@ -1481,7 +1497,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           items: itemMap.get(order.id) ?? [],
           pdfJob: job(PREPARE_ORDER_JOB),
           ticketJob: job(PREPARE_TICKET_JOB),
-          ticket: ticket ? { storageKey: ticket.storageKey, sizeBytes: ticket.sizeBytes, builtAt: ticket.builtAt, fresh: ticket.fresh } : null,
+          ticket: ticket ? (({ orderId: _order, ...rest }) => rest)(ticket) : null,
           lastAssignmentAt: assignedRows.find((row) => row.orderId === order.id)?.at ?? null,
           lastRecipientEditAt: editedRows.find((row) => row.orderId === order.id)?.at ?? null,
         });
@@ -1539,6 +1555,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           previewKey: orderTickets.previewKey,
           bytes: orderTickets.sizeBytes,
           fresh: sql<boolean>`coalesce(${orderTickets.stamp} = order_ticket_stamp(${orders}), false)`,
+          pageCount: orderTickets.pageCount,
         })
         .from(orders)
         .leftJoin(orderTickets, eq(orderTickets.orderId, orders.id))

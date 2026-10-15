@@ -356,13 +356,14 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     expect(row!.fresh).toBe(true);
     await ownerPage.goto(at(`/orders/${n}`));
     const ticket = ownerPage.locator('li[data-ticket="ready"]');
-    await expect(ticket.locator('.ad-print__meta')).toHaveText('شماره، مهلت، مشخصات چاپ و برچسب پست · یک برگ A4، جدا از جزوه');
+    // از ۹٫۲ بیجک و برگهٔ اول تنها جزوه، با قالب‌های پیش‌فرض.
+    await expect(ticket.locator('.ad-print__meta')).toHaveText('بیجک و برگهٔ اول هر جزوه · 2 برگ A4، جدا از جزوه');
     await ticket.getByRole('link', { name: 'دیدن' }).click();
     await expect(ownerPage).toHaveURL(new RegExp(`/orders/${n}/ticket$`));
     await expect(ownerPage.getByRole('heading', { level: 1, name: `برگهٔ سفارش ${n}` })).toBeVisible();
     const preview = ownerPage.getByRole('img', { name: `برگهٔ سفارش ${n}: شماره، مهلت، مشخصات چاپ و برچسب پست` });
-    // PNG همان صفحهٔ A4 با ۱۵۰ DPI، از راه خود پنل.
-    await expect.poll(() => preview.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0))).toBe(1240);
+    // PNG همان صفحهٔ A4 با ۱۵۰ DPI، از راه خود پنل (A4 قالب، ۵۹۵٫۲۸ پوینت: ۱۲۴۱ پیکسل).
+    await expect.poll(() => preview.evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : 0))).toBe(1241);
     const direct = await ownerContext.request.get(at(`/orders/${n}/ticket/preview`));
     expect(direct.headers()).toMatchObject({ 'content-type': 'image/png', 'x-accel-buffering': 'no' });
     expect(direct.headers()['cache-control']).toContain('no-store');
@@ -568,7 +569,7 @@ test.describe.serial('خروجی چاپ در پنل', () => {
       expect(opened.blank, `${width} folds`).toEqual([]);
       // برگه در گوشی هم کل پهنا را می‌گیرد و بیرون نمی‌زند.
       await page.goto(at(`/orders/${o.P.number}/ticket`));
-      const sheet = await page.locator('.ad-sheet img').boundingBox();
+      const sheet = await page.locator('.ad-sheet img').first().boundingBox();
       expect(sheet!.width).toBeLessThanOrEqual(width);
       expect(problems).toEqual([]);
       await context.close();

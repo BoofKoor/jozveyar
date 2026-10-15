@@ -144,6 +144,18 @@ export type AdminErrorCode =
   | 'sms_not_failed'
   /** بازه‌های وزن گزارش ارسال (۶٫۴): خطای هر فیلد در `errors`. */
   | 'invalid_bands'
+  /** قالب برگه‌ها (۹٫۲، ADR-057): بارگذاری، پیش‌نمایش و فعال کردن. */
+  | 'template_not_found'
+  | 'invalid_template_kind'
+  | 'template_file_required'
+  | 'template_not_html'
+  | 'template_too_large'
+  | 'template_not_utf8'
+  | 'template_changed'
+  | 'template_no_preview'
+  | 'preview_busy'
+  | 'preview_order_unpaid'
+  | 'preview_files_deleted'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
   | 'unavailable';
 

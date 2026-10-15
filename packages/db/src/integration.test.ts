@@ -44,7 +44,7 @@ import {
   smsMessages,
   users,
 } from './schema.js';
-import { and, count, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm';
 import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts';
 import { CITIES, PROVINCES, SHIPPING_ZONES } from '@jozveyar/geo';
 import { HOLIDAYS_SETTING, SLA_DAYS_SETTING, seedReferenceData } from './reference.js';
@@ -128,6 +128,8 @@ import {
 import { CHECKOUT_AUDIENCE_SETTING, DEFAULT_SETTINGS } from './reference.js';
 import { checkoutPreviews } from './schema.js';
 import { SETTINGS_LOCK } from './settings.js';
+import { orderTickets, TICKET_TEMPLATE_MAX_BYTES, ticketTemplates } from './schema.js';
+import { createTicketTemplateStore, PREVIEW_TICKET_TEMPLATE_JOB, TEMPLATE_TARGET } from './templates.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -1928,7 +1930,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -2329,7 +2331,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -2808,7 +2810,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -3737,7 +3739,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -4035,6 +4037,431 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect((await conn.db.select().from(settings).where(eq(settings.key, FILES_RETENTION_SETTING)))[0]!.value).toBe(30);
     });
   });
+  // متن‌ها، مجوز، کد تازه و سنجش فایل در سرویس پنل با ذخیره‌گاه ساختگی (`apps/admin/lib/server/templates.test.ts`)؛ اینجا محافظ‌های
+  // 0041، قفل و تراکنش، که فقط پستگرس معنایشان را دارد.
+  describe('قالب برگه‌ها روی پستگرس (برش ۹٫۲)', () => {
+    const NOW = new Date('2026-10-15T07:50:00Z');
+    const MINUTE = 60_000;
+    let admin = '';
+    let doc = '';
+    const actor = () => ({ adminUserId: admin, ipHash: null });
+    const html = (text: string) => `<p>${text}</p>`;
+    const shaOf = (text: string) => createHash('sha256').update(text).digest('hex');
+    const templates = () => createTicketTemplateStore(conn);
+    const upload = (kind: 'bijak' | 'first_page', text: string) =>
+      templates().upload({ kind, html: html(text), sha256: shaOf(html(text)), fileName: `${kind}.html`, actor: actor(), at: NOW });
+    /** نتیجهٔ پیش‌نمایش همان‌طور که کارگر می‌نویسد. */
+    const previewed = (id: number, over: Partial<typeof ticketTemplates.$inferInsert> = {}) =>
+      conn.db
+        .update(ticketTemplates)
+        .set({ previewAt: NOW, previewPages: 2, previewPdfKey: `ticket-templates/${id}/preview.pdf`, previewPngKey: `ticket-templates/${id}/preview.png`, ...over })
+        .where(eq(ticketTemplates.id, id));
+    const activeOf = async (kind: 'bijak' | 'first_page') =>
+      (await conn.db.select().from(ticketTemplates).where(and(eq(ticketTemplates.kind, kind), eq(ticketTemplates.isActive, true))))[0]?.id ?? null;
+    const insertRow = (over: Partial<typeof ticketTemplates.$inferInsert>) =>
+      rejectedConstraint(
+        conn.db.insert(ticketTemplates).values({ kind: 'bijak', version: 900, html: html('x'), sha256: shaOf('x'), fileName: 'x.html', createdBy: admin, ...over }),
+      );
+    const change = (id: number, set: Partial<typeof ticketTemplates.$inferInsert>) =>
+      rejectedConstraint(conn.db.update(ticketTemplates).set(set).where(eq(ticketTemplates.id, id)));
+
+    /** سفارش پرداخت‌شده همان‌طور که سرور می‌سازد، با کار برگه‌اش (`settlePayment`). */
+    async function paidOrder() {
+      const sections = [{ documentId: doc, pageCount: 20 }];
+      const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
+      const item = { copies: 1, sidesMode: 'double' as const, paperSize: 'a4' as const, bindingTypeId: 'spiral_clear', sections, rules };
+      const breakdown = quote({ items: [item], shipping: { methodId: 'post', zoneId: 'tehran' } }, SEED_PRICE_LIST);
+      const [user] = await conn.db
+        .insert(users)
+        .values({ mobile: '09152345678' })
+        .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+        .returning();
+      const store = createOrderStore(conn);
+      const { order } = await store.createOrder({
+        checkoutKey: randomUUID(),
+        userId: user!.id,
+        breakdown,
+        quoteSnapshot: null,
+        slaDays: 2,
+        shippingMethodId: 'post',
+        shippingZoneId: 'tehran',
+        provinceId: 8,
+        cityId: 394,
+        recipientName: 'مریم کاظمی',
+        recipientPhone: '09152345678',
+        addressText: 'بلوار سجاد، سجاد 18، پلاک 42',
+        postalCode: null,
+        items: [{ pageCount: 20, ...item }],
+      });
+      const payment = await store.insertPayment({
+        orderId: order.id,
+        provider: 'mock',
+        amountRials: order.totalRials,
+        authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`,
+        raw: null,
+      });
+      await store.settlePayment('mock', payment.authority, async ({ payment }) => ({
+        kind: 'succeeded',
+        verifiedAmountRials: payment.amountRials,
+        refId: '803114',
+        cardMask: null,
+        raw: null,
+        paidAt: NOW,
+        postHandoffDueAt: new Date(NOW.getTime() + 2 * 86_400_000),
+      }));
+      return order.id;
+    }
+    const ticketJob = async (orderId: string) =>
+      (await conn.db.select().from(jobs).where(and(eq(jobs.orderId, orderId), eq(jobs.kind, PREPARE_TICKET_JOB))))[0]!;
+    const setTicketJob = (orderId: string, set: Partial<typeof jobs.$inferInsert>) =>
+      conn.db.update(jobs).set(set).where(and(eq(jobs.orderId, orderId), eq(jobs.kind, PREPARE_TICKET_JOB)));
+    const templateEvents = () =>
+      conn.db.select().from(adminEvents).where(eq(adminEvents.targetType, TEMPLATE_TARGET)).orderBy(asc(adminEvents.id));
+
+    beforeAll(async () => {
+      await clearOrders(conn);
+      await conn.db.execute(
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+      );
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      const created = await createAdminStore(conn).createInvite({
+        inviteId: randomUUID(),
+        newUserId: randomUUID(),
+        username: 'sara',
+        displayName: 'سارا رضایی',
+        role: 'owner',
+        tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+        totpSealed: 'v1.sealed',
+        at: NOW,
+        expiresAt: new Date(NOW.getTime() + 15 * MINUTE),
+        createdBy: null,
+        allowExisting: false,
+        event: { adminUserId: null, action: 'admins.invite', targetType: 'admin' },
+      });
+      admin = created.ok ? created.userId : '';
+      doc = randomUUID();
+      const documentStore = createDocumentStore(conn);
+      await documentStore.insertUpload({
+        id: doc,
+        sessionHash: 'e'.repeat(64),
+        originalName: 'آمار.pdf',
+        sourceKind: 'pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 1_000,
+        storageKey: `uploads/${doc}.pdf`,
+        uploadId: 'u',
+        partSizeBytes: 8 * 1024 * 1024,
+      });
+      await documentStore.markUploaded(doc, NOW, new Date(NOW.getTime() + 2 * 86_400_000), null);
+      await conn.db.update(documents).set({ status: 'ready', pageCount: 20 }).where(eq(documents.id, doc));
+    });
+
+    beforeEach(async () => {
+      await clearOrders(conn);
+      // نسخه پاک‌نشدنی است (`ticket_templates_append_only`)؛ TRUNCATE تریگر ردیفی ندارد، و کارهای پیش‌نمایش و برگه‌ها را هم می‌برد.
+      await conn.db.execute(sql`TRUNCATE ticket_templates, admin_events CASCADE`);
+    });
+
+    afterAll(async () => {
+      await clearOrders(conn);
+      await conn.db.execute(sql`TRUNCATE ticket_templates CASCADE`);
+    });
+
+    it('نسخهٔ تازه غیرفعال و بی پیش‌نمایش؛ متن، نوع، شماره، سازنده و اولین فعال شدن منجمد؛ پاک‌نشدنی؛ یک فعال برای هر نوع', async () => {
+      // نسخهٔ تازه با هر نشانی از فعال شدن یا پیش‌نمایش: نه (تریگر پیش از CHECK).
+      expect(await insertRow({ isActive: true })).toBe('ticket_templates_activated');
+      for (const over of [
+        { isActive: true, activatedAt: NOW },
+        { activatedAt: NOW },
+        { previewAt: NOW },
+        { previewOrderNumber: 10001 },
+        { previewPages: 1 },
+        { previewPdfKey: 'ticket-templates/1/preview.pdf' },
+        { previewPngKey: 'ticket-templates/1/preview.png' },
+        { previewError: 'bijak خط 1: x' },
+        { previewBlocked: ['https://example.com/a.png'] },
+      ]) {
+        expect(await insertRow(over), JSON.stringify(over)).toBe('ticket_templates_insert_state');
+      }
+      // شکل: خالی و بزرگ‌تر از سقف، sha256، شماره و نام فایل.
+      expect(await insertRow({ html: '' })).toBe('ticket_templates_size');
+      expect(await insertRow({ html: 'x'.repeat(TICKET_TEMPLATE_MAX_BYTES + 1) })).toBe('ticket_templates_size');
+      expect(await insertRow({ html: 'x'.repeat(TICKET_TEMPLATE_MAX_BYTES) })).toBeUndefined();
+      expect(await insertRow({ version: 901, sha256: 'A'.repeat(64) })).toBe('ticket_templates_sha256');
+      expect(await insertRow({ version: 0 })).toBe('ticket_templates_version_positive');
+      expect(await insertRow({ version: 901, fileName: '' })).toBe('ticket_templates_file_name');
+      expect(await insertRow({ version: 900 })).toBe('ticket_templates_version');
+
+      const one = await upload('bijak', 'یک');
+      const other = await upload('first_page', 'دو');
+      for (const set of [
+        { html: html('عوض') },
+        { kind: 'first_page' as const },
+        { version: 7 },
+        { sha256: 'c'.repeat(64) },
+        { fileName: 'other.html' },
+        { createdBy: randomUUID() },
+        { createdAt: new Date(NOW.getTime() + MINUTE) },
+        // اولین فعال شدن فقط با فعال شدن.
+        { activatedAt: NOW },
+      ]) {
+        expect(await change(one.id, set), JSON.stringify(set)).toBe('ticket_templates_frozen');
+      }
+      expect(await rejectedConstraint(conn.db.delete(ticketTemplates).where(eq(ticketTemplates.id, one.id)))).toBe('ticket_templates_append_only');
+
+      // پیش‌نمایش: صفحه یا خطا، با زمانش؛ فایل‌ها با صفحه‌ها.
+      expect(await change(one.id, { previewPages: 1, previewPdfKey: 'a.pdf', previewPngKey: 'a.png' })).toBe('ticket_templates_preview');
+      expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPdfKey: 'a.pdf', previewPngKey: 'a.png', previewError: 'x' })).toBe('ticket_templates_preview');
+      expect(await change(one.id, { previewAt: NOW })).toBe('ticket_templates_preview');
+      expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPdfKey: 'a.pdf' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPngKey: 'a.png' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewError: 'x', previewPngKey: 'a.png' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewError: 'x', previewPdfKey: 'a.pdf' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewPages: 0, previewPdfKey: 'a.pdf', previewPngKey: 'a.png' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPdfKey: 'a.pdf', previewPngKey: 'a.png' })).toBeUndefined();
+
+      // فعال: اولین فعال شدن یک بار، و یک فعال در هر نوع.
+      expect(await change(one.id, { isActive: true })).toBe('ticket_templates_activated');
+      expect(await change(one.id, { isActive: true, activatedAt: NOW })).toBeUndefined();
+      expect(await change(one.id, { activatedAt: new Date(NOW.getTime() + MINUTE) })).toBe('ticket_templates_frozen');
+      const two = await upload('bijak', 'سه');
+      expect(await change(two.id, { isActive: true, activatedAt: NOW })).toBe('ticket_templates_one_active');
+      expect(await change(other.id, { isActive: true, activatedAt: NOW })).toBeUndefined();
+      expect(await change(one.id, { isActive: false })).toBeUndefined();
+      expect(await change(one.id, { isActive: true })).toBeUndefined();
+
+      // کار هر چیز یک هدف دارد؛ برگه با قالب بیجک بیجک است و با قالب برگهٔ اول برگهٔ اول.
+      const orderId = await paidOrder();
+      expect(
+        await rejectedConstraint(conn.db.insert(jobs).values({ kind: PREVIEW_TICKET_TEMPLATE_JOB, ticketTemplateId: one.id, orderId })),
+      ).toBe('jobs_one_target');
+      const ticket = (over: Partial<typeof orderTickets.$inferInsert>) =>
+        rejectedConstraint(
+          conn.db
+            .insert(orderTickets)
+            .values({
+              orderId,
+              storageKey: 'orders/1/ticket.pdf',
+              sizeBytes: 10,
+              sha256: 'b'.repeat(64),
+              previewKey: 'orders/1/ticket.png',
+              stamp: 'd'.repeat(64),
+              pageCount: 2,
+              ...over,
+            })
+            .onConflictDoUpdate({ target: orderTickets.orderId, set: { bijakTemplateId: over.bijakTemplateId ?? null, firstPageTemplateId: over.firstPageTemplateId ?? null } }),
+        );
+      expect(await ticket({ bijakTemplateId: other.id })).toBe('order_tickets_template_kind');
+      expect(await ticket({ firstPageTemplateId: one.id })).toBe('order_tickets_template_kind');
+      expect(await ticket({ pageCount: 0 })).toBe('order_tickets_pages');
+      expect(await ticket({ bijakTemplateId: one.id, firstPageTemplateId: other.id })).toBeUndefined();
+      expect(await ticket({ bijakTemplateId: two.id, firstPageTemplateId: other.id })).toBeUndefined();
+      expect(await ticket({ bijakTemplateId: other.id, firstPageTemplateId: other.id })).toBe('order_tickets_template_kind');
+    });
+
+    it('بارگذاری: شمارهٔ بعدی همان نوع، رویداد بی متن، و پیش‌نمایش ساختگی همان لحظه؛ دو بارگذاری هم‌زمان دو شماره', async () => {
+      const first = await upload('bijak', 'یک');
+      expect(first).toMatchObject({
+        kind: 'bijak',
+        version: 1,
+        sha256: shaOf(html('یک')),
+        fileName: 'bijak.html',
+        sizeBytes: Buffer.byteLength(html('یک')),
+        createdBy: 'سارا رضایی',
+        isActive: false,
+        activatedAt: null,
+        preview: { job: 'busy', jobError: null, at: null, orderNumber: null, pages: null, pdfKey: null, pngKey: null, blocked: [], error: null },
+      });
+      // هم‌زمان: زیر یک قفل پشت‌سرهم، پس شماره‌های پشت‌سرهم، نه خطای ایندکس یکتای (نوع، شماره).
+      const many = await Promise.all(Array.from({ length: 8 }, (_, i) => upload('bijak', `هم‌زمان ${i}`)));
+      expect(many.map((v) => v.version).sort((x, y) => x - y)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+      expect((await upload('first_page', 'چهار')).version).toBe(1);
+      const previewJobs = await conn.db.select().from(jobs).where(eq(jobs.kind, PREVIEW_TICKET_TEMPLATE_JOB));
+      expect(previewJobs.map((job) => [job.ticketTemplateId, job.status, job.payload]).sort()).toEqual(
+        (await templates().versions()).map((v) => [v.id, 'queued', {}]).sort(),
+      );
+      const [event] = await templateEvents();
+      expect(event).toMatchObject({
+        adminUserId: admin,
+        action: 'settings.template_upload',
+        targetType: 'ticket_template',
+        targetId: String(first.id),
+        detail: { kind: 'bijak', version: 1, fileName: 'bijak.html', bytes: Buffer.byteLength(html('یک')) },
+      });
+      expect(JSON.stringify(await templateEvents())).not.toContain('<p>');
+      // تازه‌ترین اول در هر نوع.
+      expect((await templates().versions()).map((v) => [v.kind, v.version])).toEqual([
+        ...[9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => ['bijak', n]),
+        ['first_page', 1],
+      ]);
+      expect(await templates().source(first.id)).toEqual({ kind: 'bijak', version: 1, fileName: 'bijak.html', html: html('یک') });
+      expect(await templates().source(first.id + 1000)).toBeNull();
+    });
+
+    it('پیش‌نمایش دوباره همان کار را با دادهٔ تازه دوباره در صف می‌گذارد؛ حال کار و نتیجه در فهرست', async () => {
+      const one = await upload('first_page', 'یک');
+      await conn.db
+        .update(jobs)
+        .set({ status: 'failed', attempts: 3, lastError: 'order_missing: 10999', finishedAt: NOW })
+        .where(eq(jobs.ticketTemplateId, one.id));
+      await previewed(one.id, { previewBlocked: ['https://example.com/a.png'] });
+      const [listed] = await templates().versions();
+      expect(listed!.preview).toEqual({
+        job: 'failed',
+        jobError: 'order_missing: 10999',
+        at: NOW,
+        orderNumber: null,
+        pages: 2,
+        pdfKey: `ticket-templates/${one.id}/preview.pdf`,
+        pngKey: `ticket-templates/${one.id}/preview.png`,
+        gone: false,
+        blocked: ['https://example.com/a.png'],
+        error: null,
+      });
+      const request = (id: number, orderNumber: number | null) => templates().requestPreview({ id, orderNumber, actor: actor(), at: NOW });
+      expect(await request(one.id, 10001)).toBe('ok');
+      const [job] = await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id));
+      expect(job).toMatchObject({ status: 'queued', attempts: 0, lastError: null, finishedAt: null, payload: { orderNumber: 10001 } });
+      expect((await templates().versions())[0]!.preview.job).toBe('busy');
+      // در صف یا در دست کارگر: درخواست دوم نه، تا «انجام شد» کارگر آن را گم نکند.
+      expect(await request(one.id, null)).toBe('busy');
+      await conn.db.update(jobs).set({ status: 'running', lockedBy: 'worker-a' }).where(eq(jobs.ticketTemplateId, one.id));
+      expect(await request(one.id, null)).toBe('busy');
+      await conn.db.update(jobs).set({ status: 'done', lockedBy: null }).where(eq(jobs.ticketTemplateId, one.id));
+      expect((await templates().versions())[0]!.preview.job).toBe('done');
+      expect(await request(one.id, null)).toBe('ok');
+      expect((await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id)))[0]!.payload).toEqual({});
+      expect(await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id))).toHaveLength(1);
+      expect(await request(one.id + 1000, null)).toBe('not_found');
+      // کاری که نبود، تازه.
+      await conn.db.delete(jobs).where(eq(jobs.ticketTemplateId, one.id));
+      expect(await request(one.id, 10001)).toBe('ok');
+      expect((await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id)))[0]).toMatchObject({ status: 'queued', payload: { orderNumber: 10001 } });
+      expect((await templateEvents()).filter((e) => e.action === 'settings.template_preview').map((e) => [e.targetId, e.detail])).toEqual([
+        [String(one.id), { kind: 'first_page', version: 1, orderNumber: 10001 }],
+        [String(one.id), { kind: 'first_page', version: 1, orderNumber: null }],
+        [String(one.id), { kind: 'first_page', version: 1, orderNumber: 10001 }],
+      ]);
+      // سفارش پیش‌نمایش: وضعیت و پاک شدن فایل‌ها؛ نبود.
+      const orderId = await paidOrder();
+      const [{ orderNumber }] = (await conn.db.select({ orderNumber: orders.orderNumber }).from(orders).where(eq(orders.id, orderId))) as [{ orderNumber: number }];
+      expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'paid', filesDeleted: false });
+      expect(await templates().previewOrder(orderNumber + 1000)).toBeNull();
+      // پیش‌نمایش با همین سفارش: تا فایل‌هایش هست «gone» نه؛ پس از پاک شدن آنها (`retention.py`) آری، و فقط برای همان سفارش.
+      const other = await upload('first_page', 'نمونه');
+      await previewed(one.id, { previewOrderNumber: orderNumber });
+      await previewed(other.id);
+      const goneOf = async (id: number) => (await templates().versions()).find((v) => v.id === id)!.preview;
+      expect(await goneOf(one.id)).toMatchObject({ orderNumber, gone: false });
+      await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, orderId));
+      await conn.db.update(orders).set({ status: 'handed_to_post', handedToPostAt: NOW }).where(eq(orders.id, orderId));
+      await conn.db.update(orders).set({ filesDeletedAt: NOW }).where(eq(orders.id, orderId));
+      expect(await goneOf(one.id)).toMatchObject({ orderNumber, gone: true });
+      expect(await goneOf(other.id)).toMatchObject({ orderNumber: null, gone: false });
+      expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'handed_to_post', filesDeleted: true });
+    });
+
+    it('فعال کردن: فقط با پیش‌نمایش درست و همان که دیده شد؛ قبلی خاموش؛ برگهٔ «در صف چاپ» از نو؛ رویداد؛ برگشت به پیش‌فرض', async () => {
+      const v1 = await upload('bijak', 'یک');
+      const v2 = await upload('bijak', 'دو');
+      const fp = await upload('first_page', 'برگه');
+      const seen = (sha: string, at: Date) => (row: { sha256: string; previewAt: Date }) => row.sha256 === sha && row.previewAt.getTime() === at.getTime();
+      const activate = (id: number | null, expectedActive: number | null, verify = seen(shaOf(html(id === v2.id ? 'دو' : 'یک')), NOW), kind: 'bijak' | 'first_page' = 'bijak') =>
+        templates().activate({ kind, id, expectedActive, verify, actor: actor(), at: NOW });
+
+      // بی پیش‌نمایش، با پیش‌نمایش خطادار، نوع دیگر، شناسهٔ ناموجود، و دیده‌شده‌ای که دیگر نیست.
+      expect(await activate(v1.id, null)).toEqual({ ok: false, reason: 'no_preview' });
+      await previewed(v1.id, { previewPages: null, previewPdfKey: null, previewPngKey: null, previewError: 'bijak خط 3: x' });
+      expect(await activate(v1.id, null)).toEqual({ ok: false, reason: 'no_preview' });
+      await previewed(v1.id, { previewError: null });
+      expect(await activate(fp.id, null)).toEqual({ ok: false, reason: 'not_found' });
+      expect(await activate(v2.id + 1000, null)).toEqual({ ok: false, reason: 'not_found' });
+      expect(await activate(v1.id, null, seen(shaOf(html('یک')), new Date(NOW.getTime() - MINUTE)))).toEqual({ ok: false, reason: 'changed' });
+      expect(await activeOf('bijak')).toBeNull();
+
+      // سفارش‌ها: «در صف چاپ» با برگهٔ ساخته یا شکست‌خورده از نو؛ در صف یا در دست کارگر همان؛ «در حال چاپ» نه.
+      const done = await paidOrder();
+      const failed = await paidOrder();
+      const running = await paidOrder();
+      const printing = await paidOrder();
+      await setTicketJob(done, { status: 'done', attempts: 1, finishedAt: NOW });
+      await setTicketJob(failed, { status: 'failed', attempts: 3, lastError: 'template_error: bijak خط 2: x', finishedAt: NOW });
+      await setTicketJob(running, { status: 'running', attempts: 1, lockedBy: 'worker-a', lockedUntil: new Date(NOW.getTime() + 10 * MINUTE) });
+      await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, printing));
+      await setTicketJob(printing, { status: 'done', attempts: 1, finishedAt: NOW });
+      expect(await templates().queuedOrders()).toBe(3);
+
+      expect(await activate(v1.id, null)).toEqual({ ok: true, already: false, previous: null, requeued: 2 });
+      expect(await activeOf('bijak')).toBe(v1.id);
+      for (const id of [done, failed]) {
+        expect(await ticketJob(id)).toMatchObject({ status: 'queued', attempts: 0, lastError: null, finishedAt: null, lockedBy: null });
+      }
+      expect(await ticketJob(running)).toMatchObject({ status: 'running', lockedBy: 'worker-a' });
+      expect(await ticketJob(printing)).toMatchObject({ status: 'done' });
+      const [activated] = await conn.db.select().from(ticketTemplates).where(eq(ticketTemplates.id, v1.id));
+      expect(activated).toMatchObject({ isActive: true, activatedAt: NOW });
+
+      // دوباره همان: «از پیش فعال»، بی رویداد. صفحه‌ای که پیش از فعال شدن دیده شد: «عوض شد».
+      expect(await activate(v1.id, null)).toEqual({ ok: true, already: true, previous: 1, requeued: 0 });
+      await previewed(v2.id);
+      expect(await activate(v2.id, null)).toEqual({ ok: false, reason: 'changed' });
+      expect(await activate(v2.id, v1.id, () => false)).toEqual({ ok: false, reason: 'changed' });
+      expect(await activeOf('bijak')).toBe(v1.id);
+
+      await setTicketJob(done, { status: 'done', finishedAt: NOW });
+      const later = new Date(NOW.getTime() + 5 * MINUTE);
+      expect(await templates().activate({ kind: 'bijak', id: v2.id, expectedActive: v1.id, verify: seen(shaOf(html('دو')), NOW), actor: actor(), at: later })).toEqual({
+        ok: true,
+        already: false,
+        previous: 1,
+        requeued: 1,
+      });
+      // برگشت به نسخهٔ قبل: اولین فعال شدنش همان می‌ماند.
+      expect(await templates().activate({ kind: 'bijak', id: v1.id, expectedActive: v2.id, verify: seen(shaOf(html('یک')), NOW), actor: actor(), at: later })).toMatchObject({
+        ok: true,
+        previous: 2,
+      });
+      expect((await conn.db.select().from(ticketTemplates).where(eq(ticketTemplates.id, v1.id)))[0]).toMatchObject({ isActive: true, activatedAt: NOW });
+      expect((await conn.db.select().from(ticketTemplates).where(eq(ticketTemplates.id, v2.id)))[0]).toMatchObject({ isActive: false, activatedAt: later });
+
+      // برگشت به پیش‌فرض: بی نسخهٔ فعال؛ بار دوم «از پیش».
+      expect(await templates().activate({ kind: 'bijak', id: null, expectedActive: v2.id, verify: () => true, actor: actor(), at: later })).toEqual({
+        ok: false,
+        reason: 'changed',
+      });
+      expect(await templates().activate({ kind: 'bijak', id: null, expectedActive: v1.id, verify: () => false, actor: actor(), at: later })).toMatchObject({
+        ok: true,
+        already: false,
+        previous: 1,
+      });
+      expect(await activeOf('bijak')).toBeNull();
+      expect(await templates().activate({ kind: 'bijak', id: null, expectedActive: v1.id, verify: () => true, actor: actor(), at: later })).toEqual({
+        ok: true,
+        already: true,
+        previous: null,
+        requeued: 0,
+      });
+      expect((await templateEvents()).filter((e) => e.action !== 'settings.template_upload').map((e) => [e.action, e.targetId, e.detail])).toEqual([
+        ['settings.template_activate', String(v1.id), { kind: 'bijak', from: null, to: 1, requeued: 2 }],
+        ['settings.template_activate', String(v2.id), { kind: 'bijak', from: 1, to: 2, requeued: 1 }],
+        ['settings.template_activate', String(v1.id), { kind: 'bijak', from: 2, to: 1, requeued: 0 }],
+        ['settings.template_default', 'bijak', { kind: 'bijak', from: 1, to: null, requeued: 0 }],
+      ]);
+    });
+
+    it('دو فعال کردن هم‌زمان از یک صفحه: یکی فعال می‌شود و دیگری «عوض شد»، نه خطای ایندکس یکتا', async () => {
+      const a = await upload('first_page', 'یک');
+      const b = await upload('first_page', 'دو');
+      await previewed(a.id);
+      await previewed(b.id);
+      const results = await Promise.all(
+        [a, b].map((v) => templates().activate({ kind: 'first_page', id: v.id, expectedActive: null, verify: () => true, actor: actor(), at: NOW })),
+      );
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'changed' }]);
+      expect(await activeOf('first_page')).toBe(results[0]!.ok ? a.id : b.id);
+    });
+  });
   // در همین فایل، به همان دلیل «سند و آپلود». متن‌ها، مجوز و سنجش فرم در سرویس‌های پنل با ذخیره‌گاه ساختگی
   // (`apps/admin/lib/server/*.test.ts`)؛ اینجا همان که فقط پستگرس معنایش را دارد: محافظ‌ها، قفل، تراکنش و هم‌زمانی.
   describe('چاپخانه‌ها و تخصیص روی پستگرس (برش ۵٫۲)', () => {
@@ -4174,7 +4601,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -5466,7 +5893,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -5842,7 +6269,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -6316,7 +6743,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -8099,7 +8526,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
