@@ -10,11 +10,11 @@
  */
 
 import type { ItemSpec, OrderSpec } from '@jozveyar/contracts';
-import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/constants';
+import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/files';
 import { itemPageCount, wholeDocumentRule } from '@jozveyar/pricing';
 import { ERROR_MESSAGES, type FileKind } from './analysis-protocol';
 import { isFileError, isServerPath, type AnalysisState } from './fileAnalysis';
-import { REFUSED_CODES, isRuleError, ruleErrorText, unsupportedHint } from './fileRules';
+import { REFUSED_CODES, formatOffText, isRuleError, ruleErrorText, unsupportedHint } from './fileRules';
 import { summarize, type AnalysisSummaryView } from './fileSummary';
 import type { RestoredFile, Section } from './jozve';
 import type { OrderConfig } from './orderConfig';
@@ -123,7 +123,11 @@ export function sectionView(section: Section, rules: FileRules = DEFAULT_FILE_RU
 
   let blocked: SectionView['blocked'] = null;
   if (!serverReady) {
-    if (isFileError(analysis) && analysis.error) {
+    if (section.kind !== null && section.kind !== 'pdf' && !rules.formats[section.kind]) {
+      // خانوادهٔ خاموش (برش ۸٫۴): همان لحظهٔ انداختن بیرون از قیمت؛ آپلودش را سرور با `format_off` رد می‌کند. فایلی که پیش‌تر رسیده
+      // (`serverReady`) دست نمی‌خورد.
+      blocked = { ...formatOffText(section.kind), refused: true };
+    } else if (isFileError(analysis) && analysis.error) {
       const { code } = analysis.error;
       // متن قاعده‌های فایل با عدد خود فایل و سقف همین صفحه (برش ۸٫۴)؛ صف فقط کد گذاشته.
       const text = isRuleError(code)

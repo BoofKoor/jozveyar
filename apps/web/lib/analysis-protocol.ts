@@ -22,13 +22,6 @@ export const MAX_PAGES_TO_ANALYZE = 200;
 /** بعد از این تعداد صفحه، اولین قیمت نشان داده می‌شود و بقیه در پس‌زمینه ادامه می‌یابد. */
 export const FIRST_PRICE_AFTER_PAGES = 8;
 
-/**
- * پسوندهایی که می‌پذیریم — همان فهرست سرور (`KINDS` در `lib/server/uploads.ts`)،
- * که تصمیم آخر با اوست. PDF در مرورگر خوانده می‌شود؛ بقیه روی سرور به PDF تبدیل
- * می‌شوند (ADR-028).
- */
-export const ACCEPTED_EXTENSIONS = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'jpg', 'jpeg', 'png', 'webp', 'heic'];
-
 export function extensionOf(name: string): string {
   return /\.([a-z0-9]{2,5})$/i.exec(name)?.[1]?.toLowerCase() ?? '';
 }
@@ -73,6 +66,11 @@ export interface AnalyzeRequest {
   buffer: ArrayBuffer;
   thresholds: DetectionThresholds;
   maxPagesToAnalyze: number;
+  /**
+   * سقف صفحهٔ هر فایل (برش ۸٫۴، `file.max_pages`): سند بیشتر همان لحظهٔ باز شدن با `too_many_pages` و شمار صفحه‌هایش برمی‌گردد، نه
+   * بررسی و نه آپلود. بی آن سقفی نیست (سرور هنوز می‌سنجد).
+   */
+  maxPages?: number;
 }
 
 export type WorkerResponse =
@@ -81,7 +79,8 @@ export type WorkerResponse =
   | { kind: 'done'; job: number; analysis: DocumentAnalysis }
   /** پایان کار «فقط شمارش». */
   | { kind: 'counted'; job: number; pageCount: number }
-  | { kind: 'error'; job: number; code: WorkerErrorCode; message: string };
+  /** `pageCount` فقط با `too_many_pages`: شمار صفحهٔ سندی که از سقف بیشتر است. */
+  | { kind: 'error'; job: number; code: WorkerErrorCode | 'too_many_pages'; message: string; pageCount?: number };
 
 export type AnalysisErrorCode =
   | 'password_protected'

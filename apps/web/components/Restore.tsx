@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import type { CheckoutItem } from '@jozveyar/contracts/checkout';
-import type { FileRules } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import { tabStorage, writeDraft } from '../lib/draft';
 import { RESTORING_ATTR } from '../lib/draftKey';
 import type { FollowDocument, RestoredSection } from '../lib/jozveController';
@@ -123,13 +123,13 @@ const followDocument: FollowDocument = (documentId, upload, onChange) => {
  * رابط پس از فایل نشانه را برمی‌دارد (`OrderDesk`)؛ برنگشت، همین‌جا: صفحهٔ معمول، و اگر جزوه‌ای بود (`lost`)، یک خط
  * که چرا.
  */
-export function Restore({ state, jozve, rules, onConfig, onDone }: RestoreProps) {
+export function Restore({ state, jozve, onConfig, onDone }: RestoreProps) {
   useEffect(() => {
     if (state !== 'restoring') return;
     let live = true;
     // یک بار، حتی اگر React در حالت سخت‌گیر اثر را دو بار اجرا کند. خطای پیش‌بینی‌نشده: صفحهٔ معمول، و پیش‌نویس
     // پاک، تا هر بار صفحه همان خطا نشود.
-    restoring ??= restoreDraft(rules).catch(() => {
+    restoring ??= restoreDraft(jozve.rules).catch(() => {
       writeDraft(tabStorage(), null);
       return null;
     });

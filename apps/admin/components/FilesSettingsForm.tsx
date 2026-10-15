@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 
-import type { FileRules } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import { formatNumber } from '@jozveyar/text';
 
 import { saveFilesAction, type FilesState } from '../app/[gate]/actions';

@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { FILE_MAX_MB_LIMIT, FILE_MAX_PAGES_LIMIT } from './constants.js';
+import { FILE_MAX_MB_LIMIT, FILE_MAX_PAGES_LIMIT } from './files.js';
 
 /** یک تعطیلی رسمی: تاریخ شمسی به شکل `formatJalaliNumeric` (`1405/10/02`). */
 export const holidaySchema = z.object({

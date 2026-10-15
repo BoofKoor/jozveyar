@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
-import { MAX_SECTIONS_PER_ITEM, type FileRules } from '@jozveyar/contracts/constants';
+import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import { DEFAULT_PAPER_SIZE, minOrderGapRials, pausedOf, quote, type PausedOptions } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import { effectiveConfig, type Replacement } from '../lib/catalog';
@@ -40,6 +41,7 @@ import { Names, Note, SingleFileCard, jozveTitleId } from './AnalysisCard';
 import { ConfigPanel, type ConfigQuote } from './ConfigPanel';
 import { AskLater, JozveSettings, NewJozve, OverflowNote, type MenuItem } from './DeskParts';
 import { DeskFilesContext } from './DeskFiles';
+import { acceptOf } from '../lib/fileRules';
 import { JozveFiles } from './JozveFiles';
 import { OrderSummary, PriceDock, roundUpToToman, type DeskAction } from './OrderSummary';
 import { FlowNav, jozveSpecLabel, type JozveLine } from './checkout/parts';
@@ -190,8 +192,6 @@ export { fetchStatus, loadCheckout, markOf, type HistoryMark };
 export interface RestoreProps {
   state: 'restoring' | 'lost';
   jozve: JozveHandle;
-  /** قاعده‌های فایل همین صفحه (برش ۸٫۴). */
-  rules: FileRules;
   onConfig: (next: OrderConfig) => void;
   onDone: (state: 'lost' | null) => void;
 }
@@ -233,9 +233,6 @@ export function Restore(props: RestoreProps) {
 
 interface Props {
   jozve: JozveHandle;
-  /** قاعده‌های فایل همین صفحه (برش ۸٫۴)، و `accept` فایل‌گزین‌ها؛ از پوسته. */
-  rules: FileRules;
-  accept: string;
   /**
    * تنظیم جزوهٔ اول که پوسته نگه می‌دارد، تا با «از اول» نرود؛ null یعنی پیش‌فرض‌ها. جزوه‌های دیگر تنظیمشان را در چیدمان
    * همین‌جا دارند (`lib/layout.ts`).
@@ -299,7 +296,9 @@ function priceOf(parts: readonly JozvePart[], priceList: PriceList) {
  * تعرفه همان تعرفهٔ فعال پایگاه داده است که سرور با آن قیمت قطعی می‌دهد، از JSON درون HTML صفحه (برش ۴٫۴، `lib/tariff.ts`)؛
  * یک بار در هر بار سوار شدن خوانده می‌شود.
  */
-export function OrderDesk({ jozve, rules: pageRules, accept, config, onConfig }: Props) {
+export function OrderDesk({ jozve, config, onConfig }: Props) {
+  /** قاعده‌های فایل همین صفحه (برش ۸٫۴)، از صف جزوه؛ `accept` فایل‌گزین‌های میز همین‌جا ساخته می‌شود، نه در پوسته. */
+  const pageRules = jozve.rules;
   const [{ priceList, slaDays, paused: pagePaused }] = useState(pageTariff);
   /**
    * گزینه‌های موقتاً خاموش (برش ۸٫۴، سؤال ۱۸۸): از JSON همین صفحه، و تازه‌تر از پاسخ ۴۰۹ `option_unavailable` سرور، که فهرست همین
@@ -333,6 +332,7 @@ export function OrderDesk({ jozve, rules: pageRules, accept, config, onConfig }:
   }, []);
   const byKey = useMemo(() => new Map(jozve.sections.map((section) => [section.key, section])), [jozve.sections]);
   const jozves = useMemo(() => jozvesOf(synced, byKey, priceList, rules, paused), [synced, byKey, priceList, rules, paused]);
+  const accept = useMemo(() => acceptOf(rules.formats), [rules.formats]);
   const deskFiles = useMemo(() => ({ rules, accept }), [rules, accept]);
   const multi = jozves.length > 1;
   const priced = useMemo(() => priceOf(jozves, priceList), [jozves, priceList]);

@@ -10,7 +10,7 @@
  */
 
 import type { Holiday } from '@jozveyar/contracts';
-import { FILE_FAMILIES, type FileRules } from '@jozveyar/contracts/constants';
+import { FILE_FAMILIES, type FileRules } from '@jozveyar/contracts/files';
 import type { KeyCheck, ServiceKeyName } from '@jozveyar/db';
 import { SMS_TEMPLATES, paramMark, type SmsPurpose } from '@jozveyar/sms';
 import { formatJalaliNumeric, formatNumber, formatTehranTime, jalaliYear, toLatinDigits } from '@jozveyar/text';

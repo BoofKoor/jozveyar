@@ -8,13 +8,14 @@
  */
 
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
-import type { FileRules } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import {
   ERROR_MESSAGES,
   FIRST_PRICE_AFTER_PAGES,
   MAX_BROWSER_ANALYSIS_BYTES,
   fileKind,
   type AnalysisErrorCode,
+  type WorkerErrorCode,
   type WorkerResponse,
 } from './analysis-protocol';
 
@@ -89,8 +90,8 @@ export function initialAnalysis(file: { name: string; size: number }, rules?: Fi
       error: { code: 'unsupported_type', ...ERROR_MESSAGES.unsupported_type },
     };
   }
-  // قاعده‌های فایل (برش ۸٫۴): همان لحظهٔ انداختن، پیش از هر خواندن و آپلودی؛ متن را رابط پس از فایل با عدد خود فایل می‌سازد.
-  if (rules && kind !== 'pdf' && !rules.formats[kind]) return { ...base, phase: 'error', error: { code: 'format_off', title: '', hint: '' } };
+  // حجم بیش از سقف (برش ۸٫۴): همان لحظهٔ انداختن، پیش از خواندن و آپلود؛ متن را رابط پس از فایل با عدد خود فایل می‌سازد. خانوادهٔ
+  // خاموش را خود نما می‌گیرد (`jozveView`) و سرور آپلودش را رد می‌کند (`format_off`)، تا پوسته سبک بماند.
   if (rules && file.size > rules.maxMb * 1048576) return { ...base, phase: 'error', error: { code: 'too_large', title: '', hint: '' } };
   if (kind === 'image') return { ...base, phase: 'needs_server', pageCount: 1, estimatedFrom: 'image' };
   if (kind !== 'pdf') return { ...base, phase: 'needs_server' };
@@ -138,7 +139,13 @@ export function applyWorkerMessage(
         elapsedMs: message.analysis.elapsedMs,
       };
     case 'error':
-      return { ...state, phase: 'error', error: { code: message.code, ...ERROR_MESSAGES[message.code] } };
+      // `too_many_pages` (۸٫۴) متن ندارد: رابط پس از فایل با عدد خود سند و سقف همان لحظه می‌سازدش.
+      return {
+        ...state,
+        phase: 'error',
+        pageCount: message.pageCount ?? state.pageCount,
+        error: { code: message.code, ...(ERROR_MESSAGES[message.code as WorkerErrorCode] ?? { title: '', hint: '' }) },
+      };
     default:
       return state;
   }

@@ -303,6 +303,11 @@ async function inspect(doc: pdfjs.PDFDocumentProxy, request: AnalyzeRequest): Pr
     post({ kind: 'error', job, code: 'no_pages', message: 'سند صفحه‌ای ندارد' });
     return;
   }
+  // سقف صفحهٔ هر فایل (برش ۸٫۴): همان لحظهٔ شمردن، پیش از بررسی و آپلود؛ اینجا، نه در صف، تا پوسته سبک بماند.
+  if (request.maxPages !== undefined && pageCount > request.maxPages) {
+    post({ kind: 'error', job, code: 'too_many_pages', message: '', pageCount });
+    return;
+  }
 
   if (request.countOnly) {
     // قیمت کل جزوه فقط تعداد صفحه‌ها را لازم دارد؛ رنگ و کیفیت در نوبت خودش.

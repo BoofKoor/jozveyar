@@ -540,9 +540,10 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
     const priced = (bindingTypeId: string, copies: number) => quoted(bindingTypeId, copies).totalWithoutShippingRials;
     expect([priced(DEFAULT_BINDING_TYPE_ID, 1), priced('staple', 1), priced('staple', 2)]).toEqual([610_000, 240_000, 480_000]);
 
-    // صفحهٔ اصلی: A5 در تعرفه نیست؛ Word نه در کارت بارگذاری، نه در انتخاب فایل، نه در سؤال‌ها.
+    // صفحهٔ اصلی: A5 در تعرفه نیست، پس جدول همان یک اندازه است، بی نام اندازه (۸٫۳)؛ Word نه در کارت بارگذاری، نه در انتخاب فایل،
+    // نه در سؤال‌ها.
     await shop.goto('/');
-    await expect(shop.getByTestId('tariff-print').locator('dt')).toHaveText(['سیاه‌سفید A4', 'رنگی A4']);
+    await expect(shop.getByTestId('tariff-print').locator('dt')).toHaveText(['سیاه‌سفید', 'رنگی']);
     await expect(shop.locator('.jy-drop__format')).toHaveText(['PDF', 'پاورپوینت', 'عکس']);
     expect(await shop.locator('#jozve-file').getAttribute('accept')).toBe('.pdf,.pptx,.ppt,.jpg,.jpeg,.png,.webp,.heic');
     await expect(shop.locator('#faq')).toContainText('PDF، پاورپوینت و عکس اسکن‌شده.');

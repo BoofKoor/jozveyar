@@ -99,18 +99,16 @@ describe('حالت اولیه از نوع و حجم فایل', () => {
     expect(isFileError(xlsx)).toBe(true);
   });
 
-  it('قاعده‌های فایل (۸٫۴): خانوادهٔ خاموش و حجم بیش از سقف همان لحظه خطای خود فایل‌اند؛ PDF هرگز خاموش نیست', () => {
+  it('قاعده‌های فایل (۸٫۴): حجم بیش از سقف همان لحظه خطای خود فایل است، پیش از خواندن؛ خانوادهٔ خاموش را نما می‌گیرد', () => {
     const rules = { formats: { word: false, slides: true, image: false }, maxMb: 10, maxPages: 1500 };
-    for (const name of ['j.docx', 'j.doc', 'scan.png']) {
-      const state = initialAnalysis({ name, size: 10 }, rules);
-      expect(state).toMatchObject({ phase: 'error', error: { code: 'format_off' } });
-      expect(isFileError(state)).toBe(true);
-    }
-    expect(initialAnalysis({ name: 's.pptx', size: 10 }, rules).phase).toBe('needs_server');
     expect(initialAnalysis({ name: 'a.pdf', size: 10 * 1024 * 1024 }, rules).phase).toBe('queued');
-    const big = initialAnalysis({ name: 'a.pdf', size: 10 * 1024 * 1024 + 1 }, rules);
-    expect(big).toMatchObject({ phase: 'error', error: { code: 'too_large' } });
-    expect(isFileError(big)).toBe(true);
+    for (const name of ['a.pdf', 'j.docx']) {
+      const big = initialAnalysis({ name, size: 10 * 1024 * 1024 + 1 }, rules);
+      expect(big, name).toMatchObject({ phase: 'error', error: { code: 'too_large' } });
+      expect(isFileError(big), name).toBe(true);
+    }
+    // Word خاموش در خود حالت فایل نیست: نما بیرونش می‌گذارد و سرور آپلودش را رد می‌کند (`jozve.test.ts`).
+    expect(initialAnalysis({ name: 'j.docx', size: 10 }, rules).phase).toBe('needs_server');
     // بی قاعده (پیش از ۸٫۴) هیچ سقفی سنجیده نمی‌شود؛ سرور هنوز می‌سنجد.
     expect(initialAnalysis({ name: 'j.docx', size: 2 * 1024 ** 3 }).phase).toBe('needs_server');
   });
@@ -118,6 +116,15 @@ describe('حالت اولیه از نوع و حجم فایل', () => {
 
 describe('پیام‌های کارگر', () => {
   const queued = initialAnalysis({ name: 'a.pdf', size: 1000 });
+
+  it('بیش از سقف صفحه (۸٫۴): کارگر همان لحظهٔ شمردن برمی‌گرداند؛ خطای خود فایل با شمار صفحه‌اش، متن با رابط پس از فایل', () => {
+    const refused = applyWorkerMessage(queued, { kind: 'error', job: 1, code: 'too_many_pages', message: '', pageCount: 1820 }, 3);
+    expect(refused).toMatchObject({ phase: 'error', pageCount: 1820, error: { code: 'too_many_pages', title: '', hint: '' } });
+    expect(isFileError(refused)).toBe(true);
+    // خطای دیگر کارگر شمار صفحه را دست نمی‌زند و متن خودش را دارد.
+    const corrupt = applyWorkerMessage({ ...queued, pageCount: 12 }, { kind: 'error', job: 1, code: 'corrupt_file', message: '' }, 3);
+    expect(corrupt).toMatchObject({ pageCount: 12, error: { code: 'corrupt_file', title: 'این فایل خوانده نشد' } });
+  });
 
   it('شمارش فقط تعداد صفحه را می‌گذارد و فایل در صف بررسی می‌ماند', () => {
     const counted = applyWorkerMessage(queued, { kind: 'counted', job: 1, pageCount: 40 }, 5);

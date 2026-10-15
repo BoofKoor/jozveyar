@@ -1,4 +1,4 @@
-import type { FileRules } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 
 /**
  * محتوای ثابت کارت بارگذاری، از طرح ز (docs/UI.md، ۴الف). کامپوننت سرور: جزیرهٔ سفارش آن را

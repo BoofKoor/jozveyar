@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/constants';
+import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/files';
 
 import { acceptOf } from '../lib/fileRules';
 

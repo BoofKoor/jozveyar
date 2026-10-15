@@ -478,6 +478,9 @@ describe('خاموش موقت گزینه‌های تعرفهٔ فعال (۸٫۴�
     const { tariff, settings } = catalog();
     settings.values.set('catalog.paused', { sizes: ['a3'], papers: ['paper_gone'], bindings: [] });
     await tariff.setAvailability(OWNER, { kind: 'size', id: 'a5', paused: '1', seen: '0' }, 'ip');
+    await tariff.setAvailability(OWNER, { kind: 'paper', id: 'glossy', paused: '1', seen: '0' }, 'ip');
+    expect(settings.values.get('catalog.paused')).toEqual({ sizes: ['a3', 'a5'], papers: ['paper_gone', 'glossy'], bindings: [] });
+    await tariff.setAvailability(OWNER, { kind: 'paper', id: 'glossy', paused: '0', seen: '1' }, 'ip');
     expect(settings.values.get('catalog.paused')).toEqual({ sizes: ['a3', 'a5'], papers: ['paper_gone'], bindings: [] });
     settings.values.set('catalog.paused', 'خراب');
     expect((await items(tariff)).items.every((item) => !item.paused)).toBe(true);

@@ -13,7 +13,8 @@
  */
 
 import type { DocumentAnalysis } from '@jozveyar/contracts';
-import { DEFAULT_THRESHOLDS, MAX_SECTIONS_PER_ITEM, type FileRules } from '@jozveyar/contracts/constants';
+import { DEFAULT_THRESHOLDS, MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import {
   ERROR_MESSAGES,
   MAX_PAGES_TO_ANALYZE,
@@ -142,6 +143,8 @@ export function createJozve(deps: JozveDeps) {
           buffer,
           thresholds: DEFAULT_THRESHOLDS,
           maxPagesToAnalyze: MAX_PAGES_TO_ANALYZE,
+          // سقف صفحهٔ هر فایل (برش ۸٫۴) را خود کارگر همان لحظهٔ شمردن می‌سنجد (`too_many_pages`).
+          maxPages: deps.rules?.maxPages,
         });
       },
       () => {
@@ -161,16 +164,6 @@ export function createJozve(deps: JozveDeps) {
   function onWorkerMessage(message: WorkerResponse) {
     if (!inFlight || message.job !== inFlight.job) return; // پاسخ دیررس کاری که لغو شد
     const { key, startedAt } = inFlight;
-    // سقف صفحهٔ هر فایل (برش ۸٫۴): همان لحظهٔ شمردن، پیش از بررسی و آپلود.
-    if ((message.kind === 'meta' || message.kind === 'counted') && deps.rules && message.pageCount > deps.rules.maxPages) {
-      if (message.kind === 'meta') {
-        // کارگر هنوز سرگرم همین سند است: با سندش بسته می‌شود.
-        worker?.terminate();
-        worker = null;
-      }
-      finish((a) => ({ ...a, pageCount: message.pageCount, phase: 'error', error: { code: 'too_many_pages', title: '', hint: '' } }));
-      return;
-    }
     patchAnalysis(key, (a) => applyWorkerMessage(a, message, deps.now() - startedAt));
     if (message.kind === 'done') sendAnalysis(key);
     if (message.kind === 'done' || message.kind === 'counted' || message.kind === 'error') finish();
@@ -196,7 +189,6 @@ export function createJozve(deps: JozveDeps) {
   function estimateOffice(section: Section & { file: File }) {
     const ext = extensionOf(section.file.name);
     if (ext !== 'docx' && ext !== 'pptx') return; // doc و ppt قدیمی چنین فهرستی ندارند
-    if (section.analysis.phase === 'error') return; // قاعده‌های فایل نپذیرفتندش (برش ۸٫۴)
     deps
       .officePageCount(section.file, ext)
       .then((pages) => {

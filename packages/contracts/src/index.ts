@@ -71,7 +71,7 @@ export type DetectionThresholds = z.infer<typeof detectionThresholdsSchema>;
  * (`@jozveyar/contracts/constants`) و اسکیماها به باندل اولیه نیایند.
  */
 export { DEFAULT_THRESHOLDS } from './constants.js';
-/** قاعده‌های فایل (برش ۸٫۴): همان در `constants.ts`، برای سرور. */
+/** قاعده‌های فایل (برش ۸٫۴): همان `files.ts` (`@jozveyar/contracts/files`)، برای سرور. */
 export {
   DEFAULT_FILE_RULES,
   FILE_FAMILIES,
@@ -79,7 +79,7 @@ export {
   FILE_MAX_PAGES_LIMIT,
   type FileFamily,
   type FileRules,
-} from './constants.js';
+} from './files.js';
 
 export const pageWarningSchema = z.enum([
   'low_dpi',

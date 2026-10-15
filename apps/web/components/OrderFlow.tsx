@@ -1,7 +1,7 @@
 'use client';
 
 import { startTransition, useCallback, useDeferredValue, useEffect, useState, type ReactNode } from 'react';
-import type { FileRules } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import type { OrderConfig } from '../lib/orderConfig';
 import { useJozve } from '../lib/useJozve';
 import { DropZone } from './DropZone';
@@ -146,7 +146,7 @@ export function OrderFlow({ hero, upload, trust, more, children, rules, accept }
             {showDesk ? null : (
               <div className="home-hero__order">
                 {restore && desk ? (
-                  <desk.Restore state={restore} jozve={jozve} rules={rules} onConfig={setConfig} onDone={setRestore} />
+                  <desk.Restore state={restore} jozve={jozve} onConfig={setConfig} onDone={setRestore} />
                 ) : null}
                 <DropZone
                   accept={accept}
@@ -174,7 +174,7 @@ export function OrderFlow({ hero, upload, trust, more, children, rules, accept }
         {showDesk ? <span hidden data-jozve="" /> : null}
         {showDesk ? (
           desk ? (
-            <desk.OrderDesk jozve={jozve} rules={rules} accept={accept} config={config} onConfig={setConfig} />
+            <desk.OrderDesk jozve={jozve} config={config} onConfig={setConfig} />
           ) : (
             <div className="home-desk">
               <div className="jy-card">

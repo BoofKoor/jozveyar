@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/constants';
+import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/files';
 
 import {
   REFUSED_CODES,

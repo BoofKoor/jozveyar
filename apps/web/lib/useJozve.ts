@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { FileRules } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import type { WorkerResponse } from './analysis-protocol';
 import { createJozve, type JozveDeps } from './jozveController';
 
@@ -56,6 +56,8 @@ export function useJozve(rules: FileRules) {
     return () => jozve.dispose();
   }, [jozve]);
   return {
+    /** همان قاعده‌های فایل، برای رابط پس از فایل (نما، `accept`، برگرداندن). */
+    rules,
     sections: snapshot.sections,
     overflow: snapshot.overflow,
     add: jozve.add,

@@ -4,10 +4,17 @@
  * رابط پس از فایل و کامپوننت‌های سرور، تا باندل اولیه همان بماند.
  */
 
-import { FILE_FAMILIES, type FileFamily, type FileRules } from '@jozveyar/contracts/constants';
+import { FILE_FAMILIES, type FileFamily, type FileRules } from '@jozveyar/contracts/files';
 import { formatNumber } from '@jozveyar/text';
 
-import { ACCEPTED_EXTENSIONS, fileKind, type FileKind, type RuleErrorCode } from './analysis-protocol';
+import { fileKind, type FileKind, type RuleErrorCode } from './analysis-protocol';
+
+/**
+ * پسوندهایی که می‌پذیریم — همان فهرست سرور (`KINDS` در `lib/server/uploads.ts`)، که تصمیم آخر با اوست. PDF در مرورگر خوانده می‌شود؛
+ * بقیه روی سرور به PDF تبدیل می‌شوند (ADR-028). اینجاست، نه در `analysis-protocol.ts`، چون فقط `accept` (سرور و رابط پس از فایل) لازمش
+ * دارد و پوسته نه (۸٫۴).
+ */
+export const ACCEPTED_EXTENSIONS = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'jpg', 'jpeg', 'png', 'webp', 'heic'];
 
 /** نام هر خانواده، و نام پسوندهایش در راهنما. */
 const FAMILY: Record<FileFamily, { name: string; detail: string }> = {

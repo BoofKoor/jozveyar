@@ -5,7 +5,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
-import { DEFAULT_FILE_RULES, DEFAULT_THRESHOLDS, type FileRules } from '@jozveyar/contracts/constants';
+import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts/constants';
+import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/files';
 
 import type { WorkerResponse } from './analysis-protocol';
 import { orderGate } from './checkout/gate';
@@ -110,6 +111,12 @@ function harness(
           setTimeout(() => {
             if (dead) return;
             const { job } = request;
+            // سقف صفحه را کارگر واقعی همان لحظهٔ شمردن می‌سنجد (برش ۸٫۴، `analyze.worker.ts`).
+            if (typeof outcome === 'number' && request.maxPages !== undefined && outcome > request.maxPages) {
+              open -= 1;
+              onMessage({ kind: 'error', job, code: 'too_many_pages', message: '', pageCount: outcome });
+              return;
+            }
             if (outcome === 'corrupt') {
               open -= 1;
               onMessage({ kind: 'error', job, code: 'corrupt_file', message: '' });
@@ -474,7 +481,7 @@ describe('قاعده‌های فایل (برش ۸٫۴)', () => {
     expect(h.log.filter((l) => !l.startsWith('upload'))).toEqual([
       'count a.pdf', 'count b.pdf', 'count c.pdf', 'full a.pdf', 'full c.pdf',
     ]);
-    // کارگر پس از شمردن بیکار بود: بسته نشد، و همان یکی کل صف را برد.
+    // کارگر خودش سند را بست و ادامه داد: همان یکی کل صف را برد.
     expect(h.stats).toMatchObject({ workersCreated: 1, maxOpen: 1, alive: 0 });
     const view = h.view();
     expect(view.pageCount).toBe(16);
@@ -493,7 +500,7 @@ describe('قاعده‌های فایل (برش ۸٫۴)', () => {
     expect(h.log.filter((l) => l.startsWith('upload'))).toEqual(['upload a.pdf', 'upload c.pdf']);
   });
 
-  it('تک‌فایل بیش از سقف صفحه: کارگر با اولین پیام بررسی بسته می‌شود، بی آپلود و بی فرستادن تحلیل', async () => {
+  it('تک‌فایل بیش از سقف صفحه: کارگر همان لحظهٔ باز کردن برمی‌گرداندش، بی آپلود و بی فرستادن تحلیل', async () => {
     const h = harness({ 'a.pdf': 20, 'b.pdf': 6 }, { rules: RULES });
     h.jozve.add(files('a.pdf'));
     await settle();
@@ -509,12 +516,13 @@ describe('قاعده‌های فایل (برش ۸٫۴)', () => {
     expect(h.view()).toMatchObject({ pageCount: 6 });
   });
 
-  it('خانوادهٔ خاموش و حجم بیش از سقف: همان لحظهٔ انداختن، بی خواندن، بی برآورد Word و بی آپلود', async () => {
+  it('خانوادهٔ خاموش و حجم بیش از سقف: همان لحظهٔ انداختن بیرون از قیمت؛ فایل حجیم خوانده و فرستاده نمی‌شود', async () => {
     const h = harness({ 'a.pdf': 10 }, { rules: RULES, office: { 'b.docx': 5 } });
     h.jozve.add([...files('a.pdf'), new File(['PK'], 'b.docx'), new File([new Uint8Array(1024 * 1024 + 1)], 'c.pdf')]);
     await settle();
-    expect(h.log).toEqual(['full a.pdf', 'upload a.pdf']);
-    expect(h.officeAsked).toEqual([]);
+    // Word خاموش را نما بیرون می‌گذارد و سرور آپلودش را با `format_off` رد می‌کند؛ فایل حجیم نه خوانده می‌شود و نه آپلود.
+    expect(h.log.filter((l) => l.endsWith('c.pdf'))).toEqual([]);
+    expect(h.log).toContain('full a.pdf');
     const view = h.view();
     expect(view.pageCount).toBe(10);
     expect(view.blocked.map((v) => [v.name, v.blocked])).toEqual([

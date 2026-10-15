@@ -87,6 +87,19 @@ describe('وضع هر فایل', () => {
     expect(sectionView({ ...ready('a.pdf', 10), upload: refused }).blocked).toBeNull();
   });
 
+  it('خانوادهٔ خاموش (۸٫۴): همان لحظهٔ انداختن بیرون از قیمت، پیش از آپلود؛ فایلی که پیش‌تر روی سرور رسیده نه', () => {
+    const off = { formats: { word: false, slides: true, image: true }, maxMb: 1536, maxPages: 1500 };
+    expect(sectionView(word('new.docx', 9), off).blocked).toEqual({
+      title: 'فایل Word فعلاً پذیرفته نمی‌شود',
+      hint: 'از Word خروجی PDF بگیر و همان را جایش بینداز.',
+      refused: true,
+    });
+    expect(jozveView([ready('a.pdf', 10), word('new.docx', 9)], off)).toMatchObject({ pageCount: 10 });
+    // رسیده و شمرده‌شده پیش از خاموش شدن: دست نمی‌خورد.
+    expect(sectionView({ ...word('old.docx', 9), upload: done('d1', { state: 'ready', pageCount: 9 }) }, off).blocked).toBeNull();
+    expect(sectionView(word('new.docx', 9)).blocked).toBeNull();
+  });
+
   it('خانواده‌ای که پس از بار صفحه خاموش شد: سرور آپلود را نپذیرفت و پیش‌فاکتور هم بیرون است (۸٫۴)', () => {
     const off: UploadSnapshot = { phase: 'unavailable', documentId: null, sentBytes: 0, totalBytes: 1, reason: 'format_off' };
     expect(sectionView({ ...word('new.docx', 9), upload: off }).blocked).toEqual({
@@ -98,7 +111,8 @@ describe('وضع هر فایل', () => {
 
   it('«پذیرفته نشد» با متن قاعده‌ها و سقف همین صفحه؛ فایل خراب «خوانده نشد» می‌ماند (۸٫۴)', () => {
     const rules = { formats: { word: true, slides: true, image: false }, maxMb: 50, maxPages: 300 };
-    const unsupported = section('a.exe', { phase: 'error', error: { code: 'unsupported_type', title: 'این نوع فایل را نمی‌شناسیم', hint: 'قدیمی' } });
+    // نوع ناشناس `kind` ندارد (`fileKind`).
+    const unsupported = { ...section('a.exe', { phase: 'error', error: { code: 'unsupported_type', title: 'این نوع فایل را نمی‌شناسیم', hint: 'قدیمی' } }), kind: null };
     expect(sectionView(unsupported, rules).blocked).toEqual({
       title: 'این نوع فایل را نمی‌گیریم',
       hint: 'PDF، Word یا پاورپوینت بینداز. اگر جزوه با برنامهٔ دیگری ساخته شده، از همان برنامه خروجی PDF بگیر.',
