@@ -123,6 +123,18 @@ def test_a_template_that_eats_memory_stops_at_the_cap(tmp_path):
     assert "MemoryError" in failure.value.error["message"] or "حافظه" in failure.value.error["message"]
 
 
+def test_a_template_that_makes_too_many_pages_stops_at_the_cap(tmp_path, monkeypatch):
+    """سقف صفحه همان `order_tickets_pages` است و در خود ساختن، پس قالب پرصفحه پیش از هزار صفحه می‌ایستد. شاهد: زیر سقف ساخته می‌شود."""
+    monkeypatch.setattr(ticket, "MAX_TICKET_PAGES", 5)
+    pages = '{% for i in range(3) %}<p style="break-after: page">{{ jozve.seq }}-{{ i }}</p>{% endfor %}'
+    with pytest.raises(TemplateFailure) as failure:
+        one(tmp_path, pages, kind="first_page")
+    assert failure.value.error["kind"] == "pages" and failure.value.error["template"] == "first_page"
+    assert str(failure.value) == "first_page: برگه بیش از 5 صفحه شد"
+    monkeypatch.setattr(ticket, "MAX_TICKET_PAGES", 6)
+    assert one(tmp_path, pages, kind="first_page").pages == [3, 3]
+
+
 def test_a_syntax_error_names_the_template_and_line(tmp_path):
     with pytest.raises(TemplateFailure) as failure:
         one(tmp_path, "<p>یک</p>\n<p>دو</p>\n{% if %}", kind="first_page")

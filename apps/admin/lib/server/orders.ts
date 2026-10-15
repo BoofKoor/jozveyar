@@ -102,6 +102,7 @@ import {
 import { REFUND_SLOW_MS, readManualRefund, refundAskable, refundCard, viaGateway, type RefundCard, type RefundState } from '../refunds';
 import { monthKey, monthLabel, monthRange, parseMonthKey } from '../report';
 import { maskMobile } from '../settings';
+import { previewKeyOf } from '../ticketTemplates';
 import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 import { zipSize, zipStream, type ZipEntry } from './zip';
@@ -720,14 +721,15 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     },
 
     /**
-     * برگهٔ سفارش (برش ۵٫۱): PDF با رویداد، یا پیش‌نمایش PNG بی رویداد (همان داده‌های صفحهٔ سفارش). فقط برگه‌ای که با
-     * دادهٔ امروز سفارش ساخته شده؛ برگهٔ کهنه نه، حتی اگر فایلش هست.
+     * برگهٔ سفارش (برش ۵٫۱): PDF با رویداد، یا پیش‌نمایش PNG صفحهٔ `page` بی رویداد (همان داده‌های صفحهٔ سفارش؛ از ۹٫۲ بیجک و برگهٔ
+     * اول هر جزوه، هر کدام یک صفحه یا بیشتر). فقط برگه‌ای که با دادهٔ امروز سفارش ساخته شده؛ برگهٔ کهنه نه، حتی اگر فایلش هست.
      */
     async downloadTicket(
       session: AdminSession,
       numberParam: string,
       what: 'pdf' | 'preview',
       ip: string,
+      page = 1,
     ): Promise<Result<DownloadFile>> {
       if (!can(session, 'files.download')) return fail(403, 'forbidden');
       const orderNumber = orderNumberOf(numberParam);
@@ -735,7 +737,11 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (!file) return fail(404, 'order_not_found');
       if (file.filesDeletedAt) return fail(410, 'files_deleted');
       if (!isPaidStatus(file.status) || !file.key || !file.previewKey || !file.fresh) return fail(409, 'ticket_not_ready');
-      if (what === 'preview') return streamed(session, file, file.previewKey, `${ticketFileName(file.orderNumber)}.png`, ip, null);
+      if (what === 'preview') {
+        if (!Number.isInteger(page) || page < 1 || page > (file.pageCount ?? 1)) return fail(404, 'order_not_found');
+        const name = page === 1 ? ticketFileName(file.orderNumber) : `${ticketFileName(file.orderNumber)}-${page}`;
+        return streamed(session, file, previewKeyOf(file.previewKey, page), `${name}.png`, ip, null);
+      }
       return streamed(session, file, file.key, `${ticketFileName(file.orderNumber)}.pdf`, ip, {
         action: 'orders.ticket_download',
         detail: { orderNumber: file.orderNumber },

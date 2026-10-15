@@ -4,9 +4,8 @@
 <meta charset="utf-8">
 <title>برگهٔ اول جزوهٔ {{ jozve.seq }}، سفارش {{ order.number }}</title>
 <style>
-  /* قالب پیش‌فرض برگهٔ اول جزوه‌یار (برش ۹٫۲): روی دستهٔ هر جزوه، همان مشخصات جزوهٔ برگهٔ سفارش ۵٫۱. فقط سیاه، برای چاپ تک‌رنگ. */
+  /* قالب پیش‌فرض برگهٔ اول جزوه‌یار (برش ۹٫۲): روی دستهٔ هر جزوه، همان مشخصات جزوهٔ برگهٔ سفارش ۵٫۱. فقط سیاه (رنگ پیش‌فرض متن و خط‌ها)، برای چاپ تک‌رنگ. */
   @page { size: A4; margin: 15mm; }
-  * { color: #000000; }
   html { font-family: Vazirmatn, sans-serif; font-size: 14pt; line-height: 1.6; }
   body { margin: 0; }
   p { margin: 0; }
@@ -15,8 +14,8 @@
   .no { font-size: 60pt; font-weight: 600; line-height: 1.05; }
   .of { font-size: 22pt; font-weight: 600; margin-top: 6pt; }
   .who { font-size: 16pt; margin-top: 4pt; }
-  .rule { border-top: 1.8pt solid #000000; margin: 14pt 0 12pt; }
-  .mode { display: inline-block; font-size: 20pt; font-weight: 600; border: 2.1pt solid #000000; padding: 2pt 12pt; margin-bottom: 12pt; }
+  .rule { border-top: 1.8pt solid; margin: 14pt 0 12pt; }
+  .mode { display: inline-block; font-size: 20pt; font-weight: 600; border: 2.1pt solid; padding: 2pt 12pt; margin-bottom: 12pt; }
   table { border-collapse: collapse; width: 100%; }
   td { vertical-align: top; padding: 3pt 0; }
   td.dt { font-weight: 600; width: 80pt; }

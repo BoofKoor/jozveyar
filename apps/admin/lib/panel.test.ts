@@ -299,6 +299,27 @@ describe('رویدادها', () => {
     ]);
   });
 
+  it('قالب برگه‌ها (۹٫۲): بارگذاری با نام فایل، پیش‌نمایش با سفارش یا نمونه، فعال شدن و برگشت به پیش‌فرض با شمار برگه‌های از نو', () => {
+    const template = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'ticket_template', detail });
+    const lines = eventLines([
+      template('settings.template_upload', { kind: 'bijak', version: 3, fileName: 'bijak-apex.html', bytes: 270_000 }),
+      template('settings.template_preview', { kind: 'first_page', version: 2, orderNumber: 10027 }),
+      template('settings.template_preview', { kind: 'bijak', version: 3, orderNumber: null }),
+      template('settings.template_activate', { kind: 'bijak', from: null, to: 3, requeued: 4 }),
+      template('settings.template_activate', { kind: 'first_page', from: 1, to: 2, requeued: 0 }),
+      template('settings.template_default', { kind: 'bijak', from: 3, to: null, requeued: 1 }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['نسخهٔ ', { ltr: '3' }, ' قالب بیجک بارگذاری شد', ' (', { ltr: 'bijak-apex.html' }, ')'],
+      ['پیش‌نمایش نسخهٔ ', { ltr: '2' }, ' قالب برگهٔ اول', ' با سفارش ', { ltr: '10027' }],
+      ['پیش‌نمایش نسخهٔ ', { ltr: '3' }, ' قالب بیجک', ' با دادهٔ نمونه'],
+      ['نسخهٔ ', { ltr: '3' }, ' قالب بیجک فعال شد', '، به جای قالب پیش‌فرض', '؛ برگهٔ ', { ltr: '4' }, ' سفارش در صف چاپ از نو ساخته می‌شود'],
+      ['نسخهٔ ', { ltr: '2' }, ' قالب برگهٔ اول فعال شد', '، به جای نسخهٔ ', { ltr: '1' }],
+      ['قالب بیجک به پیش‌فرض برگشت', '، به جای نسخهٔ ', { ltr: '3' }, '؛ برگهٔ ', { ltr: '1' }, ' سفارش در صف چاپ از نو ساخته می‌شود'],
+    ]);
+    expect(inEventKind('settings.template_activate', 'settings')).toBe(true);
+  });
+
   it('تنظیمات و کلیدها (۴٫۶): عددها و تاریخ جدا از جملهٔ فارسی؛ کلید با نامش، هرگز مقدارش؛ چیپ به ترتیب طرح', () => {
     const setting = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'setting', detail });
     const key = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'service_key', detail });

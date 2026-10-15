@@ -907,10 +907,12 @@
     font-weight: 600;
     overflow-wrap: anywhere;
   }
-  /* برگهٔ سفارش: همان PDF کارگر، پیش‌نمایش سیاه روی سفید در اندازهٔ A4 */
+  /* برگهٔ سفارش: همان PDF کارگر، پیش‌نمایش سیاه روی سفید در اندازهٔ A4؛ از ۹٫۲ هر صفحه زیر قبلی (بیجک، بعد برگهٔ اول هر جزوه) */
   .ad-sheet-wrap {
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
     margin-block-start: 16px;
   }
   .ad-sheet {
@@ -2105,5 +2107,81 @@
   }
   .ad-live .ad-need {
     margin-block-start: 12px;
+  }
+  /*
+   * قالب برگه‌ها (برش ۹٫۲): بارگذاری نسخهٔ تازه زیر نسخه‌های هر نوع (کیت `jy-add`)، فرم «پیش‌نمایش دوباره»، و فهرست متغیرها در details
+   * پایین صفحه؛ نام متغیر چپ‌به‌راست و توضیحش کنارش، روی گوشی زیرش.
+   */
+  .ad-tpl-upload {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block-start: 12px;
+  }
+  .ad-tpl-upload[data-pending] .jy-add {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .ad-tpl-preview {
+    margin-block-start: 16px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-tpl-preview .jy-input {
+    max-width: 200px;
+  }
+  .ad-vars > summary {
+    cursor: pointer;
+  }
+  .ad-vars > summary::-webkit-details-marker {
+    display: none;
+  }
+  .ad-vars > summary::before {
+    content: '+';
+    display: inline-block;
+    width: 1.2em;
+    color: var(--color-muted);
+  }
+  .ad-vars[open] > summary::before {
+    content: '−';
+  }
+  .ad-vars > .ad-hint {
+    margin-block: 8px 4px;
+  }
+  .ad-vars__group + .ad-vars__group {
+    margin-block-start: 16px;
+  }
+  .ad-vars__title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin-block: 12px 4px;
+    font-size: inherit;
+    font-weight: 600;
+  }
+  .ad-vars__list > div {
+    display: grid;
+    grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+    gap: 2px 12px;
+    padding-block: 6px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-vars__list dt {
+    font-size: var(--text-small);
+    overflow-wrap: anywhere;
+  }
+  .ad-vars__list dd {
+    margin: 0;
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  .ad-vars__example {
+    color: var(--color-muted);
+  }
+  @media (width <= 640px) {
+    .ad-vars__list > div {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 }

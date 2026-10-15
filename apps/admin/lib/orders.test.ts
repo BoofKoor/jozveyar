@@ -693,7 +693,7 @@ describe('جزئیات سفارش', () => {
       ...over,
     });
     const view = (rest: Partial<PanelOrderDetails>, order: Partial<OrderRow> = {}) => ticketView(details({ order, rest }));
-    const fresh = { storageKey: 'orders/10027/ticket.pdf', sizeBytes: 38_000, builtAt: NOW, fresh: true };
+    const fresh = { storageKey: 'orders/10027/ticket.pdf', sizeBytes: 38_000, builtAt: NOW, fresh: true, pageCount: 1, templates: { bijak: null, firstPage: null } };
     expect(view({ ticket: fresh, ticketJob: job('done') })).toEqual({ kind: 'ready', bytes: 38_000, builtAt: NOW });
     // در حال به‌روز شدن، با علت (۵٫۲): تازه‌ترین تغییر پس از ساختن برگه؛ نام تازهٔ خود چاپخانه یا تغییری که رویداد سفارش ندارد، «داده».
     const queued = { ticket: { ...fresh, fresh: false }, ticketJob: job('queued', { attempts: 0 }) };
@@ -1235,7 +1235,7 @@ describe('فهرست جمع‌وجور و zip (برش ۹٫۱)', () => {
       changes: null,
       createdAt: tehran('2026-10-03 14:06'),
     }));
-  const ticket = { storageKey: 'orders/10027/ticket.pdf', sizeBytes: 200_000, builtAt: tehran('2026-10-03 14:07'), fresh: true };
+  const ticket = { storageKey: 'orders/10027/ticket.pdf', sizeBytes: 200_000, builtAt: tehran('2026-10-03 14:07'), fresh: true, pageCount: 2, templates: { bijak: null, firstPage: null } };
   const doneJob: PanelPdfJob = { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: NOW };
   const ready = (over: Partial<PanelOrderDetails> = {}) => details({ item: { printFiles: printed() }, rest: { ticket, ticketJob: doneJob, ...over } });
 

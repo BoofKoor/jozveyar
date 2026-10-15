@@ -47,6 +47,9 @@ RENDER_TIMEOUT = float(os.environ.get("DOCWORKER_TICKET_TIMEOUT", "90"))
 RENDER_MEMORY = 1536 * 1024 * 1024
 RENDER_MAX_FILE = 64 * 1024 * 1024
 PREVIEW_DPI = 150
+# بیشترین صفحهٔ یک برگه، همان سقف پایگاه داده (`order_tickets_pages`): ۳۰ جزوه با بیجک چندصفحه‌ای خیلی کمتر است؛ قالبی که بیشتر بسازد
+# همان‌جا می‌ایستد، نه پس از ساختن هزار صفحه.
+MAX_TICKET_PAGES = 200
 # ویرایشی که وسط هر ساختن برسد، ساختن را از نو می‌کند؛ بیش از این یعنی چیزی غیرعادی است و کار بعداً دوباره امتحان می‌شود.
 MAX_REBUILDS = 3
 # پیش‌نمایش قالب‌ها، بیرون از `orders/` تا نگهداری فایل‌های سفارش (ADR-044) دستشان نزند.
@@ -175,6 +178,7 @@ def render(templates: dict[str, Template], pages: list[tuple[str, dict]], workdi
         "fonts": font_dir(),
         "templates": {kind: f"{kind}.html" for kind in kinds},
         "pages": [{"template": kind, "context": context} for kind, context in pages],
+        "max_pages": MAX_TICKET_PAGES,
     }
     with open(os.path.join(workdir, "job.json"), "w", encoding="utf-8") as f:
         json.dump(job, f, ensure_ascii=False)

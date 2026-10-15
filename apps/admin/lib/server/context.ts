@@ -22,6 +22,7 @@ import {
   createSmsOutbox,
   createSmsStats,
   createTariffStore,
+  createTicketTemplateStore,
   getDb,
   lastAudienceChange,
   serviceKeyReader,
@@ -43,6 +44,7 @@ import { createPanelReport, type PanelReport } from './report';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelShipments, type PanelShipments } from './shipments';
 import { createPanelTariff, type PanelTariff } from './tariff';
+import { createPanelTemplates, type PanelTemplates } from './templates';
 
 interface Panel {
   config: AdminConfig;
@@ -53,6 +55,7 @@ interface Panel {
   partners: PanelPartners;
   shipments: PanelShipments;
   report: PanelReport;
+  templates: PanelTemplates;
 }
 
 let cached: Panel | null | undefined;
@@ -81,6 +84,7 @@ function build(config: AdminConfig): Panel {
     zibal: zibalGateway({ ...zibal, merchant: () => keys('PAYMENT_MERCHANT_ID') }),
     ...(panelMockGateway(process.env) ? { mock: mockGateway() } : {}),
   };
+  const storage = storageFromEnv(process.env)?.driver ?? null;
   return {
     config,
     auth,
@@ -88,7 +92,7 @@ function build(config: AdminConfig): Panel {
     // آداپتور پنل، برای «دوباره بفرست».
     orders: createPanelOrders({
       store: createPanelOrderStore(getDb()),
-      storage: storageFromEnv(process.env)?.driver ?? null,
+      storage,
       secret: config.secret,
       sms,
       payments: { orders: createOrderStore(getDb()), gateways },
@@ -130,6 +134,8 @@ function build(config: AdminConfig): Panel {
     }),
     // گزارش ارسال (۶٫۴، ADR-048): فقط خواندن، کوئری زنده؛ بازه‌های وزنش را سرویس تنظیمات عوض می‌کند.
     report: createPanelReport({ store: createShippingReportStore(getDb()) }),
+    // قالب برگه‌ها (۹٫۲، ADR-057): فقط مالک؛ فعال کردن با همان کد تازهٔ ورود. پیش‌نمایش را کارگر می‌سازد و پنل فقط فایلش را می‌خواند.
+    templates: createPanelTemplates({ store: createTicketTemplateStore(getDb()), storage, stepUp: auth.stepUp, secret: config.secret }),
   };
 }
 

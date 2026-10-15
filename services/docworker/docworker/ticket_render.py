@@ -11,7 +11,8 @@ import از بستهٔ کارگر ندارد، تا با `python -I` و بی `sy
 - **بی `base_url`:** نشانی نسبی به هیچ جا نمی‌رسد.
 
 ورودی: پوشهٔ کار با `job.json`:
-    {"fonts": "<پوشهٔ وزیرمتن>", "templates": {"bijak": "bijak.html", ...}, "pages": [{"template": "bijak", "context": {...}}, ...]}
+    {"fonts": "<پوشهٔ وزیرمتن>", "templates": {"bijak": "bijak.html", ...}, "pages": [{"template": "bijak", "context": {...}}, ...],
+     "max_pages": 200}
 خروجی: `out-<i>.pdf` برای هر ردیف `pages`، و `result.json`:
     {"ok": true, "pages": [1, 1, 2], "blocked": ["https://…"]}، یا {"ok": false, "error": {"kind", "template", "line", "message"}}.
 کد خروج ۰ یعنی `result.json` نوشته شد (درست یا خطای قالب)؛ هر چیز دیگر یعنی پردازه افتاد.
@@ -107,6 +108,8 @@ def main(workdir: str) -> int:
         except Exception as error:  # noqa: BLE001 — HTML یا CSSی که WeasyPrint نساخت
             return fail("render", name, f"{type(error).__name__}: {error}")
         counts.append(len(document.pages))
+        if sum(counts) > job["max_pages"]:
+            return fail("pages", name, f"برگه بیش از {job['max_pages']} صفحه شد")
 
     with open(os.path.join(workdir, "result.json"), "w", encoding="utf-8") as out:
         json.dump({"ok": True, "pages": counts, "blocked": blocked}, out, ensure_ascii=False)

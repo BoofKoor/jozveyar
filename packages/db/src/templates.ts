@@ -19,7 +19,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import { adminEventRow } from './admin.js';
 import type { Database } from './index.js';
-import { PREPARE_TICKET_JOB } from './orders.js';
+import { PREPARE_TICKET_JOB, type OrderStatus } from './orders.js';
 import { adminEvents, adminUsers, jobs, orders, ticketTemplates } from './schema.js';
 
 /** کلید قفل مشورتی کارهای قالب برگه: «tktp» به عدد. */
@@ -79,8 +79,13 @@ export interface TicketTemplateStore {
   source(id: number): Promise<{ kind: TicketTemplateKind; version: number; fileName: string; html: string } | null>;
   /** نسخهٔ تازه؛ شماره، بعد از آخرین نسخهٔ همان نوع. */
   upload(input: { kind: TicketTemplateKind; html: string; sha256: string; fileName: string; actor: TemplateActor; at: Date }): Promise<TicketTemplateVersion>;
-  /** پیش‌نمایش با دادهٔ ساختگی (`orderNumber` null) یا یک سفارش؛ بار دوم همان کار دوباره در صف. */
-  requestPreview(id: number, orderNumber: number | null): Promise<boolean>;
+  /** سفارشی که مالک برای پیش‌نمایش داد: وضعیتش و اینکه فایل‌هایش پاک شده؛ null یعنی نیست. */
+  previewOrder(orderNumber: number): Promise<{ status: OrderStatus; filesDeleted: boolean } | null>;
+  /**
+   * پیش‌نمایش با دادهٔ ساختگی (`orderNumber` null) یا یک سفارش، با رویداد در همان تراکنش؛ بار دوم همان کار دوباره در صف. کاری که در صف
+   * یا در دست کارگر است `busy`: کارگر با پایانش «انجام شد» می‌نوشت و درخواست تازه گم می‌شد.
+   */
+  requestPreview(input: { id: number; orderNumber: number | null; actor: TemplateActor; at: Date }): Promise<'ok' | 'busy' | 'not_found'>;
   /** شمار سفارش‌های «در صف چاپ» که فعال کردن قالب برگه‌شان را از نو می‌سازد. */
   queuedOrders(): Promise<number>;
   /**
@@ -212,28 +217,57 @@ export function createTicketTemplateStore({ db }: Database): TicketTemplateStore
       });
     },
 
-    async requestPreview(id, orderNumber) {
-      const [row] = await db.select({ id: ticketTemplates.id }).from(ticketTemplates).where(eq(ticketTemplates.id, id));
-      if (!row) return false;
-      const payload = orderNumber === null ? {} : { orderNumber };
-      await db
-        .insert(jobs)
-        .values({ kind: PREVIEW_TICKET_TEMPLATE_JOB, ticketTemplateId: id, payload })
-        .onConflictDoUpdate({
-          target: [jobs.ticketTemplateId, jobs.kind],
-          set: {
-            status: 'queued',
-            attempts: 0,
-            payload,
-            runAfter: sql`now()`,
-            lockedBy: null,
-            lockedUntil: null,
-            lastError: null,
-            finishedAt: null,
-            updatedAt: sql`now()`,
-          },
-        });
-      return true;
+    async previewOrder(orderNumber) {
+      const [row] = await db
+        .select({ status: orders.status, filesDeleted: sql<boolean>`${orders.filesDeletedAt} IS NOT NULL` })
+        .from(orders)
+        .where(eq(orders.orderNumber, orderNumber));
+      return row ?? null;
+    },
+
+    async requestPreview({ id, orderNumber, actor, at }) {
+      return db.transaction(async (tx) => {
+        const [row] = await tx
+          .select({ kind: ticketTemplates.kind, version: ticketTemplates.version })
+          .from(ticketTemplates)
+          .where(eq(ticketTemplates.id, id));
+        if (!row) return 'not_found' as const;
+        const [job] = await tx
+          .select({ id: jobs.id, status: jobs.status })
+          .from(jobs)
+          .where(and(eq(jobs.ticketTemplateId, id), eq(jobs.kind, PREVIEW_TICKET_TEMPLATE_JOB)))
+          .for('update');
+        if (job && (job.status === 'queued' || job.status === 'running')) return 'busy' as const;
+        const payload = orderNumber === null ? {} : { orderNumber };
+        if (job) {
+          // `now()` پایگاه داده، مثل `requeue` پنل: کارگر کار را با ساعت پایگاه داده برمی‌دارد.
+          await tx
+            .update(jobs)
+            .set({
+              status: 'queued',
+              attempts: 0,
+              payload,
+              runAfter: sql`now()`,
+              lockedBy: null,
+              lockedUntil: null,
+              lastError: null,
+              finishedAt: null,
+              updatedAt: sql`now()`,
+            })
+            .where(eq(jobs.id, job.id));
+        } else {
+          // نسخه همیشه با کار پیش‌نمایش ساخته می‌شود؛ این فقط برای کاری است که دستی پاک شد. دو درخواست هم‌زمان به شاخص یکتا می‌خورند.
+          const inserted = await tx
+            .insert(jobs)
+            .values({ kind: PREVIEW_TICKET_TEMPLATE_JOB, ticketTemplateId: id, payload })
+            .onConflictDoNothing()
+            .returning({ id: jobs.id });
+          if (inserted.length === 0) return 'busy' as const;
+        }
+        // پیش‌نمایش با دادهٔ سفارش نام و نشانی گیرنده را در فایلی تازه می‌گذارد؛ مثل دانلودها، رویداد دارد.
+        await tx.insert(adminEvents).values(event(actor, 'settings.template_preview', String(id), at, { kind: row.kind, version: row.version, orderNumber }));
+        return 'ok' as const;
+      });
     },
 
     async queuedOrders() {

@@ -182,6 +182,9 @@ function settingUpdate(detail: Detail): Segment[] {
   return [`${SETTING_NAMES[str(detail.key)] ?? str(detail.key)}: `, amount(detail.from), ' ← ', amount(detail.to)];
 }
 
+/** نوع قالب برگه (۹٫۲). */
+const templateKindName = (value: unknown) => (value === 'bijak' ? 'بیجک' : value === 'first_page' ? 'برگهٔ اول' : str(value));
+
 /** «10027»، و اگر سفارش چند جزوه دارد «10027 (جزوهٔ 2)»؛ عدد جدا از جملهٔ فارسی. */
 function orderRef(detail: Detail): Segment[] {
   const number = typeof detail.orderNumber === 'number' ? String(detail.orderNumber) : '';
@@ -329,6 +332,34 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return {
         badge: null,
         text: [`مسیر خرید روی سایت: ${audienceName(detail.from)} ← ${audienceName(detail.to)}${detail.fresh === true ? '، با کد تازه' : ''}`],
+      };
+    case 'settings.template_upload':
+      // قالب برگه‌ها (۹٫۲، ADR-057): نام فایل همان که مالک بارگذاری کرد، و هرگز متن قالب.
+      return {
+        badge: null,
+        text: ['نسخهٔ ', ...versionRef(detail.version), ` قالب ${templateKindName(detail.kind)} بارگذاری شد`, ...(str(detail.fileName) ? [' (', { ltr: str(detail.fileName) }, ')'] : [])],
+      };
+    case 'settings.template_preview':
+      return {
+        badge: null,
+        text: [
+          'پیش‌نمایش نسخهٔ ',
+          ...versionRef(detail.version),
+          ` قالب ${templateKindName(detail.kind)}`,
+          ...(typeof detail.orderNumber === 'number' ? [' با سفارش ', ...orderRef(detail)] : [' با دادهٔ نمونه']),
+        ],
+      };
+    case 'settings.template_activate':
+    case 'settings.template_default':
+      return {
+        badge: null,
+        text: [
+          ...(event.action === 'settings.template_default'
+            ? [`قالب ${templateKindName(detail.kind)} به پیش‌فرض برگشت`]
+            : ['نسخهٔ ', ...versionRef(detail.to), ` قالب ${templateKindName(detail.kind)} فعال شد`]),
+          ...(typeof detail.from === 'number' ? ['، به جای نسخهٔ ', ...versionRef(detail.from)] : event.action === 'settings.template_activate' ? ['، به جای قالب پیش‌فرض'] : []),
+          ...(typeof detail.requeued === 'number' && detail.requeued > 0 ? ['؛ برگهٔ ', { ltr: String(detail.requeued) }, ' سفارش در صف چاپ از نو ساخته می‌شود'] : []),
+        ],
       };
     case 'settings.checkout_preview': {
       // پیوند پیش‌نمایش (۷٫۵، سؤال ۱۶۷): فقط زمان انقضا؛ خود پیوند و هشش هرگز در رویداد نیست.

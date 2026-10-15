@@ -4315,16 +4315,35 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         blocked: ['https://example.com/a.png'],
         error: null,
       });
-      expect(await templates().requestPreview(one.id, 10001)).toBe(true);
+      const request = (id: number, orderNumber: number | null) => templates().requestPreview({ id, orderNumber, actor: actor(), at: NOW });
+      expect(await request(one.id, 10001)).toBe('ok');
       const [job] = await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id));
       expect(job).toMatchObject({ status: 'queued', attempts: 0, lastError: null, finishedAt: null, payload: { orderNumber: 10001 } });
       expect((await templates().versions())[0]!.preview.job).toBe('busy');
-      await conn.db.update(jobs).set({ status: 'done' }).where(eq(jobs.ticketTemplateId, one.id));
+      // در صف یا در دست کارگر: درخواست دوم نه، تا «انجام شد» کارگر آن را گم نکند.
+      expect(await request(one.id, null)).toBe('busy');
+      await conn.db.update(jobs).set({ status: 'running', lockedBy: 'worker-a' }).where(eq(jobs.ticketTemplateId, one.id));
+      expect(await request(one.id, null)).toBe('busy');
+      await conn.db.update(jobs).set({ status: 'done', lockedBy: null }).where(eq(jobs.ticketTemplateId, one.id));
       expect((await templates().versions())[0]!.preview.job).toBe('done');
-      expect(await templates().requestPreview(one.id, null)).toBe(true);
+      expect(await request(one.id, null)).toBe('ok');
       expect((await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id)))[0]!.payload).toEqual({});
       expect(await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id))).toHaveLength(1);
-      expect(await templates().requestPreview(one.id + 1000, null)).toBe(false);
+      expect(await request(one.id + 1000, null)).toBe('not_found');
+      // کاری که نبود، تازه.
+      await conn.db.delete(jobs).where(eq(jobs.ticketTemplateId, one.id));
+      expect(await request(one.id, 10001)).toBe('ok');
+      expect((await conn.db.select().from(jobs).where(eq(jobs.ticketTemplateId, one.id)))[0]).toMatchObject({ status: 'queued', payload: { orderNumber: 10001 } });
+      expect((await templateEvents()).filter((e) => e.action === 'settings.template_preview').map((e) => [e.targetId, e.detail])).toEqual([
+        [String(one.id), { kind: 'first_page', version: 1, orderNumber: 10001 }],
+        [String(one.id), { kind: 'first_page', version: 1, orderNumber: null }],
+        [String(one.id), { kind: 'first_page', version: 1, orderNumber: 10001 }],
+      ]);
+      // سفارش پیش‌نمایش: وضعیت و پاک شدن فایل‌ها؛ نبود.
+      const orderId = await paidOrder();
+      const [{ orderNumber }] = (await conn.db.select({ orderNumber: orders.orderNumber }).from(orders).where(eq(orders.id, orderId))) as [{ orderNumber: number }];
+      expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'paid', filesDeleted: false });
+      expect(await templates().previewOrder(orderNumber + 1000)).toBeNull();
     });
 
     it('فعال کردن: فقط با پیش‌نمایش درست و همان که دیده شد؛ قبلی خاموش؛ برگهٔ «در صف چاپ» از نو؛ رویداد؛ برگشت به پیش‌فرض', async () => {
