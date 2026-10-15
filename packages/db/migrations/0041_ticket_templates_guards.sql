@@ -3,7 +3,8 @@
 -- دست‌نویس، مثل 0013 و 0032 و به همان دلیل: نسخه‌ای که مالک بارگذاری کرد همان است که پیش‌نمایشش دیده و فعالش کرده، پس باید در خود
 -- پایگاه داده همان بماند، نه فقط در پنل. هر خطا با نام محدودیت برمی‌گردد (`check_violation` و `CONSTRAINT`).
 --
---  - **`ticket_templates_insert_state`:** نسخهٔ تازه غیرفعال، بی پیش‌نمایش؛ فعال شدن و پیش‌نمایش هر کدام راه خودشان را دارند.
+--  - **`ticket_templates_insert_state`:** نسخهٔ تازه بی فعال شدن و بی پیش‌نمایش؛ فعال شدن و پیش‌نمایش هر کدام راه خودشان را دارند. «فعال» بی
+--    اولین فعال شدن را خود CHECK `ticket_templates_activated` می‌گیرد، پس اینجا فقط `activated_at`.
 --  - **`ticket_templates_frozen`:** متن، نوع، شماره و سازنده هرگز عوض نمی‌شوند؛ زمان اولین فعال شدن یک بار نوشته می‌شود.
 --  - **`ticket_templates_append_only`:** نسخه پاک نمی‌شود: برگه‌ها به آن اشاره می‌کنند و برگشت یعنی فعال کردن دوباره‌اش.
 --  - **`order_tickets_template_kind`:** برگه با قالب بیجک بیجک است و با قالب برگهٔ اول برگهٔ اول، نه جابه‌جا.
@@ -15,7 +16,7 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'ticket_templates_append_only';
   END IF;
   IF TG_OP = 'INSERT' THEN
-    IF NEW.is_active OR NEW.activated_at IS NOT NULL OR NEW.preview_at IS NOT NULL OR NEW.preview_order_number IS NOT NULL
+    IF NEW.activated_at IS NOT NULL OR NEW.preview_at IS NOT NULL OR NEW.preview_order_number IS NOT NULL
        OR NEW.preview_pages IS NOT NULL OR NEW.preview_pdf_key IS NOT NULL OR NEW.preview_png_key IS NOT NULL
        OR NEW.preview_error IS NOT NULL OR cardinality(NEW.preview_blocked) > 0 THEN
       RAISE EXCEPTION 'نسخهٔ تازهٔ قالب غیرفعال و بی پیش‌نمایش ساخته می‌شود'

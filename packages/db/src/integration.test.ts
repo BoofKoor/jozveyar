@@ -4169,6 +4169,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     it('نسخهٔ تازه غیرفعال و بی پیش‌نمایش؛ متن، نوع، شماره، سازنده و اولین فعال شدن منجمد؛ پاک‌نشدنی؛ یک فعال برای هر نوع', async () => {
       // نسخهٔ تازه با هر نشانی از فعال شدن یا پیش‌نمایش: نه (تریگر پیش از CHECK).
+      expect(await insertRow({ isActive: true })).toBe('ticket_templates_activated');
       for (const over of [
         { isActive: true, activatedAt: NOW },
         { activatedAt: NOW },
@@ -4213,7 +4214,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPdfKey: 'a.pdf', previewPngKey: 'a.png', previewError: 'x' })).toBe('ticket_templates_preview');
       expect(await change(one.id, { previewAt: NOW })).toBe('ticket_templates_preview');
       expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPdfKey: 'a.pdf' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPngKey: 'a.png' })).toBe('ticket_templates_preview_files');
       expect(await change(one.id, { previewAt: NOW, previewError: 'x', previewPngKey: 'a.png' })).toBe('ticket_templates_preview_files');
+      expect(await change(one.id, { previewAt: NOW, previewError: 'x', previewPdfKey: 'a.pdf' })).toBe('ticket_templates_preview_files');
       expect(await change(one.id, { previewAt: NOW, previewPages: 0, previewPdfKey: 'a.pdf', previewPngKey: 'a.png' })).toBe('ticket_templates_preview_files');
       expect(await change(one.id, { previewAt: NOW, previewPages: 1, previewPdfKey: 'a.pdf', previewPngKey: 'a.png' })).toBeUndefined();
 
@@ -4269,8 +4272,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         activatedAt: null,
         preview: { job: 'busy', jobError: null, at: null, orderNumber: null, pages: null, pdfKey: null, pngKey: null, blocked: [], error: null },
       });
-      const [a, b] = await Promise.all([upload('bijak', 'دو'), upload('bijak', 'سه')]);
-      expect([a.version, b.version].sort()).toEqual([2, 3]);
+      // هم‌زمان: زیر یک قفل پشت‌سرهم، پس شماره‌های پشت‌سرهم، نه خطای ایندکس یکتای (نوع، شماره).
+      const many = await Promise.all(Array.from({ length: 8 }, (_, i) => upload('bijak', `هم‌زمان ${i}`)));
+      expect(many.map((v) => v.version).sort((x, y) => x - y)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
       expect((await upload('first_page', 'چهار')).version).toBe(1);
       const previewJobs = await conn.db.select().from(jobs).where(eq(jobs.kind, PREVIEW_TICKET_TEMPLATE_JOB));
       expect(previewJobs.map((job) => [job.ticketTemplateId, job.status, job.payload]).sort()).toEqual(
@@ -4287,9 +4291,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(JSON.stringify(await templateEvents())).not.toContain('<p>');
       // تازه‌ترین اول در هر نوع.
       expect((await templates().versions()).map((v) => [v.kind, v.version])).toEqual([
-        ['bijak', 3],
-        ['bijak', 2],
-        ['bijak', 1],
+        ...[9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => ['bijak', n]),
         ['first_page', 1],
       ]);
       expect(await templates().source(first.id)).toEqual({ kind: 'bijak', version: 1, fileName: 'bijak.html', html: html('یک') });
@@ -4345,13 +4347,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const [{ orderNumber }] = (await conn.db.select({ orderNumber: orders.orderNumber }).from(orders).where(eq(orders.id, orderId))) as [{ orderNumber: number }];
       expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'paid', filesDeleted: false });
       expect(await templates().previewOrder(orderNumber + 1000)).toBeNull();
-      // پیش‌نمایش با همین سفارش: تا فایل‌هایش هست «gone» نه؛ پس از پاک شدن آنها (`retention.py`) آری.
+      // پیش‌نمایش با همین سفارش: تا فایل‌هایش هست «gone» نه؛ پس از پاک شدن آنها (`retention.py`) آری، و فقط برای همان سفارش.
+      const other = await upload('first_page', 'نمونه');
       await previewed(one.id, { previewOrderNumber: orderNumber });
-      expect((await templates().versions())[0]!.preview).toMatchObject({ orderNumber, gone: false });
+      await previewed(other.id);
+      const goneOf = async (id: number) => (await templates().versions()).find((v) => v.id === id)!.preview;
+      expect(await goneOf(one.id)).toMatchObject({ orderNumber, gone: false });
       await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, orderId));
       await conn.db.update(orders).set({ status: 'handed_to_post', handedToPostAt: NOW }).where(eq(orders.id, orderId));
       await conn.db.update(orders).set({ filesDeletedAt: NOW }).where(eq(orders.id, orderId));
-      expect((await templates().versions())[0]!.preview).toMatchObject({ orderNumber, gone: true });
+      expect(await goneOf(one.id)).toMatchObject({ orderNumber, gone: true });
+      expect(await goneOf(other.id)).toMatchObject({ orderNumber: null, gone: false });
       expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'handed_to_post', filesDeleted: true });
     });
 

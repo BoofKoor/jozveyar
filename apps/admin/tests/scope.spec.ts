@@ -372,7 +372,9 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
     await expect(row.getByRole('link', { name: 'همهٔ فایل‌ها (zip)' })).toBeVisible();
     await expect(row.locator('.ad-row__prt, .ad-row__sum')).toHaveCount(0);
     await page.goto(at(`/orders/${o.A.number}/ticket`));
-    await expect(page.getByRole('img', { name: new RegExp(`برگهٔ سفارش ${o.A.number}`) })).toBeVisible();
+    // از ۹٫۲ دو صفحه: بیجک و برگهٔ اول تنها جزوه.
+    await expect(page.getByRole('img', { name: new RegExp(`برگهٔ سفارش ${o.A.number}`) })).toHaveCount(2);
+    await expect(page.getByRole('img', { name: `برگهٔ سفارش ${o.A.number}: شماره، مهلت، مشخصات چاپ و برچسب پست` })).toBeVisible();
 
     await page.goto(at(`/orders/${o.A.number}`));
     await side(page).getByRole('button', { name: 'شروع چاپ' }).click();

@@ -397,14 +397,10 @@ def preview_ticket_template(conn: psycopg.Connection, storage: S3Storage, templa
     if number is None:
         data = sample()
     else:
-        found = conn.execute(
-            "SELECT id::text, files_deleted_at IS NOT NULL FROM orders WHERE order_number = %s", (number,)
-        ).fetchone()
+        found = conn.execute("SELECT id::text FROM orders WHERE order_number = %s", (number,)).fetchone()
         if found is None:
             raise PermanentFailure("order_missing", str(number))
-        order_id, deleted = found
-        if deleted:
-            raise PermanentFailure("files_deleted", str(number))
+        order_id = found[0]
         data, _ = _load(conn, order_id, closed_ok=True)
     conn.commit()
     templates = {kind: Template(kind, template_id, html)}
@@ -420,7 +416,7 @@ def preview_ticket_template(conn: psycopg.Connection, storage: S3Storage, templa
             blocked, error = rendered.blocked, None
             if order_id is not None:
                 # زیر قفل اشتراکی ردیف سفارش تا commit همین کار: پاک کردن فایل‌های سفارش (`FOR UPDATE SKIP LOCKED`) یا پیش از این
-                # بود و اینجا دیده می‌شود، یا پس از این و این فایل‌ها را هم می‌برد.
+                # بود و اینجا دیده می‌شود، یا پس از این و این فایل‌ها را هم می‌برد. سنجش زودتر، پیش از ساختن، همین را نمی‌افزود.
                 gone = conn.execute(
                     "SELECT files_deleted_at IS NOT NULL FROM orders WHERE id = %s FOR SHARE", (order_id,)
                 ).fetchone()[0]
