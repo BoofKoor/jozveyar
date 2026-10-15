@@ -671,6 +671,9 @@ test.describe('پرداخت', () => {
     expect(again.status()).toBe(409);
     expect(((await again.json()) as { error: string }).error).toBe('payment_checking');
     await page.getByRole('button', { name: 'الان دوباره ببین' }).click();
+    // تا همین بررسی تمام نشده، بازهٔ ۱۵ ثانیه‌ای پایین رد می‌شود (`running` در `CheckingWatch`) و جوابِ پیش از «پرداخت موفق» «در حال
+    // بررسی» است؛ بازهٔ بعد بیرون از `expect` است. دکمه تا پایان بررسی بسته است.
+    await expect(page.getByRole('button', { name: 'الان دوباره ببین' })).toBeEnabled();
     await expect(page.getByTestId('order-checking')).toBeVisible();
 
     // درگاه «پرداخت موفق» و برگشت از جای دیگر (Push Transaction)؛ این صفحه در ۱۵ ثانیه خودش «ثبت شد» است.
