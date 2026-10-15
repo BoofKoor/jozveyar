@@ -63,6 +63,7 @@ const TOTAL = quote(
         rules: wholeDocumentRule(10, 'bw', DEFAULT_PAPER_TYPE_ID),
         copies: 1,
         sidesMode: 'double',
+        paperSize: 'a4',
         bindingTypeId: DEFAULT_BINDING_TYPE_ID,
       },
     ],

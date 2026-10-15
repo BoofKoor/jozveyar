@@ -150,7 +150,7 @@ def ready_document(conn, storage, body, pages, *, converted=False):
     return doc_id
 
 
-def paid_order(conn, sections, *, pay=True, sheets_per_volume=None, sides="double"):
+def paid_order(conn, sections, *, pay=True, sheets_per_volume=None, sides="double", size="a4"):
     """سفارش همان‌طور که سرور می‌سازد (یک تراکنش)، بعد پرداخت و کار `prepare_order` (یک تراکنش).
 
     ریز قیمت منجمد فقط همان تکه‌ای را دارد که کارگر می‌خواند (`items[0]`: صفحه، برگ و برگ هر جلد)؛ جلدها پیش‌فرض یکی،
@@ -176,9 +176,9 @@ def paid_order(conn, sections, *, pay=True, sheets_per_volume=None, sides="doubl
         (user_id, active[0], Jsonb(breakdown)),
     ).fetchone()
     item_id = conn.execute(
-        """INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-           VALUES (%s, 1, %s, 1, %s, 'spiral_clear') RETURNING id""",
-        (order_id, total, sides),
+        """INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, paper_size, binding_type_id)
+           VALUES (%s, 1, %s, 1, %s, %s, 'spiral_clear') RETURNING id""",
+        (order_id, total, sides, size),
     ).fetchone()[0]
     for seq, (doc_id, pages) in enumerate(sections, start=1):
         conn.execute(
@@ -386,6 +386,22 @@ def test_a_jozve_with_other_sizes_gets_its_own_print_file_on_a4(tmp_path, conn, 
     [(jozve_key, *_)] = printed(conn, order_id)
     with fitz.open(fetched(worker, jozve_key, tmp_path)) as jozve:
         assert [(round(p.rect.width), round(p.rect.height)) for p in jozve] == [(595, 842)] * 2 + [(420, 595)] * 2
+
+
+@services
+def test_an_a5_jozve_is_printed_on_a5_paper(tmp_path, conn, worker):
+    """اندازهٔ کاغذ جزوه از `order_items.paper_size` (برش ۸٫۳): صفحه‌های A4 روی A5 می‌نشینند و «چه عوض شد» همان را می‌گوید."""
+    a4 = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "a4"), 2)
+    a5 = ready_document(conn, worker.storage, pdf_bytes(tmp_path, 2, "a5", A5), 2, converted=True)
+    order_id, number = paid_order(conn, [(a4, 2), (a5, 2)], size="a5")
+    drain(worker, conn)
+    assert order_job(conn, order_id) == ("done", 1, None)
+    [(volume, first, last, key, _, _, changes)] = print_files(conn, order_id)
+    assert (volume, first, last, key) == (1, 1, 4, volume_key(number, 1, 1))
+    assert changes == {"resized": [[1, 2, 595, 842]]}
+    with fitz.open(fetched(worker, key, tmp_path)) as doc:
+        assert [(round(p.rect.width), round(p.rect.height)) for p in doc] == [(420, 595)] * 4
+    assert labels(fetched(worker, key, tmp_path)) == ["a4-1", "a4-2", "a5-1", "a5-2"]
 
 
 @services

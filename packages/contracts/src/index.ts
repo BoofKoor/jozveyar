@@ -21,6 +21,14 @@ export type ColorMode = z.infer<typeof colorModeSchema>;
 export const sidesModeSchema = z.enum(['single', 'double']);
 export type SidesMode = z.infer<typeof sidesModeSchema>;
 
+/**
+ * اندازهٔ کاغذ جزوه (برش ۸٫۳، سؤال ۱۸۳): هر صفحه روی یک روی برگ همین اندازه، «Fit» مثل A4 (ADR-043)؛ نه دو صفحه روی
+ * یک رو و نه کتابی. ابعاد و مساحت (برای وزن) در `PAPER_SIZES` موتور قیمت. اندازه‌ای ارائه می‌شود که تعرفه نرخ چاپش را
+ * دارد؛ A4 همیشه.
+ */
+export const paperSizeSchema = z.enum(['a4', 'a5', 'a3']);
+export type PaperSize = z.infer<typeof paperSizeSchema>;
+
 export const sourceKindSchema = z.enum(['pdf', 'docx', 'doc', 'pptx', 'ppt', 'image']);
 export type SourceKind = z.infer<typeof sourceKindSchema>;
 
@@ -175,6 +183,8 @@ export const itemSpecSchema = z.object({
   rules: z.array(printRuleSchema).min(1),
   copies: z.number().int().positive().max(1000),
   sidesMode: sidesModeSchema,
+  /** اندازهٔ کاغذ کل جزوه: یک جزوه، یک صحافی، یک اندازه (برش ۸٫۳). */
+  paperSize: paperSizeSchema,
   bindingTypeId: z.string().min(1),
 });
 export type ItemSpec = z.infer<typeof itemSpecSchema>;
@@ -201,20 +211,36 @@ export type BindingBand = z.infer<typeof bindingBandSchema>;
 
 export const paperTypeSchema = z.object({
   nameFa: z.string(),
+  /** گرماژ، برای وزن. */
   gsm: z.number().positive(),
   enabled: z.boolean(),
-  /** امروز صفر است؛ کل نرخ در `clickRates` نشسته. اهرم تفکیک یکرو/دورو در آینده. */
-  ratePerSheetRials: z.number().int().nonnegative(),
+  /**
+   * ریال هر برگ، برای هر اندازه‌ای که این کاغذ دارد (برش ۸٫۳): اندازه‌ای که نیست، این کاغذ را ندارد. تحریر صفر است، چون
+   * کل نرخ در `printRates` نشسته؛ گلاسه نرخ خودش را دارد.
+   */
+  sheetRates: z.partialRecord(paperSizeSchema, z.number().int().nonnegative()),
 });
+export type PaperType = z.infer<typeof paperTypeSchema>;
 
+/**
+ * نوع صحافی (برش ۸٫۳، سؤال ۱۸۵): داده است، نه کد؛ مالک از پنل می‌افزایدش. هر جلد کمینه و بیشینهٔ برگ دارد؛ بالای
+ * بیشینه یا خودکار چند جلد می‌شود (طلق و سیم) یا این صحافی به جزوه نمی‌خورد (منگنه). اندازه‌ای ارائه می‌شود که بازه
+ * دارد؛ بازه‌ها کمینه تا بیشینه را بی شکاف و بی همپوشانی می‌پوشانند (پنل و `binding_rate_bands_no_overlap`).
+ */
 export const bindingTypeSchema = z.object({
   nameFa: z.string(),
   enabled: z.boolean(),
-  /** بالای این تعداد برگ، سند خودکار به چند جلد می‌شکند. */
+  /** کمترین برگ یک جلد. */
+  minSheets: z.number().int().positive(),
+  /** بیشترین برگ یک جلد. */
   maxSheetsPerVolume: z.number().int().positive(),
+  /** بالای `maxSheetsPerVolume`: true یعنی خودکار چند جلد یکنواخت، false یعنی این صحافی به جزوه نمی‌خورد. */
+  splitsVolumes: z.boolean(),
   weightPerVolumeGrams: z.number().nonnegative(),
-  bands: z.array(bindingBandSchema).min(1),
+  /** قیمت هر جلد به بازهٔ برگ، برای هر اندازه‌ای که این صحافی دارد. */
+  bands: z.partialRecord(paperSizeSchema, z.array(bindingBandSchema).min(1)),
 });
+export type BindingType = z.infer<typeof bindingTypeSchema>;
 
 export const shippingRateSchema = z.object({
   methodId: z.string(),
@@ -237,22 +263,35 @@ export const shippingRateSchema = z.object({
 });
 export type ShippingRate = z.infer<typeof shippingRateSchema>;
 
+/**
+ * تنظیم‌های قیمت هر نسخه. `sheetAreaM2` پیش از ۸٫۳ اینجا بود (فقط A4)؛ حالا مساحت از اندازهٔ جزوه است
+ * (`PAPER_SIZES`)، و کلید ستون jsonb نسخه‌های قدیم با خواندن کنار می‌رود.
+ */
 export const pricingSettingsSchema = z.object({
   minOrderRials: z.number().int().nonnegative(),
   /** ۰ یعنی رُند نکن. مثلاً ۱۰۰۰۰ ریال = رُند به نزدیک‌ترین ۱۰۰۰ تومان. */
   roundingStepRials: z.number().int().nonnegative(),
   vatPercent: z.number().min(0).max(100),
   packagingWeightGrams: z.number().nonnegative(),
-  /** مساحت یک برگ به متر مربع. A4 = 0.06237 */
-  sheetAreaM2: z.number().positive(),
 });
 export type PricingSettings = z.infer<typeof pricingSettingsSchema>;
+
+/**
+ * ریال هر **رو** چاپ‌شده برای یک اندازه: یکرو و دورو، هر کدام سیاه‌سفید و رنگی (برش ۸٫۳، سؤال ۱۸۴). صفر نمی‌شود.
+ */
+export const printRateSchema = z.record(sidesModeSchema, z.record(colorModeSchema, z.number().int().positive()));
+export type PrintRate = z.infer<typeof printRateSchema>;
 
 export const priceListSchema = z.object({
   version: z.number().int().positive(),
   label: z.string(),
-  /** ریال به‌ازای هر **رو** چاپ‌شده. */
-  clickRates: z.record(colorModeSchema, z.number().int().nonnegative()),
+  /**
+   * نرخ هر رو برای هر اندازه‌ای که ارائه می‌شود (برش ۸٫۳): اندازه‌ای که اینجا نیست، ارائه نمی‌شود. پیش از ۸٫۳ دو نرخ
+   * `clickRates` برای همه بود؛ نسخه‌های قدیم با «همان نرخ برای یکرو و دورو، فقط A4» خوانده می‌شوند (مهاجرت 0038).
+   */
+  printRates: z
+    .partialRecord(paperSizeSchema, printRateSchema)
+    .refine((rates) => rates.a4 !== undefined, { message: 'نرخ چاپ A4 همیشه لازم است' }),
   paperTypes: z.record(z.string(), paperTypeSchema),
   bindingTypes: z.record(z.string(), bindingTypeSchema),
   shippingMethods: z.record(z.string(), z.object({ nameFa: z.string(), enabled: z.boolean() })),
@@ -267,7 +306,11 @@ export const quoteWarningSchema = z.enum([
   'below_min_order',
   'binding_band_missing',
   'binding_type_unavailable',
+  /** صحافی این اندازه را ندارد، یا شمار برگ جزوه بیرون از کمینه و بیشینهٔ آن است (`bindingMisfit`، ۸٫۳). */
+  'binding_does_not_fit',
   'paper_type_unavailable',
+  /** تعرفه نرخ چاپ این اندازه را ندارد (۸٫۳). */
+  'paper_size_unavailable',
   'shipping_rate_missing',
   'rules_do_not_cover_all_pages',
   'estimated_from_sample',
@@ -279,6 +322,8 @@ export interface ItemBreakdown {
   sections: ItemSection[];
   /** جمع صفحه‌های بخش‌ها. */
   pageCount: number;
+  /** اندازهٔ کاغذ جزوه (۸٫۳)؛ ریز قیمت سفارش‌های پیش از ۸٫۳ ندارندش و همه A4 بودند (`order_items.paper_size`). */
+  paperSize: PaperSize;
   /** روهای چاپی برای یک نسخه. */
   printedSides: number;
   /** برگ لازم برای یک نسخه — مبنای صحافی و وزن. */

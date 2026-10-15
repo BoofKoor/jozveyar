@@ -11,11 +11,18 @@ export interface FaqItem {
  * سؤال‌های پرتکرار؛ همین متن در JSON-LD صفحه (`FAQPage`) هم هست. نرخ چاپ و روز کاری تحویل به پست از تعرفهٔ صفحه
  * (پایگاه داده و `settings`، برش ۴٫۴).
  */
+/** «سیاه‌سفید 1,600 تومان»، و وقتی یکرو نرخ دیگری دارد «سیاه‌سفید 1,600 تومان در دورو و 1,800 تومان در یکرو» (A4، ۸٫۳). */
+function rateText(priceList: SiteTariff['priceList'], color: 'bw' | 'color'): string {
+  const rates = priceList.printRates.a4!;
+  const [double, single] = [rates.double[color], rates.single[color]];
+  return double === single ? formatTomans(double) : `${formatTomans(double)} در دورو و ${formatTomans(single)} در یکرو`;
+}
+
 export function faqItems({ priceList, slaDays }: SiteTariff): FaqItem[] {
   return [
     {
       q: 'قیمت چاپ جزوه چطور حساب می‌شود؟',
-      a: `به‌ازای هر صفحهٔ چاپ‌شده: سیاه‌سفید ${formatTomans(priceList.clickRates.bw ?? 0)} و رنگی ${formatTomans(priceList.clickRates.color ?? 0)}. هزینهٔ صحافی جدا و بر اساس تعداد برگ محاسبه می‌شود. قیمت نهایی را قبل از هر ثبت‌نامی روی صفحه می‌بینید.`,
+      a: `به‌ازای هر صفحهٔ چاپ‌شده: سیاه‌سفید ${rateText(priceList, 'bw')} و رنگی ${rateText(priceList, 'color')}. هزینهٔ صحافی جدا و بر اساس تعداد برگ محاسبه می‌شود. قیمت نهایی را قبل از هر ثبت‌نامی روی صفحه می‌بینید.`,
     },
     {
       q: 'باید تعداد صفحات را خودم بشمارم؟',

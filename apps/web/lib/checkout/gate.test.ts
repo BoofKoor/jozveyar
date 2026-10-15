@@ -4,7 +4,7 @@ import type { JozveView, SectionView } from '../jozveView';
 import type { OrderConfig } from '../orderConfig';
 import { orderGate, retryable } from './gate';
 
-const config: OrderConfig = { colorMode: 'bw', sidesMode: 'double', bindingTypeId: 'spiral', paperTypeId: 'a4-80', copies: 2 };
+const config: OrderConfig = { colorMode: 'bw', sidesMode: 'double', paperSize: 'a5', bindingTypeId: 'spiral', paperTypeId: 'a4-80', copies: 2 };
 
 /** فقط همان‌چه `orderGate` می‌خواند؛ بقیهٔ نمای فایل اینجا بی‌اثر است. */
 function section(key: string, over: Partial<SectionView> = {}): SectionView {
@@ -28,7 +28,7 @@ describe('orderGate', () => {
     expect(orderGate(one(view(section('b'), section('a'))))).toEqual({
       kind: 'ready',
       items: [
-        { documentIds: ['doc-b', 'doc-a'], colorMode: 'bw', paperTypeId: 'a4-80', sidesMode: 'double', bindingTypeId: 'spiral', copies: 2 },
+        { documentIds: ['doc-b', 'doc-a'], colorMode: 'bw', paperTypeId: 'a4-80', sidesMode: 'double', paperSize: 'a5', bindingTypeId: 'spiral', copies: 2 },
       ],
     });
   });
@@ -38,8 +38,8 @@ describe('orderGate', () => {
     expect(orderGate([{ view: view(section('a'), section('b')), config }, { view: view(section('c')), config: color }])).toEqual({
       kind: 'ready',
       items: [
-        { documentIds: ['doc-a', 'doc-b'], colorMode: 'bw', paperTypeId: 'a4-80', sidesMode: 'double', bindingTypeId: 'spiral', copies: 2 },
-        { documentIds: ['doc-c'], colorMode: 'color', paperTypeId: 'a4-80', sidesMode: 'double', bindingTypeId: 'spiral', copies: 1 },
+        { documentIds: ['doc-a', 'doc-b'], colorMode: 'bw', paperTypeId: 'a4-80', sidesMode: 'double', paperSize: 'a5', bindingTypeId: 'spiral', copies: 2 },
+        { documentIds: ['doc-c'], colorMode: 'color', paperTypeId: 'a4-80', sidesMode: 'double', paperSize: 'a5', bindingTypeId: 'spiral', copies: 1 },
       ],
     });
     const failed = section('d', { serverReady: false, serverFailed: true });

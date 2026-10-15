@@ -21,7 +21,9 @@ function asSelectRows(list = SEED_PRICE_LIST) {
       isActive: rows.priceList.isActive ?? false,
       createdAt: new Date('2026-01-01T00:00:00Z'),
     } as never,
+    printRates: rows.printRates as never,
     paperTypes: rows.paperTypes.map((p) => ({ ...p, enabled: p.enabled ?? true })) as never,
+    paperRates: rows.paperRates as never,
     bindingTypes: rows.bindingTypes.map((b) => ({ ...b, enabled: b.enabled ?? true })) as never,
     bindingRateBands: rows.bindingRateBands as never,
     shippingMethods: rows.shippingMethods.map((m) => ({
@@ -60,6 +62,7 @@ describe('تعرفهٔ پایه', () => {
           rules: [{ pageRanges: [[1, 1500]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }],
           copies: 10,
           sidesMode: 'double' as const,
+          paperSize: 'a4' as const,
           bindingTypeId: 'spiral_clear',
         },
       ],
@@ -100,7 +103,7 @@ describe('رفت‌وبرگشت تعرفه', () => {
 
   it('بازه‌های صحافی بر حسب برگ و مرتب برمی‌گردند', () => {
     const back = rowsToPriceList(asSelectRows());
-    const bands = back.bindingTypes.spiral_clear!.bands;
+    const bands = back.bindingTypes.spiral_clear!.bands.a4!;
     expect(bands.map((b) => b.minSheets)).toEqual([1, 151, 301, 451, 601, 701]);
     expect(bands[0]!.priceRials).toBe(450_000);
   });
@@ -110,6 +113,8 @@ describe('رفت‌وبرگشت تعرفه', () => {
     const rows = asSelectRows() as unknown as Parameters<typeof rowsToPriceList>[0];
     const shuffled = {
       ...rows,
+      printRates: rows.printRates.slice().reverse(),
+      paperRates: rows.paperRates.slice().reverse(),
       bindingRateBands: rows.bindingRateBands.slice().reverse(),
       shippingRates: rows.shippingRates.slice().reverse(),
     };
@@ -125,6 +130,7 @@ describe('رفت‌وبرگشت تعرفه', () => {
           rules: [{ pageRanges: [[1, 147]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }],
           copies: 1,
           sidesMode: 'double' as const,
+          paperSize: 'a4' as const,
           bindingTypeId: 'spiral_clear',
         },
       ],
@@ -132,5 +138,72 @@ describe('رفت‌وبرگشت تعرفه', () => {
     };
 
     expect(quote(spec, rowsToPriceList(asSelectRows()))).toEqual(quote(spec, SEED_PRICE_LIST));
+  });
+});
+
+describe('کاتالوگ چاپ: اندازه‌ها، نرخ‌ها و صحافی‌ها (۸٫۳)', () => {
+  /** کاتالوگی با A4 و A5، کاغذی که فقط A4 دارد، و صحافی‌ای که چند جلد نمی‌شود و A5 هم ندارد. */
+  const catalog: PriceList = {
+    ...SEED_PRICE_LIST,
+    version: 3,
+    printRates: {
+      a5: { single: { color: 15_000, bw: 12_000 }, double: { color: 13_000, bw: 10_000 } },
+      a4: { single: { color: 22_000, bw: 18_000 }, double: { color: 20_000, bw: 16_000 } },
+    },
+    paperTypes: {
+      ...SEED_PRICE_LIST.paperTypes,
+      glossy: { nameFa: 'گلاسه', gsm: 135, enabled: false, sheetRates: { a4: 15_000 } },
+    },
+    bindingTypes: {
+      ...SEED_PRICE_LIST.bindingTypes,
+      staple: {
+        nameFa: 'منگنه',
+        enabled: true,
+        minSheets: 2,
+        maxSheetsPerVolume: 50,
+        splitsVolumes: false,
+        weightPerVolumeGrams: 1,
+        bands: { a4: [{ minSheets: 2, maxSheets: 50, priceRials: 80_000 }] },
+      },
+    },
+  };
+
+  it('هر اندازه چهار ردیف نرخ دارد، هر کاغذ یک ردیف برای هر اندازه‌اش، و هر بازه اندازه‌اش را', () => {
+    const rows = priceListToRows(catalog);
+    expect(rows.printRates).toHaveLength(8);
+    expect(rows.printRates.filter((r) => r.paperSize === 'a5').map((r) => [r.sidesMode, r.colorMode, r.rateRials])).toEqual([
+      ['single', 'color', 15_000],
+      ['single', 'bw', 12_000],
+      ['double', 'color', 13_000],
+      ['double', 'bw', 10_000],
+    ]);
+    expect(rows.paperRates).toEqual([
+      { priceListVersion: 3, paperTypeId: 'tahrir80', paperSize: 'a4', rateRials: 0 },
+      { priceListVersion: 3, paperTypeId: 'glossy', paperSize: 'a4', rateRials: 15_000 },
+    ]);
+    expect(rows.bindingTypes.find((b) => b.id === 'staple')).toMatchObject({ minSheets: 2, splitsVolumes: false });
+    expect(new Set(rows.bindingRateBands.map((b) => b.paperSize))).toEqual(new Set(['a4']));
+  });
+
+  it('رفت‌وبرگشت بی تغییر؛ اندازه‌ها به ترتیب ثابت، هر ترتیبی که ردیف‌ها بیایند', () => {
+    const rows = asSelectRows(catalog) as unknown as Parameters<typeof rowsToPriceList>[0];
+    const back = rowsToPriceList(rows);
+    // ترتیب کرایه‌ها را تست بالا می‌سنجد (مرتب‌شده با منطقه)؛ اینجا بقیه.
+    expect({ ...back, shippingRates: [] }).toEqual({ ...priceListSchema.parse(catalog), shippingRates: [] });
+    expect(Object.keys(back.printRates)).toEqual(['a4', 'a5']);
+    const shuffled = { ...rows, printRates: rows.printRates.slice().reverse(), paperRates: rows.paperRates.slice().reverse() };
+    expect(rowsToPriceList(shuffled)).toEqual(back);
+  });
+
+  it('اندازهٔ نیمه‌کاره خوانده نمی‌شود: سه حالت از چهار', () => {
+    const rows = asSelectRows(catalog) as unknown as Parameters<typeof rowsToPriceList>[0];
+    const partial = { ...rows, printRates: rows.printRates.filter((r) => !(r.paperSize === 'a5' && r.colorMode === 'bw' && r.sidesMode === 'double')) };
+    expect(() => rowsToPriceList(partial)).toThrow();
+  });
+
+  it('مساحت برگ نسخه‌های پیش از ۸٫۳ در تنظیم‌ها با خواندن کنار می‌رود', () => {
+    const rows = asSelectRows() as unknown as Parameters<typeof rowsToPriceList>[0];
+    const legacy = { ...rows, priceList: { ...rows.priceList, settings: { ...SEED_PRICE_LIST.settings, sheetAreaM2: 0.06237 } } };
+    expect(rowsToPriceList(legacy).settings).toEqual(SEED_PRICE_LIST.settings);
   });
 });

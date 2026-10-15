@@ -12,7 +12,7 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { SEED_TARIFF } from '../tariff';
 import { loadTariff, siteTariff } from './tariff';
 
-const V2: PriceList = { ...SEED_PRICE_LIST, version: 2, label: 'نسخهٔ دوم', clickRates: { color: 30_000, bw: 20_000 } };
+const V2: PriceList = { ...SEED_PRICE_LIST, version: 2, label: 'نسخهٔ دوم', printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } } };
 const DB = 'postgresql://jozveyar@127.0.0.1:5432/jozveyar';
 
 function source(settings: Record<string, unknown> = {}, list: PriceList | Error = V2) {

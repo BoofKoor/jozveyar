@@ -55,13 +55,19 @@ function fileOf(value: unknown): DraftFile | null {
   return { name, size, lastModified, documentId };
 }
 
+/** اندازه‌های کاغذ (`paperSizeSchema`)؛ بی zod، چون این تکه اسکیما parse نمی‌کند. */
+const PAPER_SIZES: readonly OrderConfig['paperSize'][] = ['a4', 'a5', 'a3'];
+
 function configOf(value: unknown): OrderConfig | null {
   if (!isObject(value)) return null;
   const { colorMode, sidesMode, bindingTypeId, paperTypeId, copies } = value;
+  // پیش‌نویس پیش از ۸٫۳ اندازه ندارد، و آن روز همه A4 بود.
+  const paperSize = value.paperSize ?? 'a4';
   if (colorMode !== 'bw' && colorMode !== 'color') return null;
   if (sidesMode !== 'single' && sidesMode !== 'double') return null;
+  if (!PAPER_SIZES.includes(paperSize as OrderConfig['paperSize'])) return null;
   if (!isText(bindingTypeId, 40) || !isText(paperTypeId, 40) || !isId(copies) || copies > 1000) return null;
-  return { colorMode, sidesMode, bindingTypeId, paperTypeId, copies };
+  return { colorMode, sidesMode, paperSize: paperSize as OrderConfig['paperSize'], bindingTypeId, paperTypeId, copies };
 }
 
 function placeOf(value: unknown): Place | null {

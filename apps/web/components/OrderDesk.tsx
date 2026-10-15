@@ -4,8 +4,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
-import { quote } from '@jozveyar/pricing';
+import { DEFAULT_PAPER_SIZE, quote } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
+import { effectiveConfig, type Replacement } from '../lib/catalog';
 import { formatNumber } from '@jozveyar/text';
 import type { ApiFailure } from '../lib/checkout/api';
 import { orderGate, retryable } from '../lib/checkout/gate';
@@ -43,10 +44,11 @@ import { JozveFiles } from './JozveFiles';
 import { OrderSummary, PriceDock, type DeskAction } from './OrderSummary';
 import { FlowNav, jozveSpecLabel, type JozveLine } from './checkout/parts';
 
-/** انتخاب‌های پیش‌فرض، از تعرفه: سیاه‌سفید، دورو، یک نسخه. */
+/** انتخاب‌های پیش‌فرض، از تعرفه: سیاه‌سفید، دورو، A4، یک نسخه. */
 export const INITIAL_CONFIG: OrderConfig = {
   colorMode: 'bw',
   sidesMode: 'double',
+  paperSize: DEFAULT_PAPER_SIZE,
   bindingTypeId: DEFAULT_BINDING_TYPE_ID,
   paperTypeId: DEFAULT_PAPER_TYPE_ID,
   copies: 1,
@@ -155,24 +157,20 @@ export function primeLayout(layout: DraftLayout | null) {
   restoredJozves = layout;
 }
 
-/** تنظیمی که تعرفهٔ امروز دارد، وگرنه null (پیش‌فرض‌ها): خود جدول، نه نام‌های ارث‌رسیده («constructor» پیش‌نویس دستکاری‌شده). */
-function knownConfig(config: OrderConfig | null, priceList: PriceList): OrderConfig | null {
-  const has = (table: object, id: string) => Object.prototype.hasOwnProperty.call(table, id);
-  return config && has(priceList.bindingTypes, config.bindingTypeId) && has(priceList.paperTypes, config.paperTypeId) ? config : null;
-}
-
 /**
- * برای برگشت بعد از رفرش: تنظیم هر جزوه که تعرفهٔ امروز دارد (تعرفهٔ تازه یعنی پیش‌فرض)، و قلم‌های جزوه‌های برگشته اگر همه
- * روی سرور و شمرده‌اند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین تکه بمانند.
+ * برای برگشت بعد از رفرش: تنظیم هر جزوه همان‌طور که بود، و قلم‌های جزوه‌های برگشته اگر همه روی سرور و شمرده‌اند. گزینه‌ای که
+ * تعرفهٔ امروز ندارد یا به جزوه نمی‌خورد، در قلم جایش را به پیش‌فرض همان ردیف می‌دهد (`effectiveConfig`، سؤال ۲۲۴)، و میز
+ * همان را با یادداشتش نشان می‌دهد؛ تنظیم خود جزوه می‌ماند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین
+ * تکه بمانند.
  */
 export function restoredOrder(jozves: readonly { sections: readonly RestoredSection[]; config: OrderConfig | null }[]) {
   const { priceList } = pageTariff();
-  const configs = jozves.map((jozve) => knownConfig(jozve.config, priceList));
+  const configs = jozves.map((jozve) => jozve.config);
   let at = 0;
-  const parts = jozves.map((jozve, i) => ({
-    view: jozveView(jozve.sections.map((section) => ({ ...section, key: `r${(at += 1)}` }))),
-    config: configs[i] ?? INITIAL_CONFIG,
-  }));
+  const parts = jozves.map((jozve, i) => {
+    const view = jozveView(jozve.sections.map((section) => ({ ...section, key: `r${(at += 1)}` })));
+    return { view, config: effectiveConfig(configs[i] ?? INITIAL_CONFIG, priceList, view.pageCount).config };
+  });
   const gate = orderGate(parts);
   return { configs, items: gate.kind === 'ready' ? gate.items : null };
 }
@@ -231,17 +229,23 @@ interface Props {
   onConfig: (next: OrderConfig) => void;
 }
 
-/** یک جزوهٔ میز: جایش در چیدمان، نمای فایل‌هایش، و تنظیمات چاپش. */
+/**
+ * یک جزوهٔ میز: جایش در چیدمان، نمای فایل‌هایش، و تنظیمات چاپش. `config` همان است که قیمت می‌خورد و به مسیر خرید می‌رود
+ * (`effectiveConfig`، ۸٫۳)؛ `chosen` انتخاب خود جزوه، که می‌ماند؛ و `replaced` هر انتخابی که جایش را به پیش‌فرض داد.
+ */
 interface DeskJozve extends JozvePart {
   slot: JozveSlot;
+  chosen: OrderConfig;
+  replaced: Replacement[];
 }
 
-function jozvesOf(layout: DeskLayout, byKey: ReadonlyMap<string, Section>): DeskJozve[] {
-  return layout.jozves.map((slot) => ({
-    slot,
-    view: jozveView(slot.sections.map((key) => byKey.get(key)!)),
-    config: slot.config ?? INITIAL_CONFIG,
-  }));
+function jozvesOf(layout: DeskLayout, byKey: ReadonlyMap<string, Section>, priceList: PriceList): DeskJozve[] {
+  return layout.jozves.map((slot) => {
+    const view = jozveView(slot.sections.map((key) => byKey.get(key)!));
+    const chosen = slot.config ?? INITIAL_CONFIG;
+    const { config, replaced } = effectiveConfig(chosen, priceList, view.pageCount);
+    return { slot, view, chosen, config, replaced };
+  });
 }
 
 /**
@@ -292,7 +296,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     setLayout((current) => change(reconcile(current, keysRef.current)));
   }, []);
   const byKey = useMemo(() => new Map(jozve.sections.map((section) => [section.key, section])), [jozve.sections]);
-  const jozves = useMemo(() => jozvesOf(synced, byKey), [synced, byKey]);
+  const jozves = useMemo(() => jozvesOf(synced, byKey, priceList), [synced, byKey, priceList]);
   const multi = jozves.length > 1;
   const priced = useMemo(() => priceOf(jozves, priceList), [jozves, priceList]);
   const breakdown = priced?.breakdown ?? null;
@@ -303,11 +307,17 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   const blocked = sections.filter((s) => s.blocked !== null).map((s) => s.name);
   const waiting = sections.filter((s) => s.waiting).map((s) => s.name);
 
-  /** قیمت سفارش وقتی جزوهٔ `index` انتخاب دیگری دارد (`ConfigPanel`): اثر هر گزینه روی جمع، و برگ‌های همان جزوه. */
+  /**
+   * قیمت سفارش وقتی جزوهٔ `index` انتخاب دیگری دارد (`ConfigPanel`): اثر هر گزینه روی جمع، و برگ‌های همان جزوه. انتخاب دیگر
+   * هم همان قاعدهٔ «نمی‌خورد، پیش‌فرض» را دارد (`effectiveConfig`): اثر «یکرو» روی جزوه‌ای که منگنه‌اش در یکرو نمی‌خورد، قیمت
+   * طلق و سیم را هم دارد.
+   */
   const quoteFor = useCallback(
     (index: number) =>
       (next: OrderConfig): ConfigQuote | null => {
-        const order = orderSpec(jozves.map((j, i) => (i === index ? { ...j, config: next } : j)));
+        const order = orderSpec(
+          jozves.map((j, i) => (i === index ? { ...j, config: effectiveConfig(next, priceList, j.view.pageCount).config } : j)),
+        );
         if (!order) return null;
         const other = quote(order.spec, priceList);
         const at = order.index[index];
@@ -323,10 +333,10 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
    */
   const asked = synced.asking ? arrangement(synced) : null;
   const askKey =
-    asked && breakdown ? JSON.stringify([asked, jozves.map((j) => [j.config, j.view.included.map((s) => [s.key, s.pageCount])])]) : null;
+    asked && breakdown ? JSON.stringify([asked, jozves.map((j) => [j.chosen, j.view.included.map((s) => [s.key, s.pageCount])])]) : null;
   const askDelta = () => {
     if (!asked || !breakdown) return null;
-    const other = priceOf(jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey), priceList);
+    const other = priceOf(jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey, priceList), priceList);
     return other ? other.breakdown.totalWithoutShippingRials - breakdown.totalWithoutShippingRials : null;
   };
 
@@ -341,7 +351,8 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
       ? null
       : open && jozves.some((j) => j.slot.key === open.key)
         ? open.key
-        : jozves[0]!.slot.key;
+        : // جزوه‌ای که انتخابی از آن جایش را به پیش‌فرض داد، تنظیماتش باز (سؤال ۲۲۴)؛ وگرنه جزوهٔ اول.
+          (jozves.find((j) => j.replaced.length > 0) ?? jozves[0]!).slot.key;
   /** کلید جزوه‌ای که کار بعدی چیدمان می‌سازد. */
   const freshKey = `j${synced.next}`;
   /** فایلی که با منوی ردیف به جزوهٔ دیگر رفت: فوکوس به سر همان جزوه، نه گم شدن با ردیفی که از جایش رفت. */
@@ -704,11 +715,12 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   );
 
   const room = MAX_SECTIONS_PER_ITEM - jozve.sections.length;
-  /** «سیاه‌سفید، دورو، طلق و سیم» یک جزوه. */
-  const specOf = ({ colorMode, sidesMode, bindingTypeId, paperTypeId }: OrderConfig) =>
+  /** «سیاه‌سفید، دورو، A4، طلق و سیم» یک جزوه. */
+  const specOf = ({ colorMode, sidesMode, paperSize, bindingTypeId, paperTypeId }: OrderConfig) =>
     jozveSpecLabel(
       colorMode,
       sidesMode,
+      paperSize,
       priceList.bindingTypes[bindingTypeId]?.nameFa ?? '',
       paperTypeId === DEFAULT_PAPER_TYPE_ID ? null : (priceList.paperTypes[paperTypeId]?.nameFa ?? null),
     );
@@ -745,7 +757,10 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
               id={`jozve-set-${index + 1}`}
             >
               <ConfigPanel
-                config={j.config}
+                config={j.chosen}
+                effective={j.config}
+                replaced={j.replaced}
+                pageCount={j.view.pageCount}
                 onChange={(next) => configureAt(index, next)}
                 priceList={priceList}
                 quoteFor={quoteFor(index)}

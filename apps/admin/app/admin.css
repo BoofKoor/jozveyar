@@ -1214,6 +1214,120 @@
   .ad-changes__k {
     color: var(--color-muted);
   }
+  /* کاتالوگ (۸٫۳): هر اندازه یک گروه با تیک «ارائه می‌شود»، هر کاغذ و صحافی یک قاب، بازه‌های هر اندازه زیر صحافی */
+  .ad-check {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--color-green-600);
+    cursor: pointer;
+  }
+  .ad-size {
+    min-width: 0;
+    margin-block-start: 16px;
+  }
+  .ad-size + .ad-size {
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-size__legend {
+    font-weight: 600;
+  }
+  .ad-size__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  .ad-size__legend + .ad-rates {
+    margin-block-start: 4px;
+  }
+  .ad-rates--4 {
+    grid-template-columns: repeat(4, minmax(0, 10rem));
+  }
+  @media (width <= 860px) {
+    .ad-rates--4 {
+      grid-template-columns: repeat(2, minmax(0, 12rem));
+    }
+  }
+  /* در گوشی دو ستون: سیاه‌سفید و رنگی هر رو کنار هم، تا چهار نرخ هر اندازه یک صفحه طول نکشد */
+  @media (max-width: 520px) {
+    .ad-rates--4 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+  }
+  .ad-option {
+    min-width: 0;
+    margin-block-start: 16px;
+    padding: 16px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  /* در گوشی قاب نه، فقط خط بالا: جدول بازه‌ها جای پهنای قاب را لازم دارد */
+  @media (max-width: 520px) {
+    .ad-option {
+      padding: 16px 0 0;
+      border-width: 1px 0 0;
+      border-radius: 0;
+    }
+  }
+  .ad-option__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px 16px;
+  }
+  .ad-option__row > .jy-field {
+    flex: 0 1 9rem;
+    min-width: 0;
+  }
+  .ad-option__row > .jy-field.ad-in-name {
+    flex: 1 1 14rem;
+  }
+  .ad-option__foot {
+    align-items: center;
+    margin-block-start: 8px;
+  }
+  .ad-option__foot > .jy-btn {
+    margin-inline-start: auto;
+  }
+  .ad-option > .ad-hint {
+    margin-block-start: 8px;
+  }
+  /* «بالای سقف»: برچسب و دو گزینه در یک ردیف؛ legend شناور تا جزو ردیف باشد، نه بالای قاب */
+  .ad-split {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 16px;
+    min-width: 0;
+  }
+  .ad-split > legend {
+    float: inline-start;
+  }
+  .ad-binding-bands {
+    margin-block-start: 16px;
+  }
+  .ad-binding-bands__caption {
+    caption-side: top;
+    font-weight: 600;
+    text-align: start;
+  }
+  .ad-binding-view + .ad-binding-view {
+    margin-block-start: 16px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-binding-view__name {
+    margin-block-start: 8px;
+    font-weight: 600;
+  }
+  .ad-binding-view > .ad-hint {
+    margin-block-start: 4px;
+  }
 
   /* ===== تنظیمات و کلیدها (۴٫۶): تعطیلی‌ها با افزودن و حذف، کلیدها با منبع و ۴ نویسهٔ آخر ===== */
   .ad-days > li {

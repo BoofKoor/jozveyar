@@ -171,6 +171,7 @@ describe('مسیر خرید روی سرور', () => {
               rules: [{ pageRanges: [[1, 120]], colorMode: 'bw', paperTypeId: 'tahrir80' }],
               copies: 1,
               sidesMode: 'double',
+              paperSize: 'a4',
               bindingTypeId: 'spiral_clear',
             },
           ],
@@ -184,7 +185,7 @@ describe('مسیر خرید روی سرور', () => {
 
     it('تعرفهٔ فعال پایگاه داده، نه تعرفهٔ درون کد', async () => {
       const scan = doc(100);
-      const dearer: PriceList = { ...SEED_PRICE_LIST, version: 2, clickRates: { color: 30_000, bw: 20_000 } };
+      const dearer: PriceList = { ...SEED_PRICE_LIST, version: 2, printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } } };
       orders.activate(dearer);
       const result = await service.quote(ME, { items: [item([scan])], place: null });
       expect(result.ok && result.value.breakdown.priceListVersion).toBe(2);
@@ -374,6 +375,55 @@ describe('مسیر خرید روی سرور', () => {
         expectedTotalRials: 1,
       });
       expect(result).toMatchObject({ status: 422, error: 'quote_warnings', warnings: ['binding_type_unavailable'] });
+    });
+
+    it('اندازهٔ کاغذ (۸٫۳): A5 با تعرفه‌ای که A5 دارد سفارش A5 می‌سازد؛ بی اندازه (زبانهٔ پیش از ۸٫۳) A4 است', async () => {
+      const spiral = SEED_PRICE_LIST.bindingTypes.spiral_clear!;
+      const catalog: PriceList = {
+        ...SEED_PRICE_LIST,
+        version: 3,
+        printRates: {
+          ...SEED_PRICE_LIST.printRates,
+          a5: { single: { color: 15_000, bw: 12_000 }, double: { color: 13_000, bw: 10_000 } },
+        },
+        paperTypes: { tahrir80: { ...SEED_PRICE_LIST.paperTypes.tahrir80!, sheetRates: { a4: 0, a5: 0 } } },
+        bindingTypes: { spiral_clear: { ...spiral, bands: { ...spiral.bands, a5: [{ minSheets: 1, maxSheets: 800, priceRials: 400_000 }] } } },
+      };
+      orders.activate(catalog);
+      const scan = doc(100);
+      const quoted = await service.quote(ME, { items: [item([scan], { paperSize: 'a5' })], place: TEHRAN });
+      expect(quoted.ok && quoted.value.breakdown.items[0]).toMatchObject({ paperSize: 'a5', printRials: 100 * 10_000, bindingRials: 400_000 });
+      const total = quoted.ok ? quoted.value.breakdown.totalRials : 0;
+      await placed([scan], { items: [item([scan], { paperSize: 'a5' })], expectedTotalRials: total, quoteSnapshot: { totalRials: total } });
+      expect(orders.items.at(-1)).toMatchObject({ paperSize: 'a5' });
+      // زبانه‌ای که پیش از استقرار باز بود اندازه نمی‌فرستد: همان A4
+      const old = await service.quote(ME, { items: [item([scan])], place: null });
+      expect(old.ok && old.value.breakdown.items[0]).toMatchObject({ paperSize: 'a4', printRials: 100 * 16_000 });
+    });
+
+    it('اندازه‌ای که تعرفه ندارد و صحافی‌ای که به جزوه نمی‌خورد سفارش نمی‌سازند؛ اندازهٔ ناشناس ۴۰۰', async () => {
+      const scan = doc(113);
+      const attempt = (over: Record<string, unknown>) =>
+        service.placeOrder(ME, SARA, { items: [item([scan], over)], place: TEHRAN, recipient, checkoutKey: randomUUID(), expectedTotalRials: 1 });
+      expect(await attempt({ paperSize: 'a3' })).toMatchObject({ status: 422, error: 'quote_warnings', warnings: expect.arrayContaining(['paper_size_unavailable']) });
+      expect(await attempt({ paperSize: 'b5' })).toMatchObject({ status: 400, fields: ['items.0.paperSize'] });
+      const staple = {
+        nameFa: 'منگنه',
+        enabled: true,
+        minSheets: 1,
+        maxSheetsPerVolume: 50,
+        splitsVolumes: false,
+        weightPerVolumeGrams: 1,
+        bands: { a4: [{ minSheets: 1, maxSheets: 50, priceRials: 80_000 }] },
+      };
+      orders.activate({ ...SEED_PRICE_LIST, version: 4, bindingTypes: { ...SEED_PRICE_LIST.bindingTypes, staple } });
+      // ۱۱۳ صفحهٔ دورو = ۵۷ برگ، منگنه تا ۵۰
+      expect(await attempt({ bindingTypeId: 'staple' })).toMatchObject({
+        status: 422,
+        error: 'quote_warnings',
+        warnings: expect.arrayContaining(['binding_does_not_fit']),
+      });
+      expect(orders.orders).toEqual([]);
     });
 
     it('فایلی که کمتر از یک ساعت زنده است: «دوباره بینداز»، نه سفارش', async () => {
@@ -1000,7 +1050,9 @@ describe('مسیر خرید روی سرور', () => {
             sidesMode: 'double',
             colorMode: 'bw',
             bindingName: 'طلق و سیم',
-            paperName: 'تحریر ۸۰ گرم',
+            // کاغذ پیش‌فرض نام نمی‌گیرد (۸٫۳)؛ اندازه همیشه
+            paperName: null,
+            paperSize: 'a4',
             sections: [
               { name: 'ریاضی ۲ - جلسه ۱.pdf', pageCount: 48 },
               { name: 'حل تمرین.docx', pageCount: 18 },

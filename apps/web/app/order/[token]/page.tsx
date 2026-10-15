@@ -578,13 +578,13 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
   const lineItem = breakdown.items[0]!;
   const many = details.items.length > 1;
   const place = details.shipping.cityName ?? `استان ${details.shipping.provinceName}`;
-  const print = printLabel(item.colorMode, item.sidesMode);
+  const print = printLabel(item.colorMode, item.sidesMode, item.paperSize, item.paperName);
   const files = item.sections.map((section) => ({ name: section.name, pageCount: section.pageCount }));
   /** هر جزوهٔ سفارش برای مرور و خلاصه (برش ۸٫۲، سؤال ۲۲۵). */
   const recaps: RecapJozve[] = details.items.map((jozve) => ({
     files: jozve.sections.map((section) => ({ name: section.name, pageCount: section.pageCount })),
     pageCount: jozve.pageCount,
-    print: printLabel(jozve.colorMode, jozve.sidesMode),
+    print: printLabel(jozve.colorMode, jozve.sidesMode, jozve.paperSize, jozve.paperName),
     bindingName: jozve.bindingName,
     copies: jozve.copies,
   }));
@@ -683,7 +683,7 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
                       ? [
                           {
                             n: i + 1,
-                            spec: jozveSpecLabel(jozve.colorMode, jozve.sidesMode, jozve.bindingName),
+                            spec: jozveSpecLabel(jozve.colorMode, jozve.sidesMode, jozve.paperSize, jozve.bindingName, jozve.paperName),
                             pageCount: line.pageCount,
                             copies: line.copies,
                             totalRials: line.totalRials,

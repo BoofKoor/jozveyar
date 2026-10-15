@@ -86,7 +86,7 @@ async function order(
   const rules = [{ pageRanges: [[1, 10]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
   const zoneId = place.provinceId === TEHRAN.provinceId ? 'tehran' : 'other';
   const breakdown = quote(
-    { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
+    { items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
     SEED_PRICE_LIST,
   );
   return sql.begin(async (tx) => {
@@ -103,8 +103,8 @@ async function order(
               ${place.provinceId}, ${place.cityId}, ${name}, ${phone}, 'خیابان ولیعصر، پلاک 12', ${new Date(paidAt.getTime() - 30 * MINUTE)})
       RETURNING id, order_number`;
     const [item] = await tx<{ id: string }[]>`
-      INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-      VALUES (${row!.id}, 1, 10, 1, 'double', 'spiral_clear') RETURNING id`;
+      INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, paper_size, binding_type_id)
+      VALUES (${row!.id}, 1, 10, 1, 'double', 'a4', 'spiral_clear') RETURNING id`;
     await tx`INSERT INTO order_item_sections (order_item_id, seq, document_id, page_count) VALUES (${item!.id}, 1, ${docId}, 10)`;
     await tx`INSERT INTO print_rules (order_item_id, seq, page_ranges, color_mode, paper_type_id)
              VALUES (${item!.id}, 1, ${tx.json(rules[0]!.pageRanges)}, 'bw', 'tahrir80')`;

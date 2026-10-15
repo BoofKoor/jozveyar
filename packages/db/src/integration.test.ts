@@ -79,7 +79,9 @@ import {
   adminUserRoles,
   adminUsers,
   bindingTypes,
+  paperRates,
   paperTypes,
+  printRates,
   rolePermissions,
   shippingMethods,
 } from './schema.js';
@@ -225,6 +227,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           ],
           copies: 1,
           sidesMode: 'double' as const,
+          paperSize: 'a4' as const,
           bindingTypeId: 'spiral_clear',
         },
       ],
@@ -252,6 +255,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           ],
           copies: 10,
           sidesMode: 'double' as const,
+          paperSize: 'a4' as const,
           bindingTypeId: 'spiral_clear',
         },
       ],
@@ -287,12 +291,66 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           conn.db.insert(bindingRateBands).values({
             priceListVersion: DRAFT,
             bindingTypeId: 'spiral_clear',
+            paperSize: 'a4',
             minSheets: 100,
             maxSheets: 200,
             priceRials: 999_000,
           }),
         ),
       ).toBe('binding_rate_bands_no_overlap');
+    });
+
+    it('بازه‌های صحافی هر اندازه جدا (۸٫۳): همان بازه در A5 پذیرفته، همپوشانی در همان اندازه نه', async () => {
+      const a5 = and(eq(bindingRateBands.priceListVersion, DRAFT), eq(bindingRateBands.paperSize, 'a5'));
+      await conn.db
+        .insert(bindingRateBands)
+        .values({ priceListVersion: DRAFT, bindingTypeId: 'spiral_clear', paperSize: 'a5', minSheets: 1, maxSheets: 150, priceRials: 400_000 });
+      expect(
+        await rejectedConstraint(
+          conn.db
+            .insert(bindingRateBands)
+            .values({ priceListVersion: DRAFT, bindingTypeId: 'spiral_clear', paperSize: 'a5', minSheets: 100, maxSheets: 200, priceRials: 1 }),
+        ),
+      ).toBe('binding_rate_bands_no_overlap');
+      await conn.db.delete(bindingRateBands).where(a5);
+    });
+
+    it('نرخ چاپ هر اندازه هیچ یا هر چهار حالت، و صفر نه؛ نرخ کاغذ منفی نه؛ کمینهٔ برگ صحافی از ۱ تا سقف (۸٫۳)', async () => {
+      const rate = (sidesMode: 'single' | 'double', colorMode: 'color' | 'bw', paperSize: 'a4' | 'a5' | 'a3' = 'a5') =>
+        ({ priceListVersion: DRAFT, paperSize, sidesMode, colorMode, rateRials: 10_000 }) as const;
+      const four = [rate('single', 'color'), rate('single', 'bw'), rate('double', 'color'), rate('double', 'bw')];
+      const one = (paperSize: 'a4' | 'a5', sidesMode: 'single' | 'double', colorMode: 'color' | 'bw') =>
+        and(
+          eq(printRates.priceListVersion, DRAFT),
+          eq(printRates.paperSize, paperSize),
+          eq(printRates.sidesMode, sidesMode),
+          eq(printRates.colorMode, colorMode),
+        );
+      // سه حالت از چهار: پایان تراکنش رد می‌کند، و هیچ نمی‌ماند.
+      expect(await rejectedConstraint(conn.db.insert(printRates).values(four.slice(0, 3)))).toBe('print_rates_complete');
+      // هر چهار پذیرفته؛ یکی کمتر نه؛ هر چهار با هم پاک پذیرفته.
+      await conn.db.insert(printRates).values(four);
+      expect(await rejectedConstraint(conn.db.delete(printRates).where(one('a5', 'double', 'bw')))).toBe('print_rates_complete');
+      await conn.db.delete(printRates).where(and(eq(printRates.priceListVersion, DRAFT), eq(printRates.paperSize, 'a5')));
+      // یک حالت A4 به اندازهٔ دیگر: هر دو اندازه نیمه‌کاره.
+      expect(await rejectedConstraint(conn.db.update(printRates).set({ paperSize: 'a3' }).where(one('a4', 'single', 'color')))).toBe(
+        'print_rates_complete',
+      );
+      expect(await rejectedConstraint(conn.db.update(printRates).set({ rateRials: 0 }).where(one('a4', 'single', 'bw')))).toBe(
+        'print_rates_positive',
+      );
+      expect(await rejectedConstraint(conn.db.update(paperRates).set({ rateRials: -1 }).where(eq(paperRates.priceListVersion, DRAFT)))).toBe(
+        'paper_rates_nonnegative',
+      );
+      expect(
+        await rejectedConstraint(conn.db.insert(paperRates).values({ priceListVersion: DRAFT, paperTypeId: 'glossy', paperSize: 'a4', rateRials: 1 })),
+      ).toBe('paper_rates_paper_type_fk');
+      for (const minSheets of [0, 801]) {
+        expect(await rejectedConstraint(conn.db.update(bindingTypes).set({ minSheets }).where(eq(bindingTypes.priceListVersion, DRAFT)))).toBe(
+          'binding_types_sheets',
+        );
+      }
+      expect((await loadPriceList(conn, DRAFT)).printRates).toEqual(SEED_PRICE_LIST.printRates);
     });
 
     it('بازهٔ وزن همپوشان رد می‌شود', async () => {
@@ -331,8 +389,6 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           conn.db.insert(priceLists).values({
             version: 99,
             label: 'دومی',
-            clickRateColorRials: 1,
-            clickRateBwRials: 1,
             settings: SEED_PRICE_LIST.settings,
             isActive: true,
           }),
@@ -602,7 +658,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const rules = over.rules ?? [{ pageRanges: [[1, pageCount]] as [number, number][], colorMode: 'bw' as const }];
       const breakdown = quote(
         {
-          items: [{ sections, rules: rules.map((r) => ({ ...r, paperTypeId: 'tahrir80' })), copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }],
+          items: [{ sections, rules: rules.map((r) => ({ ...r, paperTypeId: 'tahrir80' })), copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }],
           shipping: { methodId: 'post', zoneId: 'tehran' },
         },
         SEED_PRICE_LIST,
@@ -640,7 +696,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           .returning();
         const [item] = await tx
           .insert(orderItems)
-          .values({ orderId: order!.id, seq: 1, pageCount, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' })
+          .values({ orderId: order!.id, seq: 1, pageCount, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' })
           .returning();
         await tx.insert(orderItemSections).values(sections.map((s, i) => ({ orderItemId: item!.id, seq: i + 1, ...s })));
         await tx.insert(printRules).values(
@@ -707,6 +763,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     it('مشخصات جزوه منجمد است؛ فقط PDF جزوه بعداً پر می‌شود', async () => {
       const { item } = await placeOrder();
       expect(await rejectedConstraint(conn.db.update(orderItems).set({ copies: 2 }).where(eq(orderItems.id, item.id)))).toBe('order_items_frozen');
+      // اندازهٔ کاغذ هم، مثل بقیهٔ مشخصات (۸٫۳)
+      expect(await rejectedConstraint(conn.db.update(orderItems).set({ paperSize: 'a5' }).where(eq(orderItems.id, item.id)))).toBe(
+        'order_items_frozen',
+      );
       expect(
         await rejectedConstraint(conn.db.update(printRules).set({ colorMode: 'color' }).where(eq(printRules.orderItemId, item.id))),
       ).toBe('order_spec_frozen');
@@ -962,7 +1022,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const rules = [{ pageRanges: [[1, 102]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const breakdown = quote(
         {
-          items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }],
+          items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }],
           shipping: { methodId: 'post', zoneId: 'tehran' },
         },
         SEED_PRICE_LIST,
@@ -981,7 +1041,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         recipientPhone: MOBILE,
         addressText: 'تهران، خیابان ولیعصر، پلاک 12',
         postalCode: null,
-        items: [{ pageCount: 102, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        items: [{ pageCount: 102, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', sections, rules }],
         ...over,
       };
     }
@@ -998,6 +1058,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect.objectContaining({
           seq: 1,
           pageCount: 102,
+          paperSize: 'a4',
           sections: [
             expect.objectContaining({ seq: 1, documentId: docIds[0], pageCount: 48, originalName: 'جلسه 48.pdf' }),
             expect.objectContaining({ seq: 2, documentId: docIds[1], pageCount: 54, originalName: 'جلسه 54.pdf' }),
@@ -1009,6 +1070,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const events = await conn.db.select().from(orderStatusEvents).where(eq(orderStatusEvents.orderId, order.id));
       expect(events).toEqual([expect.objectContaining({ fromStatus: null, toStatus: 'awaiting_payment', actor: 'user' })]);
       expect(await store.details(randomUUID())).toBeNull();
+    });
+
+    it('اندازهٔ کاغذ هر جزوه همان که سرویس داد ذخیره می‌شود (۸٫۳)', async () => {
+      const store = createOrderStore(conn);
+      const input = await newOrder();
+      const { order } = await store.createOrder({ ...input, items: [{ ...input.items[0]!, paperSize: 'a5' }] });
+      const [row] = await conn.db.select({ paperSize: orderItems.paperSize }).from(orderItems).where(eq(orderItems.orderId, order.id));
+      expect(row).toEqual({ paperSize: 'a5' });
     });
 
     it('یک کلید، یک سفارش: دو «پرداخت» هم‌زمان با یک کلید، دومی همان سفارش را می‌گیرد', async () => {
@@ -2202,7 +2271,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const rules = [{ pageRanges: [[1, pageCount]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const zoneId = over.zoneId ?? 'tehran';
       const breakdown = quote(
-        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
         SEED_PRICE_LIST,
       );
       const phone = over.phone ?? '09121234567';
@@ -2225,7 +2294,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         recipientPhone: phone,
         addressText: 'خیابان ولیعصر، پلاک 12',
         postalCode: null,
-        items: [{ pageCount, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        items: [{ pageCount, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', sections, rules }],
       });
       await placedAt(conn, order.id, PLACED);
       num[key] = order.orderNumber;
@@ -2655,7 +2724,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const sections = [{ documentId: docId, pageCount: 20 }];
       const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const breakdown = quote(
-        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
         SEED_PRICE_LIST,
       );
       const [user] = await conn.db
@@ -2678,7 +2747,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         recipientPhone: '09121234567',
         addressText: 'خیابان ولیعصر، پلاک 12',
         postalCode: null,
-        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', sections, rules }],
       });
       await placedAt(conn, order.id, PLACED);
       const payment = await store.insertPayment({
@@ -2837,6 +2906,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
                 pageCount: 20,
                 copies: 1,
                 sidesMode: 'double' as const,
+                paperSize: 'a4' as const,
                 bindingTypeId: 'spiral_clear',
                 sections: [{ documentId: docId, pageCount: 20 }],
                 rules: [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }],
@@ -3580,7 +3650,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const sections = [{ documentId: docOf[pages]!, pageCount: pages }];
       const rules = [{ pageRanges: [[1, pages]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const breakdown = quote(
-        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId: 'tehran' } },
         SEED_PRICE_LIST,
       );
       const [user] = await conn.db
@@ -3603,7 +3673,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         recipientPhone: '09152345678',
         addressText: 'بلوار سجاد، سجاد 18، پلاک 42',
         postalCode: null,
-        items: [{ pageCount: pages, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        items: [{ pageCount: pages, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', sections, rules }],
       });
       const payment = await store.insertPayment({
         orderId: order.id,
@@ -3987,7 +4057,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const sections = [{ documentId: docId, pageCount: 20 }];
       const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const breakdown = quote(
-        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
         SEED_PRICE_LIST,
       );
       const [user] = await conn.db
@@ -4010,7 +4080,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         recipientPhone: '09152345678',
         addressText: 'بلوار سجاد، سجاد 18، پلاک 42',
         postalCode: null,
-        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', sections, rules }],
       });
       const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
       if (!settle) {
@@ -5378,8 +5448,6 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const v1 = eq(priceLists.version, 1);
       for (const change of [
         { label: 'تعرفهٔ دیگر' },
-        { clickRateBwRials: 17_000 },
-        { clickRateColorRials: 22_000 },
         { settings: { ...SEED_PRICE_LIST.settings, vatPercent: 9 } },
         { activatedAt: null },
         { activatedAt: NOW },
@@ -5391,8 +5459,19 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       }
       expect(await rejectedConstraint(conn.db.delete(priceLists).where(v1))).toBe('price_lists_frozen');
 
-      // ردیف‌ها: عوض کردن، پاک کردن و درج، در هر پنج جدول.
+      // ردیف‌ها: عوض کردن، پاک کردن و درج، در هر هفت جدول (نرخ چاپ و نرخ کاغذ از ۸٫۳).
       for (const [name, query] of [
+        ['نرخ چاپ', conn.db.update(printRates).set({ rateRials: 17_000 }).where(eq(printRates.priceListVersion, 1))],
+        ['پاک کردن نرخ چاپ', conn.db.delete(printRates).where(eq(printRates.priceListVersion, 1))],
+        [
+          'نرخ چاپ A5',
+          conn.db.insert(printRates).values({ priceListVersion: 1, paperSize: 'a5', sidesMode: 'single', colorMode: 'bw', rateRials: 1 }),
+        ],
+        ['نرخ کاغذ', conn.db.update(paperRates).set({ rateRials: 1 }).where(eq(paperRates.priceListVersion, 1))],
+        [
+          'نرخ کاغذ A5',
+          conn.db.insert(paperRates).values({ priceListVersion: 1, paperTypeId: 'tahrir80', paperSize: 'a5', rateRials: 0 }),
+        ],
         ['کاغذ', conn.db.update(paperTypes).set({ gsm: 90 }).where(eq(paperTypes.priceListVersion, 1))],
         ['صحافی', conn.db.update(bindingTypes).set({ maxSheetsPerVolume: 900 }).where(eq(bindingTypes.priceListVersion, 1))],
         ['بازه', conn.db.update(bindingRateBands).set({ priceRials: 1 }).where(eq(bindingRateBands.priceListVersion, 1))],
@@ -5402,7 +5481,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         ['پاک کردن کرایه', conn.db.delete(shippingRates).where(eq(shippingRates.priceListVersion, 1))],
         [
           'بازهٔ تازه',
-          conn.db.insert(bindingRateBands).values({ priceListVersion: 1, bindingTypeId: 'spiral_clear', minSheets: 801, maxSheets: 900, priceRials: 1 }),
+          conn.db.insert(bindingRateBands).values({ priceListVersion: 1, bindingTypeId: 'spiral_clear', paperSize: 'a4', minSheets: 801, maxSheets: 900, priceRials: 1 }),
         ],
         ['کاغذ تازه', conn.db.insert(paperTypes).values({ priceListVersion: 1, id: 'glossy', nameFa: 'گلاسه', gsm: 120 })],
       ] as const) {
@@ -5424,7 +5503,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       await seedPriceList(conn, { ...SEED_PRICE_LIST, version: 2, label: 'پیش‌نویس' }, { activate: false });
       expect((await headOf(2))!.activatedAt).toBeNull();
       const v2 = eq(priceLists.version, 2);
-      await conn.db.update(priceLists).set({ label: 'پیش‌نویس مهر', clickRateBwRials: 17_000 }).where(v2);
+      await conn.db.update(priceLists).set({ label: 'پیش‌نویس مهر' }).where(v2);
+      await conn.db
+        .update(printRates)
+        .set({ rateRials: 17_000 })
+        .where(and(eq(printRates.priceListVersion, 2), eq(printRates.colorMode, 'bw')));
       await conn.db.update(bindingRateBands).set({ priceRials: 460_000 }).where(eq(bindingRateBands.priceListVersion, 2));
       await conn.db.delete(shippingRates).where(and(eq(shippingRates.priceListVersion, 2), eq(shippingRates.zoneId, 'other')));
       expect((await headOf(2))!.label).toBe('پیش‌نویس مهر');
@@ -5457,7 +5540,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         await tx.update(priceLists).set({ isActive: false }).where(eq(priceLists.isActive, true));
         const [row] = await tx
           .insert(priceLists)
-          .values({ version: 3, label: 'سه', clickRateColorRials: 1, clickRateBwRials: 1, settings: SEED_PRICE_LIST.settings, isActive: true })
+          .values({ version: 3, label: 'سه', settings: SEED_PRICE_LIST.settings, isActive: true })
           .returning();
         await tx.update(priceLists).set({ isActive: false }).where(eq(priceLists.version, 3));
         await tx.update(priceLists).set({ isActive: true }).where(eq(priceLists.version, 1));
@@ -5488,7 +5571,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         await tx.update(priceLists).set({ activatedAt: NOW }).where(eq(priceLists.version, 2));
         // اتصال دیگر، پیش از COMMIT فعال شدن: سرِ نسخه را قفل‌شده می‌بیند و منتظر می‌ماند.
         late = rejectedConstraint(
-          conn.db.insert(bindingRateBands).values({ priceListVersion: 2, bindingTypeId: 'spiral_clear', minSheets: 801, maxSheets: 900, priceRials: 1 }),
+          conn.db.insert(bindingRateBands).values({ priceListVersion: 2, bindingTypeId: 'spiral_clear', paperSize: 'a4', minSheets: 801, maxSheets: 900, priceRials: 1 }),
         ).finally(() => {
           settled = true;
         });
@@ -5497,7 +5580,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       });
       expect(await late).toBe('price_list_rows_frozen');
       const [bands] = await conn.db.select({ n: count() }).from(bindingRateBands).where(eq(bindingRateBands.priceListVersion, 2));
-      expect(bands!.n).toBe(SEED_PRICE_LIST.bindingTypes.spiral_clear!.bands.length);
+      expect(bands!.n).toBe(SEED_PRICE_LIST.bindingTypes.spiral_clear!.bands.a4!.length);
     });
 
     it('نسخهٔ تازه از روی نسخهٔ فعال با شمارهٔ بعدی، سازنده، «از روی» و رویداد؛ هر بار یک پیش‌نویس، حتی هم‌زمان', async () => {
@@ -5534,15 +5617,21 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const edited: PriceList = {
         ...base,
         label: 'تعرفهٔ مهر 1405',
-        clickRates: { color: 22_000, bw: 17_000 },
+        printRates: {
+          a4: { single: { color: 24_000, bw: 19_000 }, double: { color: 22_000, bw: 17_000 } },
+          a5: { single: { color: 15_000, bw: 12_000 }, double: { color: 13_000, bw: 10_000 } },
+        },
         bindingTypes: {
           ...base.bindingTypes,
           spiral_clear: {
             ...spiral,
-            bands: [
-              { minSheets: 1, maxSheets: 300, priceRials: 480_000 },
-              { minSheets: 301, maxSheets: 800, priceRials: 600_000 },
-            ],
+            bands: {
+              a4: [
+                { minSheets: 1, maxSheets: 300, priceRials: 480_000 },
+                { minSheets: 301, maxSheets: 800, priceRials: 600_000 },
+              ],
+              a5: [{ minSheets: 1, maxSheets: 800, priceRials: 400_000 }],
+            },
           },
         },
         shippingRates: base.shippingRates.map((r) =>
@@ -5573,10 +5662,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           ...edited.bindingTypes,
           spiral_clear: {
             ...spiral,
-            bands: [
-              { minSheets: 1, maxSheets: 300, priceRials: 1 },
-              { minSheets: 300, maxSheets: 800, priceRials: 1 },
-            ],
+            bands: {
+              a4: [
+                { minSheets: 1, maxSheets: 300, priceRials: 1 },
+                { minSheets: 300, maxSheets: 800, priceRials: 1 },
+              ],
+            },
           },
         },
       };
@@ -6059,7 +6150,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const sections = [{ documentId: docId, pageCount: 20 }];
       const rules = [{ pageRanges: [[1, 20]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
       const breakdown = quote(
-        { items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
+        { items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }], shipping: { methodId: 'post', zoneId } },
         SEED_PRICE_LIST,
       );
       const [user] = await conn.db
@@ -6082,7 +6173,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         recipientPhone: '09152345678',
         addressText: 'بلوار سجاد، سجاد 18، پلاک 42',
         postalCode: null,
-        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear', sections, rules }],
+        items: [{ pageCount: 20, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear', sections, rules }],
       });
       const payment = await orderStore.insertPayment({
         orderId: order.id,

@@ -34,7 +34,7 @@ def sample(**over) -> TicketData:
         shipping="پست پیشتاز",
         partner=("چاپ نور", "مشهد"),
         items=[
-            TicketItem(1, 120, 60, 1, "double", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم",
+            TicketItem(1, 120, 60, 1, "double", "a4", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم",
                        [("ریاضی ۲ - جلسه ۱.pdf", 1, 48), ("ریاضی ۲ - جلسه ۲.pdf", 49, 102), ("حل تمرین فصل ۱.docx", 103, 120)],
                        [(1, 120, 60)]),
         ],
@@ -97,6 +97,21 @@ def test_the_print_partner_sits_under_the_deadline():
     assert '<p class="k">پرداخت شنبه 11 مهر، 14:05</p>' in top and "چاپ نور" not in top
 
 
+def test_the_paper_size_sits_in_the_mode_box(tmp_path):
+    """اندازهٔ کاغذ جزوه در قاب حالت چاپ (برش ۸٫۳)، چپ‌به‌راست: کسی که چاپ می‌کند اول کاغذ سینی را می‌خواهد."""
+    data = sample()
+    data.items[0].paper_size = "a5"
+    top, _ = ticket_html(data, ticket.font_dir())
+    assert '<div class="mode">سیاه‌سفید · دورو · &#x202A;A5&#x202C;</div>' in top
+    pdf, png = str(tmp_path / "t.pdf"), str(tmp_path / "t.png")
+    render_ticket(data, pdf, png)
+    with fitz.open(pdf) as doc:
+        assert "A5" in {text for text, _, _ in words(doc[0])}
+    # شاهد: A4 هم گفته می‌شود، همان‌جا.
+    top, _ = ticket_html(sample(), ticket.font_dir())
+    assert '<div class="mode">سیاه‌سفید · دورو · &#x202A;A4&#x202C;</div>' in top
+
+
 def test_every_string_from_a_person_is_escaped():
     data = sample(recipient_name='<img src="x">مریم', address="تهران & <b>شمال</b>", shipping="پست <i>")
     data.partner = ("<s>چاپ</s> & نور", "مشهد")
@@ -114,8 +129,8 @@ def test_every_string_from_a_person_is_escaped():
 def test_many_volumes_and_files_stay_on_one_page(tmp_path):
     many = [(f"جلسه {n}.pdf", 2 * n - 1, 2 * n) for n in range(1, 31)]
     data = sample(items=[
-        TicketItem(1, 60, 30, 2, "double", ["color"], ["تحریر ۸۰ گرم"], "طلق و سیم", many, [(1, 60, 30)]),
-        TicketItem(2, 1650, 825, 1, "double", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم", [("Statistics.pdf", 1, 1650)],
+        TicketItem(1, 60, 30, 2, "double", "a4", ["color"], ["تحریر ۸۰ گرم"], "طلق و سیم", many, [(1, 60, 30)]),
+        TicketItem(2, 1650, 825, 1, "double", "a4", ["bw"], ["تحریر ۸۰ گرم"], "طلق و سیم", [("Statistics.pdf", 1, 1650)],
                    [(1, 826, 413), (827, 1650, 412)]),
     ])
     top, _ = ticket_html(data, ticket.font_dir())
@@ -187,8 +202,8 @@ def paid_order(conn, *, status="paid"):
         (user_id, version, Jsonb(breakdown)),
     ).fetchone()
     item_id = conn.execute(
-        """INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-           VALUES (%s, 1, 120, 1, 'double', 'spiral_clear') RETURNING id""",
+        """INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, paper_size, binding_type_id)
+           VALUES (%s, 1, 120, 1, 'double', 'a5', 'spiral_clear') RETURNING id""",
         (order_id,),
     ).fetchone()[0]
     for seq, (name, pages) in enumerate([("ریاضی ۲ - جلسه ۱.pdf", 48), ("حل تمرین.docx", 72)], start=1):
@@ -262,8 +277,8 @@ def test_a_paid_order_gets_its_ticket_and_preview_under_orders(tmp_path, conn, w
     assert data.due == DUE and data.paid == PAID
     [item] = data.items
     assert item.sections == [("ریاضی ۲ - جلسه ۱.pdf", 1, 48), ("حل تمرین.docx", 49, 120)]
-    assert (item.sheets, item.volumes, item.papers, item.binding, item.color_modes) == (
-        60, [(1, 120, 60)], ["تحریر ۸۰ گرم"], "طلق و سیم", ["bw"]
+    assert (item.sheets, item.volumes, item.papers, item.binding, item.color_modes, item.paper_size) == (
+        60, [(1, 120, 60)], ["تحریر ۸۰ گرم"], "طلق و سیم", ["bw"], "a5"
     )
     path = str(tmp_path / "ticket.pdf")
     worker.storage.download(key, path)

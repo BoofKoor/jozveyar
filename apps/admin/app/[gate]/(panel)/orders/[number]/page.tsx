@@ -43,6 +43,7 @@ import {
   orderNumberOf,
   orderState,
   orderTimeline,
+  paperSizeText,
   paymentView,
   pdfFileName,
   phoneText,
@@ -285,7 +286,8 @@ function PrintRows({
                 </>
               ) : (
                 <>
-                  فایل چاپ · <span className="num">{formatNumber(volume.lastPage)}</span> صفحه، A4 عمودی، یک جلد
+                  فایل چاپ · <span className="num">{formatNumber(volume.lastPage)}</span> صفحه، {paperSizeText(item.paperSize)} عمودی، یک
+                  جلد
                 </>
               )}
               {' · '}

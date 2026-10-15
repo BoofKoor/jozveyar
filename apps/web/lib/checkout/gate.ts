@@ -44,6 +44,7 @@ export function orderGate(parts: readonly JozvePart[]): OrderGate {
       colorMode: config.colorMode,
       paperTypeId: config.paperTypeId,
       sidesMode: config.sidesMode,
+      paperSize: config.paperSize,
       bindingTypeId: config.bindingTypeId,
       copies: config.copies,
     })),

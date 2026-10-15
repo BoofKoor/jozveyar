@@ -14,6 +14,7 @@ import type { UploadSnapshot } from './upload/client';
 const CONFIG = {
   colorMode: 'bw' as const,
   sidesMode: 'double' as const,
+  paperSize: 'a4' as const,
   bindingTypeId: 'spiral_clear',
   paperTypeId: 'tahrir80',
   copies: 1,

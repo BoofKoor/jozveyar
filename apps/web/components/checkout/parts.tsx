@@ -11,10 +11,17 @@ import { formatNumber, formatTomans } from '@jozveyar/text';
 
 const COLOR = { color: 'رنگی', bw: 'سیاه‌سفید', mixed: 'رنگی و سیاه‌سفید' } as const;
 const SIDES = { double: 'دورو', single: 'یکرو' } as const;
+const SIZE = { a4: 'A4', a5: 'A5', a3: 'A3' } as const;
 
-/** «سیاه‌سفید، دورو». */
-export const printLabel = (colorMode: keyof typeof COLOR, sidesMode: keyof typeof SIDES) =>
-  `${COLOR[colorMode]}، ${SIDES[sidesMode]}`;
+/**
+ * «سیاه‌سفید، دورو، A4» (اندازه از ۸٫۳، طرح میز)، و نام کاغذ فقط وقتی جز کاغذ پیش‌فرض است: «رنگی، دورو، A4، گلاسه».
+ */
+export const printLabel = (
+  colorMode: keyof typeof COLOR,
+  sidesMode: keyof typeof SIDES,
+  paperSize: keyof typeof SIZE,
+  paperName: string | null = null,
+) => [COLOR[colorMode], SIDES[sidesMode], SIZE[paperSize], paperName].filter(Boolean).join('، ');
 
 /**
  * قدم‌های سفارش: «۱ جزوه و قیمت ← ۲ آدرس ← ۳ پرداخت». قدم انجام‌شده تیک دارد و پیوند است، برای برگشتن
@@ -142,21 +149,22 @@ export function SummaryLines({
   );
 }
 
-/** «سیاه‌سفید، دورو، طلق و سیم»؛ کاغذ فقط وقتی جز کاغذ پیش‌فرض است (طرح میز، سؤال ۲۲۵). */
+/** «سیاه‌سفید، دورو، A4، طلق و سیم»؛ کاغذ فقط وقتی جز کاغذ پیش‌فرض است (طرح میز، سؤال ۲۲۵). */
 export function jozveSpecLabel(
   colorMode: keyof typeof COLOR,
   sidesMode: keyof typeof SIDES,
+  paperSize: keyof typeof SIZE,
   bindingName: string,
   paperName: string | null = null,
 ): string {
-  return [printLabel(colorMode, sidesMode), paperName, bindingName].filter(Boolean).join('، ');
+  return [printLabel(colorMode, sidesMode, paperSize, paperName), bindingName].filter(Boolean).join('، ');
 }
 
 /** یک جزوه در خلاصهٔ سفارش چندجزوه (برش ۸٫۲). */
 export interface JozveLine {
   /** شمارهٔ جزوه در سفارش، از ۱؛ جزوه‌ای که هنوز قیمت ندارد در خلاصه نیست، پس شماره از ترتیب ردیف‌ها نمی‌آید. */
   n: number;
-  /** «سیاه‌سفید، دورو، طلق و سیم» (`jozveSpecLabel`). */
+  /** «سیاه‌سفید، دورو، A4، طلق و سیم» (`jozveSpecLabel`). */
   spec: string;
   pageCount: number;
   copies: number;

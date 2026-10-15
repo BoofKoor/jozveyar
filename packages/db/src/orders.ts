@@ -15,7 +15,7 @@
  */
 
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
-import type { Breakdown, PriceList } from '@jozveyar/contracts';
+import type { Breakdown, PaperSize, PriceList } from '@jozveyar/contracts';
 import { formatDeadlineDay } from '@jozveyar/text';
 
 import { adminEventRow } from './admin.js';
@@ -129,6 +129,8 @@ export interface NewOrderItem {
   pageCount: number;
   copies: number;
   sidesMode: 'single' | 'double';
+  /** اندازهٔ کاغذ جزوه (۸٫۳)؛ همان که `quote()` با آن قیمت داد. */
+  paperSize: PaperSize;
   bindingTypeId: string;
   sections: { documentId: string; pageCount: number }[];
   rules: { pageRanges: [number, number][]; colorMode: 'color' | 'bw'; paperTypeId: string }[];
@@ -505,6 +507,7 @@ export function createOrderStore({ db }: Database): OrderStore {
                 pageCount: item.pageCount,
                 copies: item.copies,
                 sidesMode: item.sidesMode,
+                paperSize: item.paperSize,
                 bindingTypeId: item.bindingTypeId,
               })
               .returning({ id: orderItems.id });

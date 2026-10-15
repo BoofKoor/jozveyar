@@ -245,9 +245,9 @@ test.describe('چند جزوه در یک سفارش (۸٫۲)', () => {
     await expect(summaryTotal(page)).toHaveText('176,600');
     await expect(price(page)).toContainText('176,600');
     await expect(page.getByTestId('summary-jozve')).toHaveText([
-      'جزوهٔ 1سیاه‌سفید، دورو، طلق و سیم · 6 صفحه54,600',
-      'جزوهٔ 2سیاه‌سفید، دورو، طلق و سیم · 10 صفحه61,000',
-      'جزوهٔ 3سیاه‌سفید، دورو، طلق و سیم · 10 صفحه61,000',
+      'جزوهٔ 1سیاه‌سفید، دورو، A4، طلق و سیم · 6 صفحه54,600',
+      'جزوهٔ 2سیاه‌سفید، دورو، A4، طلق و سیم · 10 صفحه61,000',
+      'جزوهٔ 3سیاه‌سفید، دورو، A4، طلق و سیم · 10 صفحه61,000',
     ]);
     await expect(page.locator('.home-sum__label')).toHaveText('جمع · 3 جزوه');
     await expect(page.locator('.home-dock__label')).toHaveText('جمع · 3 جزوه');
@@ -267,7 +267,7 @@ test.describe('چند جزوه در یک سفارش (۸٫۲)', () => {
     await expect(summaryTotal(page)).toHaveText('180,600');
     await settingsButtons(page).nth(1).click();
     await expect.poll(() => expanded(page)).toEqual(['false', 'false', 'false']);
-    await expect(settingsButtons(page).nth(1)).toHaveText(/رنگی، دورو، طلق و سیم · 1 نسخه/);
+    await expect(settingsButtons(page).nth(1)).toHaveText(/رنگی، دورو، A4، طلق و سیم · 1 نسخه/);
 
     // «همه یک جزوه»: یک کارت با تنظیمات جزوهٔ ۱، و خلاصهٔ یک‌جزوه
     await arrangeTile(page, 'همه یک جزوه، یک صحافی').click();
@@ -328,7 +328,7 @@ test.describe('چند جزوه در یک سفارش (۸٫۲)', () => {
     await expect.poll(() => cardPrices(page)).toEqual(['65,000', '54,600']);
     await expect.poll(() => expanded(page)).toEqual(['false', 'true']);
     await expect(optionTile(page, 'سیاه‌سفید').locator('input')).toBeChecked();
-    await expect(settingsButtons(page).first()).toHaveText(/رنگی، دورو، طلق و سیم · 1 نسخه/);
+    await expect(settingsButtons(page).first()).toHaveText(/رنگی، دورو، A4، طلق و سیم · 1 نسخه/);
 
     // افزودن به همان جزوه: جزوهٔ ۲ دو فایل، پشت‌سرهم با یک صحافی
     await page.setInputFiles('#jozve-add-2', fixture('mixed-color-10.pdf'));

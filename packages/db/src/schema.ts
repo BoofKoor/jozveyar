@@ -45,6 +45,11 @@ import {
 
 /* ──────────────────────────── تعرفه ──────────────────────────── */
 
+export const sidesMode = pgEnum('sides_mode', ['single', 'double']);
+export const colorMode = pgEnum('color_mode', ['color', 'bw']);
+/** اندازهٔ کاغذ جزوه (برش ۸٫۳، سؤال ۱۸۳)؛ ابعاد در `PAPER_SIZES` موتور قیمت. */
+export const paperSize = pgEnum('paper_size', ['a4', 'a5', 'a3']);
+
 /**
  * تعرفه نسخه‌دار است و نسخهٔ قدیمی هیچ‌وقت پاک نمی‌شود.
  *
@@ -61,10 +66,10 @@ export const priceLists = pgTable(
   {
     version: integer('version').primaryKey(),
     label: text('label').notNull(),
-    /** ریال به‌ازای هر **رو** چاپ‌شده — نه هر برگ. */
-    clickRateColorRials: bigint('click_rate_color_rials', { mode: 'number' }).notNull(),
-    clickRateBwRials: bigint('click_rate_bw_rials', { mode: 'number' }).notNull(),
-    /** `PricingSettings` — مالیات، رُند، وزن بسته‌بندی، مساحت برگ. */
+    /**
+     * `PricingSettings` — حداقل سفارش، مالیات، رُند، وزن بسته‌بندی. نرخ هر رو از ۸٫۳ در `print_rates` است؛ دو ستون
+     * `click_rate_*` پیش از آن، بعد از رفتن به همان جدول، پاک شدند (0038 و 0039).
+     */
     settings: jsonb('settings').notNull(),
     /** دقیقاً یکی فعال است؛ با ایندکس یکتای جزئی در مهاجرت تضمین می‌شود. */
     isActive: boolean('is_active').notNull().default(false),
@@ -95,10 +100,56 @@ export const paperTypes = pgTable(
     nameFa: text('name_fa').notNull(),
     gsm: integer('gsm').notNull(),
     enabled: boolean('enabled').notNull().default(true),
-    /** امروز صفر است؛ کل نرخ در نرخ کلیک نشسته. اهرم تفکیک یکرو/دورو در آینده. */
-    ratePerSheetRials: bigint('rate_per_sheet_rials', { mode: 'number' }).notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.priceListVersion, t.id] })],
+);
+
+/**
+ * نرخ هر رو چاپ‌شده (برش ۸٫۳، سؤال ۱۸۴): برای هر اندازه، یکرو یا دورو، و رنگی یا سیاه‌سفید. اندازه‌ای ارائه می‌شود که هر
+ * چهار ردیفش هست؛ شمار ردیف‌های هر اندازه صفر یا چهار است (تریگر معوق `print_rates_complete`، 0038). نسخه‌های پیش از ۸٫۳
+ * با همان دو نرخ برای یکرو و دورو، فقط A4، از ستون‌های `click_rate_*` همان نسخه آمدند (0038).
+ */
+export const printRates = pgTable(
+  'print_rates',
+  {
+    priceListVersion: integer('price_list_version')
+      .notNull()
+      .references(() => priceLists.version, { onDelete: 'cascade' }),
+    paperSize: paperSize('paper_size').notNull(),
+    sidesMode: sidesMode('sides_mode').notNull(),
+    colorMode: colorMode('color_mode').notNull(),
+    /** ریال به‌ازای هر **رو** چاپ‌شده — نه هر برگ. صفر نمی‌شود. */
+    rateRials: bigint('rate_rials', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.priceListVersion, t.paperSize, t.sidesMode, t.colorMode] }),
+    check('print_rates_positive', sql`${t.rateRials} > 0`),
+  ],
+);
+
+/**
+ * نرخ هر برگ هر کاغذ، برای هر اندازه‌ای که آن کاغذ دارد (برش ۸٫۳، سؤال ۱۸۶): اندازه‌ای که ردیف ندارد، این کاغذ را ندارد.
+ * تحریر صفر است، چون کل نرخ در `print_rates` نشسته. پیش از ۸٫۳ یک نرخ در `paper_types.rate_per_sheet_rials` بود، که برای
+ * A4 به اینجا آمد (0038).
+ */
+export const paperRates = pgTable(
+  'paper_rates',
+  {
+    priceListVersion: integer('price_list_version').notNull(),
+    paperTypeId: text('paper_type_id').notNull(),
+    paperSize: paperSize('paper_size').notNull(),
+    rateRials: bigint('rate_rials', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.priceListVersion, t.paperTypeId, t.paperSize] }),
+    // مثل بازه‌های صحافی: کلید خارجی به خود کاغذ، که به تعرفه وصل است.
+    foreignKey({
+      columns: [t.priceListVersion, t.paperTypeId],
+      foreignColumns: [paperTypes.priceListVersion, paperTypes.id],
+      name: 'paper_rates_paper_type_fk',
+    }).onDelete('cascade'),
+    check('paper_rates_nonnegative', sql`${t.rateRials} >= 0`),
+  ],
 );
 
 export const bindingTypes = pgTable(
@@ -110,11 +161,18 @@ export const bindingTypes = pgTable(
     id: text('id').notNull(),
     nameFa: text('name_fa').notNull(),
     enabled: boolean('enabled').notNull().default(true),
-    /** بالای این تعداد **برگ**، سند خودکار به چند جلد می‌شکند. */
+    /** کمترین **برگ** یک جلد (برش ۸٫۳)؛ جزوهٔ نازک‌تر این صحافی را نمی‌خورد. */
+    minSheets: integer('min_sheets').notNull().default(1),
+    /** بیشترین **برگ** یک جلد. */
     maxSheetsPerVolume: integer('max_sheets_per_volume').notNull(),
+    /** بالای سقف: true یعنی خودکار چند جلد (طلق و سیم، و هر صحافی پیش از ۸٫۳)، false یعنی این صحافی نمی‌خورد (منگنه). */
+    splitsVolumes: boolean('splits_volumes').notNull().default(true),
     weightPerVolumeGrams: integer('weight_per_volume_grams').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.priceListVersion, t.id] })],
+  (t) => [
+    primaryKey({ columns: [t.priceListVersion, t.id] }),
+    check('binding_types_sheets', sql`${t.minSheets} >= 1 AND ${t.maxSheetsPerVolume} >= ${t.minSheets}`),
+  ],
 );
 
 /**
@@ -132,12 +190,17 @@ export const bindingRateBands = pgTable(
   {
     priceListVersion: integer('price_list_version').notNull(),
     bindingTypeId: text('binding_type_id').notNull(),
+    /**
+     * بازه‌های هر اندازه جدا (برش ۸٫۳): صحافی‌ای اندازه‌ای را دارد که بازه دارد. پیش از ۸٫۳ همه A4 بودند؛ پیش‌فرض ستون فقط
+     * برای همان ردیف‌ها بود و رفت (0039)، پس اندازه همیشه گفته می‌شود.
+     */
+    paperSize: paperSize('paper_size').notNull(),
     minSheets: integer('min_sheets').notNull(),
     maxSheets: integer('max_sheets').notNull(),
     priceRials: bigint('price_rials', { mode: 'number' }).notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.priceListVersion, t.bindingTypeId, t.minSheets] }),
+    primaryKey({ columns: [t.priceListVersion, t.bindingTypeId, t.paperSize, t.minSheets] }),
     index('binding_rate_bands_lookup').on(t.priceListVersion, t.bindingTypeId),
     // کلید خارجی به **نوع صحافی** است، نه مستقیم به تعرفه. این هم تعرفه را
     // پوشش می‌دهد (چون خود نوع صحافی به تعرفه وصل است) و هم یک چیز بیشتر
@@ -606,8 +669,6 @@ export const orderStatus = pgEnum('order_status', [
   'handed_to_post',
   'cancelled',
 ]);
-export const sidesMode = pgEnum('sides_mode', ['single', 'double']);
-export const colorMode = pgEnum('color_mode', ['color', 'bw']);
 
 /**
  * شمارهٔ انسانی سفارش: در پیامک، درگاه و فایل پست («نام گ»، ADR-010). از 10001، دور از کدهای دستی
@@ -771,6 +832,11 @@ export const orderItems = pgTable(
     pageCount: integer('page_count').notNull(),
     copies: integer('copies').notNull(),
     sidesMode: sidesMode('sides_mode').notNull(),
+    /**
+     * اندازهٔ کاغذ جزوه (برش ۸٫۳)؛ فایل چاپ هر صفحه را روی همین «Fit» می‌کند. منجمد، مثل بقیهٔ مشخصات
+     * (`order_items_frozen`، 0038). سفارش‌های پیش از ۸٫۳ همه A4 بودند؛ پیش‌فرض ستون فقط برای همان‌ها بود و رفت (0039).
+     */
+    paperSize: paperSize('paper_size').notNull(),
     bindingTypeId: text('binding_type_id').notNull(),
 
     /**

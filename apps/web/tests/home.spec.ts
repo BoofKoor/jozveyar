@@ -53,7 +53,8 @@ test.describe('تعرفه: همان عددهای فلوی سفارش', () => {
 
     const print = page.getByTestId('tariff-print');
     await expect(print.locator('dt')).toHaveText(['سیاه‌سفید', 'رنگی']);
-    await expect(print.locator('dd')).toHaveText([`${toman(list.clickRates.bw!)} تومان`, `${toman(list.clickRates.color!)} تومان`]);
+    const a4 = list.printRates.a4!;
+    await expect(print.locator('dd')).toHaveText([`${toman(a4.double.bw)} تومان`, `${toman(a4.double.color)} تومان`]);
     await expect(print.locator('.home-price__note')).toHaveText(
       `کاغذ ${toLatinDigits(list.paperTypes[DEFAULT_PAPER_TYPE_ID]!.nameFa)}. هر برگ در چاپ دورو دو صفحه است.`,
     );
@@ -62,13 +63,13 @@ test.describe('تعرفه: همان عددهای فلوی سفارش', () => {
     const card = page.getByTestId('tariff-binding');
     await expect(card.getByRole('heading')).toHaveText(`صحافی ${binding.nameFa}`);
     await expect(card.locator('.home-price__big')).toHaveText(
-      `از ${toman(Math.min(...binding.bands.map((band) => band.priceRials)))} تومان`,
+      `از ${toman(Math.min(...binding.bands.a4!.map((band) => band.priceRials)))} تومان`,
     );
     // ریز بازه‌ها، بر حسب برگ؛ اولی «تا ۱۵۰ برگ»
     await card.getByText('بر اساس تعداد برگ').click();
     const rows = card.locator('tr');
-    await expect(rows).toHaveCount(binding.bands.length);
-    for (const [i, band] of binding.bands.entries()) {
+    await expect(rows).toHaveCount(binding.bands.a4!.length);
+    for (const [i, band] of binding.bands.a4!.entries()) {
       const label = i === 0 ? `تا ${formatNumber(band.maxSheets)} برگ` : `${formatNumber(band.minSheets)} تا ${formatNumber(band.maxSheets)}`;
       await expect(rows.nth(i).locator('td')).toHaveText([label, toman(band.priceRials)]);
     }
@@ -97,6 +98,7 @@ test.describe('تعرفه: همان عددهای فلوی سفارش', () => {
             rules: wholeDocumentRule(120, 'bw', DEFAULT_PAPER_TYPE_ID),
             copies: 1,
             sidesMode: 'double',
+            paperSize: 'a4',
             bindingTypeId: DEFAULT_BINDING_TYPE_ID,
           },
         ],

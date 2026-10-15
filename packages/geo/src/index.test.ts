@@ -97,6 +97,7 @@ describe('منطقهٔ کرایه: استان تهران، نه شهر تهرا�
                 rules: [{ pageRanges: [[1, pageCount]], colorMode: 'bw', paperTypeId: 'tahrir80' }],
                 copies: pageCount === 2 ? 1 : 10,
                 sidesMode: 'double',
+                paperSize: 'a4',
                 bindingTypeId: 'spiral_clear',
               },
             ],

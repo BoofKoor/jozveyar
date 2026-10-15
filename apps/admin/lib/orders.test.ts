@@ -267,6 +267,7 @@ function line(over: Partial<PanelOrderLine> = {}): PanelOrderLine {
     copies: 1,
     colorModes: ['bw'],
     sidesModes: ['double'],
+    paperSizes: ['a4'],
     pdfJob: 'done',
     printPartnerId: 'partner-noor',
     unreturnedPayments: 0,
@@ -284,6 +285,11 @@ describe('ردیف فهرست', () => {
     expect(text(jozveSegs(line({ pageCount: 88, colorModes: ['color'] })))).toBe('88 صفحه · رنگی');
     expect(text(jozveSegs(line({ colorModes: ['bw', 'color'], copies: 2, itemCount: 2, fileCount: 4 })))).toBe(
       '2 جزوه · 4 فایل · 120 صفحه · رنگی و سیاه‌سفید · 2 نسخه',
+    );
+    // اندازه فقط وقتی A4 نیست (۸٫۳)؛ چند جزوه با چند اندازه همه را می‌گوید.
+    expect(text(jozveSegs(line({ paperSizes: ['a5'] })))).toBe('120 صفحه · سیاه‌سفید، A5');
+    expect(text(jozveSegs(line({ paperSizes: ['a3', 'a4', 'a5'], sidesModes: ['single'], itemCount: 3 })))).toBe(
+      '3 جزوه · 120 صفحه · سیاه‌سفید، یکرو، A3 و A5',
     );
   });
 
@@ -328,6 +334,7 @@ const BREAKDOWN = quote(
         rules: [{ pageRanges: [[1, 120]], colorMode: 'bw', paperTypeId: 'tahrir80' }],
         copies: 1,
         sidesMode: 'double',
+        paperSize: 'a4',
         bindingTypeId: 'spiral_clear',
       },
     ],
@@ -345,6 +352,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     pageCount: 120,
     copies: 1,
     sidesMode: 'double',
+    paperSize: 'a4',
     bindingTypeId: 'spiral_clear',
     printPdfKey: null,
     printPdfBytes: null,
@@ -455,11 +463,12 @@ function volume(n: number, firstPage: number, lastPage: number, over: Partial<Pa
 }
 
 describe('جزئیات سفارش', () => {
-  it('مشخصات چاپ، همان طرح: «سیاه‌سفید، دورو · تحریر ۸۰ گرم»، «طلق و سیم · 120 صفحه، 60 برگ، یک جلد»، «1 نسخه»', () => {
+  it('مشخصات چاپ، همان طرح با اندازه (۸٫۳): «سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم»، «طلق و سیم · 120 صفحه، 60 برگ، یک جلد»، «1 نسخه»', () => {
     const d = details();
     const facts = specFacts(d.items[0]!, BREAKDOWN.items[0]);
+    expect(text(specFacts({ ...d.items[0]!, paperSize: 'a5' }, BREAKDOWN.items[0])[0]!.value)).toBe('سیاه‌سفید، دورو، A5 · تحریر ۸۰ گرم');
     expect(facts.map((f) => [f.label, text(f.value)])).toEqual([
-      ['چاپ', 'سیاه‌سفید، دورو · تحریر ۸۰ گرم'],
+      ['چاپ', 'سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم'],
       ['صحافی', 'طلق و سیم · 120 صفحه، 60 برگ، یک جلد'],
       ['تعداد', '1 نسخه'],
     ]);
@@ -599,6 +608,13 @@ describe('جزئیات سفارش', () => {
     );
     // همهٔ صفحه‌ها عوض شد: «بقیه» ندارد.
     expect(note([{ rotated: [[1, 120]] }])).toBe('صفحهٔ 1 تا 120 (3 فایل) افقی بود و چرخید، بالایش لبهٔ چپ کاغذ.');
+    // جزوهٔ A5 (۸٫۳): صفحه روی همان اندازه می‌نشیند، و بی تغییر یعنی همه A5 بود.
+    const a5 = (changes: PanelPrintVolume['changes']) =>
+      text(changesNote(details({ item: { paperSize: 'a5', printFiles: [volume(1, 1, 120, { changes })] } }).items[0]!));
+    expect(a5({ resized: [[1, 48, 595, 842]] })).toBe(
+      'صفحهٔ 1 تا 48 (فایل ریاضی ۲ - جلسه ۱.pdf) اندازهٔ A4 داشت و روی A5 نشست؛ بقیه بی تغییر.',
+    );
+    expect(a5(null)).toBe('همهٔ صفحه‌ها A5 عمودی بود؛ فایل چاپ همان PDF جزوه است.');
   });
 
   it('هشدارهای فایل (۸٫۱): هر هشدار یک یادداشت، صفحهٔ سراسری جزوه با نام فایل، اسلاید بی حاشیه، و فونت جایگزین', () => {

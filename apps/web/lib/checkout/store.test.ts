@@ -16,6 +16,7 @@ const ITEM: CheckoutItem = {
   colorMode: 'bw',
   paperTypeId: 'tahrir80',
   sidesMode: 'double',
+  paperSize: 'a4',
   bindingTypeId: 'spiral',
   copies: 1,
 };
@@ -29,6 +30,7 @@ function breakdown(totalRials: number, shippingRials: number | null = null, page
       {
         sections: [{ documentId: ITEM.documentIds[0]!, pageCount }],
         pageCount,
+        paperSize: 'a4',
         printedSides: pageCount,
         sheets: Math.ceil(pageCount / 2),
         colorSides: 0,

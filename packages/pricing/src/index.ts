@@ -9,15 +9,46 @@
  */
 
 import type {
+  BindingType,
   Breakdown,
   ColorMode,
   ItemBreakdown,
   ItemSpec,
   OrderSpec,
   PageRange,
+  PaperSize,
   PriceList,
   QuoteWarning,
+  SidesMode,
 } from '@jozveyar/contracts';
+
+/* ──────────────────────────── اندازهٔ کاغذ ──────────────────────────── */
+
+/**
+ * اندازه‌های کاغذ، به ترتیب نمایش (برش ۸٫۳): ابعاد به میلی‌متر. فایل چاپ هر صفحه را روی همین «Fit» می‌کند
+ * (`docworker/printfile.py`)، و وزن از مساحت همین است. اینکه کدام ارائه می‌شود با تعرفه است (`offeredSizes`).
+ */
+export const PAPER_SIZES: Readonly<Record<PaperSize, { label: string; widthMm: number; heightMm: number }>> = {
+  a4: { label: 'A4', widthMm: 210, heightMm: 297 },
+  a5: { label: 'A5', widthMm: 148, heightMm: 210 },
+  a3: { label: 'A3', widthMm: 297, heightMm: 420 },
+};
+
+export const PAPER_SIZE_ORDER: readonly PaperSize[] = ['a4', 'a5', 'a3'];
+
+/** اندازهٔ پیش‌فرض: جزوه‌ای که اندازه‌اش گفته نشده، و هر نسخهٔ تعرفه دارد. */
+export const DEFAULT_PAPER_SIZE: PaperSize = 'a4';
+
+/** مساحت یک برگ به متر مربع، مبنای وزن: A4 همان 0.06237 پیش از ۸٫۳. */
+export function sheetAreaM2(size: PaperSize): number {
+  const { widthMm, heightMm } = PAPER_SIZES[size];
+  return (widthMm * heightMm) / 1_000_000;
+}
+
+/** اندازه‌هایی که این تعرفه ارائه می‌کند، به ترتیب نمایش: آنها که نرخ چاپ دارند. */
+export function offeredSizes(list: PriceList): PaperSize[] {
+  return PAPER_SIZE_ORDER.filter((size) => list.printRates[size] !== undefined);
+}
 
 /* ──────────────────────────── کمکی‌ها ──────────────────────────── */
 
@@ -65,6 +96,39 @@ export function splitSheets(totalSheets: number, maxPerVolume: number): number[]
   return Array.from({ length: volumes }, (_, i) => base + (i < remainder ? 1 : 0));
 }
 
+/** برگ یک نسخهٔ جزوه: دورو یعنی هر دو صفحه یک برگ. */
+export function sheetsOf(pageCount: number, sidesMode: SidesMode): number {
+  return sidesMode === 'double' ? Math.ceil(pageCount / 2) : pageCount;
+}
+
+/**
+ * جلدهای یک نسخه با این صحافی: صحافی‌ای که چند جلد می‌شود، بالای سقف یکنواخت می‌شکند؛ بقیه همیشه یک جلد (و اگر از سقف
+ * بیشتر است، `bindingMisfit` می‌گوید نمی‌خورد).
+ */
+export function volumesOf(binding: Pick<BindingType, 'splitsVolumes' | 'maxSheetsPerVolume'>, sheets: number): number[] {
+  return binding.splitsVolumes ? splitSheets(sheets, binding.maxSheetsPerVolume) : [sheets];
+}
+
+/** چرا صحافی‌ای به این جزوه نمی‌خورد (برش ۸٫۳): این اندازه را ندارد، جلدش از کمینه نازک‌تر است، یا از سقف بیشتر. */
+export type BindingMisfit =
+  | { reason: 'size' }
+  | { reason: 'min'; minSheets: number }
+  | { reason: 'max'; maxSheets: number };
+
+/**
+ * صحافی به این اندازه و این شمار برگ می‌خورد یا نه؛ null یعنی می‌خورد. همان که `quote()` با `binding_does_not_fit` رد
+ * می‌کند و کاشی صحافی با دلیلش خاموش نشان می‌دهد («تا 50 برگ؛ این جزوه 57 برگ است»)، یک تعریف (قاعدهٔ ۱). کمینه روی
+ * نازک‌ترین جلد است: جزوهٔ بلندی که دو جلد می‌شود، هر جلدش باید به کمینه برسد.
+ */
+export function bindingMisfit(binding: BindingType, size: PaperSize, sheets: number): BindingMisfit | null {
+  if (!binding.bands[size]?.length) return { reason: 'size' };
+  if (!binding.splitsVolumes && sheets > binding.maxSheetsPerVolume) {
+    return { reason: 'max', maxSheets: binding.maxSheetsPerVolume };
+  }
+  if (Math.min(...volumesOf(binding, sheets)) < binding.minSheets) return { reason: 'min', minSheets: binding.minSheets };
+  return null;
+}
+
 /** قیمت صحافی یک جلد. null یعنی هیچ بازه‌ای این تعداد برگ را نمی‌پوشاند. */
 export function bandPriceRials(
   sheets: number,
@@ -88,13 +152,17 @@ function quoteItem(
   list: PriceList,
   warnings: Set<QuoteWarning>,
 ): ItemBreakdown {
-  const { copies, sidesMode } = item;
+  const { copies, sidesMode, paperSize } = item;
   // یک جزوه، یک صحافی: برگ‌ها از جمع صفحه‌های همهٔ بخش‌ها می‌آیند، نه جدا از هر فایل.
   const pageCount = itemPageCount(item.sections);
 
   // برگ به حالت رنگ بستگی ندارد — همهٔ صفحات چاپ می‌شوند.
   const printedSides = pageCount;
-  const sheets = sidesMode === 'double' ? Math.ceil(printedSides / 2) : printedSides;
+  const sheets = sheetsOf(printedSides, sidesMode);
+
+  // نرخ هر رو با اندازه و یکرو یا دورو (۸٫۳)؛ اندازه‌ای که نرخ ندارد ارائه نمی‌شود.
+  const rates = list.printRates[paperSize];
+  if (!rates) warnings.add('paper_size_unavailable');
 
   // روهای هر حالت رنگ، از قاعده‌ها.
   const sidesByMode: Record<ColorMode, number> = { color: 0, bw: 0 };
@@ -107,22 +175,20 @@ function quoteItem(
     coveredSides += sides;
 
     const paper = list.paperTypes[rule.paperTypeId];
-    if (!paper) {
-      warnings.add('paper_type_unavailable');
-      continue;
-    }
-    if (!paper.enabled) warnings.add('paper_type_unavailable');
+    // کاغذی که نیست، خاموش است، یا این اندازه را ندارد.
+    const sheetRate = paper?.sheetRates[paperSize];
+    if (!paper?.enabled || sheetRate === undefined) warnings.add('paper_type_unavailable');
+    if (sheetRate === undefined) continue;
     // نرخ کاغذ به برگ است، ولی قاعده بر حسب صفحه. سهم این قاعده از برگ‌ها:
     const ruleSheets = sidesMode === 'double' ? sides / 2 : sides;
-    paperRialsPerCopy += ruleSheets * paper.ratePerSheetRials;
+    paperRialsPerCopy += ruleSheets * sheetRate;
   }
 
   // قاعده‌ها باید کل سند را بپوشانند. اگر نپوشاندند، قیمت ناقص است.
   if (coveredSides !== pageCount) warnings.add('rules_do_not_cover_all_pages');
 
-  const printRialsPerCopy =
-    sidesByMode.color * (list.clickRates.color ?? 0) +
-    sidesByMode.bw * (list.clickRates.bw ?? 0);
+  const sideRates = rates?.[sidesMode];
+  const printRialsPerCopy = sideRates ? sidesByMode.color * sideRates.color + sidesByMode.bw * sideRates.bw : 0;
 
   // صحافی
   const binding = list.bindingTypes[item.bindingTypeId];
@@ -133,9 +199,11 @@ function quoteItem(
     warnings.add('binding_type_unavailable');
   } else {
     if (!binding.enabled) warnings.add('binding_type_unavailable');
-    sheetsPerVolume = splitSheets(sheets, binding.maxSheetsPerVolume);
+    if (bindingMisfit(binding, paperSize, sheets)) warnings.add('binding_does_not_fit');
+    sheetsPerVolume = volumesOf(binding, sheets);
+    const bands = binding.bands[paperSize] ?? [];
     for (const volumeSheets of sheetsPerVolume) {
-      const price = bandPriceRials(volumeSheets, binding.bands);
+      const price = bandPriceRials(volumeSheets, bands);
       if (price === null) {
         warnings.add('binding_band_missing');
       } else {
@@ -144,7 +212,7 @@ function quoteItem(
     }
   }
 
-  const paperWeightPerCopy = sheets * (firstPaperGsm(item, list) ?? 80) * list.settings.sheetAreaM2;
+  const paperWeightPerCopy = sheets * (firstPaperGsm(item, list) ?? 80) * sheetAreaM2(paperSize);
   const bindingWeightPerCopy = (binding?.weightPerVolumeGrams ?? 0) * sheetsPerVolume.length;
 
   return {
@@ -153,6 +221,7 @@ function quoteItem(
       pageCount: sectionPages,
     })),
     pageCount,
+    paperSize,
     printedSides,
     sheets,
     colorSides: sidesByMode.color,

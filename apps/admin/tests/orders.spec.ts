@@ -86,7 +86,7 @@ async function order(
   const rules = [{ pageRanges: [[1, pageCount]] as [number, number][], colorMode: 'bw' as const, paperTypeId: 'tahrir80' }];
   const breakdown = quote(
     {
-      items: [{ sections, rules, copies: 1, sidesMode: 'double', bindingTypeId: 'spiral_clear' }],
+      items: [{ sections, rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }],
       shipping: { methodId: 'post', zoneId: who.zoneId },
     },
     SEED_PRICE_LIST,
@@ -109,8 +109,8 @@ async function order(
               ${createdAt})
       RETURNING id, order_number, total_rials`;
     const [item] = await tx<{ id: string }[]>`
-      INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, binding_type_id)
-      VALUES (${row!.id}, 1, ${pageCount}, 1, 'double', 'spiral_clear') RETURNING id`;
+      INSERT INTO order_items (order_id, seq, page_count, copies, sides_mode, paper_size, binding_type_id)
+      VALUES (${row!.id}, 1, ${pageCount}, 1, 'double', 'a4', 'spiral_clear') RETURNING id`;
     for (const [i, s] of sections.entries()) {
       await tx`INSERT INTO order_item_sections (order_item_id, seq, document_id, page_count)
                VALUES (${item!.id}, ${i + 1}, ${s.documentId}, ${s.pageCount})`;
@@ -311,7 +311,7 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('در صف چاپ');
     await expect(ownerPage.locator('.ad-status .jy-card__title')).toHaveText('تحویل به پست تا امروز');
     await expect(ownerPage.locator('.ad-files li')).toHaveText(['1ریاضی ۲ - جلسه ۱.pdf10 صفحه', '2ریاضی ۲ - جلسه ۲.pdf10 صفحه']);
-    await expect(ownerPage.locator('.ad-spec dd')).toHaveText(['سیاه‌سفید، دورو · تحریر ۸۰ گرم', 'طلق و سیم · 20 صفحه، 10 برگ، یک جلد', '1 نسخه']);
+    await expect(ownerPage.locator('.ad-spec dd')).toHaveText(['سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم', 'طلق و سیم · 20 صفحه، 10 برگ، یک جلد', '1 نسخه']);
     await expect(ownerPage.locator('.ad-sum__total')).toHaveText(`پرداخت شد${formatTomans(o.A.totalRials)}`);
     await expect(ownerPage.locator('.ad-facts dd').filter({ hasText: 'خراسان رضوی' })).toHaveText(
       'خراسان رضوی، مشهد، بلوار سجاد، سجاد 18، پلاک 42، واحد 6',

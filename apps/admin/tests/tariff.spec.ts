@@ -13,7 +13,8 @@ import { alertOf, at, awayFromMidnight, BASE, codeFor, enroll, GATE, layoutProbl
  * نسخهٔ فعال فقط‌خواندنی برای هر دو نقش، پیش‌نویس از روی نسخهٔ فعال (فقط مالک)، ویرایش با «نسخهٔ فعال: …» و پیش‌نمایش
  * چهار جزوهٔ طرح با همان `quote()`، سنجش با پیام دقیق طرح و «اول خطا را درست کن»، فعال کردن در صفحهٔ جدا با کد تازه،
  * برگشت با فعال کردن دوبارهٔ نسخهٔ قبل، و «همین حالا عوض شد» با پیام روشن. سایت (وب روی ۳۱۰۱، همان پایگاه داده) نسخهٔ
- * تازه را با ISR تا یک دقیقه نشان می‌دهد.
+ * تازه را با ISR تا یک دقیقه نشان می‌دهد. کاتالوگ (۸٫۳): نرخ یکرو و دورو، A5 با تیک، کاغذ و صحافی تازه با بازه‌های هر
+ * اندازه، پیش‌نمایش گزینهٔ تازه با «—» و «تازه»، و همان در پایگاه داده.
  *
  * همان پنل و پایگاه دادهٔ `admin.spec.ts` (طرز اجرا بالای همان)، و برای سایت `E2E_WEB_BASE_URL=http://127.0.0.1:3101`.
  * تعرفهٔ فعال را عوض می‌کند، پس آخرین فایل پنل است (ترتیب نام) و در پایان نسخهٔ ۱ دوباره فعال است، هر جا که افتاده باشد.
@@ -66,8 +67,38 @@ const versionIn = async (page: Page) => Number(/(\d+)\s*$/.exec(await page.getBy
 const rowOf = (page: Page, version: number) => page.locator(`.ad-versions li[data-version="${version}"]`);
 const bar = (page: Page) => page.locator('.ad-bar');
 const note = (page: Page) => page.locator('.ad-bar__note[data-note]');
-const bandInput = (page: Page, row: number, part: 'از برگ' | 'تا برگ' | 'قیمت') =>
-  page.locator(`tr[data-band="${row}"]`).getByLabel(part, { exact: true });
+/** ردیف بازهٔ یک صحافی در یک اندازه (`spiral_clear.a4`: طلق و سیم، A4). */
+const bandInput = (page: Page, row: number, part: 'از برگ' | 'تا برگ' | 'قیمت', table = 'spiral_clear.a4') =>
+  page.locator(`[data-bands="${table}"] tr[data-band="${row}"]`).getByLabel(part, { exact: true });
+const bandIssue = (page: Page, row: number, table = 'spiral_clear.a4') => page.locator(`[data-bands="${table}"] tr[data-band-issues="${row}"] .jy-error`);
+/** فیلد نرخ هر رو: اندازه، یکرو یا دورو، رنگ. */
+const rateField = (page: Page, size: 'a4' | 'a5' | 'a3', sides: 'double' | 'single', color: 'bw' | 'color') =>
+  page.locator(`#d-print-${size}-${sides}-${color}`);
+/** نرخ هر روی یک نسخه در پایگاه داده، ریال: `{ 'a4.double.bw': 16000, … }`. */
+async function printRatesOf(version: number): Promise<Record<string, number>> {
+  const rows = await sql<{ key: string; rials: number }[]>`
+    SELECT paper_size::text || '.' || sides_mode::text || '.' || color_mode::text AS key, rate_rials::int AS rials
+      FROM print_rates WHERE price_list_version = ${version} ORDER BY 1`;
+  return Object.fromEntries(rows.map((row) => [row.key, row.rials]));
+}
+/** چهار نرخ A4 یک نسخه، تومان؛ یکرو و دورو یکی. */
+const a4Rates = (bw: number, color: number) => ({ 'a4.double.bw': bw * 10, 'a4.double.color': color * 10, 'a4.single.bw': bw * 10, 'a4.single.color': color * 10 });
+/** «افزودن بازه» زیر جدول یک صحافی در یک اندازه، و پر کردن ردیف تازه. */
+async function addBand(page: Page, table: string, from: string, to: string, price: string) {
+  const index = await page.locator(`[data-bands="${table}"] tr[data-band]`).count();
+  await page.locator(`.ad-binding-bands:has([data-bands="${table}"])`).getByRole('button', { name: 'افزودن بازه' }).click();
+  await expect(bandInput(page, index, 'از برگ', table)).toBeFocused();
+  await bandInput(page, index, 'از برگ', table).fill(from);
+  await bandInput(page, index, 'تا برگ', table).fill(to);
+  await bandInput(page, index, 'قیمت', table).fill(price);
+}
+/** هر چهار نرخ A4 در ویرایشگر. */
+async function fillA4(page: Page, bw: string, color: string) {
+  for (const sides of ['double', 'single'] as const) {
+    await rateField(page, 'a4', sides, 'bw').fill(bw);
+    await rateField(page, 'a4', sides, 'color').fill(color);
+  }
+}
 /** خطوط «تغییرها»ی صفحهٔ فعال‌سازی: [چه، از ← به]. */
 const changesOf = (page: Page) =>
   page.locator('[data-changes] li').evaluateAll((items) => items.map((li) => [...li.children].map((cell) => (cell.textContent ?? '').trim())));
@@ -130,14 +161,16 @@ test.describe.serial('تعرفه در پنل', () => {
           ? `فعال از ${formatJalaliNumeric(v1!.at)} · ${orders} سفارش با این نسخه`
           : new RegExp(`^فعال( از \\d{4}/\\d\\d/\\d\\d)?(، و پیش‌تر [^·]+)? · ${orders} سفارش با این نسخه$`),
       );
-      // همان عددهای طرح پنل (`m-tariff`)، از نسخهٔ فعال پایگاه داده.
+      // همان عددهای طرح پنل (`m-tariff`)، از نسخهٔ فعال پایگاه داده؛ از ۸٫۳ دورو و یکرو هر اندازه جدا.
       expect(await cells(page, '[data-tariff="print"]')).toEqual([
-        ['سیاه‌سفید', '1,600 تومان'],
-        ['رنگی', '2,000 تومان'],
-        ['کاغذ', 'تحریر ۸۰ گرم'],
+        ['سیاه‌سفید A4', '1,600', '1,600'],
+        ['رنگی A4', '2,000', '2,000'],
       ]);
-      await expect(page.locator('[data-tariff="print"]')).toContainText('یکرو و دورو هم‌قیمت‌اند؛ هر رو یک صفحه است.');
-      await expect(page.locator('[data-tariff="binding"] h2')).toHaveText('صحافی طلق و سیم');
+      await expect(page.locator('[data-tariff="print"] .ad-hint')).toHaveText('تومان؛ هر رو یک صفحه است. A5 و A3 ارائه نمی‌شود.');
+      expect(await cells(page, '[data-tariff="paper"]')).toEqual([['تحریر ۸۰ گرم', '80', '0']]);
+      const spiral = page.locator('[data-tariff="binding"] [data-binding="spiral_clear"]');
+      await expect(spiral.locator('h3')).toHaveText('طلق و سیم');
+      await expect(spiral.locator('.ad-hint')).toHaveText('هر جلد 1 تا 800 برگ؛ بالاتر چند جلد می‌شود · وزن هر جلد 60 گرم');
       expect(await cells(page, '[data-tariff="binding"]')).toEqual([
         ['1 تا 150', '45,000'],
         ['151 تا 300', '50,000'],
@@ -146,7 +179,6 @@ test.describe.serial('تعرفه در پنل', () => {
         ['601 تا 700', '68,000'],
         ['701 تا 800', '78,000'],
       ]);
-      await expect(page.locator('[data-tariff="binding"]')).toContainText('بالای 800 برگ، جلد تازه.');
       await expect(page.locator('[data-tariff="shipping"] h2')).toHaveText('پست پیشتاز');
       expect(await cells(page, '[data-tariff="shipping"]')).toEqual([
         ['تا 1 کیلو', '129,500', '137,750'],
@@ -184,11 +216,22 @@ test.describe.serial('تعرفه در پنل', () => {
     await expect(ownerPage).toHaveURL(new RegExp(`${GATE}/tariff/${first}$`));
     await expect(ownerPage.locator('.ad-sub')).toHaveText(/^از روی نسخهٔ 1 · سارا رضایی، امروز \d\d:\d\d$/);
     await expect(ownerPage.getByLabel('نام نسخه')).toHaveValue(draftLabel(new Date()));
-    const bw = ownerPage.getByLabel('سیاه‌سفید، هر رو (تومان)');
-    const color = ownerPage.getByLabel('رنگی، هر رو (تومان)');
+    const bw = rateField(ownerPage, 'a4', 'double', 'bw');
+    const color = rateField(ownerPage, 'a4', 'double', 'color');
     await expect(bw).toHaveValue('1,600');
-    await expect(ownerPage.locator('#d-bw-hint')).toHaveText('نسخهٔ فعال: 1,600');
-    await expect(ownerPage.locator('#d-color-hint')).toHaveText('نسخهٔ فعال: 2,000');
+    await expect(ownerPage.getByLabel('سیاه‌سفید یکرو')).toHaveValue('1,600');
+    await expect(ownerPage.locator('#d-print-a4-double-bw-hint')).toHaveText('نسخهٔ فعال: 1,600');
+    await expect(ownerPage.locator('#d-print-a4-single-color-hint')).toHaveText('نسخهٔ فعال: 2,000');
+    // A5 و A3 بی تیک، بی فیلد؛ کاغذ و صحافی پیش‌فرض بی «حذف» و بی «روشن».
+    await expect(ownerPage.getByLabel('A5 ارائه می‌شود')).not.toBeChecked();
+    await expect(ownerPage.getByLabel('A3 ارائه می‌شود')).not.toBeChecked();
+    await expect(ownerPage.locator('[id^="d-print-a5-"], [id^="d-print-a3-"]')).toHaveCount(0);
+    const tahrir = ownerPage.locator('[data-paper="tahrir80"]');
+    await expect(tahrir.getByLabel('نام کاغذ')).toHaveValue('تحریر ۸۰ گرم');
+    await expect(tahrir.getByLabel('هر برگ A4')).toHaveValue('0');
+    await expect(tahrir.getByRole('button', { name: 'حذف این کاغذ' })).toHaveCount(0);
+    await expect(ownerPage.locator('[data-binding="spiral_clear"]').getByRole('button', { name: 'حذف این صحافی' })).toHaveCount(0);
+    await expect(ownerPage.locator('[data-binding="spiral_clear"]').getByLabel('کمینهٔ برگ')).toHaveAttribute('readonly', '');
     await expect(bandInput(ownerPage, 2, 'از برگ')).toHaveValue('301');
     await expect(bandInput(ownerPage, 2, 'قیمت')).toHaveValue('55,000');
     await expect(ownerPage.getByLabel('بقیهٔ کشور، 1 تا 3 کیلو')).toHaveValue('161,812');
@@ -197,11 +240,11 @@ test.describe.serial('تعرفه در پنل', () => {
     await expect(bar(ownerPage).getByRole('link', { name: 'فعال کن…' })).toBeVisible();
     expect((await cells(ownerPage, '[data-preview]')).map((row) => row[3])).toEqual(['0', '0', '0', '0']);
 
-    // همان عددهای طرح (`m-tariff-draft`): ورودی تومان با ارقام فارسی هم پذیرفته است.
+    // همان عددهای طرح (`m-tariff-draft`)، با یکرو و دورو هم‌نرخ: ورودی تومان با ارقام فارسی هم پذیرفته است.
+    await fillA4(ownerPage, '1,700', '2,200');
     await bw.fill('۱۷۰۰');
     await bw.blur();
     await expect(bw).toHaveValue('1,700');
-    await color.fill('2,200');
     expect(await cells(ownerPage, '[data-preview]')).toEqual([
       ['147 صفحه، سیاه‌سفید، دورو', '280,200', '294,900', '+14,700'],
       ['120 صفحه، رنگی، دورو', '285,000', '309,000', '+24,000'],
@@ -214,18 +257,17 @@ test.describe.serial('تعرفه در پنل', () => {
     await ownerPage.waitForTimeout(1_000);
     await expect(ownerPage).toHaveURL(new RegExp(`/tariff/${first}$`));
     await expect(note(ownerPage)).toHaveText('تغییرهای ذخیره‌نشده داری.');
-    const [before] = await sql<{ bw: number }[]>`SELECT click_rate_bw_rials::int AS bw FROM price_lists WHERE version = ${first}`;
-    expect(before!.bw).toBe(16_000);
+    expect(await printRatesOf(first)).toEqual(a4Rates(1_600, 2_000));
 
     await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(ownerPage).toHaveURL(new RegExp(`/tariff/${first}\\?saved=1$`));
     await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');
     await expect(bw).toHaveValue('1,700');
-    const [saved] = await sql<{ bw: number; color: number; activated: Date | null; active: boolean; based: number }[]>`
-      SELECT click_rate_bw_rials::int AS bw, click_rate_color_rials::int AS color, activated_at AS activated, is_active AS active, based_on AS based
-      FROM price_lists WHERE version = ${first}`;
+    const [saved] = await sql<{ activated: Date | null; active: boolean; based: number }[]>`
+      SELECT activated_at AS activated, is_active AS active, based_on AS based FROM price_lists WHERE version = ${first}`;
+    expect(saved).toEqual({ activated: null, active: false, based: 1 });
     // تومان در فرم، ریال در پایگاه داده (قاعدهٔ ۳).
-    expect(saved).toEqual({ bw: 17_000, color: 22_000, activated: null, active: false, based: 1 });
+    expect(await printRatesOf(first)).toEqual(a4Rates(1_700, 2_200));
     expect(await activeVersion()).toBe(1);
 
     // یک پیش‌نویس در هر زمان: صفحهٔ تعرفه «ادامهٔ پیش‌نویس» دارد، نه «نسخهٔ تازه».
@@ -259,7 +301,7 @@ test.describe.serial('تعرفه در پنل', () => {
     const from = bandInput(ownerPage, 2, 'از برگ');
     await from.fill('302');
     // همان پیام طرح (`m-tariff-invalid`)، زیر همان ردیف، و فیلد نامعتبر.
-    const gap = ownerPage.locator('tr[data-band-issues="2"] .jy-error');
+    const gap = bandIssue(ownerPage, 2);
     await expect(gap).toHaveText('برگ 301 قیمت ندارد: بازهٔ قبلی تا 300 است. «از» را 301 کن.');
     await expect(from).toHaveAttribute('aria-invalid', 'true');
     const gapId = await gap.getAttribute('id');
@@ -272,20 +314,19 @@ test.describe.serial('تعرفه در پنل', () => {
     await expect(bar(ownerPage).getByRole('button', { name: 'فعال کن…' })).toHaveCount(0);
 
     // هشدار، نه خطا: «شاید ریال نوشته‌ای».
-    const bw = ownerPage.getByLabel('سیاه‌سفید، هر رو (تومان)');
+    const bw = rateField(ownerPage, 'a4', 'double', 'bw');
     await bw.fill('17,000');
-    await expect(ownerPage.locator('#d-bw-warn')).toHaveText('17,000 تومان؟ بیش از ده برابر نسخهٔ فعال (1,600) است؛ شاید ریال نوشته‌ای.');
+    await expect(ownerPage.locator('#d-print-a4-double-bw-warn')).toHaveText('17,000 تومان؟ بیش از ده برابر نسخهٔ فعال (1,600) است؛ شاید ریال نوشته‌ای.');
     await expect(bw).not.toHaveAttribute('aria-invalid', 'true');
 
     // سرور منبع حقیقت است: پیش‌نویس با خطا ذخیره نمی‌شود.
     await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(note(ownerPage)).toHaveText('پیش‌نویس خطا دارد؛ اول خطا را درست کن.');
-    const [row] = await sql<{ bw: number }[]>`SELECT click_rate_bw_rials::int AS bw FROM price_lists WHERE version = ${first}`;
-    expect(row!.bw).toBe(17_000);
+    expect(await printRatesOf(first)).toEqual(a4Rates(1_700, 2_200));
 
     await from.fill('301');
     await bw.fill('1,700');
-    await expect(ownerPage.locator('#d-bw-warn')).toHaveCount(0);
+    await expect(ownerPage.locator('#d-print-a4-double-bw-warn')).toHaveCount(0);
     await expect(ownerPage.locator('[data-preview]')).toBeVisible();
 
     // بازهٔ تازه: ردیف خالی نادیده است؛ بالای سقف جلد خطاست؛ حذفش همه را برمی‌گرداند.
@@ -296,9 +337,9 @@ test.describe.serial('تعرفه در پنل', () => {
     await added.fill('801');
     await bandInput(ownerPage, 6, 'تا برگ').fill('900');
     await bandInput(ownerPage, 6, 'قیمت').fill('90,000');
-    await expect(ownerPage.locator('tr[data-band-issues="6"] .jy-error')).toHaveText('بالای 800 برگ جلد تازه است: «تا»ی آخرین بازه 800 باشد.');
+    await expect(bandIssue(ownerPage, 6)).toHaveText('بالای 800 برگ سقف جلد است: «تا»ی آخرین بازه 800 باشد.');
     await expect(blocked).toBeVisible();
-    await ownerPage.locator('tr[data-band="6"]').getByRole('button', { name: 'حذف این بازه' }).click();
+    await ownerPage.locator('[data-bands="spiral_clear.a4"] tr[data-band="6"]').getByRole('button', { name: 'حذف این بازه' }).click();
     await expect(ownerPage.locator('tr[data-band]')).toHaveCount(6);
     await expect(ownerPage.locator('.jy-error')).toHaveCount(0);
     await expect(ownerPage.locator('[data-preview]')).toBeVisible();
@@ -320,11 +361,13 @@ test.describe.serial('تعرفه در پنل', () => {
     await expect(ownerPage).toHaveURL(new RegExp(`/tariff/${first}/activate$`));
     await expect(ownerPage.getByRole('heading', { level: 1 })).toHaveText(`فعال کردن نسخهٔ ${first}`);
     await expect(ownerPage.locator('.ad-back')).toHaveText(`نسخهٔ ${first}`);
-    // همان خطوط طرح (`m-tariff-activate`).
+    // همان خطوط طرح (`m-tariff-activate`)، از ۸٫۳ برای هر رنگ، رو و اندازه.
     expect(await changesOf(ownerPage)).toEqual([
-      ['چاپ سیاه‌سفید، هر رو', '1,600 ← 1,700 تومان'],
-      ['چاپ رنگی، هر رو', '2,000 ← 2,200 تومان'],
-      ['صحافی، پست و بقیه', 'بی تغییر'],
+      ['چاپ سیاه‌سفید، دورو، A4، هر رو', '1,600 ← 1,700 تومان'],
+      ['چاپ سیاه‌سفید، یکرو، A4، هر رو', '1,600 ← 1,700 تومان'],
+      ['چاپ رنگی، دورو، A4، هر رو', '2,000 ← 2,200 تومان'],
+      ['چاپ رنگی، یکرو، A4، هر رو', '2,000 ← 2,200 تومان'],
+      ['کاغذ، صحافی، پست و بقیه', 'بی تغییر'],
     ]);
     await expect(ownerPage.locator('.jy-note--info')).toHaveText(
       `از همین لحظه، سفارش‌های تازه با نسخهٔ ${first} قیمت می‌خورند و صفحهٔ اصلی سایت تا یک دقیقه تعرفهٔ تازه را نشان می‌دهد. سفارش‌های ثبت‌شده همان قیمت خودشان را دارند.`,
@@ -348,9 +391,8 @@ test.describe.serial('تعرفه در پنل', () => {
     await expect(rowOf(ownerPage, 1).locator('.ad-versions__meta')).toHaveText(/^فعال بود \d{4}\/\d\d\/\d\d/);
     await expect(rowOf(ownerPage, 1).getByRole('link', { name: 'دوباره فعال کن…' })).toBeVisible();
     expect(await cells(ownerPage, '[data-tariff="print"]')).toEqual([
-      ['سیاه‌سفید', '1,700 تومان'],
-      ['رنگی', '2,200 تومان'],
-      ['کاغذ', 'تحریر ۸۰ گرم'],
+      ['سیاه‌سفید A4', '1,700', '1,700'],
+      ['رنگی A4', '2,200', '2,200'],
     ]);
 
     const [row] = await sql<{ active: boolean; activated: Date | null }[]>`
@@ -362,12 +404,11 @@ test.describe.serial('تعرفه در پنل', () => {
     expect(await frozenOrders()).toEqual(orders);
 
     // نسخهٔ فعال‌شده دیگر پیش‌نویس نیست: ویرایشگر کهنه ذخیره نمی‌کند؛ صفحه‌اش خود صفحهٔ تعرفه است.
-    await stale.getByLabel('رنگی، هر رو (تومان)').fill('2,300');
+    await rateField(stale, 'a4', 'double', 'color').fill('2,300');
     await bar(stale).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(note(stale)).toHaveText('این نسخه دیگر پیش‌نویس نیست: فعال شده و ویرایش نمی‌شود. برای تغییر، نسخهٔ تازه بساز.');
     await stale.close();
-    const [kept] = await sql<{ color: number }[]>`SELECT click_rate_color_rials::int AS color FROM price_lists WHERE version = ${first}`;
-    expect(kept!.color).toBe(22_000);
+    expect(await printRatesOf(first)).toEqual(a4Rates(1_700, 2_200));
     await ownerPage.goto(at(`/tariff/${first}`));
     await expect(ownerPage).toHaveURL(new RegExp(`${GATE}/tariff$`));
 
@@ -382,9 +423,11 @@ test.describe.serial('تعرفه در پنل', () => {
     await rowOf(ownerPage, 1).getByRole('link', { name: 'دوباره فعال کن…' }).click();
     await expect(ownerPage.getByRole('heading', { level: 1 })).toHaveText('فعال کردن دوبارهٔ نسخهٔ 1');
     expect(await changesOf(ownerPage)).toEqual([
-      ['چاپ سیاه‌سفید، هر رو', '1,700 ← 1,600 تومان'],
-      ['چاپ رنگی، هر رو', '2,200 ← 2,000 تومان'],
-      ['صحافی، پست و بقیه', 'بی تغییر'],
+      ['چاپ سیاه‌سفید، دورو، A4، هر رو', '1,700 ← 1,600 تومان'],
+      ['چاپ سیاه‌سفید، یکرو، A4، هر رو', '1,700 ← 1,600 تومان'],
+      ['چاپ رنگی، دورو، A4، هر رو', '2,200 ← 2,000 تومان'],
+      ['چاپ رنگی، یکرو، A4، هر رو', '2,200 ← 2,000 تومان'],
+      ['کاغذ، صحافی، پست و بقیه', 'بی تغییر'],
     ]);
     await expect(ownerPage.locator('.ad-hint').last()).toHaveText(`برای برگشت، نسخهٔ ${first} را دوباره فعال کن.`);
     await ownerPage.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
@@ -404,9 +447,8 @@ test.describe.serial('تعرفه در پنل', () => {
       await page.goto(at(`/tariff/${first}`));
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(`نسخهٔ ${first} · ${draftLabel(new Date())}`);
       expect(await cells(page, '[data-tariff="print"]')).toEqual([
-        ['سیاه‌سفید', '1,700 تومان'],
-        ['رنگی', '2,200 تومان'],
-        ['کاغذ', 'تحریر ۸۰ گرم'],
+        ['سیاه‌سفید A4', '1,700', '1,700'],
+        ['رنگی A4', '2,200', '2,200'],
       ]);
       await expect(page.getByRole('textbox')).toHaveCount(0);
     }
@@ -424,6 +466,147 @@ test.describe.serial('تعرفه در پنل', () => {
     expect(operatorProblems).toEqual([]);
   });
 
+  test('کاتالوگ (۸٫۳): A5 با تیک، کاغذ و صحافی تازه با بازه‌ها، پیش‌نمایش گزینهٔ تازه، و همان در پایگاه داده و «چه عوض می‌شود»', async () => {
+    await ownerPage.goto(at('/tariff'));
+    await ownerPage.getByRole('button', { name: 'نسخهٔ تازه' }).click();
+    await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('پیش‌نویس');
+    const draft = await versionIn(ownerPage);
+    expect(draft).toBe(first + 1);
+
+    // A5 با تیک: هرچه لازم دارد خطای جای خودش است؛ برداشتن تیک همه را می‌برد.
+    const a5 = ownerPage.getByLabel('A5 ارائه می‌شود');
+    await a5.check();
+    await expect(ownerPage.locator('#d-print-a5-double-bw-error')).toHaveText('عدد را بنویس.');
+    const tahrir = ownerPage.locator('[data-paper="tahrir80"]');
+    await expect(tahrir.locator('#d-paper-tahrir80-a5-error')).toHaveText('کاغذ پیش‌فرض نرخ هر اندازه را دارد؛ صفر هم می‌شود.');
+    await expect(ownerPage.locator('[data-binding="spiral_clear"] .ad-issues .jy-error')).toHaveText('صحافی پیش‌فرض بازه‌های هر اندازه را دارد.');
+    await expect(ownerPage.getByText('تا خطاها درست نشوند، پیش‌نمایش حساب نمی‌شود.')).toBeVisible();
+    await a5.uncheck();
+    await expect(ownerPage.locator('.jy-error')).toHaveCount(0);
+    await a5.check();
+    for (const sides of ['double', 'single'] as const) {
+      await rateField(ownerPage, 'a5', sides, 'bw').fill('1,200');
+      await rateField(ownerPage, 'a5', sides, 'color').fill('1,500');
+    }
+    await tahrir.getByLabel('هر برگ A5').fill('0');
+    await addBand(ownerPage, 'spiral_clear.a5', '1', '800', '40,000');
+    await expect(ownerPage.locator('.jy-error')).toHaveCount(0);
+
+    // کاغذ تازه: فوکوس روی نامش، نرخ هر اندازهٔ ارائه‌شده صفر از پیش؛ نام تکراری نه.
+    await ownerPage.getByRole('button', { name: 'افزودن کاغذ' }).click();
+    const glossy = ownerPage.locator('[data-paper^="paper_"]');
+    await expect(glossy.getByLabel('نام کاغذ')).toBeFocused();
+    await expect(glossy.getByLabel('هر برگ A5')).toHaveValue('0');
+    await expect(glossy.locator('.jy-error')).toHaveText('نام کاغذ را بنویس.');
+    await glossy.getByLabel('نام کاغذ').fill('تحریر 80 گرم');
+    await expect(glossy.locator('.jy-error')).toHaveText('این نام را گزینهٔ دیگری هم دارد.');
+    await glossy.getByLabel('نام کاغذ').fill('گلاسه');
+    await glossy.getByLabel('گرماژ').fill('135');
+    await glossy.getByLabel('هر برگ A4').fill('3,000');
+    await glossy.getByLabel('هر برگ A5').fill('2,000');
+
+    // صحافی تازه: 1 تا 50 برگ و «نمی‌خورد» از پیش؛ قیمت بازه را مالک می‌نویسد.
+    await ownerPage.getByRole('button', { name: 'افزودن صحافی' }).click();
+    const staple = ownerPage.locator('[data-binding^="binding_"]');
+    await expect(staple.getByLabel('نام صحافی')).toBeFocused();
+    await expect(staple.getByLabel('نمی‌خورد')).toBeChecked();
+    await expect(staple.getByText('این صحافی A5 ندارد.')).toBeVisible();
+    await staple.getByLabel('نام صحافی').fill('منگنه');
+    await staple.getByLabel('وزن هر جلد (گرم)').fill('5');
+    const stapleId = (await staple.getAttribute('data-binding'))!;
+    await bandInput(ownerPage, 0, 'قیمت', `${stapleId}.a4`).fill('5,000');
+    await expect(ownerPage.locator('.jy-error')).toHaveCount(0);
+
+    // پیش‌نمایش: چهار نمونهٔ طرح، و یک نمونه برای A5، گلاسه و منگنه که نسخهٔ فعال ندارد.
+    expect((await cells(ownerPage, '[data-preview]')).slice(4)).toEqual([
+      ['147 صفحه، سیاه‌سفید، دورو، A5', '—', '216,400', 'تازه'],
+      ['120 صفحه، رنگی، دورو، گلاسه', '—', '465,000', 'تازه'],
+      ['100 صفحه، دورو، منگنه', '—', '165,000', 'تازه'],
+    ]);
+
+    await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
+    await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');
+    expect(await printRatesOf(draft)).toEqual({
+      ...a4Rates(1_600, 2_000),
+      'a5.double.bw': 12_000,
+      'a5.double.color': 15_000,
+      'a5.single.bw': 12_000,
+      'a5.single.color': 15_000,
+    });
+    const glossyId = (await glossy.getAttribute('data-paper'))!;
+    const papers = await sql<{ id: string; name: string; gsm: number; rates: string }[]>`
+      SELECT t.id, t.name_fa AS name, t.gsm, string_agg(r.paper_size::text || ':' || r.rate_rials, ' ' ORDER BY r.paper_size) AS rates
+        FROM paper_types t JOIN paper_rates r ON r.price_list_version = t.price_list_version AND r.paper_type_id = t.id
+       WHERE t.price_list_version = ${draft}
+       GROUP BY t.id, t.name_fa, t.gsm ORDER BY t.id <> 'tahrir80', t.id`;
+    expect([...papers]).toEqual([
+      { id: 'tahrir80', name: 'تحریر ۸۰ گرم', gsm: 80, rates: 'a4:0 a5:0' },
+      { id: glossyId, name: 'گلاسه', gsm: 135, rates: 'a4:30000 a5:20000' },
+    ]);
+    const bindings = await sql<{ id: string; name: string; min: number; max: number; splits: boolean; weight: number; bands: string }[]>`
+      SELECT t.id, t.name_fa AS name, t.min_sheets AS min, t.max_sheets_per_volume AS max, t.splits_volumes AS splits,
+             t.weight_per_volume_grams AS weight,
+             string_agg(b.paper_size::text || ':' || b.min_sheets || '-' || b.max_sheets || '=' || b.price_rials, ' '
+                        ORDER BY b.paper_size, b.min_sheets) AS bands
+        FROM binding_types t JOIN binding_rate_bands b ON b.price_list_version = t.price_list_version AND b.binding_type_id = t.id
+       WHERE t.price_list_version = ${draft}
+       GROUP BY t.id, t.name_fa, t.min_sheets, t.max_sheets_per_volume, t.splits_volumes, t.weight_per_volume_grams
+       ORDER BY t.id <> 'spiral_clear', t.id`;
+    expect([...bindings]).toEqual([
+      {
+        id: 'spiral_clear',
+        name: 'طلق و سیم',
+        min: 1,
+        max: 800,
+        splits: true,
+        weight: 60,
+        bands: 'a4:1-150=450000 a4:151-300=500000 a4:301-450=550000 a4:451-600=620000 a4:601-700=680000 a4:701-800=780000 a5:1-800=400000',
+      },
+      { id: stapleId, name: 'منگنه', min: 1, max: 50, splits: false, weight: 5, bands: 'a4:1-50=50000' },
+    ]);
+
+    // «چه عوض می‌شود»، بی فعال کردن.
+    await bar(ownerPage).getByRole('link', { name: 'فعال کن…' }).click();
+    await expect(ownerPage).toHaveURL(new RegExp(`/tariff/${draft}/activate$`));
+    expect(await changesOf(ownerPage)).toEqual([
+      ['اندازهٔ A5', 'تازه'],
+      ['چاپ سیاه‌سفید، دورو، A5، هر رو', 'تازه: 1,200 تومان'],
+      ['چاپ سیاه‌سفید، یکرو، A5، هر رو', 'تازه: 1,200 تومان'],
+      ['چاپ رنگی، دورو، A5، هر رو', 'تازه: 1,500 تومان'],
+      ['چاپ رنگی، یکرو، A5، هر رو', 'تازه: 1,500 تومان'],
+      ['کاغذ «تحریر ۸۰ گرم»، A5، هر برگ', 'تازه: 0 تومان'],
+      ['کاغذ «گلاسه»', 'تازه'],
+      ['صحافی «طلق و سیم»، A5', 'تازه'],
+      ['صحافی «منگنه»', 'تازه'],
+      ['پست و بقیه', 'بی تغییر'],
+    ]);
+
+    // حذف کاغذ و خاموش کردن صحافی: پایگاه داده همان، و پیش‌نمایش بی گزینهٔ خاموش.
+    await ownerPage.goto(at(`/tariff/${draft}`));
+    await glossy.getByRole('button', { name: 'حذف این کاغذ' }).click();
+    await expect(ownerPage.locator('[data-paper]')).toHaveCount(1);
+    await staple.getByLabel('روشن', { exact: true }).uncheck();
+    await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
+    await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');
+    expect((await sql<{ id: string }[]>`SELECT id FROM paper_types WHERE price_list_version = ${draft}`).map((row) => row.id)).toEqual(['tahrir80']);
+    expect((await sql<{ enabled: boolean }[]>`SELECT enabled FROM binding_types WHERE price_list_version = ${draft} AND id = ${stapleId}`)[0]).toEqual({
+      enabled: false,
+    });
+    expect((await cells(ownerPage, '[data-preview]')).map((row) => row[0])).toEqual([
+      '147 صفحه، سیاه‌سفید، دورو',
+      '120 صفحه، رنگی، دورو',
+      '3 فایل، 300 صفحه، یکرو',
+      '1,650 صفحه، دو جلد',
+      '147 صفحه، سیاه‌سفید، دورو، A5',
+    ]);
+
+    // پایان: پیش‌نویس پاک، تا شمارهٔ بعدی همان بماند.
+    await bar(ownerPage).getByRole('button', { name: 'حذف پیش‌نویس' }).click();
+    await bar(ownerPage).getByRole('button', { name: 'پیش‌نویس را پاک کن' }).click();
+    await expect(ownerPage).toHaveURL(new RegExp(`/tariff\\?deleted=${draft}$`));
+    expect(ownerProblems).toEqual([]);
+  });
+
   test('همین حالا عوض شد: پیش‌نویسی که جای دیگر ذخیره شد رونویسی نمی‌شود؛ پاک کردن با «پاک شود؟»', async () => {
     await ownerPage.goto(at('/tariff'));
     await ownerPage.getByRole('button', { name: 'نسخهٔ تازه' }).click();
@@ -433,19 +616,17 @@ test.describe.serial('تعرفه در پنل', () => {
     const other = await ownerContext.newPage();
     await other.goto(at(`/tariff/${draft}`));
 
-    await ownerPage.getByLabel('سیاه‌سفید، هر رو (تومان)').fill('1,650');
+    await rateField(ownerPage, 'a4', 'double', 'bw').fill('1,650');
     await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');
-    await other.getByLabel('رنگی، هر رو (تومان)').fill('2,100');
+    await rateField(other, 'a4', 'double', 'color').fill('2,100');
     await bar(other).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(note(other)).toHaveText(
       'پیش‌نویس همین حالا جای دیگری ذخیره شد. صفحه را دوباره باز کن تا تازه‌ترینش را ببینی؛ تغییرهای این صفحه ذخیره نشد.',
     );
-    const [row] = await sql<{ bw: number; color: number }[]>`
-      SELECT click_rate_bw_rials::int AS bw, click_rate_color_rials::int AS color FROM price_lists WHERE version = ${draft}`;
-    expect(row).toEqual({ bw: 16_500, color: 20_000 });
+    expect(await printRatesOf(draft)).toEqual({ ...a4Rates(1_600, 2_000), 'a4.double.bw': 16_500 });
     await other.reload();
-    await expect(other.getByLabel('سیاه‌سفید، هر رو (تومان)')).toHaveValue('1,650');
+    await expect(rateField(other, 'a4', 'double', 'bw')).toHaveValue('1,650');
     await other.close();
 
     // پاک کردن: اول «پاک شود؟»، و «انصراف» برمی‌گرداند.
@@ -474,7 +655,7 @@ test.describe.serial('تعرفه در پنل', () => {
     // شمارهٔ پیش‌نویس پاک‌شده دوباره به کار می‌رود.
     const draft = await versionIn(ownerPage);
     expect(draft).toBe(first + 1);
-    await ownerPage.getByLabel('رنگی، هر رو (تومان)').fill('2,100');
+    await rateField(ownerPage, 'a4', 'double', 'color').fill('2,100');
     await bar(ownerPage).getByRole('button', { name: 'فعال کن…' }).click();
     await expect(ownerPage).toHaveURL(new RegExp(`/tariff/${draft}/activate$`));
     // زبانهٔ دیگر: برگشت به نسخهٔ اول، نسبت به نسخهٔ 1 که الان فعال است.
@@ -498,9 +679,11 @@ test.describe.serial('تعرفه در پنل', () => {
     expect(await activeVersion()).toBe(draft);
     // تغییرها حالا نسبت به نسخهٔ تازهٔ فعال‌اند.
     expect(await changesOf(other)).toEqual([
-      ['چاپ سیاه‌سفید، هر رو', '1,600 ← 1,700 تومان'],
-      ['چاپ رنگی، هر رو', '2,100 ← 2,200 تومان'],
-      ['صحافی، پست و بقیه', 'بی تغییر'],
+      ['چاپ سیاه‌سفید، دورو، A4، هر رو', '1,600 ← 1,700 تومان'],
+      ['چاپ سیاه‌سفید، یکرو، A4، هر رو', '1,600 ← 1,700 تومان'],
+      ['چاپ رنگی، دورو، A4، هر رو', '2,100 ← 2,200 تومان'],
+      ['چاپ رنگی، یکرو، A4، هر رو', '2,000 ← 2,200 تومان'],
+      ['کاغذ، صحافی، پست و بقیه', 'بی تغییر'],
     ]);
     expect(otherProblems).toEqual([]);
     await other.close();
@@ -523,6 +706,17 @@ test.describe.serial('تعرفه در پنل', () => {
     const long = `<b>${'تعرفه‌آزمایشی'.repeat(5)}`.slice(0, 56) + '</b>';
     expect([...long]).toHaveLength(60);
     await ownerPage.getByLabel('نام نسخه').fill(long);
+    // با A5 و صحافی دوم، تا قاب‌ها و جدول‌های بازهٔ کاتالوگ (۸٫۳) هم در گوشی سنجیده شوند.
+    await ownerPage.getByLabel('A5 ارائه می‌شود').check();
+    for (const sides of ['double', 'single'] as const) {
+      for (const color of ['bw', 'color'] as const) await rateField(ownerPage, 'a5', sides, color).fill('1,200');
+    }
+    await ownerPage.locator('[data-paper="tahrir80"]').getByLabel('هر برگ A5').fill('0');
+    await addBand(ownerPage, 'spiral_clear.a5', '1', '800', '40,000');
+    await ownerPage.getByRole('button', { name: 'افزودن صحافی' }).click();
+    await ownerPage.locator('[data-binding^="binding_"]').getByLabel('نام صحافی').fill('منگنه');
+    await ownerPage.locator('[data-binding^="binding_"] [data-band="0"]').getByLabel('قیمت', { exact: true }).fill('5,000');
+    await expect(ownerPage.locator('.jy-error')).toHaveCount(0);
     await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
     await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');
     await ownerPage.goto(at('/tariff'));
@@ -538,8 +732,8 @@ test.describe.serial('تعرفه در پنل', () => {
         await page.goto(at(path.replace('?error', '')));
         if (path.endsWith('?error')) {
           await bandInput(page, 2, 'از برگ').fill('302');
-          await page.getByLabel('سیاه‌سفید، هر رو (تومان)').fill('17,000');
-          await expect(page.locator('tr[data-band-issues="2"] .jy-error')).toBeVisible();
+          await rateField(page, 'a4', 'double', 'bw').fill('17,000');
+          await expect(bandIssue(page, 2)).toBeVisible();
         }
         const { overflow, small, blank } = await layoutProblems(page);
         expect(overflow, `${width} ${path}`).toBeLessThanOrEqual(0);

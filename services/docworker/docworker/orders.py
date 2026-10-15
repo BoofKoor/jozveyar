@@ -7,8 +7,9 @@
    تحلیل و قیمت رویش بود (`coalesce(pdf_storage_key, storage_key)`) — و پشت‌سرهم، بی صفحهٔ سفید بینشان، در یک PDF زیر
    `orders/<شماره>/jozve-<قلم>.pdf` می‌نشینند. این پیشوند بیرون از قاعدهٔ نگهداری `uploads/` است: جزوه‌ای که دیرتر از
    روزهای نگهداری چاپ شود، فایلش را از دست نمی‌دهد (ADR-044 آن را N روز پس از پست یا لغو پاک می‌کند).
-2. **فایل چاپ هر جلد** (`printfile.py`): از روی همان PDF جزوه، A4 عمودی، جلدها با ریز قیمت منجمد. جزوه‌ای که هیچ صفحه‌اش
-   عوض نمی‌شود و یک جلد است، فایل چاپش خود PDF جزوه است، بی کپی دوم؛ بقیه زیر `orders/<شماره>/print-<قلم>-<جلد>.pdf`.
+2. **فایل چاپ هر جلد** (`printfile.py`): از روی همان PDF جزوه، روی اندازهٔ کاغذ جزوه (`order_items.paper_size`، از ۸٫۳؛ پیش از
+   آن همه A4) و عمودی، جلدها با ریز قیمت منجمد. جزوه‌ای که هیچ صفحه‌اش عوض نمی‌شود و یک جلد است، فایل چاپش خود PDF جزوه
+   است، بی کپی دوم؛ بقیه زیر `orders/<شماره>/print-<قلم>-<جلد>.pdf`.
 
 تعداد صفحهٔ هر بخش با همان شمارش سرور سنجیده می‌شود که قیمت از آن آمد، جمعشان با صفحه‌های قلم، و صفحه‌های هر جلد با
 بازه‌اش. اختلاف یعنی چیزی که چاپ می‌شود با چیزی که پولش گرفته شد نمی‌خواند: شکست قطعی و بلند، نه چاپ بی‌صدا.
@@ -76,7 +77,7 @@ def merge_sections(paths: list[str], expected_pages: list[int], out_path: str) -
 
     یک بخش عیناً همان فایل است، بایت‌به‌بایت: بازنویسی چیزی به چاپ اضافه نمی‌کند و فقط خطر عوض شدن
     چیزی را دارد. چند بخش با `insert_pdf` پشت‌سرهم می‌آیند؛ اندازه‌ها و جهت هر صفحه همان می‌ماند و
-    فایل چاپ (برش ۵٫۱) آنها را روی A4 می‌چیند. خروجی: تعداد صفحه‌های PDF جزوه.
+    فایل چاپ (برش ۵٫۱) آنها را روی اندازهٔ کاغذ جزوه می‌چیند. خروجی: تعداد صفحه‌های PDF جزوه.
     """
     if len(paths) != len(expected_pages) or not paths:
         raise PermanentFailure("sections_mismatch")
@@ -120,14 +121,15 @@ def plan_volumes(breakdown: object, seq: int, page_count: int, sides_mode: str) 
     return printfile.volume_ranges(page_count, sides_mode, item["sheetsPerVolume"])
 
 
-def build_print_files(jozve_path: str, ranges: list[tuple[int, int]], workdir: str) -> list[dict]:
-    """فایل چاپ هر جلد از روی PDF جزوه. `path` null یعنی فایل چاپ خود PDF جزوه است (یک جلد، بی تغییر)."""
+def build_print_files(jozve_path: str, ranges: list[tuple[int, int]], workdir: str, size: str = "a4") -> list[dict]:
+    """فایل چاپ هر جلد از روی PDF جزوه، روی اندازهٔ کاغذ جزوه (۸٫۳). `path` null یعنی فایل چاپ خود PDF جزوه است (یک
+    جلد، بی تغییر: همهٔ صفحه‌ها همین حالا به همان اندازه)."""
     with fitz.open(jozve_path) as doc:
         if doc.needs_pass:
             doc.authenticate("")
         if doc.page_count != ranges[-1][1]:
             raise PermanentFailure("page_count_mismatch", f"PDF جزوه {doc.page_count} صفحه، جلدها {ranges[-1][1]}")
-        states = printfile.page_states(doc)
+        states = printfile.page_states(doc, size)
         if len(ranges) == 1 and not any(state.changed for state in states):
             return [{"volume": 1, "first": 1, "last": ranges[0][1], "path": None, "changes": None}]
         if any(state.annotated for state in states):
@@ -163,7 +165,7 @@ def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -
         # شود، «دوباره بساز» پنل همین کار را از نو در صف می‌گذارد.
         raise PermanentFailure("order_closed", status)
     items = conn.execute(
-        """SELECT i.id::text, i.seq, i.page_count, i.sides_mode::text, i.print_pdf_key, i.print_pdf_sha256,
+        """SELECT i.id::text, i.seq, i.page_count, i.sides_mode::text, i.paper_size::text, i.print_pdf_key, i.print_pdf_sha256,
                   i.print_pdf_ready_at IS NOT NULL,
                   EXISTS (SELECT 1 FROM order_print_files f WHERE f.order_item_id = i.id)
              FROM order_items i WHERE i.order_id = %s ORDER BY i.seq""",
@@ -183,9 +185,11 @@ def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -
     conn.commit()
     # ریز قیمت پیش از هر دانلودی: جلدبندی‌ای که نمی‌خواند، چیزی نمی‌سازد.
     plans = {item_id: plan_volumes(breakdown, seq, pages, sides) for item_id, seq, pages, sides, *_ in items}
+    for _, seq, _, _, size, *_ in items:
+        printfile.paper_rect(size)  # اندازهٔ ناشناس پیش از هر دانلودی، نه وسط کار
 
     prepared = []
-    for item_id, seq, item_pages, _, jozve_key, jozve_sha, jozve_ready, printed in items:
+    for item_id, seq, item_pages, _, size, jozve_key, jozve_sha, jozve_ready, printed in items:
         if jozve_ready and printed:
             continue  # تلاش قبلی همین قلم را ساخت و ثبت کرد
         with tempfile.TemporaryDirectory(prefix="docworker-order-") as workdir:
@@ -220,7 +224,7 @@ def prepare_order(conn: psycopg.Connection, storage: S3Storage, order_id: str) -
                 conn.commit()
 
             volumes = []
-            for file in build_print_files(jozve, plans[item_id], workdir):
+            for file in build_print_files(jozve, plans[item_id], workdir, size):
                 if file["path"] is None:
                     key, path = jozve_key, jozve
                 else:

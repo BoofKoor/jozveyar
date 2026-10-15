@@ -2,9 +2,12 @@
 
 import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
-import type { PriceList } from '@jozveyar/contracts';
+import type { PaperSize, PriceList } from '@jozveyar/contracts';
+import { PAPER_SIZES, bandPriceRials, bindingMisfit, offeredSizes, sheetsOf, volumesOf, type BindingMisfit } from '@jozveyar/pricing';
+import { bindingsFor, papersFor, type Replacement } from '../lib/catalog';
 import type { Sentence } from '../lib/fileCard';
 import type { OrderConfig } from '../lib/orderConfig';
+import { Inline } from './Inline';
 
 /** قیمت سفارش و برگ‌های همین جزوه با یک انتخاب، از همان `quote()` قیمت اصلی (`OrderDesk`). */
 export interface ConfigQuote {
@@ -15,7 +18,14 @@ export interface ConfigQuote {
 }
 
 interface Props {
+  /** انتخاب خود جزوه؛ هر تغییر از همین است، تا انتخابی که امروز نمی‌خورد (منگنهٔ جزوهٔ ۵۷ برگی) گم نشود. */
   config: OrderConfig;
+  /** همان که قیمت می‌خورد (`effectiveConfig`، ۸٫۳): کاشی انتخاب‌شده همین است. */
+  effective: OrderConfig;
+  /** انتخاب‌هایی که جایشان را به پیش‌فرض دادند، با دلیل؛ یادداشت زیر همان ردیف. */
+  replaced: readonly Replacement[];
+  /** صفحه‌های جزوه، برای برگ و صحافی‌ای که نمی‌خورد. */
+  pageCount: number;
   onChange: (next: OrderConfig) => void;
   priceList: PriceList;
   /**
@@ -32,7 +42,8 @@ interface Props {
 
 interface Option<T extends string> {
   value: T;
-  title: string;
+  /** نام کاغذ و صحافی از تعرفه با `Inline` (رقم لاتین، «تحریر 80 گرم»، مثل صفحهٔ اصلی). */
+  title: ReactNode;
   note?: ReactNode;
   disabled?: boolean;
 }
@@ -48,6 +59,7 @@ function Tiles<T extends string>({
   options,
   onSelect,
   effectOf,
+  three = false,
   children,
 }: {
   legend: string;
@@ -57,6 +69,8 @@ function Tiles<T extends string>({
   onSelect: (value: T) => void;
   /** اثر گزینهٔ دیگر روی قیمت، خط جدای زیر کاشی. */
   effectOf?: (value: T) => ReactNode;
+  /** ردیف سه‌تایی از ۵۲۱ پیکسل (اندازهٔ کاغذ، سؤال ۲۲۱). */
+  three?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -64,7 +78,7 @@ function Tiles<T extends string>({
     <div className="home-field">
       <fieldset className="min-w-0">
         <legend className="home-field__label">{legend}</legend>
-        <div className="jy-tiles home-tiles">
+        <div className={three ? 'jy-tiles jy-tiles--3 home-tiles' : 'jy-tiles home-tiles'}>
           {options.map((option) => {
             const selected = option.value === value;
             const effect = selected || option.disabled ? null : effectOf?.(option.value);
@@ -115,12 +129,99 @@ function perPage(rials: number) {
   );
 }
 
+/** «1,500 تومان هر برگ»، «45,000 تومان هر جلد»؛ صفر «بی هزینهٔ اضافه» (طرح میز). */
+function perUnit(rials: number, unit: 'برگ' | 'جلد') {
+  if (rials === 0) return 'بی هزینهٔ اضافه';
+  return (
+    <>
+      <span className="num">{formatTomans(rials, false)}</span> تومان هر {unit}
+    </>
+  );
+}
+
+/** دلیل کاشی صحافی‌ای که به این جزوه نمی‌خورد (سؤال ۲۲۰): «تا 50 برگ؛ این جزوه 57 برگ است». */
+function misfitNote(misfit: BindingMisfit, sheets: number) {
+  const limit =
+    misfit.reason === 'max' ? (
+      <>
+        تا <span className="num">{formatNumber(misfit.maxSheets)}</span> برگ
+      </>
+    ) : misfit.reason === 'min' ? (
+      <>
+        دست‌کم <span className="num">{formatNumber(misfit.minSheets)}</span> برگ
+      </>
+    ) : null;
+  return (
+    <>
+      {limit}؛ این جزوه <span className="num">{formatNumber(sheets)}</span> برگ است
+    </>
+  );
+}
+
+/** «A4»، با جهت خودش در متن فارسی. */
+function sizeName(size: PaperSize) {
+  return <bdi>{PAPER_SIZES[size].label}</bdi>;
+}
+
 /**
- * «تنظیمات چاپ» یک جزوه (طرح ز، docs/UI.md بخش ۴): رنگ و یکرو یا دورو با کاشی، صحافی به شکل متن وقتی یک گزینه
- * بیشتر ندارد، و شمارندهٔ یک‌تکهٔ تعداد نسخه (`jy-stepper`). از ۸٫۲ درون کارت همان جزوه است (سؤال ۲۱۷)، پس سرش را کارت
- * می‌گذارد (`JozveSettings`)؛ در هر لحظه فقط یکی روی صفحه است، پس شناسه‌ها یکتا می‌مانند.
+ * یادداشت زیر ردیفی که انتخابش جایش را به پیش‌فرض داد (۸٫۳، سؤال ۲۲۴): چه نشد، چرا، و چه جایش آمد؛ کاشی همان پیش‌فرض
+ * انتخاب‌شده است و تغییر دیگر همین‌جاست.
  */
-export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }: Props) {
+function ReplacedHint({ replacement, priceList, sheets }: { replacement: Replacement; priceList: PriceList; sheets: number }) {
+  let text: ReactNode;
+  if (replacement.field === 'paperSize') {
+    text = (
+      <>
+        اندازهٔ {sizeName(replacement.from)} دیگر ارائه نمی‌شود؛ این جزوه {sizeName(replacement.to)} شد.
+      </>
+    );
+  } else if (replacement.field === 'paperTypeId') {
+    const from = priceList.paperTypes[replacement.from];
+    const to = priceList.paperTypes[replacement.to]?.nameFa ?? '';
+    text = from?.enabled ? (
+      <>
+        کاغذ «<Inline text={from.nameFa} />» در این اندازه نیست؛ کاغذ این جزوه «<Inline text={to} />» شد.
+      </>
+    ) : (
+      <>
+        کاغذ پیشین این جزوه دیگر نیست؛ «<Inline text={to} />» جایش آمد.
+      </>
+    );
+  } else {
+    const from = priceList.bindingTypes[replacement.from];
+    const to = priceList.bindingTypes[replacement.to]?.nameFa ?? '';
+    const misfit = replacement.misfit;
+    text =
+      from && misfit?.reason === 'size' ? (
+        <>
+          صحافی «<Inline text={from.nameFa} />» در این اندازه نیست؛ صحافی این جزوه «<Inline text={to} />» شد.
+        </>
+      ) : from && misfit ? (
+        <>
+          «<Inline text={from.nameFa} />» {misfitNote(misfit, sheets)}؛ صحافی‌اش «<Inline text={to} />» شد.
+        </>
+      ) : (
+        <>
+          صحافی پیشین این جزوه دیگر نیست؛ «<Inline text={to} />» جایش آمد.
+        </>
+      );
+  }
+  return (
+    <p data-testid={`replaced-${replacement.field}`} className="home-field__hint">
+      <span className="jy-icon jy-icon-info" aria-hidden="true" />
+      <span>{text}</span>
+    </p>
+  );
+}
+
+/**
+ * «تنظیمات چاپ» یک جزوه (طرح ز، docs/UI.md بخش ۴؛ طرح میز، قدم ۱۱): رنگ و یکرو یا دورو با کاشی؛ اندازهٔ کاغذ، کاغذ و
+ * صحافی با کاشی وقتی بیش از یک گزینه دارند (سؤال ۲۲۰)، صحافی تنها به شکل متن؛ و شمارندهٔ یک‌تکهٔ تعداد نسخه (`jy-stepper`).
+ * گزینه‌ای که این اندازه را ندارد اصلاً دیده نمی‌شود، و صحافی‌ای که به این جزوه نمی‌خورد با دلیلش خاموش است (`bindingMisfit`،
+ * ۸٫۳). از ۸٫۲ درون کارت همان جزوه است (سؤال ۲۱۷)، پس سرش را کارت می‌گذارد (`JozveSettings`)؛ در هر لحظه فقط یکی روی صفحه
+ * است، پس شناسه‌ها یکتا می‌مانند.
+ */
+export function ConfigPanel({ config, effective, replaced, pageCount, onChange, priceList, quoteFor, colorHint }: Props) {
   const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) => onChange({ ...config, [key]: value });
   const current = quoteFor(config);
 
@@ -141,7 +242,7 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
    * همان قیمت»)؛ دوروی انتخاب‌شده «جزوهٔ نازک‌تر». اثر رنگ جداست، چون عددش درشت است و خودش خبر است.
    */
   const sidesNote = (sidesMode: OrderConfig['sidesMode'], count: number) => {
-    const effect = sidesMode === config.sidesMode ? null : effectOf('sidesMode')(sidesMode);
+    const effect = sidesMode === effective.sidesMode ? null : effectOf('sidesMode')(sidesMode);
     const thinner = sidesMode === 'double' && doubleSheets < singleSheets;
     return (
       <>
@@ -151,20 +252,34 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
     );
   };
 
-  const bindings = Object.entries(priceList.bindingTypes).filter(([, binding]) => binding.enabled);
-  const papers = Object.entries(priceList.paperTypes);
+  const size = effective.paperSize;
+  /** نرخ هر رو در همین اندازه و همین یکرو یا دورو. */
+  const rates = priceList.printRates[size]?.[effective.sidesMode];
+  const sizes = offeredSizes(priceList);
+  const papers = papersFor(priceList, size);
+  const bindings = bindingsFor(priceList, size);
+  const jozveSheets = sheetsOf(pageCount, effective.sidesMode);
+  const hint = (field: Replacement['field']) =>
+    replaced
+      .filter((replacement) => replacement.field === field)
+      .map((replacement) => <ReplacedHint key={field} replacement={replacement} priceList={priceList} sheets={jozveSheets} />);
+  /** یادداشت ردیفی که کاشی ندارد (یک گزینه): خانهٔ خودش، تا جداکنندهٔ ردیف‌ها سر جایش بماند. */
+  const loneHint = (field: Replacement['field']) => {
+    const hints = hint(field);
+    return hints.length > 0 ? <div className="home-field">{hints}</div> : null;
+  };
 
   return (
     <>
       <Tiles
         legend="رنگ چاپ"
         name="jozve-color"
-        value={config.colorMode}
+        value={effective.colorMode}
         onSelect={(value) => set('colorMode', value)}
         effectOf={effectOf('colorMode')}
         options={[
-          { value: 'bw', title: 'سیاه‌سفید', note: perPage(priceList.clickRates.bw ?? 0) },
-          { value: 'color', title: 'رنگی', note: perPage(priceList.clickRates.color ?? 0) },
+          { value: 'bw', title: 'سیاه‌سفید', note: perPage(rates?.bw ?? 0) },
+          { value: 'color', title: 'رنگی', note: perPage(rates?.color ?? 0) },
         ]}
       >
         <p data-testid="color-hint" className="home-field__hint">
@@ -180,7 +295,7 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
       <Tiles
         legend="یکرو یا دورو"
         name="jozve-sides"
-        value={config.sidesMode}
+        value={effective.sidesMode}
         onSelect={(value) => set('sidesMode', value)}
         options={[
           { value: 'double', title: 'دورو', note: sidesNote('double', doubleSheets) },
@@ -188,36 +303,76 @@ export function ConfigPanel({ config, onChange, priceList, quoteFor, colorHint }
         ]}
       />
 
-      {bindings.length > 1 ? (
+      {sizes.length > 1 ? (
         <Tiles
-          legend="صحافی"
-          name="jozve-binding"
-          value={config.bindingTypeId}
-          onSelect={(value) => set('bindingTypeId', value)}
-          effectOf={effectOf('bindingTypeId')}
-          options={bindings.map(([id, binding]) => ({ value: id, title: binding.nameFa }))}
-        />
+          legend="اندازهٔ کاغذ"
+          name="jozve-size"
+          value={size}
+          onSelect={(value) => set('paperSize', value)}
+          effectOf={effectOf('paperSize')}
+          three
+          options={sizes.map((option) => ({
+            value: option,
+            title: PAPER_SIZES[option].label,
+            note: perPage(priceList.printRates[option]![effective.sidesMode][effective.colorMode]),
+          }))}
+        >
+          {hint('paperSize')}
+        </Tiles>
       ) : (
-        // یک گزینه: متن، نه انتخابی که انتخاب نیست
-        <div className="home-field home-row">
-          <p className="home-field__label">صحافی</p>
-          <p className="home-row__value">
-            <span className="jy-icon jy-icon-binding" aria-hidden="true" />
-            {priceList.bindingTypes[config.bindingTypeId]?.nameFa}
-          </p>
-        </div>
+        loneHint('paperSize')
       )}
 
       {papers.length > 1 ? (
         <Tiles
           legend="کاغذ"
           name="jozve-paper"
-          value={config.paperTypeId}
+          value={effective.paperTypeId}
           onSelect={(value) => set('paperTypeId', value)}
           effectOf={effectOf('paperTypeId')}
-          options={papers.map(([id, paper]) => ({ value: id, title: paper.nameFa, disabled: !paper.enabled }))}
-        />
-      ) : null}
+          options={papers.map(([id, paper]) => ({
+            value: id,
+            title: <Inline text={paper.nameFa} />,
+            note: perUnit(paper.sheetRates[size] ?? 0, 'برگ'),
+          }))}
+        >
+          {hint('paperTypeId')}
+        </Tiles>
+      ) : (
+        loneHint('paperTypeId')
+      )}
+
+      {bindings.length > 1 ? (
+        <Tiles
+          legend="صحافی"
+          name="jozve-binding"
+          value={effective.bindingTypeId}
+          onSelect={(value) => set('bindingTypeId', value)}
+          effectOf={effectOf('bindingTypeId')}
+          options={bindings.map(([id, binding]) => {
+            const misfit = pageCount > 0 ? bindingMisfit(binding, size, jozveSheets) : null;
+            const perVolume = bandPriceRials(volumesOf(binding, jozveSheets)[0] ?? 0, binding.bands[size] ?? []);
+            return {
+              value: id,
+              title: <Inline text={binding.nameFa} />,
+              note: misfit ? misfitNote(misfit, jozveSheets) : perVolume === null ? null : perUnit(perVolume, 'جلد'),
+              disabled: misfit !== null,
+            };
+          })}
+        >
+          {hint('bindingTypeId')}
+        </Tiles>
+      ) : (
+        // یک گزینه: متن، نه انتخابی که انتخاب نیست
+        <div className="home-field home-row">
+          <p className="home-field__label">صحافی</p>
+          <p className="home-row__value">
+            <span className="jy-icon jy-icon-binding" aria-hidden="true" />
+            <Inline text={priceList.bindingTypes[effective.bindingTypeId]?.nameFa ?? ''} />
+          </p>
+          {hint('bindingTypeId')}
+        </div>
+      )}
 
       <div className="home-field home-row">
         <p id="copies-label" className="home-field__label">

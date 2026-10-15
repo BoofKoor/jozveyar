@@ -247,6 +247,7 @@ export function jozveItem(view: JozveView, config: OrderConfig): ItemSpec | null
     rules: wholeDocumentRule(view.pageCount, config.colorMode, config.paperTypeId),
     copies: config.copies,
     sidesMode: config.sidesMode,
+    paperSize: config.paperSize,
     bindingTypeId: config.bindingTypeId,
   };
 }

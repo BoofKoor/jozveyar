@@ -1,5 +1,5 @@
 /**
- * سرویس تعرفهٔ پنل (`tariff.ts`، برش ۴٫۵) با ذخیره‌گاه حافظه‌ای و ساعت ساختگی: مجوز در سرور، سنجش فرم در سرور، «همان که
+ * سرویس تعرفهٔ پنل (`tariff.ts`، برش ۴٫۵؛ کاتالوگ از ۸٫۳) با ذخیره‌گاه حافظه‌ای و ساعت ساختگی: مجوز در سرور، سنجش فرم در سرور، «همان که
  * دیده شد» (اثر انگشت محتوا و نسخهٔ فعال)، و کد تازه فقط پس از هر سنجشی که بی کد جواب دارد. قفل، تراکنش، رویداد و
  * تغییرناپذیری روی پستگرس در تست یکپارچگی `packages/db`.
  */
@@ -121,6 +121,11 @@ function service(stepUpResult: Result<true> = ok(true)) {
 }
 
 const mutations = (writes: { method: string }[]) => writes.map((w) => w.method);
+/** نرخ چاپ A4 گران‌تر، یکرو و دورو: سیاه‌سفید 1,700 و رنگی 2,200 تومان. */
+const dearer = (form: DraftForm): DraftForm['print'] => ({
+  ...form.print,
+  a4: { single: { bw: '1,700', color: '2,200' }, double: { bw: '1,700', color: '2,200' } },
+});
 
 describe('مجوز در سرور (ADR-038)', () => {
   it('متصدی: تعرفه و هر نسخهٔ فعال‌شده را می‌بیند؛ پیش‌نویس، ساختن، ذخیره، پاک کردن و فعال کردن نه، بی رسیدن به ذخیره‌گاه', async () => {
@@ -200,9 +205,9 @@ describe('ذخیرهٔ پیش‌نویس', () => {
 
   it('فرم درست: ذخیره با کننده؛ ذخیره‌گاه محتوای امروز را با اثر انگشتی که ویرایشگر داشت می‌سنجد', async () => {
     const { tariff, view, writes, rows } = await withDraft();
-    const result = await tariff.saveDraft(OWNER, '2', { form: edit(view.form, { bw: '1,700', color: '2,200' }), fingerprint: view.fingerprint }, 'ip');
+    const result = await tariff.saveDraft(OWNER, '2', { form: edit(view.form, { print: dearer(view.form) }), fingerprint: view.fingerprint }, 'ip');
     expect(result).toEqual(ok({ version: 2 }));
-    expect(rows.get(2)!.list.clickRates).toEqual({ color: 22_000, bw: 17_000 });
+    expect(rows.get(2)!.list.printRates).toEqual({ a4: { single: { color: 22_000, bw: 17_000 }, double: { color: 22_000, bw: 17_000 } } });
     const input = writes.at(-1)!.input as { verify: (list: PriceList) => boolean; at: Date; actor: TariffActor };
     expect(input.at).toEqual(NOW);
     expect(input.verify({ ...V1, version: 2, label: 'تعرفهٔ مهر 1405' })).toBe(true);
@@ -211,17 +216,19 @@ describe('ذخیرهٔ پیش‌نویس', () => {
 
   it('فرم با خطا ذخیره نمی‌شود: همان خطاها با جایشان، و ذخیره‌گاه دست نمی‌خورد', async () => {
     const { tariff, view, writes } = await withDraft();
-    const bands = view.form.bands.map((band, i) => (i === 2 ? { ...band, from: '302' } : band));
-    const result = await tariff.saveDraft(OWNER, '2', { form: edit(view.form, { bands, label: '' }), fingerprint: view.fingerprint }, 'ip');
+    const [spiral] = view.form.bindings;
+    const a4 = spiral!.bands.a4.map((band, i) => (i === 2 ? { ...band, from: '302' } : band));
+    const bindings = [{ ...spiral!, bands: { ...spiral!.bands, a4 } }];
+    const result = await tariff.saveDraft(OWNER, '2', { form: edit(view.form, { bindings, label: '' }), fingerprint: view.fingerprint }, 'ip');
     expect(result).toMatchObject({ ok: false, status: 400, error: 'invalid_draft' });
     const issues = (result as unknown as { issues: { field: string }[] }).issues;
-    expect(issues.map((i) => i.field)).toEqual(['label', 'band.2.from']);
+    expect(issues.map((i) => i.field)).toEqual(['label', 'binding.0.band.a4.2.from']);
     expect(mutations(writes)).toEqual(['createDraft']);
   });
 
   it('پیش‌نویسی که از وقتی ویرایشگر باز شد عوض شده، رونویسی نمی‌شود؛ پیش یا زیر قفل', async () => {
     const { tariff, view, writes, store } = await withDraft();
-    const form = edit(view.form, { bw: '1,700' });
+    const form = edit(view.form, { print: dearer(view.form) });
     expect(await tariff.saveDraft(OWNER, '2', { form, fingerprint: 'کهنه' }, 'ip')).toMatchObject({ ok: false, status: 409, error: 'draft_changed' });
     expect(mutations(writes)).toEqual(['createDraft']);
     // هم‌زمان: پیش از قفل هنوز همان بود، زیر قفل نه.
@@ -246,7 +253,7 @@ describe('فعال کردن با کد تازه', () => {
     await s.tariff.createDraft(OWNER, 'ip');
     const view = await s.tariff.version(OWNER, '2');
     if (!view.ok || view.value.kind !== 'draft') throw new Error('draft');
-    await s.tariff.saveDraft(OWNER, '2', { form: { ...view.value.view.form, bw: '1,700', color: '2,200' }, fingerprint: view.value.view.fingerprint }, 'ip');
+    await s.tariff.saveDraft(OWNER, '2', { form: { ...view.value.view.form, print: dearer(view.value.view.form) }, fingerprint: view.value.view.fingerprint }, 'ip');
     const activation = await s.tariff.activation(OWNER, '2');
     if (!activation.ok) throw new Error('activation');
     return { ...s, activation: activation.value };
@@ -257,8 +264,8 @@ describe('فعال کردن با کد تازه', () => {
     expect(activation.active.version).toBe(1);
     expect(activation.again).toBe(false);
     expect(activation.problems).toEqual([]);
-    expect(activation.changes.unchanged).toEqual(['صحافی', 'پست', 'بقیه']);
-    expect(activation.changes.lines).toHaveLength(2);
+    expect(activation.changes.unchanged).toEqual(['کاغذ', 'صحافی', 'پست', 'بقیه']);
+    expect(activation.changes.lines).toHaveLength(4);
     expect(activation.fingerprint).toBe(fingerprint(activation.list));
     expect(await tariff.activation(OWNER, '1')).toMatchObject({ ok: false, status: 409, error: 'already_active' });
   });
@@ -330,8 +337,11 @@ describe('فعال کردن با کد تازه', () => {
     expect(back.value.problems).toEqual([]);
     expect(back.value.changes.lines.map((l) => l.value.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : 'name' in s ? s.name : s.barcode)).join(''))).toEqual([
       '1,700 ← 1,600 تومان',
+      '1,700 ← 1,600 تومان',
       '2,200 ← 2,000 تومان',
-      'عوض شد (کاغذ، وزن جلد یا روش‌های ارسال)',
+      '2,200 ← 2,000 تومان',
+      'نام: تحریر',
+      'عوض شد (روش‌های ارسال)',
     ]);
     expect(await tariff.activate(OWNER, '1', { active: '2', fingerprint: back.value.fingerprint, code: '123456' }, 'ip')).toEqual(ok({ version: 1, previous: 2 }));
   });

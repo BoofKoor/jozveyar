@@ -57,7 +57,7 @@ import {
 } from '@jozveyar/payments';
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
 import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
-import { DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
+import { DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { deliverQueued, smsState, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay, formatJalaliWeekday, formatTehranTime } from '@jozveyar/text';
 import { checkRecipient } from '@jozveyar/text/input';
@@ -127,6 +127,7 @@ function specOf(items: readonly CheckoutItem[], docs: ReadonlyMap<string, Checko
         rules: wholeDocumentRule(itemPageCount(sections), item.colorMode, item.paperTypeId),
         copies: item.copies,
         sidesMode: item.sidesMode,
+        paperSize: item.paperSize,
         bindingTypeId: item.bindingTypeId,
       };
     }),
@@ -246,9 +247,11 @@ export async function orderView(
         pageCount: item.pageCount,
         copies: item.copies,
         sidesMode: item.sidesMode,
+        paperSize: item.paperSize,
         colorMode: modes.size === 1 ? [...modes][0]! : 'mixed',
         bindingName: list.bindingTypes[item.bindingTypeId]?.nameFa ?? item.bindingTypeId,
-        paperName: list.paperTypes[paperId]?.nameFa ?? paperId,
+        // نام کاغذ فقط وقتی جز کاغذ پیش‌فرض است (طرح میز، سؤال ۲۲۵)؛ برچسب جزوه بی آن کامل است.
+        paperName: paperId === DEFAULT_PAPER_TYPE_ID ? null : (list.paperTypes[paperId]?.nameFa ?? paperId),
         sections: item.sections.map((s) => ({ name: s.originalName, pageCount: s.pageCount })),
       };
     }),
@@ -510,6 +513,7 @@ export function createCheckoutService(deps: CheckoutDeps) {
           pageCount: itemPageCount(item.sections),
           copies: item.copies,
           sidesMode: item.sidesMode,
+          paperSize: item.paperSize,
           bindingTypeId: item.bindingTypeId,
           sections: item.sections,
           rules: item.rules.map((rule) => ({
