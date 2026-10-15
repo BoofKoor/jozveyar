@@ -5,6 +5,7 @@
  */
 
 import { ERROR_MESSAGES, type FileKind } from './analysis-protocol';
+import { formatOffText } from './fileRules';
 
 /**
  * پیام شکست تحلیل یا تبدیل **سرور** (کدهای کارگر، ADR-028). سه کد اول همان
@@ -59,8 +60,13 @@ export function serverFailureMessage(
  * سرور آپلود را نپذیرفت (`reason` همان کد خطای API است). فقط دو دلیل به فایل
  * برمی‌گردد؛ بقیه (استوریج نیست، دیسک پر، شبکه) گذرا است.
  */
-export function uploadRefusalMessage(reason: string | undefined): string {
+export function uploadRefusalMessage(reason: string | undefined, kind: FileKind | null = null): string {
   if (reason === 'unsupported_type') return ERROR_MESSAGES.unsupported_type.hint;
+  // خانواده‌ای که پس از بار صفحه خاموش شد (برش ۸٫۴): سرور دوباره سنجید.
+  if (reason === 'format_off') {
+    const { title, hint } = formatOffText(kind);
+    return `${title}. ${hint}`;
+  }
   if (reason === 'too_large') {
     return 'این فایل از سقف حجمی که می‌گیریم بزرگ‌تر است. از برنامه‌اش خروجی PDF با کیفیت کمتر بگیر و همان را بینداز.';
   }
@@ -71,8 +77,9 @@ export function uploadRefusalMessage(reason: string | undefined): string {
  * همان رد آپلود، برای یک فایل از جزوهٔ چندفایلی: عنوان کوتاه و راه جلو. «دوباره
  * بینداز» اینجا یعنی «جایگزین کن» — همان فایل همان‌جای جزوه دوباره می‌رود.
  */
-export function uploadRefusal(reason: string | undefined): { title: string; hint: string } {
+export function uploadRefusal(reason: string | undefined, kind: FileKind | null = null): { title: string; hint: string } {
   if (reason === 'unsupported_type') return ERROR_MESSAGES.unsupported_type;
+  if (reason === 'format_off') return formatOffText(kind);
   if (reason === 'too_large') {
     return {
       title: 'این فایل از سقف حجم بزرگ‌تر است',

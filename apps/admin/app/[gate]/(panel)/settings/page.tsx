@@ -8,6 +8,7 @@ import { formatJalaliNumeric, formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../components/Alert';
 import { CheckoutCard } from '../../../../components/CheckoutCard';
+import { FilesSettingsForm } from '../../../../components/FilesSettingsForm';
 import { HolidayAddForm } from '../../../../components/HolidayAddForm';
 import { KeyForm } from '../../../../components/KeyForm';
 import { KeyTestButton, TemplateTestForm } from '../../../../components/KeyTestForm';
@@ -29,6 +30,8 @@ import {
   KEY_TESTS_PER_HOUR,
   TEMPLATE_SAMPLES,
   creditCard,
+  formatsSeen,
+  formatsSegs,
   holidaysView,
   keyCheckView,
   maskText,
@@ -48,6 +51,8 @@ const OTP = SETTING_SCHEMAS['otp.site_hourly_limit'];
 const OTP_DAY = SETTING_SCHEMAS['otp.site_daily_limit'];
 const KEEP = SETTING_SCHEMAS['order.files_retention_days'];
 const CREDIT = SETTING_SCHEMAS['sms.credit_alert_days'];
+const MAX_MB = SETTING_SCHEMAS['file.max_mb'];
+const MAX_PAGES = SETTING_SCHEMAS['file.max_pages'];
 
 /** رنگ خط آزمایش (کلاس کامل و ثابت، برای آیکون‌های کیت). */
 const CHECK_ICONS: Record<KeyCheckView['tone'], string> = {
@@ -174,6 +179,15 @@ export default async function SettingsPage({ params, searchParams }: { params: P
     ) : values && done === 'sms.credit_alert_days' && v === values.creditAlertDays ? (
       <Alert tone="success">
         آستانهٔ هشدار اعتبار پیامک ذخیره شد: <span className="num">{v}</span> روز مصرف.
+      </Alert>
+    ) : values &&
+      done === 'files' &&
+      one(query, 'f') === formatsSeen(values.files.formats) &&
+      Number(one(query, 'mb')) === values.files.maxMb &&
+      Number(one(query, 'p')) === values.files.maxPages ? (
+      <Alert tone="success">
+        فایل‌ها ذخیره شد: <Segments segs={formatsSegs(values.files.formats)} />؛ هر فایل تا <span className="num">{formatNumber(values.files.maxMb)}</span> مگابایت و{' '}
+        <span className="num">{formatNumber(values.files.maxPages)}</span> صفحه. صفحهٔ اصلی سایت تا یک دقیقه همین را نشان می‌دهد.
       </Alert>
     ) : null;
 
@@ -329,6 +343,13 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                 stepper
                 rangeError={`روز مصرف عدد صحیح ${CREDIT.minValue} تا ${CREDIT.maxValue} باشد.`}
                 hint="اعتبار را از پنل sms.ir شارژ کن. بی اعتبار، کد تأیید نمی‌رود و کسی نمی‌تواند سفارش بدهد."
+              />
+              <FilesSettingsForm
+                key={`files:${formatsSeen(values.files.formats)}:${values.files.maxMb}:${values.files.maxPages}:${mark}`}
+                gate={gate}
+                files={values.files}
+                maxMbError={`حجم هر فایل عدد صحیح ${formatNumber(MAX_MB.minValue ?? 1)} تا ${formatNumber(MAX_MB.maxValue ?? 1536)} مگابایت باشد.`}
+                maxPagesError={`صفحهٔ هر فایل عدد صحیح ${formatNumber(MAX_PAGES.minValue ?? 1)} تا ${formatNumber(MAX_PAGES.maxValue ?? 1500)} باشد.`}
               />
             </div>
 

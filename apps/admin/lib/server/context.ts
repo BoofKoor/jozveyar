@@ -97,7 +97,12 @@ function build(config: AdminConfig): Panel {
       stepUp: auth.stepUp,
     }),
     // فعال کردن تعرفه کار حساس است: همان کد تازهٔ ورود، با همان سقف اشتباه و قفل (ADR-038).
-    tariff: createPanelTariff({ store: createTariffStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
+    tariff: createPanelTariff({
+      store: createTariffStore(getDb()),
+      settings: createSettingsStore(getDb()),
+      stepUp: auth.stepUp,
+      secret: config.secret,
+    }),
     // کلیدها کار حساس‌اند (کد تازه)؛ مقدار `.env` هر کلید از همان `.env` کانتینر، با هر درخواست (ADR-041). «آزمایش» کلیدها و اعتبار
     // با خود sms.ir (۷٫۱)؛ اعتبار خودکار فقط وقتی sms.ir در کار است.
     settings: createPanelSettings({

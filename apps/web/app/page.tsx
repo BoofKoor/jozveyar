@@ -4,6 +4,8 @@ import { OrderFlow } from '../components/OrderFlow';
 import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
+import { acceptOf } from '../lib/fileRules';
+import { siteFiles } from '../lib/server/fileRules';
 import { siteTariff } from '../lib/server/tariff';
 import { TARIFF_ELEMENT_ID, tariffJson } from '../lib/tariff';
 
@@ -37,8 +39,8 @@ const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})
  * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است.
  */
 export default async function HomePage() {
-  const tariff = await siteTariff();
-  const faq = faqItems(tariff);
+  const [tariff, files] = await Promise.all([siteTariff(), siteFiles()]);
+  const faq = faqItems(tariff, files);
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -80,6 +82,8 @@ export default async function HomePage() {
       {/* نام سایت را لوگوی سربرگ می‌گوید. سربرگ و پاورقی در layout است. */}
       <main className="home">
         <OrderFlow
+          rules={files.rules}
+          accept={acceptOf(files.rules.formats)}
           hero={
             <div className="home-hero__text">
               <p className="home-eyebrow">چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران</p>
@@ -93,7 +97,7 @@ export default async function HomePage() {
               <p className="home-lead">صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم؛ بی‌ثبت‌نام و بی فرم.</p>
             </div>
           }
-          upload={<UploadCard />}
+          upload={<UploadCard formats={files.rules.formats} />}
           trust={
             <ul className="home-trust">
               <li>
@@ -123,7 +127,7 @@ export default async function HomePage() {
                 <span className="home-trust__t">
                   <b>فایلت پیش ما نمی‌ماند</b>
                   <span>
-                    <span className="num">2</span> روز بعد خودکار پاک می‌شود
+                    <span className="num">{files.uploadDays}</span> روز بعد خودکار پاک می‌شود
                   </span>
                 </span>
               </li>
@@ -132,7 +136,7 @@ export default async function HomePage() {
           more={
             <>
               <HowItWorks slaDays={tariff.slaDays} />
-              <Tariff priceList={tariff.priceList} />
+              <Tariff priceList={tariff.priceList} paused={tariff.paused} />
             </>
           }
         >

@@ -1241,6 +1241,16 @@
     min-height: 44px;
     cursor: pointer;
   }
+  /* کارت «فایل‌ها» (۸٫۴): یک تیک برای هر خانوادهٔ فرمت، هر کدام یک ردیف لمسی */
+  .ad-toggles {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-block-start: 4px;
+  }
+  .ad-muted {
+    color: var(--color-muted);
+  }
   .ad-size__legend + .ad-rates {
     margin-block-start: 4px;
   }

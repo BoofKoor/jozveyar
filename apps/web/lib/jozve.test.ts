@@ -86,6 +86,58 @@ describe('وضع هر فایل', () => {
     expect(sectionView({ ...word('new.docx', 9), upload: refused }).blocked).toBeNull();
     expect(sectionView({ ...ready('a.pdf', 10), upload: refused }).blocked).toBeNull();
   });
+
+  it('خانوادهٔ خاموش (۸٫۴): همان لحظهٔ انداختن بیرون از قیمت، پیش از آپلود؛ فایلی که پیش‌تر روی سرور رسیده نه', () => {
+    const off = { formats: { word: false, slides: true, image: true }, maxMb: 1536, maxPages: 1500 };
+    expect(sectionView(word('new.docx', 9), off).blocked).toEqual({
+      title: 'فایل Word فعلاً پذیرفته نمی‌شود',
+      hint: 'از Word خروجی PDF بگیر و همان را جایش بینداز.',
+      refused: true,
+    });
+    expect(jozveView([ready('a.pdf', 10), word('new.docx', 9)], off)).toMatchObject({ pageCount: 10 });
+    // رسیده و شمرده‌شده پیش از خاموش شدن: دست نمی‌خورد.
+    expect(sectionView({ ...word('old.docx', 9), upload: done('d1', { state: 'ready', pageCount: 9 }) }, off).blocked).toBeNull();
+    expect(sectionView(word('new.docx', 9)).blocked).toBeNull();
+  });
+
+  it('خانواده‌ای که پس از بار صفحه خاموش شد: سرور آپلود را نپذیرفت و پیش‌فاکتور هم بیرون است (۸٫۴)', () => {
+    const off: UploadSnapshot = { phase: 'unavailable', documentId: null, sentBytes: 0, totalBytes: 1, reason: 'format_off' };
+    expect(sectionView({ ...word('new.docx', 9), upload: off }).blocked).toEqual({
+      title: 'فایل Word فعلاً پذیرفته نمی‌شود',
+      hint: 'از Word خروجی PDF بگیر و همان را جایش بینداز.',
+      refused: true,
+    });
+  });
+
+  it('«پذیرفته نشد» با متن قاعده‌ها و سقف همین صفحه؛ فایل خراب «خوانده نشد» می‌ماند (۸٫۴)', () => {
+    const rules = { formats: { word: true, slides: true, image: false }, maxMb: 50, maxPages: 300 };
+    // نوع ناشناس `kind` ندارد (`fileKind`).
+    const unsupported = { ...section('a.exe', { phase: 'error', error: { code: 'unsupported_type', title: 'این نوع فایل را نمی‌شناسیم', hint: 'قدیمی' } }), kind: null };
+    expect(sectionView(unsupported, rules).blocked).toEqual({
+      title: 'این نوع فایل را نمی‌گیریم',
+      hint: 'PDF، Word یا پاورپوینت بینداز. اگر جزوه با برنامهٔ دیگری ساخته شده، از همان برنامه خروجی PDF بگیر.',
+      refused: true,
+    });
+    const tooMany = section('big.pdf', { phase: 'error', pageCount: 420, error: { code: 'too_many_pages', title: '', hint: '' } });
+    expect(sectionView(tooMany, rules).blocked).toMatchObject({ title: 'هر فایل تا 300 صفحه پذیرفته می‌شود', refused: true });
+    const corrupt = section('c.pdf', { phase: 'error', error: { code: 'corrupt_file', title: 'خراب', hint: 'دوباره' } });
+    expect(sectionView(corrupt, rules).blocked).toEqual({ title: 'خراب', hint: 'دوباره', refused: false });
+  });
+
+  it('شمارش سرور بیش از سقف صفحه: فایل بیرون است، با عدد سرور (۸٫۴)', () => {
+    const rules = { formats: { word: true, slides: true, image: true }, maxPages: 300, maxMb: 1536 };
+    const view = sectionView({ ...word('big.docx', 250), upload: done('d1', { state: 'ready', pageCount: 301, colorPageCount: 0 }) }, rules);
+    expect(view.blocked).toEqual({
+      title: 'هر فایل تا 300 صفحه پذیرفته می‌شود',
+      hint: 'این فایل 301 صفحه است. دو تکه‌اش کن و هر دو را بینداز؛ با هم یک جزوه می‌شوند.',
+      refused: true,
+    });
+    expect(jozveView([ready('a.pdf', 10), { ...word('big.docx', 250), upload: done('d1', { state: 'ready', pageCount: 301 }) }], rules)).toMatchObject({
+      pageCount: 10,
+    });
+    // همان فایل با سقف پیش‌فرض (۱٬۵۰۰) پذیرفته است.
+    expect(sectionView({ ...word('big.docx', 250), upload: done('d2', { state: 'ready', pageCount: 301 }) }).blocked).toBeNull();
+  });
 });
 
 describe('جمع جزوه', () => {

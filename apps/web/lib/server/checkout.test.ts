@@ -426,6 +426,73 @@ describe('مسیر خرید روی سرور', () => {
       expect(orders.orders).toEqual([]);
     });
 
+    it('سقف صفحهٔ هر فایل (۸٫۴): با شمارش سرور و تنظیم همین لحظه، در قیمت و در سفارش؛ ۴۲۲ با شناسهٔ همان فایل‌ها و سقف', async () => {
+      const small = doc(300);
+      const big = doc(301);
+      expect((await service.quote(ME, { items: [item([small, big])], place: null })).ok).toBe(true);
+      orders.settings.set('file.max_pages', 300);
+      expect(await service.quote(ME, { items: [item([small, big])], place: null })).toMatchObject({
+        status: 422,
+        error: 'too_many_pages',
+        documentIds: [big],
+        maxPages: 300,
+      });
+      const attempt = await service.placeOrder(ME, SARA, {
+        items: [item([small]), item([big])],
+        place: TEHRAN,
+        recipient,
+        checkoutKey: randomUUID(),
+        expectedTotalRials: 1,
+      });
+      expect(attempt).toMatchObject({ status: 422, error: 'too_many_pages', documentIds: [big] });
+      expect(orders.orders).toEqual([]);
+      // تنظیم خراب: پیش‌فرض ۱٬۵۰۰، با لاگ.
+      orders.settings.set('file.max_pages', 0);
+      expect((await service.quote(ME, { items: [item([small, big])], place: null })).ok).toBe(true);
+      expect(logs.some((line) => line.includes('file.max_pages'))).toBe(true);
+    });
+
+    it('گزینهٔ موقتاً خاموش (۸٫۴، سؤال ۱۸۸): نه قیمت نه سفارش، ۴۰۹ با فهرست همین لحظه؛ پیش‌فرض‌ها و A4 هرگز خاموش نیستند', async () => {
+      const spiral = SEED_PRICE_LIST.bindingTypes.spiral_clear!;
+      const staple = {
+        nameFa: 'منگنه',
+        enabled: true,
+        minSheets: 1,
+        maxSheetsPerVolume: 50,
+        splitsVolumes: false,
+        weightPerVolumeGrams: 1,
+        bands: { a4: [{ minSheets: 1, maxSheets: 50, priceRials: 80_000 }], a5: [{ minSheets: 1, maxSheets: 50, priceRials: 60_000 }] },
+      };
+      orders.activate({
+        ...SEED_PRICE_LIST,
+        version: 5,
+        printRates: { ...SEED_PRICE_LIST.printRates, a5: { single: { color: 15_000, bw: 12_000 }, double: { color: 13_000, bw: 10_000 } } },
+        paperTypes: { tahrir80: { ...SEED_PRICE_LIST.paperTypes.tahrir80!, sheetRates: { a4: 0, a5: 0 } } },
+        bindingTypes: { spiral_clear: { ...spiral, bands: { ...spiral.bands, a5: [{ minSheets: 1, maxSheets: 800, priceRials: 400_000 }] } }, staple },
+      });
+      const scan = doc(40);
+      // A4، تحریر و طلق و سیم هم در فهرست باشند، دیده نمی‌شوند.
+      orders.settings.set('catalog.paused', { sizes: ['a5'], papers: ['tahrir80'], bindings: ['staple', 'spiral_clear'] });
+      const conflict = { status: 409, error: 'option_unavailable', paused: { sizes: ['a5'], papers: [], bindings: ['staple'] } };
+      expect(await service.quote(ME, { items: [item([scan], { paperSize: 'a5' })], place: null })).toMatchObject(conflict);
+      expect(await service.quote(ME, { items: [item([scan], { bindingTypeId: 'staple' })], place: null })).toMatchObject(conflict);
+      const attempt = await service.placeOrder(ME, SARA, {
+        items: [item([scan]), item([doc(30)], { bindingTypeId: 'staple' })],
+        place: TEHRAN,
+        recipient,
+        checkoutKey: randomUUID(),
+        expectedTotalRials: 1,
+      });
+      expect(attempt).toMatchObject(conflict);
+      expect(orders.orders).toEqual([]);
+      // پیش‌فرض‌ها قیمت می‌خورند، با همان قیمت
+      const plain = await service.quote(ME, { items: [item([scan])], place: null });
+      expect(plain.ok && plain.value.breakdown.items[0]).toMatchObject({ paperSize: 'a4', printRials: 40 * 16_000 });
+      // روشن شدن دوباره، بی نسخهٔ تازه
+      orders.settings.set('catalog.paused', { sizes: [], papers: [], bindings: [] });
+      expect((await service.quote(ME, { items: [item([scan], { bindingTypeId: 'staple' })], place: null })).ok).toBe(true);
+    });
+
     it('فایلی که کمتر از یک ساعت زنده است: «دوباره بینداز»، نه سفارش', async () => {
       const scan = doc(20, { fileExpiresAt: new Date(clock.getTime() + HOUR / 2) });
       const result = await service.placeOrder(ME, SARA, {

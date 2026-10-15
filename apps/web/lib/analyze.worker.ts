@@ -27,7 +27,7 @@ import {
   type PageMeasurement,
 } from '@jozveyar/analysis';
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
-import type { AnalyzeRequest, AnalysisErrorCode, WorkerResponse } from './analysis-protocol';
+import type { AnalyzeRequest, WorkerErrorCode, WorkerResponse } from './analysis-protocol';
 
 // pdf.js کارگر خودش را برای تجزیه بالا می‌آورد. کارگر تودرتو در همهٔ مرورگرهای
 // هدف پشتیبانی می‌شود؛ اگر جایی نشود، pdf.js خودکار به حالت same-thread می‌افتد.
@@ -74,7 +74,7 @@ class OffscreenCanvasFactory {
 }
 
 /** خطای pdf.js را به کدی که پیام فارسی دارد نگاشت می‌کند. */
-function classifyError(error: unknown): AnalysisErrorCode {
+function classifyError(error: unknown): WorkerErrorCode {
   const name = (error as { name?: string })?.name ?? '';
   const message = String((error as { message?: string })?.message ?? error ?? '');
   if (name === 'PasswordException' || /password/i.test(message)) return 'password_protected';
@@ -301,6 +301,11 @@ async function inspect(doc: pdfjs.PDFDocumentProxy, request: AnalyzeRequest): Pr
   const pageCount = doc.numPages;
   if (pageCount === 0) {
     post({ kind: 'error', job, code: 'no_pages', message: 'سند صفحه‌ای ندارد' });
+    return;
+  }
+  // سقف صفحهٔ هر فایل (برش ۸٫۴): همان لحظهٔ شمردن، پیش از بررسی و آپلود؛ اینجا، نه در صف، تا پوسته سبک بماند.
+  if (request.maxPages !== undefined && pageCount > request.maxPages) {
+    post({ kind: 'error', job, code: 'too_many_pages', message: '', pageCount });
     return;
   }
 

@@ -38,6 +38,7 @@ import {
   type BindingInput,
   type DraftForm,
   type PaperInput,
+  type RestInput,
 } from './tariff';
 
 /** متن تکه‌ها، مثل آنچه صفحه نشان می‌دهد. */
@@ -104,8 +105,14 @@ function fieldsOf(f: DraftForm): [string, string][] {
       ),
     ]),
     ...Object.entries(f.ship).map(([key, value]): [string, string] => [`ship.${key}`, value]),
+    ...Object.entries(f.rest)
+      .filter((entry): entry is [string, string] => entry[1] !== null)
+      .map(([key, value]): [string, string] => [`rest.${key}`, value]),
   ];
 }
+
+/** «بقیه»ای که فرم نفرستاد (زبانهٔ پیش از ۸٫۴): همان پیش‌نویس. */
+const NO_REST: RestInput = { rounding: null, minOrder: null, packaging: null };
 
 /** قیمت یک جزوه بی کرایه با یک تعرفه؛ هشدارها جدا. */
 function priced(list: PriceList, item: { pages: number; size?: 'a4' | 'a5' | 'a3'; paper?: string; binding?: string; color?: 'bw' | 'color'; sides?: 'single' | 'double' }) {
@@ -223,6 +230,7 @@ describe('فرم پیش‌نویس', () => {
         },
       ],
       ship: { 'tehran:0': '130,000' },
+      rest: NO_REST,
     });
     // فرم کامل ویرایشگر، رفت‌وبرگشت؛ با A5 و کاغذ و صحافی تازه هم.
     expect(draftFormFromEntries(fieldsOf(draftFormOf(V1)))).toEqual(draftFormOf(V1));
@@ -250,7 +258,7 @@ describe('فرم پیش‌نویس', () => {
   it('تومان به ریال، نام یکدست، یکرو و دورو جدا؛ هرچه فرم ندارد از پیش‌نویس ذخیره‌شده', () => {
     const base: PriceList = { ...V1, version: 2, settings: { ...V1.settings, packagingWeightGrams: 120 } };
     const print = { ...form().print, a4: { single: { bw: '1,900', color: '۲۴۰۰' }, double: { bw: '1,700', color: '2,200' } } };
-    const check = readDraft(form({ label: '  تعرفهٔ   مهر ۱۴۰۵ ', print }), base, V1);
+    const check = readDraft(form({ label: '  تعرفهٔ   مهر ۱۴۰۵ ', print, rest: NO_REST }), base, V1);
     expect(check.errors).toEqual([]);
     expect(check.list).toMatchObject({
       version: 2,
@@ -260,6 +268,36 @@ describe('فرم پیش‌نویس', () => {
     expect(check.list!.settings.packagingWeightGrams).toBe(120);
     expect(check.list!.paperTypes).toEqual(V1.paperTypes);
     expect(check.list!.bindingTypes).toEqual(V1.bindingTypes);
+  });
+
+  it('«بقیه» (۸٫۴): گرد کردن و حداقل سفارش تومان، وزن بسته‌بندی گرم؛ هر خطا زیر فیلد خودش؛ مالیات فرم ندارد', () => {
+    const rest = (over: Partial<RestInput>) => form({ rest: { ...form().rest, ...over } });
+    expect(form().rest).toEqual({ rounding: '0', minOrder: '0', packaging: '100' });
+    const check = readDraft(rest({ rounding: '1,000', minOrder: '۵۰٬۰۰۰', packaging: '150' }), V1, V1);
+    expect(check.errors).toEqual([]);
+    expect(check.list!.settings).toEqual({ vatPercent: 0, roundingStepRials: 10_000, minOrderRials: 500_000, packagingWeightGrams: 150 });
+    expect(errorsOf(rest({ rounding: '', minOrder: '50000.5', packaging: '10001' }))).toEqual([
+      ['rest.rounding', 'عدد را بنویس.'],
+      ['rest.minOrder', 'فقط رقم بنویس، بی اعشار و بی واحد.'],
+      ['rest.packaging', 'وزن بسته‌بندی از 0 تا 10,000 گرم است.'],
+    ]);
+    expect(errorsOf(rest({ minOrder: '100,000,001' }))).toEqual([['rest.minOrder', 'بیش از 100,000,000 تومان است؛ شاید صفر اضافه دارد.']]);
+    // صفر یعنی «ندارد».
+    expect(readDraft(rest({ rounding: '0', minOrder: '0' }), V1, V1).list!.settings).toMatchObject({ roundingStepRials: 0, minOrderRials: 0 });
+    // مالیات همان پیش‌نویس می‌ماند، و فیلد ساختگی‌اش نادیده است.
+    const taxed: PriceList = { ...V1, settings: { ...V1.settings, vatPercent: 9 } };
+    expect(readDraft(rest({}), taxed, V1).list!.settings.vatPercent).toBe(9);
+    expect(draftFormFromEntries([...fieldsOf(form()), ['rest.vat', '50']]).rest).toEqual(form().rest);
+  });
+
+  it('«بقیه»: بیش از ده برابر نسخهٔ فعال هشدار است، نه خطا', () => {
+    const active: PriceList = { ...V1, settings: { ...V1.settings, minOrderRials: 500_000, roundingStepRials: 10_000 } };
+    const check = readDraft(form({ rest: { ...form().rest, rounding: '100,001', minOrder: '500,001' } }), active, active);
+    expect(check.errors).toEqual([]);
+    expect(issuesOf(check.warnings)).toEqual([
+      ['rest.rounding', '100,001 تومان؟ بیش از ده برابر نسخهٔ فعال (1,000) است؛ شاید ریال نوشته‌ای.'],
+      ['rest.minOrder', '500,001 تومان؟ بیش از ده برابر نسخهٔ فعال (50,000) است؛ شاید ریال نوشته‌ای.'],
+    ]);
   });
 
   it('نام: خالی نه؛ حداکثر 60 نویسه، پس از یکدست شدن', () => {
@@ -690,6 +728,18 @@ describe('تغییرها نسبت به نسخهٔ فعال', () => {
       ['چاپ رنگی، دورو، A4، هر رو', '2,200 ← 2,000 تومان'],
     ]);
     expect(changesOf({ ...V1, version: 3, label: 'فقط نام' })).toEqual({ lines: [], unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست', 'بقیه'] });
+  });
+
+  it('«بقیه» (۸٫۴): گرد کردن و حداقل سفارش هر کدام یک خط؛ گروه‌های دیگر بی تغییر', () => {
+    const v2 = draft(form({ rest: { rounding: '1,000', minOrder: '50,000', packaging: '100' } }));
+    expect(changesOf(v2)).toEqual({
+      lines: [
+        ['گرد کردن', 'ندارد ← به 1,000 تومان'],
+        ['حداقل سفارش', 'ندارد ← 50,000 تومان'],
+      ],
+      unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست'],
+    });
+    expect(changesOf(draft(form({ rest: { ...form().rest, packaging: '150' } }))).lines).toEqual([['وزن بسته‌بندی', '100 گرم ← 150 گرم']]);
   });
 
   it('اندازهٔ تازه با نرخ‌هایش، کاغذ و صحافی تازه، و برعکس برداشته', () => {

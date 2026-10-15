@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { PriceList } from '@jozveyar/contracts';
+import { pausedOf } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { bindingsFor, effectiveConfig, papersFor } from './catalog';
@@ -147,5 +148,34 @@ describe('تنظیمی که قیمت می‌خورد', () => {
   it('جزوه‌ای که هنوز صفحه‌ای ندارد: صحافی‌اش با برگ سنجیده نمی‌شود، فقط با اندازه', () => {
     expect(effectiveConfig({ ...CONFIG, bindingTypeId: 'glue' }, LIST, 0).replaced).toEqual([]);
     expect(effectiveConfig({ ...CONFIG, paperSize: 'a5', bindingTypeId: 'glue' }, LIST, 0).replaced).toHaveLength(1);
+  });
+});
+
+describe('موقتاً در دسترس نیست (برش ۸٫۴، سؤال ۱۸۸)', () => {
+  const paused = pausedOf(LIST, { sizes: ['a5'], papers: ['glossy'], bindings: ['staple', 'glue'] });
+
+  it('اندازه، کاغذ و صحافیِ موقتاً خاموش جایشان را به پیش‌فرض ردیف می‌دهند، با نشان «موقتاً»؛ انتخاب خود جزوه دست نمی‌خورد', () => {
+    const chosen = { ...CONFIG, paperSize: 'a5' as const, bindingTypeId: 'staple' };
+    const result = effectiveConfig(chosen, LIST, 40, paused);
+    expect(result.config).toMatchObject({ paperSize: 'a4', paperTypeId: 'tahrir80', bindingTypeId: 'spiral_clear' });
+    expect(result.replaced).toEqual([
+      { field: 'paperSize', from: 'a5', to: 'a4', paused: true },
+      { field: 'bindingTypeId', from: 'staple', to: 'spiral_clear', misfit: null, paused: true },
+    ]);
+    expect(chosen).toMatchObject({ paperSize: 'a5', bindingTypeId: 'staple' });
+    expect(effectiveConfig({ ...CONFIG, paperTypeId: 'glossy' }, LIST, 40, paused).replaced).toEqual([
+      { field: 'paperTypeId', from: 'glossy', to: 'tahrir80', paused: true },
+    ]);
+  });
+
+  it('«موقتاً» پیش از «نمی‌خورد»: چسب گرمِ جزوهٔ ۶ برگی یک دلیل دارد، همان «موقتاً»', () => {
+    expect(effectiveConfig({ ...CONFIG, bindingTypeId: 'glue' }, LIST, 12, paused).replaced).toEqual([
+      { field: 'bindingTypeId', from: 'glue', to: 'spiral_clear', misfit: null, paused: true },
+    ]);
+  });
+
+  it('روشن شدن دوباره: همان انتخاب خود جزوه برمی‌گردد', () => {
+    const chosen = { ...CONFIG, paperSize: 'a5' as const, bindingTypeId: 'staple' };
+    expect(effectiveConfig(chosen, LIST, 40).config).toBe(chosen);
   });
 });

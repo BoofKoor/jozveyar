@@ -10,6 +10,9 @@
  *   با محتوای امروز می‌سنجدش. پیش‌نویسی که در زبانه یا دست دیگری عوض شده رونویسی نمی‌شود، و فعال‌سازی درست همان نسخه‌ای
  *   را روشن می‌کند که ادمین تغییرهایش را دید، نسبت به همان نسخهٔ فعالی که دید.
  * - **رویداد** هر کار در همان تراکنش خودش است (ذخیره‌گاه، `@jozveyar/db` → `tariff.ts`).
+ * - **خاموش موقت (۸٫۴، سؤال ۱۸۸):** مالک و متصدی (`tariff.pause`) گزینه‌ای از تعرفهٔ فعال را بی نسخهٔ تازه موقتاً خاموش یا دوباره
+ *   روشن می‌کنند: تنظیم `catalog.paused` زیر قفل تنظیم‌ها، «همان که دیده شد»، با رویداد `tariff.availability` در همان تراکنش. کد تازه
+ *   نمی‌خواهد: قیمت را دست نمی‌زند و برگشت‌پذیر است.
  *
  * بی نکست؛ هر وابستگی از درگاه می‌آید (`TariffStore`، `stepUp`)، پس با ذخیره‌گاه و ساعت ساختگی تست می‌شود. قفل، تراکنش و
  * تغییرناپذیری نسخهٔ فعال‌شده روی پستگرس در تست یکپارچگی `packages/db`.
@@ -17,19 +20,22 @@
 
 import { createHash } from 'node:crypto';
 
-import type { PriceList } from '@jozveyar/contracts';
-import type { TariffStore, TariffVersion } from '@jozveyar/db';
+import { SETTING_SCHEMAS, type CatalogPaused, type PriceList } from '@jozveyar/contracts';
+import { CATALOG_PAUSED_SETTING, DEFAULT_SETTINGS, readSetting, type SettingsStore, type TariffStore, type TariffVersion } from '@jozveyar/db';
 
 import type { Seg } from '../orders';
 import {
   activePeriods,
+  availabilityItems,
   canonicalJson,
   checkPriceList,
   draftFormOf,
   draftLabel,
   readDraft,
   tariffChanges,
+  togglePaused,
   type ActivePeriod,
+  type AvailabilityItem,
   type DraftForm,
   type DraftIssue,
   type TariffChanges,
@@ -39,6 +45,8 @@ import { fail, ok, type Result } from './result';
 
 export interface PanelTariffDeps {
   store: TariffStore;
+  /** تنظیم‌ها: خاموش موقت گزینه‌ها (`catalog.paused`، ۸٫۴) زیر همان قفل و با رویداد در همان تراکنش. */
+  settings: SettingsStore;
   /** کد تازهٔ برنامهٔ تأیید برای کار حساس؛ همان `AdminAuth.stepUp`، با سقف اشتباه و قفلش. */
   stepUp: (session: AdminSession, code: unknown, ip: string) => Promise<Result<true>>;
   /** `SESSION_SECRET`: کلید HMAC IP، مثل ورود. */
@@ -56,6 +64,8 @@ export interface TariffOverview {
   /** پیش‌نویسی که هست؛ هر بار یکی. */
   draft: TariffVersion | null;
   canEdit: boolean;
+  /** کارت «در دسترس بودن» (۸٫۴): گزینه‌های خاموش‌شدنی نسخهٔ فعال با حال امروز، و اینکه این ادمین خاموش و روشن می‌کند. */
+  availability: { items: AvailabilityItem[]; canPause: boolean };
 }
 
 export interface DraftView {
@@ -98,6 +108,12 @@ export function versionOf(value: unknown): number | null {
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
+/** مقدار خام `catalog.paused` به شکل قرارداد، یا پیش‌فرض؛ همان `readSetting`، زیر قفل و بی لاگ. */
+function storedPaused(raw: unknown): CatalogPaused {
+  const parsed = raw === undefined || raw === null ? null : SETTING_SCHEMAS['catalog.paused'].safeParse(raw);
+  return parsed?.success ? parsed.data : (DEFAULT_SETTINGS['catalog.paused'] as CatalogPaused);
+}
+
 export function createPanelTariff(deps: PanelTariffDeps) {
   const now = deps.now ?? (() => new Date());
   const { store } = deps;
@@ -115,7 +131,11 @@ export function createPanelTariff(deps: PanelTariffDeps) {
   return {
     async overview(session: AdminSession): Promise<Result<TariffOverview>> {
       if (!can(session, 'tariff.read')) return fail(403, 'forbidden');
-      const [state, activations] = await Promise.all([current(), store.activations()]);
+      const [state, activations, paused] = await Promise.all([
+        current(),
+        store.activations(),
+        readSetting((key) => deps.settings.read(key), 'catalog.paused'),
+      ]);
       if (!state) return fail(503, 'unavailable');
       return ok({
         now: now(),
@@ -124,7 +144,47 @@ export function createPanelTariff(deps: PanelTariffDeps) {
         periods: activePeriods(activations),
         draft: state.versions.find((v) => v.activatedAt === null) ?? null,
         canEdit: can(session, 'tariff.edit'),
+        availability: { items: availabilityItems(state.active.list, paused), canPause: can(session, 'tariff.pause') },
       });
+    },
+
+    /**
+     * خاموش موقت یا روشن دوبارهٔ یک گزینهٔ تعرفهٔ فعال (۸٫۴، سؤال ۱۸۸): فقط گزینه‌ای که کارت نشان می‌دهد (`availabilityItems`)، از
+     * حالی که صفحه نشان داد (`seen`، «1» یعنی خاموش)؛ مقصد یکسان موفق است، بی رویداد. سایت با درخواست بعدی می‌بیند (صفحهٔ اصلی تا یک
+     * دقیقه)، و سرور مسیر خرید گزینهٔ خاموش را همان لحظه رد می‌کند.
+     */
+    async setAvailability(
+      session: AdminSession,
+      input: { kind: unknown; id: unknown; paused: unknown; seen: unknown },
+      ip: string,
+    ): Promise<Result<{ item: AvailabilityItem; written: boolean }>> {
+      if (!can(session, 'tariff.pause')) return fail(403, 'forbidden');
+      const state = await current();
+      if (!state) return fail(503, 'unavailable');
+      const { list } = state.active;
+      const found = availabilityItems(list, null).find((item) => item.kind === input.kind && item.id === input.id);
+      if (!found) return fail(404, 'option_not_found');
+      const paused = text(input.paused) === '1';
+      const seen = text(input.seen);
+      const result = await deps.settings.change({
+        key: CATALOG_PAUSED_SETTING,
+        action: 'tariff.availability',
+        at: now(),
+        actor: actor(session, ip),
+        decide: (raw) => {
+          const stored = storedPaused(raw);
+          const was = availabilityItems(list, stored).find((item) => item.kind === found.kind && item.id === found.id)!.paused;
+          if (was === paused) return { kind: 'same' };
+          if ((was ? '1' : '0') !== seen) return { kind: 'reject', reason: 'changed' };
+          return {
+            kind: 'write',
+            value: togglePaused(stored, found, paused),
+            detail: { kind: found.kind, id: found.id, name: found.name, paused, version: state.active.version.version },
+          };
+        },
+      });
+      if (!result.ok) return fail(409, 'availability_changed');
+      return ok({ item: { ...found, paused }, written: result.written });
     },
 
     /** یک نسخه: پیش‌نویس برای ویرایش (فقط مالک)، یا هر نسخهٔ دیگر فقط‌خواندنی. */

@@ -1984,7 +1984,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
       // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است.
       expect(await read('owner')).toContain('reports.read');
-      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش) و از ۶٫۲ صف تأیید؛ چاپخانه فقط دیدن،
+      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید و از ۸٫۴ خاموش موقت
+      // گزینه‌های تعرفه؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042) و از ۶٫۲ ورود فایل پست خودش، نه صف. هیچ‌کدام گزارش ارسال نه. صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'files.download',
@@ -1996,6 +1997,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.status',
         'shipments.import',
         'shipments.review',
+        'tariff.pause',
         'tariff.read',
       ]);
       expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
@@ -2080,6 +2082,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.status',
         'shipments.import',
         'shipments.review',
+        'tariff.pause',
         'tariff.read',
       ]);
       expect(session!.partner).toBeNull();

@@ -1,12 +1,10 @@
 'use client';
 
 import { useCallback, useState, type ReactNode } from 'react';
-import { ACCEPTED_EXTENSIONS } from '../lib/analysis-protocol';
-
-/** فرمت‌هایی که می‌پذیریم. PDF مسیر مرورگر، بقیه مسیر سرور (تبدیل، ADR-028). */
-export const ACCEPT = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
 interface Props {
+  /** فرمت‌هایی که می‌پذیریم، فقط خانواده‌های روشن (`acceptOf`، برش ۸٫۴). PDF مسیر مرورگر، بقیه مسیر سرور (تبدیل، ADR-028). */
+  accept: string;
   /** یک یا چند فایل؛ چند فایل به ترتیب نام، بخش‌های یک جزوه می‌شوند (ADR-030). */
   onFiles: (files: File[]) => void;
   /**
@@ -27,7 +25,7 @@ interface Props {
  * فایل‌گزین را باز می‌کنند و فوکوس ورودی روی خود کارت دیده می‌شود. اینجا فقط انداختن فایل
  * است: `is-dragover` وقتی فایلی رویش کشیده شده.
  */
-export function DropZone({ onFiles, onIntent, children }: Props) {
+export function DropZone({ accept, onFiles, onIntent, children }: Props) {
   const [dragging, setDragging] = useState(false);
 
   const take = useCallback(
@@ -60,7 +58,7 @@ export function DropZone({ onFiles, onIntent, children }: Props) {
         id="jozve-file"
         type="file"
         multiple
-        accept={ACCEPT}
+        accept={accept}
         aria-labelledby="upload-title upload-action"
         aria-describedby="upload-formats upload-hint"
         className="sr-only"

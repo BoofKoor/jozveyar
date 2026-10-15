@@ -25,7 +25,9 @@ import {
 import { tidyFa } from '@jozveyar/text';
 import { paperSizeName } from '@jozveyar/analysis';
 import { mismatchedFonts } from '@jozveyar/analysis/warnings';
-import { documentAnalysisSchema } from '@jozveyar/contracts';
+import { documentAnalysisSchema, type FileFamily } from '@jozveyar/contracts';
+
+import { readSetting } from './settings';
 
 /** پیشوندی که قاعدهٔ نگهداری باکت رویش است. سفارش پرداخت‌شده باید از اینجا بیرون برود (برش ۳). */
 export const UPLOAD_PREFIX = 'uploads/';
@@ -39,8 +41,9 @@ export const MAX_OPEN_UPLOADS_PER_SESSION = 5;
 /** سقف صفحات تحلیل مرورگر که پذیرفته می‌شود — همان سقف صفحهٔ فایل. */
 export const MAX_BROWSER_ANALYSIS_PAGES = 1500;
 
+/** یک مگابایت سقف حجم (`file.max_mb`، برش ۸٫۴)، همان که مرورگر می‌سنجد. */
+export const MEGABYTE = 1024 * 1024;
 /** پیش‌فرض‌های `settings` — همان اعدادی که ARCHITECTURE فهرست کرده. */
-export const DEFAULT_MAX_BYTES = 1_610_612_736;
 export const DEFAULT_RETENTION_DAYS = 2;
 /** روزهایی که فایل آپلود می‌ماند: قاعدهٔ سنی باکت و `file_expires_at`؛ صفحه‌های قوانین و حریم خصوصی هم همین را می‌گویند (۷٫۴). */
 export const UPLOAD_RETENTION_SETTING = 'file.retention_days';
@@ -52,28 +55,33 @@ export function positiveSetting(value: unknown, fallback: number): number {
 
 type SourceKind = DocumentRow['sourceKind'];
 
-const KINDS: Record<string, { kind: SourceKind; mime: string }> = {
-  pdf: { kind: 'pdf', mime: 'application/pdf' },
+/** هر پسوند، نوع سند و خانواده‌اش (`file.formats`، برش ۸٫۴)؛ PDF خانواده ندارد و همیشه پذیرفته است. */
+const KINDS: Record<string, { kind: SourceKind; mime: string; family: FileFamily | null }> = {
+  pdf: { kind: 'pdf', mime: 'application/pdf', family: null },
   docx: {
     kind: 'docx',
     mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    family: 'word',
   },
-  doc: { kind: 'doc', mime: 'application/msword' },
+  doc: { kind: 'doc', mime: 'application/msword', family: 'word' },
   pptx: {
     kind: 'pptx',
     mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    family: 'slides',
   },
-  ppt: { kind: 'ppt', mime: 'application/vnd.ms-powerpoint' },
-  jpg: { kind: 'image', mime: 'image/jpeg' },
-  jpeg: { kind: 'image', mime: 'image/jpeg' },
-  png: { kind: 'image', mime: 'image/png' },
-  webp: { kind: 'image', mime: 'image/webp' },
-  heic: { kind: 'image', mime: 'image/heic' },
+  ppt: { kind: 'ppt', mime: 'application/vnd.ms-powerpoint', family: 'slides' },
+  jpg: { kind: 'image', mime: 'image/jpeg', family: 'image' },
+  jpeg: { kind: 'image', mime: 'image/jpeg', family: 'image' },
+  png: { kind: 'image', mime: 'image/png', family: 'image' },
+  webp: { kind: 'image', mime: 'image/webp', family: 'image' },
+  heic: { kind: 'image', mime: 'image/heic', family: 'image' },
 };
 
 export type UploadErrorCode =
   | 'invalid_request'
   | 'unsupported_type'
+  /** خانوادهٔ این فایل (Word، پاورپوینت یا عکس) را مالک خاموش کرده (`file.formats`، برش ۸٫۴). */
+  | 'format_off'
   | 'too_large'
   | 'too_many_uploads'
   | 'storage_full'
@@ -251,8 +259,10 @@ export function createUploadService(deps: UploadServiceDeps) {
       const type = KINDS[ext];
       if (!type) return fail(415, 'unsupported_type');
 
-      const maxBytes = await numberSetting('file.max_bytes', DEFAULT_MAX_BYTES);
-      if (size > maxBytes) return fail(413, 'too_large');
+      // قاعده‌های فایل (برش ۸٫۴): مرورگر همان لحظهٔ انداختن سنجیده؛ اینجا دوباره، با تنظیم همین لحظه (قاعدهٔ ۲).
+      const read = (key: string) => deps.store.setting(key);
+      if (type.family !== null && !(await readSetting(read, 'file.formats', log))[type.family]) return fail(415, 'format_off');
+      if (size > (await readSetting(read, 'file.max_mb', log)) * MEGABYTE) return fail(413, 'too_large');
 
       const at = now();
       const openSince = new Date(at.getTime() - OPEN_UPLOAD_WINDOW_MS);

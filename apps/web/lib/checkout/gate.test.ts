@@ -86,6 +86,7 @@ describe('retryable', () => {
   it('حجم و نوع فایل با تلاش دوباره عوض نمی‌شوند؛ بقیه می‌شوند', () => {
     expect(retryable(refusedFor('too_large'))).toBe(false);
     expect(retryable(refusedFor('unsupported_type'))).toBe(false);
+    expect(retryable(refusedFor('format_off'))).toBe(false);
     expect(retryable(refusedFor('network'))).toBe(true);
     expect(retryable(section('a', { serverFailed: true }))).toBe(true);
   });

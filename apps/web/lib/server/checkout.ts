@@ -56,7 +56,7 @@ import {
   type PaymentGateway,
 } from '@jozveyar/payments';
 import { SHIPPING_ZONES, findCity, findProvince, placeIsValid, shippingZoneOf } from '@jozveyar/geo';
-import { itemPageCount, quote, wholeDocumentRule } from '@jozveyar/pricing';
+import { itemPageCount, pausedOf, quote, wholeDocumentRule, type PausedOptions } from '@jozveyar/pricing';
 import { DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { deliverQueued, smsState, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay, formatJalaliWeekday, formatTehranTime } from '@jozveyar/text';
@@ -341,7 +341,18 @@ export function createCheckoutService(deps: CheckoutDeps) {
       return doc.status !== 'ready' || !doc.pageCount;
     });
     if (unready.length > 0) return fail(409, 'documents_not_ready', { documentIds: unready });
+    // سقف صفحهٔ هر فایل (برش ۸٫۴): مرورگر همان لحظه سنجیده؛ اینجا دوباره، با شمارش سرور و تنظیم همین لحظه (قاعدهٔ ۲).
+    const maxPages = await readSetting((key) => deps.orders.setting(key), 'file.max_pages', log);
+    const over = ids.filter((id) => docs.get(id)!.pageCount! > maxPages);
+    if (over.length > 0) return fail(422, 'too_many_pages', { documentIds: over, maxPages });
     return ok(docs);
+  }
+
+  /** گزینه‌های خاموش این تعرفه که جزوه‌ای با آن‌ها قیمت خورده (برش ۸٫۴، سؤال ۱۸۸). */
+  function pausedChoices(items: readonly CheckoutItem[], paused: PausedOptions): boolean {
+    return items.some(
+      (item) => paused.sizes.has(item.paperSize) || paused.papers.has(item.paperTypeId) || paused.bindings.has(item.bindingTypeId),
+    );
   }
 
   /** قیمت سرور؛ بی جای ارسال، کرایه null. */
@@ -358,6 +369,14 @@ export function createCheckoutService(deps: CheckoutDeps) {
     if (!list.shippingMethods[DEFAULT_SHIPPING_METHOD_ID]?.enabled) {
       log(`✗ روش ارسال ${DEFAULT_SHIPPING_METHOD_ID} در تعرفهٔ ${list.version} فعال نیست؛ سفارش ممکن نیست.`);
       return fail(503, 'shipping_unavailable');
+    }
+    // در دسترس بودن زنده (برش ۸٫۴، سؤال ۱۸۸): قیمت را دست نمی‌زند، ولی گزینهٔ خاموش سفارش نمی‌شود؛ رابط با فهرست همین لحظه
+    // جایش را به پیش‌فرض می‌دهد.
+    const paused = pausedOf(list, await readSetting((key) => deps.orders.setting(key), 'catalog.paused', log));
+    if (pausedChoices(items, paused)) {
+      return fail(409, 'option_unavailable', {
+        paused: { sizes: [...paused.sizes], papers: [...paused.papers], bindings: [...paused.bindings] },
+      });
     }
     const breakdown = quote(specOf(items, docs.value, zoneId), list);
     return ok({ breakdown, list, docs: docs.value, zoneId });

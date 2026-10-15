@@ -1,6 +1,7 @@
 'use client';
 
 import { startTransition, useCallback, useDeferredValue, useEffect, useState, type ReactNode } from 'react';
+import type { FileRules } from '@jozveyar/contracts/files';
 import type { OrderConfig } from '../lib/orderConfig';
 import { useJozve } from '../lib/useJozve';
 import { DropZone } from './DropZone';
@@ -58,6 +59,13 @@ interface Props {
   more: ReactNode;
   /** سؤال‌ها (کامپوننت سرور): پس از فایل در همان شبکهٔ خلاصهٔ سفارش، تا خلاصهٔ چسبان تا ته صفحه بماند. */
   children: ReactNode;
+  /**
+   * قاعده‌های فایل (برش ۸٫۴، `settings`): صف جزوه همان لحظهٔ انداختن می‌سنجدشان و رابط پس از فایل پیامشان را می‌سازد. از HTML همین
+   * صفحه، با ISR، نه JSON تعرفه: آن را فقط تکهٔ رابط پس از فایل می‌خواند.
+   */
+  rules: FileRules;
+  /** `accept` ورودی فایل، فقط خانواده‌های روشن؛ روی سرور ساخته شده (`acceptOf`)، تا فهرست پسوندها در باندل اولیه نیاید. */
+  accept: string;
 }
 
 /**
@@ -73,8 +81,8 @@ interface Props {
  * می‌مانند و React دوباره نمی‌سازدشان. نشانه با خود رابط پس از فایل می‌آید: اگر تکه هنوز نرسیده،
  * کارت بارگذاری تا رسیدنش سر جایش است، نه صفحه‌ای نیمه‌خالی.
  */
-export function OrderFlow({ hero, upload, trust, more, children }: Props) {
-  const jozve = useJozve();
+export function OrderFlow({ hero, upload, trust, more, children, rules, accept }: Props) {
+  const jozve = useJozve(rules);
   // پیش‌فرض‌ها از تعرفه‌اند و رابط پس از فایل می‌گذاردشان؛ حالت اینجاست تا با «از اول» نرود.
   const [config, setConfig] = useState<OrderConfig | null>(null);
   const [loaded, setLoaded] = useState<DeskModule | null>(null);
@@ -141,6 +149,7 @@ export function OrderFlow({ hero, upload, trust, more, children }: Props) {
                   <desk.Restore state={restore} jozve={jozve} onConfig={setConfig} onDone={setRestore} />
                 ) : null}
                 <DropZone
+                  accept={accept}
                   onFiles={(files) => {
                     preloadDesk();
                     jozve.add(files);

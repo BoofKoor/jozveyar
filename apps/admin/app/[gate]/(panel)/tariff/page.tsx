@@ -5,6 +5,7 @@ import type { TariffVersion } from '@jozveyar/db';
 import { formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../components/Alert';
+import { AvailabilityCard } from '../../../../components/AvailabilityCard';
 import { NoAccess } from '../../../../components/NoAccess';
 import { Segments } from '../../../../components/Segments';
 import { StatusButton } from '../../../../components/StatusButton';
@@ -15,13 +16,14 @@ import { messageOf } from '../../../../lib/messages';
 import { can } from '../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../lib/server/context';
 import { versionOf } from '../../../../lib/server/tariff';
-import { periodsText, type ActivePeriod } from '../../../../lib/tariff';
+import { availabilityName, periodsText, type ActivePeriod } from '../../../../lib/tariff';
 import { newDraftAction } from '../../actions';
 
 export const metadata: Metadata = { title: 'تعرفه' };
 
-/** خطایی که «نسخهٔ تازه» با برگشت به همین صفحه می‌گوید (`?e=`). */
+/** خطایی که «نسخهٔ تازه» و کارت «در دسترس بودن» با برگشت به همین صفحه می‌گویند (`?e=`). */
 const PAGE_ERRORS = new Set(['forbidden']);
+const AVAILABILITY_ERRORS = new Set(['availability_changed', 'option_not_found']);
 
 /** سطر فهرست نسخه‌ها (طرح پنل `m-tariff`): شماره و نام، نشان، کار مالک، و دوره‌ها با شمار سفارش. */
 function VersionRow({
@@ -123,8 +125,26 @@ export default async function TariffPage({
       </section>
     );
   }
-  const { now, active, versions, periods, draft, canEdit } = result.value;
+  const { now, active, versions, periods, draft, canEdit, availability } = result.value;
   const error = typeof query.e === 'string' && PAGE_ERRORS.has(query.e) ? query.e : null;
+  // کارت «در دسترس بودن» (۸٫۴): پیام پس از کار، فقط اگر حال امروز همان است.
+  const availabilityError = typeof query.e === 'string' && AVAILABILITY_ERRORS.has(query.e) ? query.e : null;
+  const toggled =
+    query.done === 'availability'
+      ? availability.items.find((item) => item.kind === query.k && item.id === query.o && item.paused === (query.p === '1'))
+      : undefined;
+  const availabilityNote = availabilityError ? (
+    <div className="ad-flash">
+      <Alert tone="error">{messageOf(availabilityError)}</Alert>
+    </div>
+  ) : toggled ? (
+    <div className="ad-flash">
+      <Alert tone="success">
+        <Segments segs={availabilityName(toggled)} />{' '}
+        {toggled.paused ? 'موقتاً خاموش شد: در سایت «موقتاً در دسترس نیست» است و سفارش نمی‌شود.' : 'دوباره روشن شد و در سایت سفارش می‌شود.'}
+      </Alert>
+    </div>
+  ) : null;
   // پیام پس از کار، فقط اگر هنوز راست است: همان نسخه فعال است، یا آن پیش‌نویس دیگر نیست.
   const done = versionOf(query.done);
   const deleted = versionOf(query.deleted);
@@ -186,6 +206,7 @@ export default async function TariffPage({
             ))}
           </ul>
         </section>
+        <AvailabilityCard gate={gate} items={availability.items} canPause={availability.canPause} note={availabilityNote} />
         <TariffCards list={active.list} reportHref={can(session, 'reports.read') ? panelPath(gate, '/shipments/report') : undefined} />
       </div>
     </>

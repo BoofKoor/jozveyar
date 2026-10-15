@@ -186,6 +186,13 @@ export type CheckoutErrorCode =
   | 'documents_not_found'
   | 'documents_not_ready'
   | 'files_expiring'
+  /** فایلی از سقف صفحهٔ هر فایل بیشتر است (برش ۸٫۴، `file.max_pages`)؛ همراه `documentIds` و `maxPages`. */
+  | 'too_many_pages'
+  /**
+   * گزینه‌ای که جزوه با آن قیمت خورده همین حالا موقتاً در دسترس نیست (برش ۸٫۴، سؤال ۱۸۸)؛ همراه `paused`، گزینه‌های خاموش
+   * همین لحظه، تا رابط جایش را به پیش‌فرض بدهد.
+   */
+  | 'option_unavailable'
   | 'invalid_place'
   | 'shipping_unavailable'
   | 'quote_warnings'

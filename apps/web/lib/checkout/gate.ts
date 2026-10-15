@@ -51,8 +51,8 @@ export function orderGate(parts: readonly JozvePart[]): OrderGate {
   };
 }
 
-/** رد آپلودی که تلاش دوباره عوضش نمی‌کند: فایل خودش مشکل دارد (حجم، نوع). */
+/** رد آپلودی که تلاش دوباره عوضش نمی‌کند: فایل خودش مشکل دارد (حجم، نوع، خانوادهٔ خاموش؛ برش ۸٫۴). */
 export function retryable(section: SectionView): boolean {
   const reason = section.upload?.reason;
-  return !(section.uploadRefused && (reason === 'too_large' || reason === 'unsupported_type'));
+  return !(section.uploadRefused && (reason === 'too_large' || reason === 'unsupported_type' || reason === 'format_off'));
 }

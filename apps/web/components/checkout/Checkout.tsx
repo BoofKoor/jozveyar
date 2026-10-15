@@ -157,6 +157,45 @@ function failureText(failure: ApiFailure, retry: string): ReactNode {
   }
 }
 
+/**
+ * شکست‌هایی که جوابشان در «جزوه و قیمت» است (برش ۸٫۴): گزینه‌ای که همین حالا موقتاً خاموش شد، فایلی که از سقف صفحهٔ امروز بیشتر
+ * است، و قیمتی که هشدار دارد (حداقل سفارش، گزینه‌ای که دیگر به جزوه نمی‌خورد). سرور دوباره سنجید (قاعدهٔ ۲)؛ میز همان را با یادداشتش
+ * نشان می‌دهد (`onDeskFailure`).
+ */
+const AT_DESK: ReadonlySet<string> = new Set(['option_unavailable', 'too_many_pages', 'quote_warnings']);
+
+function AtDesk({ failure, onBack }: { failure: ApiFailure; onBack: () => void }) {
+  const warnings = Array.isArray(failure.body.warnings) ? (failure.body.warnings as string[]) : [];
+  const maxPages = Number(failure.body.maxPages);
+  return (
+    <Note tone="warning" testId="at-desk">
+      {failure.error === 'option_unavailable' ? (
+        'گزینه‌ای از چاپ این سفارش همین حالا موقتاً در دسترس نیست. در «جزوه و قیمت» جایش گزینهٔ پیش‌فرض آمده؛ قیمت تازه را آنجا ببین.'
+      ) : failure.error === 'too_many_pages' ? (
+        <>
+          فایلی از این سفارش از سقف صفحهٔ هر فایل
+          {Number.isInteger(maxPages) ? (
+            <>
+              {' '}
+              (<span className="num">{formatNumber(maxPages)}</span> صفحه)
+            </>
+          ) : null}{' '}
+          بیشتر است. در «جزوه و قیمت» تکلیفش را روشن کن.
+        </>
+      ) : warnings.includes('below_min_order') ? (
+        'این سفارش هنوز به حداقل سفارش نرسیده. در «جزوه و قیمت» می‌بینی چقدر مانده.'
+      ) : (
+        'گزینه‌ای از چاپ این سفارش دیگر به جزوه نمی‌خورد. در «جزوه و قیمت» تنظیمات چاپش را ببین.'
+      )}
+      <div className="mt-3">
+        <button type="button" className="jy-btn jy-btn--secondary" onClick={onBack}>
+          برگرد به جزوه و قیمت
+        </button>
+      </div>
+    </Note>
+  );
+}
+
 /** فایل‌های جزوه دیگر روی سرور نیستند یا تا کمتر از یک ساعت دیگر نمی‌مانند (ADR-034): «دوباره بینداز». */
 const FILES_GONE: ReadonlySet<string> = new Set(['files_expiring', 'documents_not_found', 'documents_not_ready', 'order_expired']);
 
@@ -754,6 +793,7 @@ function ReviewStep({
   onAddress,
   onRestart,
   onPay,
+  onDeskFailure,
 }: {
   state: CheckoutState;
   place: Place;
@@ -766,6 +806,7 @@ function ReviewStep({
   onAddress: () => void;
   onRestart: () => void;
   onPay: () => void;
+  onDeskFailure: (failure: ApiFailure) => void;
 }) {
   const title = useFocusOnMount<HTMLHeadingElement>();
   const store = checkoutStore();
@@ -841,10 +882,8 @@ function ReviewStep({
                 برگرد به جزوه و قیمت
               </button>
             </Note>
-          ) : failure.error === 'quote_warnings' ? (
-            <Note tone="warning" testId="pay-failed">
-              این سفارش از حداقل مبلغ کمتر است. چند جزوه را با هم بفرست تا هزینهٔ ارسال بین‌شان تقسیم شود.
-            </Note>
+          ) : AT_DESK.has(failure.error) ? (
+            <AtDesk failure={failure} onBack={() => onDeskFailure(failure)} />
           ) : (
             <Note tone="error" testId="pay-failed">
               {failureText(failure, 'پرداخت')}
@@ -964,11 +1003,16 @@ interface Props {
   onAuth: (auth: { mobile: string } | null) => void;
   /** فایل‌ها دیگر روی سرور نیستند: «دوباره بینداز». */
   onRestart: () => void;
+  /**
+   * شکستی که جوابش در «جزوه و قیمت» است (برش ۸٫۴، `AT_DESK`): میز گزینه‌های خاموش و سقف صفحهٔ همین لحظه را از پاسخ می‌گیرد و
+   * به «جزوه و قیمت» برمی‌گردد.
+   */
+  onDeskFailure: (failure: ApiFailure) => void;
   /** درگاه پرداخت این حالت (برش ۷٫۲، سؤال ۱۲۹): زیبال در `live`، درگاه نمونه در `mock`. */
   gateway: GatewayKind;
 }
 
-export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, onAuth, onRestart, gateway }: Props) {
+export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, onAuth, onRestart, onDeskFailure, gateway }: Props) {
   const store = checkoutStore();
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const withPlace = step !== 'city';
@@ -1031,6 +1075,11 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
   }));
   const shipped = withPlace && breakdown?.shippingRials != null && dest ? breakdown.shippingRials : null;
   const shippingLine = shipped !== null && dest ? { label: `ارسال ${method} به ${placeName(dest)}`, rials: shipped } : null;
+  /**
+   * گرد کردن (۸٫۴): فقط وقتی ریز قیمت همان جمعی است که زیر ردیف‌هاست (با ارسال بعد از شهر، بی ارسال پیش از آن)؛ قیمت با شهر قبلی
+   * در قدم شهر جمع بی ارسال را نشان می‌دهد، که گرد کردن خودش را دارد.
+   */
+  const rounding = breakdown && (withPlace ? breakdown.shippingRials !== null : breakdown.shippingRials === null) ? breakdown.roundingRials : null;
 
   if (fallback) return null;
 
@@ -1113,6 +1162,7 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
         onAddress={() => go('address')}
         onRestart={onRestart}
         onPay={pay}
+        onDeskFailure={onDeskFailure}
       />
     ) : stage === 'code' && state.otp ? (
       <CodeStep state={state} now={now} />
@@ -1149,6 +1199,8 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
             <FilesGone onRestart={onRestart} />
           ) : isPaused(state.quoteError) ? (
             <PausedNote failure={state.quoteError} retry="ادامه" />
+          ) : AT_DESK.has(state.quoteError.error) ? (
+            <AtDesk failure={state.quoteError} onBack={() => onDeskFailure(state.quoteError!)} />
           ) : (
             <Note tone="error" testId="quote-error">
               قیمت سرور نرسید. {failureText(state.quoteError, 'ادامه')}
@@ -1185,9 +1237,10 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
                   : [];
               })}
               shipping={shippingLine}
+              rounding={rounding}
             />
           ) : item ? (
-            <SummaryLines item={item} print={print} bindingName={bindingName} shipping={shippingLine} />
+            <SummaryLines item={item} print={print} bindingName={bindingName} shipping={shippingLine} rounding={rounding} />
           ) : null}
           <div className="home-sum__total">
             <span className="home-sum__label">جمع</span>

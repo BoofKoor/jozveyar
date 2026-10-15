@@ -17,7 +17,8 @@ import { formatTomans } from '@jozveyar/text';
  * داده می‌خواند، در جدول تعرفه، سؤال‌ها و «روز کاری»ها، و به JSON درون HTML که `quote()` مرورگر با آن حساب می‌کند. پس
  * پیش‌فاکتور مرورگر همان عدد سرور است (قاعدهٔ ۱ و ۲)، پس از رفرش هم (۳د)؛ و تعرفه‌ای که وسط خرید عوض شد، ۴۰۹ «تعرفه به‌روز
  * شده» و سفارشی منجمد با تعرفهٔ تازه (قاعدهٔ ۶). کاتالوگ (۸٫۳): A5، کاغذ و صحافی دیگر در صفحهٔ اصلی و کاشی‌های میز، ارزان‌تر
- * اول؛ صحافی‌ای که به جزوهٔ کلفت‌شده نمی‌خورد جایش را با یادداشت به پیش‌فرض می‌دهد؛ و سفارش A5 با منگنه، منجمد.
+ * اول؛ صحافی‌ای که به جزوهٔ کلفت‌شده نمی‌خورد جایش را با یادداشت به پیش‌فرض می‌دهد؛ و سفارش A5 با منگنه، منجمد. ۸٫۴: حداقل سفارش،
+ * گزینهٔ موقتاً خاموش (`catalog.paused`)، فرمت خاموش و سقف صفحه (`file.*`)، ۴۰۹ وسط خرید، و برگشت بعد از رفرش با گزینهٔ خاموش.
  *
  * همان سرور و سرویس‌های «مسیر خرید، سرتاسری» (`checkout.spec.ts`)، ولی **آخر و جدا**: تعرفهٔ فعال را عوض می‌کند، و ISR
  * صفحه را تا یک دقیقه با همان نگه می‌دارد. در پایان تعرفهٔ پایه دوباره فعال می‌شود. CI همین را پس از بقیه اجرا می‌کند:
@@ -75,6 +76,17 @@ const CATALOG: PriceList = {
       bands: { a4: [{ minSheets: 1, maxSheets: 50, priceRials: 80_000 }], a5: [{ minSheets: 1, maxSheets: 50, priceRials: 60_000 }] },
     },
   },
+};
+/**
+ * ۸٫۴: همان کاتالوگ با حداقل سفارش 30,000 تومان (جمع چاپ، کاغذ و صحافی، پیش از کرایه) و گرد کردن به 1,000 تومان. ده صفحه با طلق و
+ * سیم 61,000 تومان است و با منگنه 24,000، پس منگنهٔ یک‌نسخه‌ای زیرش است و دو نسخه نه؛ همه مضرب 1,000‌اند، پس گرد کردن فقط با کرایه
+ * دیده می‌شود.
+ */
+const RULES84: PriceList = {
+  ...CATALOG,
+  version: version + 3,
+  label: 'تست ۸٫۴ — حداقل سفارش',
+  settings: { ...CATALOG.settings, minOrderRials: 300_000, roundingStepRials: 10_000 },
 };
 /** نرخ A4 دوروی یک تعرفه (یکرو همان). */
 const rateOf = (list: PriceList, color: 'bw' | 'color') => list.printRates.a4!.double[color];
@@ -170,6 +182,15 @@ async function activate(versionToActivate: number) {
 }
 
 const setSlaDays = (days: number) => sql()`update settings set value = ${sql().json(days)}, updated_at = now() where key = 'order.sla_days'`;
+/** یک تنظیم `settings` (۸٫۴): همان که پنل می‌نویسد؛ سرور آپلود و مسیر خرید همان لحظه، و صفحهٔ اصلی با بازسازی ISR. */
+const setSetting = (key: string, value: unknown) =>
+  sql()`insert into settings (key, value, updated_at) values (${key}, ${sql().json(value as never)}, now())
+        on conflict (key) do update set value = excluded.value, updated_at = now()`;
+async function resetRules84() {
+  await setSetting('catalog.paused', { sizes: [], papers: [], bindings: [] });
+  await setSetting('file.formats', { word: true, slides: true, image: true });
+  await setSetting('file.max_pages', 1500);
+}
 
 test.beforeAll(async () => {
   await copyTariff(DEARER);
@@ -182,6 +203,7 @@ test.afterAll(async () => {
   if (!sqlClient) return;
   await activate(1);
   await setSlaDays(2);
+  await resetRules84();
   await sqlClient.end();
   sqlClient = null;
 });
@@ -236,7 +258,11 @@ async function homeTariff(request: APIRequestContext) {
   const response = await request.get('/');
   const html = await response.text();
   const json = /<script id="jy-tariff" type="application\/json">([^<]*)<\/script>/.exec(html)?.[1];
-  return { response, html, tariff: json ? (JSON.parse(json) as { priceList: PriceList; slaDays: number }) : null };
+  return {
+    response,
+    html,
+    tariff: json ? (JSON.parse(json) as { priceList: PriceList; slaDays: number; paused: { sizes: string[]; papers: string[]; bindings: string[] } }) : null,
+  };
 }
 
 /** ISR: صفحه‌ای که پیش از تغییر ساخته شده تا یک دقیقه می‌ماند، و درخواست بعد از آن بازسازی‌اش می‌کند. */
@@ -473,5 +499,152 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
         from orders o join order_items i on i.order_id = o.id where o.order_number = ${number}`;
     expect(order).toEqual({ price_list_version: CATALOG.version, total: String(paid), size: 'a5', binding: 'staple' });
     await catalogContext.close();
+  });
+  test('۸٫۴: حداقل سفارش، گزینهٔ موقتاً خاموش، Word خاموش و سقف صفحه؛ ۴۰۹ وسط خرید، و برگشت بعد از رفرش با گزینهٔ خاموش', async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(420_000);
+    // همه پیش از فعال شدن نسخه، تا یک بازسازی ISR همه را با هم بیاورد.
+    await insertTariff(RULES84);
+    const { minOrderRials, roundingStepRials } = RULES84.settings;
+    await sql()`update price_lists set settings = settings || ${sql().json({ minOrderRials, roundingStepRials })} where version = ${RULES84.version}`;
+    await setSetting('catalog.paused', { sizes: ['a5'], papers: [], bindings: [] });
+    await setSetting('file.formats', { word: false, slides: true, image: true });
+    await setSetting('file.max_pages', 15);
+    await activate(RULES84.version);
+    await untilHomeHas(request, RULES84.version);
+    expect((await homeTariff(request)).tariff!.paused).toEqual({ sizes: ['a5'], papers: [], bindings: [] });
+
+    const rulesContext = await newContext(browser);
+    const shop = await rulesContext.newPage();
+    const total = shop.getByTestId('summary-total');
+    const tiles = (name: string) => shop.locator(`label.jy-tile:has(input[name="${name}"])`);
+    const quoted = (bindingTypeId: string, copies: number, zoneId: 'other' | null = null) =>
+      quote(
+        {
+          items: [
+            {
+              sections: [{ documentId: 'test', pageCount: 10 }],
+              rules: wholeDocumentRule(10, 'bw', DEFAULT_PAPER_TYPE_ID),
+              copies,
+              sidesMode: 'double',
+              paperSize: 'a4',
+              bindingTypeId,
+            },
+          ],
+          shipping: zoneId ? { methodId: DEFAULT_SHIPPING_METHOD_ID, zoneId } : null,
+        },
+        RULES84,
+      );
+    const priced = (bindingTypeId: string, copies: number) => quoted(bindingTypeId, copies).totalWithoutShippingRials;
+    expect([priced(DEFAULT_BINDING_TYPE_ID, 1), priced('staple', 1), priced('staple', 2)]).toEqual([610_000, 240_000, 480_000]);
+
+    // صفحهٔ اصلی: A5 در تعرفه نیست، پس جدول همان یک اندازه است، بی نام اندازه (۸٫۳)؛ Word نه در کارت بارگذاری، نه در انتخاب فایل،
+    // نه در سؤال‌ها.
+    await shop.goto('/');
+    await expect(shop.getByTestId('tariff-print').locator('dt')).toHaveText(['سیاه‌سفید', 'رنگی']);
+    await expect(shop.locator('.jy-drop__format')).toHaveText(['PDF', 'پاورپوینت', 'عکس']);
+    expect(await shop.locator('#jozve-file').getAttribute('accept')).toBe('.pdf,.pptx,.ppt,.jpg,.jpeg,.png,.webp,.heic');
+    await expect(shop.locator('#faq')).toContainText('PDF، پاورپوینت و عکس اسکن‌شده.');
+
+    // میز: کاشی A5 خاموش با «موقتاً در دسترس نیست»؛ طلق و سیم بالای حداقل.
+    await shop.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(total).toHaveText(toman(priced(DEFAULT_BINDING_TYPE_ID, 1)), { timeout: 20_000 });
+    const a5 = tiles('jozve-size').filter({ hasText: 'A5' });
+    await expect(a5.locator('input')).toBeDisabled();
+    await expect(a5.locator('.jy-tile__note')).toHaveText('موقتاً در دسترس نیست');
+    await expect(shop.getByTestId('min-order')).toHaveCount(0);
+
+    // منگنه: 24,000 تومان، 6,000 تومان زیر حداقل؛ «ادامه» بسته با همان عدد.
+    const staple = tiles('jozve-binding').filter({ hasText: 'منگنه' });
+    await staple.click();
+    await expect(total).toHaveText(toman(priced('staple', 1)));
+    await expect(shop.getByTestId('min-order')).toContainText('حداقل سفارش 30,000 تومان است، پیش از ارسال؛ 6,000 تومان مانده.');
+    await expect(shop.getByTestId('min-order')).toContainText('نسخهٔ بیشتر بگیر، یا جزوهٔ دیگری اضافه کن.');
+    await expect(visibleButton(shop, 'تا حداقل سفارش 6,000 تومان مانده')).toHaveAttribute('aria-disabled', 'true');
+    // دو نسخه: بالای حداقل.
+    await shop.getByRole('button', { name: 'یکی بیشتر' }).click();
+    await expect(total).toHaveText(toman(priced('staple', 2)));
+    await expect(shop.getByTestId('min-order')).toHaveCount(0);
+    await expect(visibleButton(shop, 'ادامه — آدرس و تحویل')).toBeEnabled({ timeout: 90_000 });
+
+    // Word خاموش و فایل 147 صفحه‌ای (سقف 15): هر کدام روی ردیف خودش «پذیرفته نشد»؛ قیمت بی آنها.
+    await shop.setInputFiles('#jozve-add', [fixture('jozve-12.docx'), fixture('yellow-scan-147.pdf')]);
+    const refused = shop.getByTestId('section-blocked');
+    await expect(refused).toHaveCount(2, { timeout: 30_000 });
+    await expect(refused.nth(0)).toContainText('فایل Word فعلاً پذیرفته نمی‌شود');
+    await expect(refused.nth(0)).toContainText('از Word خروجی PDF بگیر و همان را جایش بینداز.');
+    await expect(refused.nth(1)).toContainText('هر فایل تا 15 صفحه پذیرفته می‌شود');
+    await expect(refused.nth(1)).toContainText('این فایل 147 صفحه است. دو تکه‌اش کن و هر دو را بینداز؛ با هم یک جزوه می‌شوند.');
+    await expect(shop.getByTestId('price-refused')).toContainText('که پذیرفته نشدند');
+    await expect(total).toHaveText(toman(priced('staple', 2)));
+    await expect(visibleButton(shop, 'اول تکلیف فایل‌های پذیرفته‌نشده را روشن کن')).toBeDisabled();
+    await shop.getByRole('button', { name: '«jozve-12.docx» را از جزوه بردار' }).click();
+    await shop.getByRole('button', { name: '«yellow-scan-147.pdf» را از جزوه بردار' }).click();
+    await expect(visibleButton(shop, 'ادامه — آدرس و تحویل')).toBeEnabled();
+
+    // سرور همان را دوباره می‌سنجد، با تنظیم همین لحظه: آپلود Word ۴۱۵، و سقف صفحه‌ای که همین حالا کم شد ۴۲۲.
+    const upload = await shop.request.post('/api/uploads', { data: { name: 'jozve.docx', sizeBytes: 10_000 } });
+    expect([upload.status(), await upload.json()]).toEqual([415, { error: 'format_off' }]);
+    const [doc] = await sql()`select id from documents where original_name = 'plain-bw-10.pdf' order by created_at desc limit 1`;
+    const item = (bindingTypeId: string) => ({
+      documentIds: [doc!.id],
+      colorMode: 'bw',
+      paperTypeId: DEFAULT_PAPER_TYPE_ID,
+      sidesMode: 'double',
+      paperSize: 'a4',
+      bindingTypeId,
+      copies: 2,
+    });
+    await setSetting('file.max_pages', 5);
+    const tooMany = await shop.request.post('/api/checkout/quote', { data: { items: [item('staple')], place: null } });
+    expect([tooMany.status(), await tooMany.json()]).toEqual([422, { error: 'too_many_pages', documentIds: [doc!.id], maxPages: 5 }]);
+    await setSetting('file.max_pages', 15);
+
+    // وسط خرید منگنه موقتاً خاموش شد: «ادامه» ۴۰۹ می‌گیرد و میز با فهرست همین لحظه جایش را به طلق و سیم می‌دهد، با یادداشت.
+    await setSetting('catalog.paused', { sizes: ['a5'], papers: [], bindings: ['staple'] });
+    const paused = await shop.request.post('/api/checkout/quote', { data: { items: [item('staple')], place: null } });
+    expect([paused.status(), await paused.json()]).toEqual([409, { error: 'option_unavailable', paused: { sizes: ['a5'], papers: [], bindings: ['staple'] } }]);
+    await visibleButton(shop, 'ادامه — آدرس و تحویل').click();
+    await expect(staple.locator('input')).toBeDisabled();
+    await expect(staple.locator('.jy-tile__note')).toHaveText('موقتاً در دسترس نیست');
+    const replaced = 'منگنه موقتاً در دسترس نیست؛ صحافی این جزوه «طلق و سیم» شد. اگر صحافی دیگری می‌خواهی، همین‌جا عوض کن.';
+    await expect(shop.getByTestId('replaced-bindingTypeId')).toHaveText(replaced);
+    await expect(visibleText(shop, 'گزینه‌ای از چاپ این سفارش همین حالا موقتاً در دسترس نیست')).toBeVisible();
+    await expect(total).toHaveText(toman(priced(DEFAULT_BINDING_TYPE_ID, 2)));
+    await expect(shop.getByTestId('summary-rounding')).toHaveCount(0);
+    await visibleButton(shop, 'ادامه — آدرس و تحویل').click();
+    await expect(heading(shop, 'به کدام شهر بفرستیم؟')).toBeVisible();
+
+    // با کرایه، جمع گرد می‌شود و ردیف «گرد کردن» ردیف‌ها را با جمع یکی می‌کند.
+    const shipped = quoted(DEFAULT_BINDING_TYPE_ID, 2, 'other');
+    expect(shipped.roundingRials).not.toBe(0);
+    await shop.getByRole('button', { name: 'مشهد' }).click();
+    await expect(heading(shop, 'نشانی در مشهد')).toBeVisible();
+    await expect(total).toHaveText(toman(shipped.totalRials));
+    const rounding = shop.getByTestId('summary-rounding').filter({ visible: true });
+    await expect(rounding.locator('dd')).toHaveText(`${shipped.roundingRials < 0 ? '−' : ''}${toman(Math.abs(shipped.roundingRials))}`);
+    expect(shipped.subtotalRials + shipped.shippingRials! + shipped.roundingRials).toBe(shipped.totalRials);
+
+    // برگشت بعد از رفرش (سؤال ۲۲۴): JSON تازهٔ صفحه منگنه را خاموش دارد؛ همان قدم با طلق و سیم، و در میز همان یادداشت.
+    await expect
+      .poll(async () => (await homeTariff(request)).tariff?.paused.bindings, { timeout: 100_000, intervals: [2_000] })
+      .toEqual(['staple']);
+    await shop.reload();
+    await expect(heading(shop, 'نشانی در مشهد')).toBeVisible({ timeout: 15_000 });
+    await expect(total).toHaveText(toman(shipped.totalRials));
+    await shop.goBack();
+    await expect(heading(shop, 'به کدام شهر بفرستیم؟')).toBeVisible();
+    await shop.goBack();
+    await expect(shop.getByTestId('replaced-bindingTypeId')).toHaveText(replaced);
+    await expect(staple.locator('input')).toBeDisabled();
+
+    // دوباره روشن: انتخاب خود جزوه (منگنه) برمی‌گردد، بی کلیک.
+    await setSetting('catalog.paused', { sizes: ['a5'], papers: [], bindings: [] });
+    const back = await shop.request.post('/api/checkout/quote', { data: { items: [item('staple')], place: null } });
+    expect(back.status()).toBe(200);
+    await rulesContext.close();
+    await resetRules84();
   });
 });

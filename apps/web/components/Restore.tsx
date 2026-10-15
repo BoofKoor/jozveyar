@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import type { CheckoutItem } from '@jozveyar/contracts/checkout';
+import type { FileRules } from '@jozveyar/contracts/files';
 import { tabStorage, writeDraft } from '../lib/draft';
 import { RESTORING_ATTR } from '../lib/draftKey';
 import type { FollowDocument, RestoredSection } from '../lib/jozveController';
@@ -70,7 +71,7 @@ type Restored = { sections: RestoredSection[]; layout: DraftLayout } | 'lost' | 
  * پیش‌نویس، وضعیت سندها از سرور، و قدم؛ یک بار در هر بار صفحه. پیش‌نویسی که برنگشت پاک می‌شود، تا دفعهٔ بعد
  * دوباره امتحان نشود؛ جزوه‌ای که برگشت، با پنهان شدن صفحه دوباره نوشته می‌شود.
  */
-async function restoreDraft(): Promise<Restored> {
+async function restoreDraft(rules: FileRules): Promise<Restored> {
   const storage = tabStorage();
   const draft = readDraft(storage);
   if (!draft) {
@@ -84,7 +85,7 @@ async function restoreDraft(): Promise<Restored> {
     return 'lost';
   }
   // جزوه‌ها با شمار فایل هر کدام (۸٫۲)؛ تنظیمی که تعرفهٔ امروز ندارد، پیش‌فرض‌ها.
-  const { configs, items } = restoredOrder(restoredJozves(sections, draft.layout));
+  const { configs, items } = restoredOrder(restoredJozves(sections, draft.layout), rules);
   // مسیر خرید پیش از قدم: قدم خرید تکهٔ مسیر خرید را می‌آورد و قیمت سرور را با همان جای برگشته می‌گیرد.
   primeCheckout(draft.checkout);
   primeStep(await restoredStep(items));
@@ -128,7 +129,7 @@ export function Restore({ state, jozve, onConfig, onDone }: RestoreProps) {
     let live = true;
     // یک بار، حتی اگر React در حالت سخت‌گیر اثر را دو بار اجرا کند. خطای پیش‌بینی‌نشده: صفحهٔ معمول، و پیش‌نویس
     // پاک، تا هر بار صفحه همان خطا نشود.
-    restoring ??= restoreDraft().catch(() => {
+    restoring ??= restoreDraft(jozve.rules).catch(() => {
       writeDraft(tabStorage(), null);
       return null;
     });

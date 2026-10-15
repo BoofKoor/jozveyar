@@ -280,6 +280,9 @@ describe('رویدادها', () => {
       tariff('tariff.activate', { version: 2, previous: 1, again: false }),
       tariff('tariff.activate', { version: 1, previous: 2, again: true }),
       tariff('tariff.draft_delete', { version: 3 }),
+      tariff('tariff.availability', { kind: 'size', id: 'a3', name: 'A3', paused: true, version: 2 }),
+      tariff('tariff.availability', { kind: 'binding', id: 'glue', name: 'چسب گرم', paused: false, version: 2 }),
+      tariff('tariff.availability', { kind: 'paper', id: 'glossy', name: 'گلاسه', paused: true, version: 2 }),
     ]);
     expect(lines.map((l) => l.text)).toEqual([
       ['پیش‌نویس نسخهٔ ', { ltr: '2' }, ' تعرفه ساخته شد، از روی نسخهٔ ', { ltr: '1' }],
@@ -287,6 +290,10 @@ describe('رویدادها', () => {
       ['نسخهٔ ', { ltr: '2' }, ' تعرفه فعال شد', '، به جای نسخهٔ ', { ltr: '1' }],
       ['نسخهٔ ', { ltr: '1' }, ' تعرفه دوباره فعال شد', '، به جای نسخهٔ ', { ltr: '2' }],
       ['پیش‌نویس نسخهٔ ', { ltr: '3' }, ' تعرفه پاک شد'],
+      // ۸٫۴: خاموش موقت گزینه‌ها
+      ['اندازهٔ ', { ltr: 'A3' }, ' موقتاً خاموش شد'],
+      ['صحافی «چسب گرم»', ' دوباره روشن شد'],
+      ['کاغذ «گلاسه»', ' موقتاً خاموش شد'],
     ]);
   });
 
@@ -314,6 +321,11 @@ describe('رویدادها', () => {
       key('settings.key_set', { name: 'SMS_API_KEY', from: 'env', tested: 'skipped' }),
       setting('settings.update', { key: 'otp.site_daily_limit', from: 2000, to: 3000 }),
       setting('settings.update', { key: 'sms.credit_alert_days', from: 7, to: 10 }),
+      // ۸٫۴: کارت «فایل‌ها»؛ مقدار بدشکل «؟»، نه شکستن صفحهٔ رویدادها.
+      setting('settings.update', { key: 'file.formats', from: { word: true, slides: true, image: true }, to: { word: false, slides: true, image: false } }),
+      setting('settings.update', { key: 'file.formats', from: { word: false, slides: false, image: false }, to: 'خراب' }),
+      setting('settings.update', { key: 'file.max_mb', from: 1536, to: 200 }),
+      setting('settings.update', { key: 'file.max_pages', from: 1500, to: 600 }),
     ]);
     expect(lines.map((l) => l.text)).toEqual([
       ['روز کاری تحویل به پست: ', { ltr: '2' }, ' ← ', { ltr: '3' }],
@@ -345,6 +357,10 @@ describe('رویدادها', () => {
       ['کلید «کلید API sms.ir»، بی آزمایش عوض شد'],
       ['سقف کد پیامکی کل سایت در 24 ساعت: ', { ltr: '2,000' }, ' ← ', { ltr: '3,000' }],
       ['هشدار اعتبار پیامک (روز مصرف): ', { ltr: '7' }, ' ← ', { ltr: '10' }],
+      ['فرمت‌های پذیرفته: ', { ltr: 'PDF' }, '، ', { ltr: 'Word' }, '، ', 'پاورپوینت', ' و ', 'عکس', ' ← ', { ltr: 'PDF' }, ' و ', 'پاورپوینت'],
+      ['فرمت‌های پذیرفته: ', 'فقط ', { ltr: 'PDF' }, ' ← ', '؟'],
+      ['حجم هر فایل (مگابایت): ', { ltr: '1,536' }, ' ← ', { ltr: '200' }],
+      ['صفحهٔ هر فایل: ', { ltr: '1,500' }, ' ← ', { ltr: '600' }],
     ]);
     // هیچ سطری مقدار کلید ندارد: فقط نام، نتیجه و موبایل پوشیده.
     expect(JSON.stringify(lines)).not.toMatch(/09\d{9}/);

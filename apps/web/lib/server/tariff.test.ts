@@ -13,6 +13,7 @@ import { SEED_TARIFF } from '../tariff';
 import { loadTariff, siteTariff } from './tariff';
 
 const V2: PriceList = { ...SEED_PRICE_LIST, version: 2, label: 'نسخهٔ دوم', printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } } };
+const NONE = { sizes: [], papers: [], bindings: [] };
 const DB = 'postgresql://jozveyar@127.0.0.1:5432/jozveyar';
 
 function source(settings: Record<string, unknown> = {}, list: PriceList | Error = V2) {
@@ -50,12 +51,27 @@ describe('تعرفهٔ صفحهٔ اصلی', () => {
 
   it('با پایگاه داده: تعرفهٔ فعال و روز کاری از settings', async () => {
     const db = source({ 'order.sla_days': 3 });
-    expect(await siteTariff({ DATABASE_URL: DB, NEXT_PHASE: 'phase-production-server' }, () => db)).toEqual({ priceList: V2, slaDays: 3 });
+    expect(await siteTariff({ DATABASE_URL: DB, NEXT_PHASE: 'phase-production-server' }, () => db)).toEqual({ priceList: V2, slaDays: 3, paused: NONE });
     expect(db.setting).toHaveBeenCalledWith('order.sla_days');
+    expect(db.setting).toHaveBeenCalledWith('catalog.paused');
+  });
+
+  it('گزینه‌های موقتاً خاموش (۸٫۴): فقط آنچه همین تعرفه ارائه می‌کند و روشن است، و هرگز پیش‌فرض‌ها', async () => {
+    const list: PriceList = {
+      ...V2,
+      printRates: { ...V2.printRates, a5: V2.printRates.a4 },
+      paperTypes: { ...V2.paperTypes, glossy: { nameFa: 'گلاسه', gsm: 130, enabled: true, sheetRates: { a4: 15_000 } } },
+    };
+    const paused = { sizes: ['a5', 'a3'], papers: ['tahrir80', 'glossy', 'gone'], bindings: ['spiral_clear'] };
+    expect((await loadTariff(source({ 'catalog.paused': paused }, list))).paused).toEqual({ sizes: ['a5'], papers: ['glossy'], bindings: [] });
+    // خراب: هیچ، بلند در لاگ
+    const log = vi.fn();
+    expect((await loadTariff(source({ 'catalog.paused': { sizes: ['a4'] } }, list), log)).paused).toEqual(NONE);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('catalog.paused'), expect.anything());
   });
 
   it('روز کاری نبود: ۲؛ خراب: همان ۲، بلند در لاگ', async () => {
-    expect(await loadTariff(source())).toEqual({ priceList: V2, slaDays: 2 });
+    expect(await loadTariff(source())).toEqual({ priceList: V2, slaDays: 2, paused: NONE });
     for (const broken of [0, 31, 2.5, '3', null]) {
       const log = vi.fn();
       const { slaDays } = await loadTariff(source({ 'order.sla_days': broken }), log);

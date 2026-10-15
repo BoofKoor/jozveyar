@@ -8,12 +8,14 @@
  */
 
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
+import type { FileRules } from '@jozveyar/contracts/files';
 import {
   ERROR_MESSAGES,
   FIRST_PRICE_AFTER_PAGES,
   MAX_BROWSER_ANALYSIS_BYTES,
   fileKind,
   type AnalysisErrorCode,
+  type WorkerErrorCode,
   type WorkerResponse,
 } from './analysis-protocol';
 
@@ -78,7 +80,7 @@ export const BROWSER_GAVE_UP: readonly AnalysisErrorCode[] = ['render_failed', '
  * - PDF بزرگ‌تر از توان مرورگر: مسیر سرور.
  * - بقیهٔ PDFها: صف کارگر.
  */
-export function initialAnalysis(file: { name: string; size: number }): AnalysisState {
+export function initialAnalysis(file: { name: string; size: number }, rules?: FileRules): AnalysisState {
   const base: AnalysisState = { ...INITIAL, fileName: file.name, fileSize: file.size };
   const kind = fileKind(file.name);
   if (kind === null) {
@@ -88,6 +90,9 @@ export function initialAnalysis(file: { name: string; size: number }): AnalysisS
       error: { code: 'unsupported_type', ...ERROR_MESSAGES.unsupported_type },
     };
   }
+  // حجم بیش از سقف (برش ۸٫۴): همان لحظهٔ انداختن، پیش از خواندن و آپلود؛ متن را رابط پس از فایل با عدد خود فایل می‌سازد. خانوادهٔ
+  // خاموش را خود نما می‌گیرد (`jozveView`) و سرور آپلودش را رد می‌کند (`format_off`)، تا پوسته سبک بماند.
+  if (rules && file.size > rules.maxMb * 1048576) return { ...base, phase: 'error', error: { code: 'too_large', title: '', hint: '' } };
   if (kind === 'image') return { ...base, phase: 'needs_server', pageCount: 1, estimatedFrom: 'image' };
   if (kind !== 'pdf') return { ...base, phase: 'needs_server' };
   if (file.size > MAX_BROWSER_ANALYSIS_BYTES) return { ...base, phase: 'needs_server' };
@@ -134,7 +139,13 @@ export function applyWorkerMessage(
         elapsedMs: message.analysis.elapsedMs,
       };
     case 'error':
-      return { ...state, phase: 'error', error: { code: message.code, ...ERROR_MESSAGES[message.code] } };
+      // `too_many_pages` (۸٫۴) متن ندارد: رابط پس از فایل با عدد خود سند و سقف همان لحظه می‌سازدش.
+      return {
+        ...state,
+        phase: 'error',
+        pageCount: message.pageCount ?? state.pageCount,
+        error: { code: message.code, ...(ERROR_MESSAGES[message.code as WorkerErrorCode] ?? { title: '', hint: '' }) },
+      };
     default:
       return state;
   }

@@ -16,7 +16,7 @@ import { tehranDay } from './format';
 import { REFUND_INQUIRY_TEXT, viaGateway } from './refunds';
 import { ROLE_NAMES } from './messages';
 import { boundsText } from './report';
-import { KEY_INFO } from './settings';
+import { KEY_INFO, formatsSegs } from './settings';
 
 /** نام وضعیت‌های سفارش در رویدادها؛ همان `STATUS_LABELS` صفحهٔ سفارش (`orders.ts` پایگاه داده را با خودش می‌آورد). */
 const STATUS: Record<OrderStatus, string> = {
@@ -102,7 +102,17 @@ const SETTING_NAMES: Record<string, string> = {
   'otp.site_daily_limit': 'سقف کد پیامکی کل سایت در 24 ساعت',
   'order.files_retention_days': 'روزهای نگهداری فایل‌های سفارش',
   'sms.credit_alert_days': 'هشدار اعتبار پیامک (روز مصرف)',
+  'file.formats': 'فرمت‌های پذیرفته',
+  'file.max_mb': 'حجم هر فایل (مگابایت)',
+  'file.max_pages': 'صفحهٔ هر فایل',
 };
+
+/** فرمت‌های پذیرفته (۸٫۴) در رویداد: «PDF، Word و عکس»؛ مقدار بدشکل «؟». */
+function formatsRef(value: unknown): Segment[] {
+  if (!value || typeof value !== 'object') return ['؟'];
+  const formats = value as Record<string, unknown>;
+  return formatsSegs({ word: formats.word === true, slides: formats.slides === true, image: formats.image === true });
+}
 
 /**
  * نتیجهٔ «آزمایش» یک کلید (۷٫۱): «درست»، «رد شد (کد 401)»، «در دسترس نیست»، یا «کلید API خالی است»؛ فقط کد و عدد پاسخ، هرگز
@@ -167,6 +177,7 @@ function bandsRef(value: unknown): Segment[] {
 function settingUpdate(detail: Detail): Segment[] {
   if (detail.key === 'calendar.official_through') return ['تعطیلی‌های ', ltrOf(detail.to), ' با تقویم رسمی تطبیق داده شد'];
   if (detail.key === 'report.weight_bands') return ['بازه‌های وزن گزارش ارسال: ', ...bandsRef(detail.from), ' ← ', ...bandsRef(detail.to)];
+  if (detail.key === 'file.formats') return [`${SETTING_NAMES['file.formats']}: `, ...formatsRef(detail.from), ' ← ', ...formatsRef(detail.to)];
   const amount = (value: unknown): Segment => ({ ltr: typeof value === 'number' ? formatNumber(value) : String(value ?? '') });
   return [`${SETTING_NAMES[str(detail.key)] ?? str(detail.key)}: `, amount(detail.from), ' ← ', amount(detail.to)];
 }
@@ -271,6 +282,14 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
           ...(typeof detail.previous === 'number' ? ['، به جای نسخهٔ ', ...versionRef(detail.previous)] : []),
         ],
       };
+    case 'tariff.availability': {
+      // خاموش موقت گزینهٔ تعرفهٔ فعال (۸٫۴، سؤال ۱۸۸): نام همان لحظه در رویداد است، چون گزینه بعداً می‌تواند عوض یا برداشته شود.
+      const name: Segment[] =
+        detail.kind === 'size'
+          ? ['اندازهٔ ', ltrOf(detail.name)]
+          : [`${detail.kind === 'paper' ? 'کاغذ' : 'صحافی'} «${str(detail.name)}»`];
+      return { badge: null, text: [...name, detail.paused === true ? ' موقتاً خاموش شد' : ' دوباره روشن شد'] };
+    }
     case 'settings.update':
       return { badge: null, text: settingUpdate(detail) };
     case 'settings.holiday_add':

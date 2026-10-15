@@ -10,6 +10,7 @@
  */
 
 import { createOrderStore, getDb, readSetting, type OrderStore } from '@jozveyar/db';
+import { pausedOf } from '@jozveyar/pricing';
 
 import { SEED_TARIFF, type SiteTariff } from '../tariff';
 
@@ -18,13 +19,23 @@ export const BUILD_PHASE = 'phase-production-build';
 
 type TariffSource = Pick<OrderStore, 'activePriceList' | 'setting'>;
 
-/** تعرفهٔ فعال و `order.sla_days`؛ تنظیم خراب همان پیش‌فرض است، با لاگ (`readSetting`). */
+/**
+ * تعرفهٔ فعال، `order.sla_days` و گزینه‌های موقتاً خاموش (`catalog.paused`، برش ۸٫۴) با همان `pausedOf` سرور مسیر خرید؛ تنظیم خراب
+ * همان پیش‌فرض است، با لاگ (`readSetting`).
+ */
 export async function loadTariff(source: TariffSource, log?: (message: string, error?: unknown) => void): Promise<SiteTariff> {
-  const [priceList, slaDays] = await Promise.all([
+  const read = (key: string) => source.setting(key);
+  const [priceList, slaDays, pausedSetting] = await Promise.all([
     source.activePriceList(),
-    readSetting((key) => source.setting(key), 'order.sla_days', log),
+    readSetting(read, 'order.sla_days', log),
+    readSetting(read, 'catalog.paused', log),
   ]);
-  return { priceList, slaDays };
+  const paused = pausedOf(priceList, pausedSetting);
+  return {
+    priceList,
+    slaDays,
+    paused: { sizes: [...paused.sizes] as ('a5' | 'a3')[], papers: [...paused.papers], bindings: [...paused.bindings] },
+  };
 }
 
 let source: TariffSource | undefined;

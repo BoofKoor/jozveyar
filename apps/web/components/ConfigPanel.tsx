@@ -3,7 +3,16 @@
 import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { PaperSize, PriceList } from '@jozveyar/contracts';
-import { PAPER_SIZES, bandPriceRials, bindingMisfit, offeredSizes, sheetsOf, volumesOf, type BindingMisfit } from '@jozveyar/pricing';
+import {
+  PAPER_SIZES,
+  bandPriceRials,
+  bindingMisfit,
+  offeredSizes,
+  sheetsOf,
+  volumesOf,
+  type BindingMisfit,
+  type PausedOptions,
+} from '@jozveyar/pricing';
 import { bindingsFor, papersFor, type Replacement } from '../lib/catalog';
 import type { Sentence } from '../lib/fileCard';
 import type { OrderConfig } from '../lib/orderConfig';
@@ -33,6 +42,8 @@ interface Props {
    * دورو از همین می‌آید، نه از حسابی دیگر (قاعدهٔ ۱). null یعنی هنوز صفحه‌ای از این جزوه شمرده نشده.
    */
   quoteFor: (config: OrderConfig) => ConfigQuote | null;
+  /** گزینه‌های موقتاً خاموش تعرفهٔ فعال (برش ۸٫۴، سؤال ۱۸۸): کاشی خاموش با «موقتاً در دسترس نیست»، بی اثر قیمت (سؤال ۲۲۰). */
+  paused: PausedOptions;
   /**
    * صفحه‌های رنگی جزوه، کنار انتخاب رنگ (`colorHint` در lib/fileCard.ts): حکم قطعی فقط بعد از
    * بررسی همهٔ صفحه‌ها. رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030).
@@ -158,6 +169,9 @@ function misfitNote(misfit: BindingMisfit, sheets: number) {
   );
 }
 
+/** یادداشت کاشی گزینه‌ای که موقتاً در دسترس نیست (برش ۸٫۴، طرح میز سؤال ۲۲۰). */
+const PAUSED_NOTE = 'موقتاً در دسترس نیست';
+
 /** «A4»، با جهت خودش در متن فارسی. */
 function sizeName(size: PaperSize) {
   return <bdi>{PAPER_SIZES[size].label}</bdi>;
@@ -169,7 +183,25 @@ function sizeName(size: PaperSize) {
  */
 function ReplacedHint({ replacement, priceList, sheets }: { replacement: Replacement; priceList: PriceList; sheets: number }) {
   let text: ReactNode;
-  if (replacement.field === 'paperSize') {
+  if (replacement.paused) {
+    // گزینه‌ای که موقتاً در دسترس نیست (برش ۸٫۴، طرح میز سؤال ۲۲۴): با روشن شدن دوباره، انتخاب خود جزوه برمی‌گردد.
+    text =
+      replacement.field === 'paperSize' ? (
+        <>
+          اندازهٔ {sizeName(replacement.from)} موقتاً در دسترس نیست؛ این جزوه {sizeName(replacement.to)} شد.
+        </>
+      ) : replacement.field === 'paperTypeId' ? (
+        <>
+          کاغذ «<Inline text={priceList.paperTypes[replacement.from]?.nameFa ?? ''} />» موقتاً در دسترس نیست؛ کاغذ این جزوه «
+          <Inline text={priceList.paperTypes[replacement.to]?.nameFa ?? ''} />» شد.
+        </>
+      ) : (
+        <>
+          <Inline text={priceList.bindingTypes[replacement.from]?.nameFa ?? ''} /> موقتاً در دسترس نیست؛ صحافی این جزوه «
+          <Inline text={priceList.bindingTypes[replacement.to]?.nameFa ?? ''} />» شد. اگر صحافی دیگری می‌خواهی، همین‌جا عوض کن.
+        </>
+      );
+  } else if (replacement.field === 'paperSize') {
     text = (
       <>
         اندازهٔ {sizeName(replacement.from)} دیگر ارائه نمی‌شود؛ این جزوه {sizeName(replacement.to)} شد.
@@ -221,7 +253,7 @@ function ReplacedHint({ replacement, priceList, sheets }: { replacement: Replace
  * ۸٫۳). از ۸٫۲ درون کارت همان جزوه است (سؤال ۲۱۷)، پس سرش را کارت می‌گذارد (`JozveSettings`)؛ در هر لحظه فقط یکی روی صفحه
  * است، پس شناسه‌ها یکتا می‌مانند.
  */
-export function ConfigPanel({ config, effective, replaced, pageCount, onChange, priceList, quoteFor, colorHint }: Props) {
+export function ConfigPanel({ config, effective, replaced, pageCount, onChange, priceList, quoteFor, colorHint, paused }: Props) {
   const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) => onChange({ ...config, [key]: value });
   const current = quoteFor(config);
 
@@ -314,7 +346,10 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
           options={sizes.map((option) => ({
             value: option,
             title: PAPER_SIZES[option].label,
-            note: perPage(priceList.printRates[option]![effective.sidesMode][effective.colorMode]),
+            note: paused.sizes.has(option)
+              ? PAUSED_NOTE
+              : perPage(priceList.printRates[option]![effective.sidesMode][effective.colorMode]),
+            disabled: paused.sizes.has(option),
           }))}
         >
           {hint('paperSize')}
@@ -333,7 +368,8 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
           options={papers.map(([id, paper]) => ({
             value: id,
             title: <Inline text={paper.nameFa} />,
-            note: perUnit(paper.sheetRates[size] ?? 0, 'برگ'),
+            note: paused.papers.has(id) ? PAUSED_NOTE : perUnit(paper.sheetRates[size] ?? 0, 'برگ'),
+            disabled: paused.papers.has(id),
           }))}
         >
           {hint('paperTypeId')}
@@ -355,8 +391,14 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
             return {
               value: id,
               title: <Inline text={binding.nameFa} />,
-              note: misfit ? misfitNote(misfit, jozveSheets) : perVolume === null ? null : perUnit(perVolume, 'جلد'),
-              disabled: misfit !== null,
+              note: paused.bindings.has(id)
+                ? PAUSED_NOTE
+                : misfit
+                  ? misfitNote(misfit, jozveSheets)
+                  : perVolume === null
+                    ? null
+                    : perUnit(perVolume, 'جلد'),
+              disabled: paused.bindings.has(id) || misfit !== null,
             };
           })}
         >

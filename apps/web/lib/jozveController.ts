@@ -14,6 +14,7 @@
 
 import type { DocumentAnalysis } from '@jozveyar/contracts';
 import { DEFAULT_THRESHOLDS, MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
+import type { FileRules } from '@jozveyar/contracts/files';
 import {
   ERROR_MESSAGES,
   MAX_PAGES_TO_ANALYZE,
@@ -48,6 +49,8 @@ export interface JozveDeps {
   startUpload(file: File, onChange: (snapshot: UploadSnapshot) => void): Promise<UploadHandle>;
   sendBrowserAnalysis(documentId: string, analysis: DocumentAnalysis): void;
   now(): number;
+  /** قاعده‌های فایل همین صفحه (برش ۸٫۴، `settings`)؛ بی آن هیچ سقفی سنجیده نمی‌شود و سرور هنوز می‌سنجد. */
+  rules?: FileRules;
 }
 
 /**
@@ -101,7 +104,7 @@ export function createJozve(deps: JozveDeps) {
 
   function createSection(file: File): Section & { file: File } {
     keys += 1;
-    return { key: `s${keys}`, file, kind: fileKind(file.name), analysis: initialAnalysis(file), upload: null };
+    return { key: `s${keys}`, file, kind: fileKind(file.name), analysis: initialAnalysis(file, deps.rules), upload: null };
   }
 
   /* ── تحلیل ── */
@@ -140,6 +143,8 @@ export function createJozve(deps: JozveDeps) {
           buffer,
           thresholds: DEFAULT_THRESHOLDS,
           maxPagesToAnalyze: MAX_PAGES_TO_ANALYZE,
+          // سقف صفحهٔ هر فایل (برش ۸٫۴) را خود کارگر همان لحظهٔ شمردن می‌سنجد (`too_many_pages`).
+          maxPages: deps.rules?.maxPages,
         });
       },
       () => {
