@@ -36,7 +36,7 @@ function FormError({ state, inline }: { state: FormState; inline: boolean }) {
 const codeErrorOf = (state: FormState) => (state.error === 'wrong_code' || state.error === 'code_used' ? messageOf(state.error) : null);
 
 /**
- * «بازپرداخت از درگاه» (برش ۷٫۳، طرح `m-refund`؛ فقط مالک): مبلغ، کارت و کارمزد پیش از کد تازه، و موجودی‌ای که کیف پول باید داشته
+ * «بازپرداخت از درگاه» (برش ۷٫۳، طرح `m-refund`؛ مالک و از ۹٫۴ حسابدار): مبلغ، کارت و کارمزد پیش از کد تازه، و موجودی‌ای که کیف پول باید داشته
  * باشد؛ بعد کد و «X تومان را برگردان».
  */
 export function RefundGatewayForm({
@@ -129,7 +129,7 @@ const FIELD_OF: Partial<Record<NonNullable<FormState['error']>, 'day' | 'referen
 };
 
 /**
- * «ثبت بازپرداخت دستی» (برش ۷٫۳، طرح `m-refund-manual`؛ فقط مالک): پولی که از راه دیگری برگشت؛ روز (پیش‌فرض امروز)، کد پیگیری بانک،
+ * «ثبت بازپرداخت دستی» (برش ۷٫۳، طرح `m-refund-manual`؛ مالک و از ۹٫۴ حسابدار): پولی که از راه دیگری برگشت؛ روز (پیش‌فرض امروز)، کد پیگیری بانک،
  * «چطور برگشت» اختیاری که مشتری نمی‌بیند، و کد تازه.
  */
 export function RefundManualForm({ target, today, noteMax }: { target: Target; today: string; noteMax: number }) {

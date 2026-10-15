@@ -1312,7 +1312,7 @@ export default async function OrderPage({
   const query = await searchParams;
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'orders.read')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'orders.read')) return <NoAccess gate={gate} session={session} />;
   const back = (
     <Link href={panelPath(gate, '/orders')} className="ad-back">
       <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
@@ -1325,7 +1325,7 @@ export default async function OrderPage({
   const view = result.value;
   const mode = modeOf(query.do);
   const canVoid = can(session, 'shipments.revert');
-  if (mode && view.partnerView && !modeAllowed(mode, view, canVoid)) return <NoAccess gate={gate} partner={session.partner} />;
+  if (mode && view.partnerView && !modeAllowed(mode, view, canVoid)) return <NoAccess gate={gate} session={session} />;
   const voiding = mode === 'void' && canVoid && typeof query.code === 'string' ? query.code : null;
   const { details, bounds, canDownload, canEditRecipient } = view;
   const { order } = details;

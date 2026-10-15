@@ -8,6 +8,7 @@ import {
   PARTNER_ROLE,
   inEventKind,
   isAdminRole,
+  roleSeen,
   type AdminEventInput,
   type AdminEventRow,
   type AdminInviteRow,
@@ -220,6 +221,10 @@ export function memoryAdminStore(): AdminStore & {
       let userId: string;
       if (existing) {
         if (!input.allowExisting) return { ok: false, reason: 'username_taken' };
+        if (input.role && input.role !== 'owner') {
+          const owners = activeOwners();
+          if (owners.includes(existing.id) && owners.length <= 1) return { ok: false, reason: 'last_owner' };
+        }
         userId = existing.id;
         Object.assign(existing, {
           passwordHash: null,
@@ -345,6 +350,41 @@ export function memoryAdminStore(): AdminStore & {
       revokeOpen(userId, at);
       addEvent(event);
       return 'ok';
+    },
+
+    async changeRole(input) {
+      const user = users.get(input.userId);
+      if (!user) return { ok: false, reason: 'not_found' };
+      const current = [...(roles.get(user.id) ?? [])];
+      const fromPartner = partnerRef(user.id);
+      if (roleSeen(current, fromPartner?.id ?? null) !== input.seen) return { ok: false, reason: 'role_stale' };
+      let partner: { id: string; name: string } | null = null;
+      if (input.role === PARTNER_ROLE) {
+        if (!input.partnerId) return { ok: false, reason: 'partner_required' };
+        const active = partners.get(input.partnerId);
+        if (!active?.active) return { ok: false, reason: 'partner_inactive' };
+        partner = { id: active.id, name: active.name };
+      }
+      if (roleSeen([input.role], partner?.id ?? null) === input.seen) return { ok: false, reason: 'role_same' };
+      if (input.role !== 'owner') {
+        const owners = activeOwners();
+        if (owners.includes(user.id) && owners.length <= 1) return { ok: false, reason: 'last_owner' };
+      }
+      setRole(user.id, input.role, partner?.id ?? null);
+      addEvent({
+        ...input.event,
+        targetType: 'admin',
+        targetId: user.id,
+        at: input.at,
+        detail: {
+          username: user.username,
+          from: current.sort(),
+          to: input.role,
+          ...(fromPartner ? { fromPartner } : {}),
+          ...(partner ? { partner } : {}),
+        },
+      });
+      return { ok: true, username: user.username, partner };
     },
 
     async revokeInvites(userId, at, event) {

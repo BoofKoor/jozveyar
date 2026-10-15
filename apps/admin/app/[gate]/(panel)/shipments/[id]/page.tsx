@@ -260,7 +260,7 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
   const query = await searchParams;
   const { shipments } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'shipments.import')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'shipments.import')) return <NoAccess gate={gate} session={session} />;
   const result = await shipments.page(session, id);
   // ورودی که نیست، و ورود بیرون از محدودهٔ این نشست: هر دو همین ۴۰۴ (`not-found.tsx`).
   if (!result.ok) notFound();

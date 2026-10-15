@@ -10,16 +10,16 @@ import { requirePanel, requireSession } from '../../../../../lib/server/context'
 export const metadata: Metadata = { title: 'افزودن ادمین' };
 
 /**
- * «افزودن ادمین» (طرح پنل `m-admin-invite`): متصدی، چاپخانه یا مالک؛ برای نقش «چاپخانه» (۵٫۳) یکی از چاپخانه‌های فعال، طرف قرارداد
- * اول و پیش‌فرض آخر.
+ * «افزودن ادمین» (طرح پنل `m-admin-invite`): متصدی، حسابدار (۹٫۴)، چاپخانه یا مالک؛ برای نقش «چاپخانه» (۵٫۳) یکی از چاپخانه‌های فعال،
+ * طرف قرارداد اول و پیش‌فرض آخر.
  */
 export default async function NewAdminPage({ params }: { params: Promise<{ gate: string }> }) {
   const { gate } = await params;
   const { auth } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'admins.manage')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'admins.manage')) return <NoAccess gate={gate} session={session} />;
   const choices = await auth.partnerChoices(session);
-  if (!choices.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!choices.ok) return <NoAccess gate={gate} session={session} />;
   const back = panelPath(gate, '/admins');
   return (
     <>

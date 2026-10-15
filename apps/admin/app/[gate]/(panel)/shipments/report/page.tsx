@@ -180,17 +180,18 @@ function BandsSource({ bands }: { bands: ReportBandsView }) {
 
 /**
  * گزارش ارسال (۶٫۴، طرح پنل `m-ship-report`، ADR-048): کرایه‌ای که مشتری داد در برابر کرایه و مالیاتی که پست گرفت، ماه‌به‌ماه به
- * روز «تحویل پست شد»؛ کل، به تفکیک منطقه و چاپخانه، و وزن واقعی در برابر برآورد با بازه‌هایی که مالک همین‌جا عوض می‌کند. فقط مالک
- * (`reports.read`)، پیش از هر خواندن (تصمیم ۱۰۶). ماه در نشانی (`?month=1405-07`)، فرم بازه‌ها با `?bands=edit`، بی JS.
+ * روز «تحویل پست شد»؛ کل، به تفکیک منطقه و چاپخانه، و وزن واقعی در برابر برآورد با بازه‌هایی که مالک همین‌جا عوض می‌کند. مالک و از
+ * ۹٫۴ حسابدار (`reports.read`)، پیش از هر خواندن (تصمیم ۱۰۶)؛ بازه‌ها فقط مالک (`settings.edit`)، و حسابدار گزارش را از زبانهٔ خودش
+ * می‌بیند، بی «ارسال». ماه در نشانی (`?month=1405-07`)، فرم بازه‌ها با `?bands=edit`، بی JS.
  */
 export default async function ReportPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
   const query = await searchParams;
   const { report } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'reports.read')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'reports.read')) return <NoAccess gate={gate} session={session} />;
   const result = await report.view(session, { month: one(query, 'month') });
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const { months, month, report: sums, bands, canEditBands } = result.value;
 
   const base = panelPath(gate, '/shipments/report');
@@ -203,10 +204,13 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
 
   return (
     <>
-      <Link href={panelPath(gate, '/shipments')} className="ad-back">
-        <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
-        ارسال
-      </Link>
+      {can(session, 'shipments.import') ? (
+        // حسابدار (۹٫۴) «ارسال» را ندارد؛ گزارش برایش زبانهٔ خودش است.
+        <Link href={panelPath(gate, '/shipments')} className="ad-back">
+          <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
+          ارسال
+        </Link>
+      ) : null}
       <div className="ad-pagehead">
         <div>
           <h1 className="ad-title">گزارش ارسال</h1>

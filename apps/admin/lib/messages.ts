@@ -29,6 +29,9 @@ export const MESSAGES: Record<AdminErrorCode, string> = {
   not_found: 'این ادمین پیدا نشد، یا وضعیتش همین حالا عوض شد.',
   self: 'این کار برای حساب خودت نیست.',
   last_owner: 'آخرین مالک پنل غیرفعال نمی‌شود.',
+  role_same: 'همین نقش را دارد؛ نقش دیگری انتخاب کن.',
+  role_stale: 'نقش این ادمین همین حالا عوض شد؛ نقش تازه را ببین و اگر هنوز لازم است، دوباره انتخاب کن.',
+  role_last_owner: 'آخرین مالک فعال پنل نقش دیگری نمی‌گیرد؛ اول مالک دیگری بساز.',
   order_not_found: 'این سفارش پیدا نشد.',
   pdf_not_ready: 'این فایل هنوز ساخته نشده است.',
   pdf_not_failed: 'فایل چاپ همین حالا در صف ساختن است، یا ساخته شده.',
@@ -156,7 +159,7 @@ export const MESSAGES: Record<AdminErrorCode, string> = {
 export const messageOf = (code: string | undefined) =>
   code && code in MESSAGES ? MESSAGES[code as AdminErrorCode] : MESSAGES.unavailable;
 
-export const ROLE_NAMES: Record<string, string> = { owner: 'مالک', operator: 'متصدی', print_partner: 'چاپخانه' };
+export const ROLE_NAMES: Record<string, string> = { owner: 'مالک', operator: 'متصدی', accountant: 'حسابدار', print_partner: 'چاپخانه' };
 
 export const roleName = (roles: readonly string[]) => roles.map((role) => ROLE_NAMES[role] ?? role).join('، ');
 

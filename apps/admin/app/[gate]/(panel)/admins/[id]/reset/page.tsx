@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: 'کد ورود تازه' };
 export default async function ResetAdminPage({ params }: { params: Promise<{ gate: string; id: string }> }) {
   const { gate, id } = await params;
   const { session, target, back } = await adminTarget(gate, id);
-  if (!target) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!target) return <NoAccess gate={gate} session={session} />;
   const name = target.user.displayName;
   const disabled = target.user.disabledAt !== null;
   return (

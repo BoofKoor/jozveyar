@@ -60,9 +60,9 @@ export default async function PartnersPage({ params, searchParams }: { params: P
   const query = await searchParams;
   const { partners } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'partners.manage')) return <NoAccess gate={gate} session={session} />;
   const result = await partners.list(session);
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const list = result.value;
   const error = one(query, 'e');
   const target = list.find((partner) => partner.id === one(query, 'p'));

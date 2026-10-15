@@ -278,20 +278,34 @@ describe('پیشخوان', () => {
 
   it('«کد رهگیری ندارد» (۶٫۲): دو روز کاری پس از روز تحویل، با تعطیلی‌ها، روزبه‌روز؛ صف تأیید فقط با `shipments.review`', async () => {
     const days = (value: { day: Date; orderNumbers: number[] }[]) => value.map((d) => [d.day.toISOString(), d.orderNumbers]);
-    const plain = await service().orders.dashboard(session());
+    const importer = session(['orders.read', 'files.download', 'shipments.import']);
+    const plain = await service().orders.dashboard(importer);
     // تحویل چهارشنبه ۸ مهر: شنبه و یکشنبه دو روز کاری‌اند، پس دوشنبه ۱۱:۲۰ هشدار؛ یکشنبه ۱۲ مهر هنوز نه.
     expect(plain.ok && days(plain.value.untracked)).toEqual([['2026-09-29T20:30:00.000Z', [10009, 10025]]]);
     // شنبه ۱۱ مهر تعطیل: دو روز کاری یکشنبه و دوشنبه می‌شود، پس هنوز هیچ.
     const holiday = await service({
       setting: async (key: string) => (key === 'calendar.holidays' ? [{ date: '1405/07/11', title: 'تعطیل' }] : undefined),
-    }).orders.dashboard(session());
+    }).orders.dashboard(importer);
     expect(holiday.ok && holiday.value.untracked).toEqual([]);
     // صف تأیید برای متصدی و مالک؛ کسی که `shipments.review` ندارد (چاپخانه) صفر می‌بیند، ولی «کد رهگیری ندارد» را همان.
     expect(plain.ok && plain.value.alerts.reviewRows).toBe(0);
     const staff = await service().orders.dashboard(session(['orders.read', 'shipments.review']));
     expect(staff.ok && staff.value.alerts.reviewRows).toBe(5);
-    const noor = await service().orders.dashboard(session(['orders.read'], { id: PARTNER_B, name: 'چاپ نور' }));
+    const noor = await service().orders.dashboard(session(['orders.read', 'shipments.import'], { id: PARTNER_B, name: 'چاپ نور' }));
     expect(noor.ok && [noor.value.alerts.reviewRows, days(noor.value.untracked)]).toEqual([0, [['2026-09-29T20:30:00.000Z', [10009, 10025]]]]);
+  });
+
+  it('هر هشدار فقط برای کسی که کارش را دارد (۹٫۴): «PDF ساخته نشد»، «بی چاپخانه» و «کد رهگیری ندارد»؛ حسابدار هیچ‌کدام، ولی پول همه', async () => {
+    const accountant = await service().orders.dashboard(session(['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read']));
+    expect(accountant.ok && [accountant.value.alerts.failedPdf, accountant.value.alerts.unassigned, accountant.value.untracked]).toEqual([[], [], []]);
+    expect(accountant.ok && accountant.value.alerts).toMatchObject({ paidSmsFailed: [10027], unrefunded: [{ orderNumber: 10026 }] });
+    // شاهد: هر کدام با مجوز کارش برمی‌گردد.
+    const pdf = await service().orders.dashboard(session(['orders.read', 'files.download']));
+    expect(pdf.ok && [pdf.value.alerts.failedPdf, pdf.value.alerts.unassigned, pdf.value.untracked]).toEqual([[10031], [], []]);
+    const assigner = await service().orders.dashboard(session(['orders.read', 'orders.assign']));
+    expect(assigner.ok && [assigner.value.alerts.failedPdf, assigner.value.alerts.unassigned]).toEqual([[], [10037]]);
+    const importer = await service().orders.dashboard(session(['orders.read', 'shipments.import']));
+    expect(importer.ok && importer.value.untracked.map((d) => d.orderNumbers)).toEqual([[10009, 10025]]);
   });
 
   it('«پیامک پرداخت نرفت» (۷٫۱)، هشدارهای پول و درگاه (۷٫۲) و بازپرداخت (۷٫۳) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {

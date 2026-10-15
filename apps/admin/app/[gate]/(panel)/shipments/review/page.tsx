@@ -62,9 +62,9 @@ export default async function ReviewQueuePage({ params, searchParams }: { params
   const query = await searchParams;
   const { shipments } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'shipments.review')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'shipments.review')) return <NoAccess gate={gate} session={session} />;
   const result = await shipments.queue(session, { page: one(query, 'page') });
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const { rows, total, page, pages, now, money } = result.value;
   const error = one(query, 'e');
   const shown = error && PAGE_ERRORS.has(error) ? error : null;

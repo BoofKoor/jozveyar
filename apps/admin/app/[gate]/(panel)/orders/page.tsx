@@ -55,14 +55,14 @@ export default async function OrdersPage({
   const query = await searchParams;
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'orders.read')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'orders.read')) return <NoAccess gate={gate} session={session} />;
   const result = await orders.list(session, {
     status: one(query.status),
     q: one(query.q),
     page: one(query.page),
     untracked: one(query.untracked),
   });
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const { buckets, bucket, q, counts, page, pages, rows, specs, canZip, canNote, bounds, untracked } = result.value;
   const money = can(session, 'orders.money');
   // نام چاپخانه زیر وضعیت (۹٫۱): کاربر چاپخانه فقط سفارش‌های خودش را دارد.

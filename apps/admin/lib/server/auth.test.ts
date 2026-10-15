@@ -52,6 +52,8 @@ const OPERATOR_PERMISSIONS = [
   'tariff.read',
 ];
 const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status', 'shipments.import'];
+// حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
+const ACCOUNTANT_PERMISSIONS = ['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.read'];
 
 /** argon2 جدا در `password.test.ts`؛ اینجا همان قرارداد، سریع، با شمارش صدازدن‌ها. */
 function fakePasswords() {
@@ -103,7 +105,7 @@ describe('ورود پنل و ادمین‌ها', () => {
   };
   const codeOf = (secret: string) => totpAt(base32Decode(secret), clock);
 
-  async function enroll(username: string, role?: 'owner' | 'operator') {
+  async function enroll(username: string, role?: 'owner' | 'operator' | 'accountant') {
     const issued = await auth.serverInvite({ username, ...(role ? { role } : {}) });
     if (!issued.ok) throw new Error(issued.error);
     const info = await auth.inviteInfo(issued.value.token);
@@ -657,6 +659,188 @@ describe('ورود پنل و ادمین‌ها', () => {
     });
   });
 
+  describe('حسابدار و عوض کردن نقش (۹٫۴)', () => {
+    const NOOR = '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e0002';
+    const AFTAB = '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e0003';
+    beforeEach(() => {
+      store.partners.set(NOOR, { id: NOOR, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, active: true });
+      store.partners.set(AFTAB, { id: AFTAB, name: 'چاپ آفتاب', cityName: 'اصفهان', isDefault: false, active: false });
+    });
+    const roleEvents = () => store.events.filter((e) => e.action === 'admins.role');
+
+    it('افزودن حسابدار با کد تازه: نشست بی محدوده و فقط پنج مجوز؛ ادمین‌ها، رویدادها و نقش نه', async () => {
+      const sara = await enroll('sara');
+      later(STEP);
+      const invited = await auth.inviteAdmin(
+        sara.session,
+        { username: 'maryam', displayName: 'مریم', role: 'accountant', code: codeOf(sara.secret) },
+        IP,
+      );
+      if (!invited.ok) throw new Error(invited.error);
+      const info = await auth.inviteInfo(invited.value.token);
+      expect(info).toMatchObject({ ok: true, value: { role: 'accountant', partnerName: null } });
+      if (!info.ok) return;
+      const done = await auth.completeInvite(invited.value.token, { password: PASSWORD, confirm: PASSWORD, code: codeOf(info.value.secret) }, IP);
+      if (!done.ok) throw new Error(done.error);
+      const maryam = (await auth.authenticate(done.value.token))!;
+      expect(maryam).toMatchObject({ roles: ['accountant'], permissions: ACCOUNTANT_PERMISSIONS, partner: null });
+      expect(scopeOf(maryam)).toEqual({ kind: 'all' });
+      later(STEP);
+      const code = codeOf(info.value.secret);
+      expect(await auth.listAdmins(maryam)).toMatchObject({ ok: false, error: 'forbidden' });
+      expect(await auth.listEvents(maryam, {})).toMatchObject({ ok: false, error: 'forbidden' });
+      expect(await auth.inviteAdmin(maryam, { username: 'ali', displayName: 'علی', role: 'operator', code }, IP)).toMatchObject({ status: 403 });
+      expect(await auth.changeRole(maryam, { userId: sara.userId, role: 'operator', seen: 'owner|', code }, IP)).toEqual({
+        ok: false,
+        status: 403,
+        error: 'forbidden',
+      });
+      expect(store.users.get(maryam.userId)!.failedAttempts).toBe(0);
+    });
+
+    it('عوض کردن نقش با کد تازه: متصدی ← حسابدار؛ نشست باز می‌ماند و درخواست بعدی مجوز تازه دارد؛ رویداد از و به', async () => {
+      const sara = await enroll('sara');
+      const ali = await enroll('ali', 'operator');
+      later(STEP);
+      const changed = await auth.changeRole(sara.session, { userId: ali.userId, role: 'accountant', seen: 'operator|', code: codeOf(sara.secret) }, IP);
+      expect(changed).toEqual({ ok: true, value: { userId: ali.userId, displayName: 'ali', role: 'accountant', partner: null } });
+      expect(store.roles.get(ali.userId)).toEqual(['accountant']);
+      expect(await auth.authenticate(ali.token)).toMatchObject({ roles: ['accountant'], permissions: ACCOUNTANT_PERMISSIONS });
+      expect(roleEvents()).toEqual([
+        expect.objectContaining({
+          adminUserId: sara.userId,
+          targetType: 'admin',
+          targetId: ali.userId,
+          ipHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          detail: { username: 'ali', from: ['operator'], to: 'accountant' },
+          at: clock,
+        }),
+      ]);
+      // برگشت هم همان راه: حسابدار ← متصدی.
+      later(STEP);
+      expect(
+        await auth.changeRole(sara.session, { userId: ali.userId, role: 'operator', seen: 'accountant|', code: codeOf(sara.secret) }, IP),
+      ).toMatchObject({ ok: true });
+      expect(await auth.authenticate(ali.token)).toMatchObject({ roles: ['operator'], permissions: OPERATOR_PERMISSIONS });
+    });
+
+    it('پیش از کد و بی هدر دادنش: خود، ناموجود، نقش نادرست، فرم کهنه و نقش یکسان', async () => {
+      const sara = await enroll('sara');
+      const ali = await enroll('ali', 'operator');
+      later(STEP);
+      const code = codeOf(sara.secret);
+      const form = { userId: ali.userId, role: 'accountant', seen: 'operator|', code };
+      expect(await auth.changeRole(sara.session, { ...form, userId: sara.userId, seen: 'owner|' }, IP)).toEqual({ ok: false, status: 400, error: 'self' });
+      expect(await auth.changeRole(sara.session, { ...form, userId: 'not-a-uuid' }, IP)).toMatchObject({ status: 404, error: 'not_found' });
+      expect(await auth.changeRole(sara.session, { ...form, userId: '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e9999' }, IP)).toMatchObject({ status: 404 });
+      expect(await auth.changeRole(sara.session, { ...form, role: 'root' }, IP)).toMatchObject({ status: 400, error: 'invalid_role' });
+      expect(await auth.changeRole(sara.session, { ...form, seen: 'owner|' }, IP)).toEqual({ ok: false, status: 409, error: 'role_stale' });
+      expect(await auth.changeRole(sara.session, { ...form, seen: undefined }, IP)).toMatchObject({ error: 'role_stale' });
+      expect(await auth.changeRole(sara.session, { ...form, role: 'operator' }, IP)).toEqual({ ok: false, status: 400, error: 'role_same' });
+      expect([store.users.get(sara.userId)!.failedAttempts, roleEvents()]).toEqual([0, []]);
+      // همان کد هنوز کار می‌کند: هیچ‌کدام به سنجش کد نرسید.
+      expect(await auth.changeRole(sara.session, form, IP)).toMatchObject({ ok: true });
+      // کد نادرست: نقش همان.
+      later(STEP);
+      const wrong = codeOf(sara.secret) === '000000' ? '111111' : '000000';
+      expect(await auth.changeRole(sara.session, { ...form, role: 'owner', seen: 'accountant|', code: wrong }, IP)).toMatchObject({
+        status: 400,
+        error: 'wrong_code',
+      });
+      expect(store.roles.get(ali.userId)).toEqual(['accountant']);
+    });
+
+    it('نقش «چاپخانه» با چاپخانهٔ فعال (پیش از کد)؛ محدودهٔ نشست با درخواست بعدی؛ عوض کردن فقط چاپخانه هم؛ رویداد با نام چاپخانه', async () => {
+      const sara = await enroll('sara');
+      const ali = await enroll('ali', 'operator');
+      later(STEP);
+      const code = codeOf(sara.secret);
+      const form = { userId: ali.userId, role: 'print_partner', seen: 'operator|', code };
+      expect(await auth.changeRole(sara.session, form, IP)).toMatchObject({ status: 400, error: 'partner_required' });
+      expect(await auth.changeRole(sara.session, { ...form, partner: AFTAB }, IP)).toMatchObject({ status: 409, error: 'partner_inactive' });
+      expect(await auth.changeRole(sara.session, { ...form, partner: 'nope' }, IP)).toMatchObject({ status: 409, error: 'partner_inactive' });
+      expect(await auth.changeRole(sara.session, { ...form, partner: NOOR }, IP)).toMatchObject({
+        ok: true,
+        value: { role: 'print_partner', partner: { id: NOOR, name: 'چاپ نور' } },
+      });
+      const hasan = (await auth.authenticate(ali.token))!;
+      expect(hasan).toMatchObject({ roles: ['print_partner'], permissions: PARTNER_PERMISSIONS, partner: { id: NOOR, name: 'چاپ نور' } });
+      expect(scopeOf(hasan)).toEqual({ kind: 'partner', partnerId: NOOR });
+      expect(roleEvents().at(-1)!.detail).toEqual({ username: 'ali', from: ['operator'], to: 'print_partner', partner: { id: NOOR, name: 'چاپ نور' } });
+      // همان چاپخانه یکسان است؛ چاپخانهٔ دیگر نه.
+      const first = '0b6a7c1e-1f53-4c2a-9d55-6c1f1c0e0001';
+      store.partners.set(first, { id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, active: true });
+      later(STEP);
+      const again = { ...form, seen: `print_partner|${NOOR}`, code: codeOf(sara.secret) };
+      expect(await auth.changeRole(sara.session, { ...again, partner: NOOR }, IP)).toMatchObject({ error: 'role_same' });
+      expect(await auth.changeRole(sara.session, { ...again, partner: first }, IP)).toMatchObject({ ok: true });
+      expect(store.partnerOf.get(ali.userId)).toBe(first);
+      // و برگشت به نقش بی محدوده: چاپخانه از نشست می‌رود.
+      later(STEP);
+      expect(
+        await auth.changeRole(sara.session, { userId: ali.userId, role: 'accountant', seen: `print_partner|${first}`, code: codeOf(sara.secret) }, IP),
+      ).toMatchObject({ ok: true });
+      expect(await auth.authenticate(ali.token)).toMatchObject({ roles: ['accountant'], partner: null });
+      expect(roleEvents().at(-1)!.detail).toEqual({
+        username: 'ali',
+        from: ['print_partner'],
+        to: 'accountant',
+        fromPartner: { id: first, name: 'چاپخانهٔ جزوه‌یار' },
+      });
+    });
+
+    it('آخرین مالک فعال نقش دیگری نمی‌گیرد، زیر قفل: دو مالک که هم‌زمان هم را پایین می‌آورند، یکی می‌ماند', async () => {
+      const sara = await enroll('sara');
+      const mina = await enroll('mina', 'owner');
+      later(STEP);
+      // مینا اول سارا را متصدی می‌کند؛ نشستی که سارا پیش از آن ساخته بود هنوز `admins.manage` دارد و فرمش از پیش ساخته شده.
+      expect(
+        await auth.changeRole(mina.session, { userId: sara.userId, role: 'operator', seen: 'owner|', code: codeOf(mina.secret) }, IP),
+      ).toMatchObject({ ok: true });
+      expect(
+        await auth.changeRole(sara.session, { userId: mina.userId, role: 'accountant', seen: 'owner|', code: codeOf(sara.secret) }, IP),
+      ).toEqual({ ok: false, status: 409, error: 'role_last_owner' });
+      expect(store.roles.get(mina.userId)).toEqual(['owner']);
+      expect(roleEvents()).toHaveLength(1);
+      // مالکِ غیرفعال مالک فعال نیست: مینا تنها مالک فعال است، حتی با مالکی غیرفعال کنارش.
+      const reza = await enroll('reza', 'owner');
+      later(STEP);
+      expect(await auth.disableAdmin(mina.session, { userId: reza.userId, code: codeOf(mina.secret) }, IP)).toMatchObject({ ok: true });
+      expect(await store.changeRole({ userId: mina.userId, role: 'operator', partnerId: null, seen: 'owner|', at: clock, event: { adminUserId: null, action: 'admins.role' } })).toEqual({
+        ok: false,
+        reason: 'last_owner',
+      });
+      // ولی مالک غیرفعال خودش نقش دیگری می‌گیرد.
+      expect(await store.changeRole({ userId: reza.userId, role: 'operator', partnerId: null, seen: 'owner|', at: clock, event: { adminUserId: null, action: 'admins.role' } })).toMatchObject({
+        ok: true,
+      });
+    });
+
+    it('ادمین دعوت‌شده و غیرفعال هم نقش تازه می‌گیرند؛ غیرفعال همان غیرفعال می‌ماند، و پیوند تازه‌اش همان نقش تازه را دارد', async () => {
+      const sara = await enroll('sara');
+      later(STEP);
+      const invited = await auth.inviteAdmin(sara.session, { username: 'reza', displayName: 'رضا', role: 'operator', code: codeOf(sara.secret) }, IP);
+      if (!invited.ok) throw new Error(invited.error);
+      later(STEP);
+      expect(
+        await auth.changeRole(sara.session, { userId: invited.value.userId, role: 'accountant', seen: 'operator|', code: codeOf(sara.secret) }, IP),
+      ).toMatchObject({ ok: true });
+      expect(await auth.inviteInfo(invited.value.token)).toMatchObject({ ok: true, value: { role: 'accountant' } });
+      const ali = await enroll('ali', 'operator');
+      later(STEP);
+      expect(await auth.disableAdmin(sara.session, { userId: ali.userId, code: codeOf(sara.secret) }, IP)).toMatchObject({ ok: true });
+      later(STEP);
+      expect(
+        await auth.changeRole(sara.session, { userId: ali.userId, role: 'accountant', seen: 'operator|', code: codeOf(sara.secret) }, IP),
+      ).toMatchObject({ ok: true });
+      expect(store.users.get(ali.userId)!.disabledAt).not.toBeNull();
+      later(STEP);
+      const reset = await auth.resetAdmin(sara.session, { userId: ali.userId, code: codeOf(sara.secret) }, IP);
+      if (!reset.ok) throw new Error(reset.error);
+      expect(await auth.inviteInfo(reset.value.token)).toMatchObject({ ok: true, value: { role: 'accountant' } });
+    });
+  });
+
   describe('دستور سرور', () => {
     it('ادمین موجود: کد ورود تازه با همان نقش؛ ادمین تازه بی نقش صریح مالک؛ نقش نادرست نه', async () => {
       const ali = await enroll('ali', 'operator');
@@ -669,6 +853,20 @@ describe('ورود پنل و ادمین‌ها', () => {
       expect(await auth.serverInvite({ username: 'x' })).toMatchObject({ error: 'invalid_username' });
       expect(await auth.serverInvite({ username: 'mina', role: 'root' })).toMatchObject({ error: 'invalid_role' });
       expect(await auth.serverInvite({ username: 'mina', displayName: 'ن'.repeat(101) })).toMatchObject({ error: 'invalid_display_name' });
+    });
+
+    it('نقش صریح برای آخرین مالک فعال نه (۹٫۴)، پیش از هر نوشتن؛ با مالک دیگر هست، و بی نقش صریح همان مالک', async () => {
+      const sara = await enroll('sara');
+      expect(await auth.serverInvite({ username: 'sara', role: 'operator' })).toEqual({ ok: false, status: 409, error: 'role_last_owner' });
+      expect(store.roles.get(sara.userId)).toEqual(['owner']);
+      // هیچ چیز عوض نشد: نشست و پیوند و رویداد همان.
+      expect(await auth.authenticate(sara.token)).not.toBeNull();
+      expect(store.invites).toHaveLength(1);
+      expect(store.events.filter((e) => e.action === 'admins.invite')).toHaveLength(1);
+      expect(await auth.serverInvite({ username: 'sara', role: 'owner' })).toMatchObject({ ok: true, value: { reset: true } });
+      await enroll('mina', 'owner');
+      expect(await auth.serverInvite({ username: 'sara', role: 'accountant' })).toMatchObject({ ok: true });
+      expect(store.roles.get(sara.userId)).toEqual(['accountant']);
     });
   });
 });

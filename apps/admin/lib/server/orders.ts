@@ -254,7 +254,7 @@ export interface OrderDetailsView {
 }
 
 export interface RefundView extends RefundCard {
-  /** «X تومان را برگردان» و «ثبت بازپرداخت دستی»: فقط مالک (`orders.refund`)، با کد تازه. */
+  /** «X تومان را برگردان» و «ثبت بازپرداخت دستی»: مالک و از ۹٫۴ حسابدار (`orders.refund`)، با کد تازه. */
   canRefund: boolean;
   /** بازپرداخت از درگاه خود پرداخت، و کارمزدش از کیف پول ما؛ null یعنی درگاه این پرداخت در این پنل بازپرداخت ندارد (فقط دستی). */
   gateway: { provider: string; name: string; feeRials: number } | null;
@@ -379,15 +379,20 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       return ok({
         bounds,
         tiles: dueTiles(summary, bounds),
-        // صف تأیید و پیامکی که نرفت (۶٫۲، ۶٫۳، ۷٫۱): فقط مالک و متصدی، که «همین است» و «دوباره بفرست» دارند.
+        // صف تأیید و پیامکی که نرفت (۶٫۲، ۶٫۳، ۷٫۱): فقط مالک و متصدی، که «همین است» و «دوباره بفرست» دارند. از ۹٫۴ هر هشدار فقط برای
+        // کسی که کارش را دارد: «PDF ساخته نشد» با «دوباره بساز» (`files.download`)، «بی چاپخانه» با انتخاب چاپخانه، و «کد رهگیری ندارد»
+        // با فایل پست؛ حسابدار هیچ‌کدام را ندارد.
         alerts: {
           ...alerts,
+          failedPdf: can(session, 'files.download') ? alerts.failedPdf : [],
+          unassigned: can(session, 'orders.assign') ? alerts.unassigned : [],
           reviewRows: can(session, 'shipments.review') ? alerts.reviewRows : 0,
           smsFailed: can(session, 'shipments.review') ? alerts.smsFailed : [],
           paidSmsFailed: can(session, 'orders.money') ? alerts.paidSmsFailed : [],
           // پیامک سفارش تازهٔ چاپخانه (۷٫۶، سؤال ۱۷۲): همان که کارت «چاپخانه» و «دوباره بفرست»ش را دارد؛ چاپخانه هرگز.
           partnerSmsFailed: can(session, 'orders.assign') ? alerts.partnerSmsFailed : [],
-          // پول و درگاه (۷٫۲، سؤال ۱۴۰) و بازپرداخت (۷٫۳، سؤال ۱۵۸): فقط مالک و متصدی. «هنوز در حال برگشت» فقط پس از `REFUND_SLOW_MS`.
+          // پول و درگاه (۷٫۲، سؤال ۱۴۰) و بازپرداخت (۷٫۳، سؤال ۱۵۸): مالک، متصدی و از ۹٫۴ حسابدار. «هنوز در حال برگشت» فقط پس از
+          // `REFUND_SLOW_MS`.
           ...(can(session, 'orders.money')
             ? { refunding: alerts.refunding.filter((row) => row.createdAt.getTime() <= at.getTime() - REFUND_SLOW_MS) }
             : {
@@ -400,7 +405,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
                 refunding: [],
               }),
         },
-        untracked: untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))),
+        untracked: can(session, 'shipments.import') ? untrackedDays(alerts.untracked, at, new Set(holidays.map((day) => day.date))) : [],
         open: summary.overdue + summary.today + summary.tomorrow + summary.later,
         queue: can(session, 'orders.money') ? queue : linesWithoutMoney(queue),
         slaDays,
@@ -1034,7 +1039,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     },
 
     /**
-     * «X تومان را برگردان» (برش ۷٫۳، ADR-051؛ طرح `m-refund`): فقط مالک (`orders.refund`)، فقط سفارش «لغو شد» با پرداخت موفق، کل مبلغ به
+     * «X تومان را برگردان» (برش ۷٫۳، ADR-051؛ طرح `m-refund`): مالک و از ۹٫۴ حسابدار (`orders.refund`)، فقط سفارش «لغو شد» با پرداخت موفق، کل مبلغ به
      * همان کارت، با درگاه خود همان پرداخت. ترتیب: مجوز، «همان که دیده شد» (پرداخت و آخرین بازپرداختش)، درگاه بازپرداخت دارد، استعلام خود
      * پرداخت (وضعیت «استردادشده» یا «در حال استرداد» یعنی درخواست نمی‌رود؛ استعلامی که جواب نداد هم نمی‌گذارد، سؤال ۱۵۴)، و فقط بعد کد
      * تازه. ردیف «در حال برگشت» با رویداد `orders.refund` در یک تراکنش، پیش از درخواست؛ بعد درخواست با شناسهٔ همان ردیف، و پاسخ روی آن.
@@ -1097,7 +1102,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
     },
 
     /**
-     * «ثبت بازپرداخت دستی» (برش ۷٫۳؛ طرح `m-refund-manual`): پولی که بیرون از درگاه برگشت (کارت به کارت، درگاه بانک)، فقط مالک، با روز
+     * «ثبت بازپرداخت دستی» (برش ۷٫۳؛ طرح `m-refund-manual`): پولی که بیرون از درگاه برگشت (کارت به کارت، درگاه بانک)، مالک و از ۹٫۴ حسابدار، با روز
      * (از روز پرداخت تا امروز)، کد پیگیری بانک و «چطور برگشت» اختیاری که فقط در پنل است؛ همان قاعدهٔ «همان که دیده شد» و کد تازه. همان
      * لحظه «برگشت داده شد»، با رویداد در همان تراکنش. کارمزدی نیست: درگاه پولی جابه‌جا نکرد.
      */

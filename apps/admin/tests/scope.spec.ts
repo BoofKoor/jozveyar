@@ -210,13 +210,14 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
     await sql?.end();
   });
 
-  test('«افزودن ادمین» با سه نقش؛ «کدام چاپخانه» فقط با نقش چاپخانه؛ پیوند یک‌باره و کد تازه، مثل متصدی؛ فهرست‌ها با کاربر', async ({ browser }) => {
+  test('«افزودن ادمین» با چهار نقش؛ «کدام چاپخانه» فقط با نقش چاپخانه؛ پیوند یک‌باره و کد تازه، مثل متصدی؛ فهرست‌ها با کاربر', async ({ browser }) => {
     test.setTimeout(180_000);
     await ownerPage.goto(at('/admins'));
     await ownerPage.getByRole('link', { name: 'افزودن ادمین' }).click();
     await expect(heading(ownerPage, 'افزودن ادمین')).toBeVisible();
     const roles = ownerPage.getByRole('group', { name: 'نقش' }).getByRole('radio');
-    await expect(roles).toHaveCount(3);
+    // از ۹٫۴ حسابدار هم (سؤال ۱۹۷): متصدی، حسابدار، چاپخانه و مالک.
+    await expect(roles).toHaveCount(4);
     await expect(ownerPage.locator('.ad-roles .jy-tile__title').first()).toHaveText('متصدی');
     const which = ownerPage.getByRole('group', { name: 'کدام چاپخانه' });
     // متصدی: «کدام چاپخانه» پنهان (بی JS، `:has()`).
@@ -280,7 +281,7 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
     const hasanRow = ownerPage.locator(`li[data-username="hasan${RUN}"]`);
     await expect(hasanRow.locator('.jy-badge')).toHaveText(`چاپخانه · ${NOOR}`);
     await expect(hasanRow.locator('.ad-people__meta')).toContainText(`فقط سفارش‌های ${NOOR}`);
-    await expect(hasanRow.getByRole('link')).toHaveText(['کد ورود تازه', 'غیرفعال کن']);
+    await expect(hasanRow.getByRole('link')).toHaveText(['عوض کردن نقش', 'کد ورود تازه', 'غیرفعال کن']);
     // چاپخانه‌ها: کاربر هر چاپخانه؛ بی کاربر، همان مالک و متصدی.
     await ownerPage.goto(at('/partners'));
     await expect(ownerPage.locator(`.ad-partners li[data-partner="${NOOR}"] .ad-partners__meta`)).toHaveText(

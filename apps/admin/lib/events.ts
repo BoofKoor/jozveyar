@@ -244,6 +244,17 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         ? { badge: null, text: ['کد ورود تازه برای ', { ltr: name }, ' ساخته شد'] }
         : { badge: null, text: ['پیوند ثبت برای ', { ltr: name }, role ? ` (${role}${partner ? `، ${partner}` : ''})` : '', ' ساخته شد'] };
     }
+    case 'admins.role': {
+      // عوض کردن نقش (۹٫۴): «نقش sara از متصدی به حسابدار عوض شد»؛ کاربر چاپخانه با نام چاپخانه‌اش، مثل پیوند ثبت.
+      const label = (roles: unknown, partner: unknown) => {
+        const names = (Array.isArray(roles) ? roles : [roles]).map((r) => ROLE_NAMES[str(r)] ?? str(r)).filter(Boolean);
+        const partnerName = str((partner as Detail | undefined)?.name);
+        return names.length === 0 ? '' : `${names.join('، ')}${partnerName ? ` (${partnerName})` : ''}`;
+      };
+      const from = label(detail.from, detail.fromPartner);
+      const to = label(detail.to, detail.partner);
+      return { badge: null, text: ['نقش ', { ltr: name }, from ? ` از ${from} به ${to} عوض شد` : ` ${to} شد`] };
+    }
     case 'admins.enroll':
       return { badge: null, text: ['ثبت: رمز و برنامهٔ تأیید گذاشته شد'] };
     case 'admins.disable':

@@ -9,7 +9,7 @@
  *  - **اتمی:** فرصت سنجش (`claimAttempt`) و مصرف گام کد (`claimTotpStep`) هر کدام یک `UPDATE`اند؛ دو
  *    درخواست هم‌زمان نه یک کد را دو بار می‌پذیرند، نه از سقف اشتباه می‌گذرند.
  *  - **یک تراکنش:** کاری که رویداد دارد، رویدادش را در همان تراکنش می‌نویسد؛ کار بی رد نمی‌ماند.
- *  - **یک قفل:** ساختن و غیرفعال کردن ادمین زیر یک قفل مشورتی، تا «آخرین مالک» و «نام تکراری» مسابقه ندهند.
+ *  - **یک قفل:** ساختن، غیرفعال کردن و از ۹٫۴ عوض کردن نقش ادمین زیر یک قفل مشورتی، تا «آخرین مالک» و «نام تکراری» مسابقه ندهند.
  */
 
 import { and, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
@@ -29,7 +29,7 @@ import {
   roles,
 } from './schema.js';
 
-/** کلید قفل مشورتی ساختن و غیرفعال کردن ادمین: «adm» به عدد. */
+/** کلید قفل مشورتی ساختن، غیرفعال کردن و عوض کردن نقش ادمین: «adm» به عدد. */
 const ADMIN_LOCK = 0x61646d;
 
 /**
@@ -46,8 +46,8 @@ export const ADMIN_PERMISSIONS = {
   'orders.revert': 'برگرداندن وضعیت سفارش',
   'orders.address': 'ویرایش نشانی گیرنده',
   /**
-   * یادداشت داخلی سفارش (برش ۹٫۳، ADR-058؛ سؤال ۱۹۵): نوشتن، و دیدن همهٔ یادداشت‌ها با «چاپخانه هم ببیند» یا بی آن. مالک و متصدی؛ از ۹٫۴
-   * حسابدار هم. چاپخانه این مجوز را ندارد و فقط یادداشتی را می‌بیند که «چاپخانه هم ببیند» دارد، روی سفارش‌های خودش (`orders.read` و محدوده).
+   * یادداشت داخلی سفارش (برش ۹٫۳، ADR-058؛ سؤال ۱۹۵): نوشتن، و دیدن همهٔ یادداشت‌ها با «چاپخانه هم ببیند» یا بی آن. مالک، متصدی و از ۹٫۴
+   * حسابدار. چاپخانه این مجوز را ندارد و فقط یادداشتی را می‌بیند که «چاپخانه هم ببیند» دارد، روی سفارش‌های خودش (`orders.read` و محدوده).
    */
   'orders.notes': 'یادداشت داخلی سفارش',
   /**
@@ -55,11 +55,14 @@ export const ADMIN_PERMISSIONS = {
    * «دوباره بفرست»ش هم (سؤال ۱۷۲)؛ چاپخانه هرگز.
    */
   'orders.assign': 'جابه‌جایی چاپخانهٔ سفارش',
-  /** مبلغ و پرداخت‌های سفارش (برش ۵٫۳، ADR-042): مالک و متصدی؛ چاپخانه چاپ و ارسال را بی مبلغ می‌کند. */
+  /**
+   * مبلغ و پرداخت‌های سفارش (برش ۵٫۳، ADR-042): مالک، متصدی و از ۹٫۴ حسابدار؛ چاپخانه چاپ و ارسال را بی مبلغ می‌کند. «استعلام از درگاه»
+   * پرداخت و بازپرداخت، و هشدارهای پول و پیامک پیشخوان، با همین.
+   */
   'orders.money': 'دیدن مبلغ و پرداخت‌ها',
   /**
-   * بازپرداخت سفارش لغوشده، از درگاه یا ثبت دستی، با کد تازه (برش ۷٫۳، ADR-051): فقط مالک؛ پول جابه‌جا می‌کند. «استعلام» بازپرداخت در
-   * جریان با `orders.money` است.
+   * بازپرداخت سفارش لغوشده، از درگاه یا ثبت دستی، با کد تازه (برش ۷٫۳، ADR-051): مالک، و از ۹٫۴ حسابدار (سؤال ۱۹۷)؛ پول جابه‌جا می‌کند،
+   * پس متصدی نه. «استعلام» بازپرداخت در جریان با `orders.money` است.
    */
   'orders.refund': 'بازپرداخت سفارش لغوشده',
   'files.download': 'دانلود PDF جزوه',
@@ -89,8 +92,8 @@ export const ADMIN_PERMISSIONS = {
   /** برگرداندن کل یک ورود فایل پست (۶٫۱) و کنار گذاشتن یک کد رهگیری (۶٫۲)، با دلیل (ADR-045): فقط مالک. */
   'shipments.revert': 'برگرداندن ورود فایل پست و کنار گذاشتن کد رهگیری',
   /**
-   * گزارش حاشیهٔ ارسال (برش ۶٫۴، ADR-048): کرایهٔ منجمد مشتری در برابر کرایه و مالیاتی که پست گرفت. فقط مالک: حاشیه راز
-   * کسب‌وکار است، و متصدی و چاپخانه لازمش ندارند.
+   * گزارش حاشیهٔ ارسال (برش ۶٫۴، ADR-048): کرایهٔ منجمد مشتری در برابر کرایه و مالیاتی که پست گرفت. مالک، و از ۹٫۴ حسابدار (سؤال ۱۹۷):
+   * حاشیه راز کسب‌وکار است، و متصدی و چاپخانه لازمش ندارند. عوض کردن بازه‌های وزن گزارش `settings.edit` هم می‌خواهد.
    */
   'reports.read': 'گزارش ارسال',
   'admins.manage': 'ادمین‌ها',
@@ -104,9 +107,13 @@ const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
 /**
  * نقش‌ها (تصمیم ۱۴۰۵/۰۷/۰۴): مالک همه‌چیز، از ۶٫۴ گزارش ارسال، از ۷٫۳ بازپرداخت و از ۹٫۲ قالب برگه‌ها هم؛ متصدی سفارش، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه (۵٫۲)،
  * مبلغ، دانلود، دیدن تعرفه، از ۶٫۱ ورود فایل پست، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت گزینه‌های تعرفه، و از ۹٫۳ یادداشت داخلی سفارش.
+ * «حسابدار» (برش ۹٫۴، سؤال ۱۹۷، ADR-059) همهٔ سفارش‌ها با مبلغ و پرداخت‌ها، بازپرداخت (ثبت دستی، با کد تازه)، یادداشت و گزارش ارسال؛ بی
+ * وضعیت، لغو، نشانی، جابه‌جایی، دانلود فایل‌ها، ارسال، تعرفه، تنظیمات، چاپخانه‌ها و ادمین‌ها. تسویهٔ چاپخانه‌ها و خروجی گزارش‌ها با برش ۱۰.
  * «چاپخانه» (برش ۵٫۳، ADR-042) فقط دیدن، «شروع چاپ» و «تحویل پست شد»، و دانلود و «دوباره بساز» فایل‌ها، همه فقط روی سفارش‌هایی
  * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش. از ۶٫۲ فایل پست
  * خودش را هم وارد می‌کند، فقط برای همان سفارش‌ها؛ صف تأیید نه (تأیید کد به مشتری می‌فرستد، ADR-046).
+ *
+ * هر ادمین یک نقش دارد (فرم «افزودن ادمین» و «عوض کردن نقش»)، هرچند جدول چند ردیف را برای نقش‌های بی محدوده می‌پذیرد.
  */
 export const ADMIN_ROLES = {
   owner: { nameFa: 'مالک', permissions: ALL_PERMISSIONS },
@@ -127,6 +134,10 @@ export const ADMIN_ROLES = {
       'shipments.review',
     ] as AdminPermission[],
   },
+  accountant: {
+    nameFa: 'حسابدار',
+    permissions: ['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read'] as AdminPermission[],
+  },
   print_partner: {
     nameFa: 'چاپخانه',
     permissions: ['orders.read', 'orders.status', 'files.download', 'shipments.import'] as AdminPermission[],
@@ -140,6 +151,12 @@ export const PARTNER_ROLE = 'print_partner' satisfies AdminRole;
 
 export const isAdminRole = (value: unknown): value is AdminRole =>
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(ADMIN_ROLES, value);
+
+/**
+ * نقش یک ادمین در یک رشته، برای «همان که دیده شد» فرم «عوض کردن نقش» (برش ۹٫۴): نقش‌ها به ترتیب، و چاپخانهٔ کاربر چاپخانه. فرم همین را
+ * از فهرست می‌آورد و تغییر زیر قفل با آن سنجیده می‌شود؛ هر تغییر هم‌زمان نقش یا چاپخانه رشته را عوض می‌کند.
+ */
+export const roleSeen = (roles: readonly string[], partnerId: string | null): string => `${[...roles].sort().join(',')}|${partnerId ?? ''}`;
 
 /** چاپخانهٔ کاربر چاپخانه: شناسه برای محدوده، نام برای سربرگ و فهرست ادمین‌ها. */
 export interface AdminPartnerRef {
@@ -217,7 +234,24 @@ export interface NewInvite {
 
 export type CreatedInvite =
   | { ok: true; userId: string; reset: boolean }
-  | { ok: false; reason: 'username_taken' | 'role_required' | 'partner_required' | 'partner_inactive' };
+  | { ok: false; reason: 'username_taken' | 'role_required' | 'partner_required' | 'partner_inactive' | 'last_owner' };
+
+/** «عوض کردن نقش» ادمین موجود از «ادمین‌ها» (برش ۹٫۴، سؤال ۱۹۷). */
+export interface RoleChange {
+  userId: string;
+  role: AdminRole;
+  /** چاپخانهٔ نقش «چاپخانه»؛ باید فعال باشد. برای نقش‌های دیگر نادیده. */
+  partnerId: string | null;
+  /** `roleSeen` نقشی که مالک دید. */
+  seen: string;
+  at: Date;
+  /** `admins.role`؛ هدف، زمان و جزئیات (نام کاربری، از، به) را خود تغییر می‌گذارد. */
+  event: Omit<AdminEventInput, 'targetType' | 'targetId' | 'detail' | 'at'>;
+}
+
+export type ChangedRole =
+  | { ok: true; username: string; partner: AdminPartnerRef | null }
+  | { ok: false; reason: 'not_found' | 'role_stale' | 'role_same' | 'last_owner' | 'partner_required' | 'partner_inactive' };
 
 export interface CompletedInvite {
   inviteId: string;
@@ -274,7 +308,7 @@ export interface AdminStore {
   /**
    * پیوند ثبت، در یک تراکنش زیر قفل: ادمین تازه با نقشش، یا برای ادمین موجود (بازیابی) رمز و برنامهٔ تأییدش
    * پاک، نشست‌ها و پیوندهای زنده‌اش باطل، و دوباره فعال. بعد خود پیوند و رویداد. نقش «چاپخانه» چاپخانهٔ فعال می‌خواهد، که
-   * تا پایان تراکنش `FOR SHARE` فعال می‌ماند (برش ۵٫۳).
+   * تا پایان تراکنش `FOR SHARE` فعال می‌ماند (برش ۵٫۳). نقش صریح برای آخرین مالک فعال فقط همان مالک (برش ۹٫۴).
    */
   createInvite(input: NewInvite): Promise<CreatedInvite>;
   findInvite(
@@ -296,6 +330,12 @@ export interface AdminStore {
    * نمی‌شود.
    */
   disableUser(userId: string, at: Date, event: AdminEventInput): Promise<'ok' | 'last_owner' | 'not_found'>;
+  /**
+   * «عوض کردن نقش» (برش ۹٫۴، سؤال ۱۹۷) در یک تراکنش زیر همان قفل: فقط اگر نقش امروز همان است که مالک دید (`roleSeen`)، با چاپخانهٔ
+   * فعال برای نقش «چاپخانه» (`FOR SHARE`)، و آخرین مالک فعال نقش دیگری نمی‌گیرد. نقش‌های قبلی می‌روند و یک ردیف تازه می‌نشیند، با رویداد
+   * `admins.role` در همان تراکنش. نشست‌ها باز می‌مانند: مجوز و محدوده با هر درخواست از همین جدول خوانده می‌شود.
+   */
+  changeRole(input: RoleChange): Promise<ChangedRole>;
   /** پیوندهای زندهٔ یک ادمین کنار می‌روند؛ ادمینی که هرگز وارد نشده بود، غیرفعال هم می‌شود. */
   revokeInvites(userId: string, at: Date, event: AdminEventInput): Promise<number>;
   logEvent(event: AdminEventInput): Promise<void>;
@@ -550,6 +590,11 @@ export function createAdminStore({ db }: Database): AdminStore {
         let userId: string;
         if (existing) {
           if (!input.allowExisting) return { ok: false, reason: 'username_taken' };
+          // دستور سرور با نقش صریح (`--operator`) برای آخرین مالک فعال پنل را بی مالک می‌گذاشت (برش ۹٫۴): پیش از هر نوشتن.
+          if (role && role.roleId !== 'owner') {
+            const owners = await activeOwners(tx);
+            if (owners.includes(existing.id) && owners.length <= 1) return { ok: false, reason: 'last_owner' };
+          }
           userId = existing.id;
           await tx
             .update(adminUsers)
@@ -690,6 +735,51 @@ export function createAdminStore({ db }: Database): AdminStore {
         await revokeOpenInvites(tx, userId, at);
         await tx.insert(adminEvents).values(adminEventRow(event));
         return 'ok' as const;
+      });
+    },
+
+    async changeRole(input) {
+      return db.transaction(async (tx): Promise<ChangedRole> => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${ADMIN_LOCK})`);
+        const [user] = await tx.select().from(adminUsers).where(eq(adminUsers.id, input.userId)).limit(1).for('update');
+        if (!user) return { ok: false, reason: 'not_found' };
+        const current = (await rolesIn(tx, [user.id])).get(user.id) ?? noRoles();
+        if (roleSeen(current.roles, current.partner?.id ?? null) !== input.seen) return { ok: false, reason: 'role_stale' };
+        let partner: AdminPartnerRef | null = null;
+        if (input.role === PARTNER_ROLE) {
+          if (!input.partnerId) return { ok: false, reason: 'partner_required' };
+          const [active] = await tx
+            .select({ id: printPartners.id, name: printPartners.name })
+            .from(printPartners)
+            .where(and(eq(printPartners.id, input.partnerId), isNull(printPartners.deactivatedAt)))
+            .limit(1)
+            .for('share');
+          if (!active) return { ok: false, reason: 'partner_inactive' };
+          partner = active;
+        }
+        if (roleSeen([input.role], partner?.id ?? null) === input.seen) return { ok: false, reason: 'role_same' };
+        if (input.role !== 'owner') {
+          const owners = await activeOwners(tx);
+          if (owners.includes(user.id) && owners.length <= 1) return { ok: false, reason: 'last_owner' };
+        }
+        await tx.delete(adminUserRoles).where(eq(adminUserRoles.adminUserId, user.id));
+        await tx.insert(adminUserRoles).values({ adminUserId: user.id, roleId: input.role, printPartnerId: partner?.id ?? null });
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...input.event,
+            targetType: 'admin',
+            targetId: user.id,
+            at: input.at,
+            detail: {
+              username: user.username,
+              from: current.roles,
+              to: input.role,
+              ...(current.partner ? { fromPartner: current.partner } : {}),
+              ...(partner ? { partner } : {}),
+            },
+          }),
+        );
+        return { ok: true, username: user.username, partner };
       });
     },
 

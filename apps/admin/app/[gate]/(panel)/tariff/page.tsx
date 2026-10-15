@@ -112,10 +112,10 @@ export default async function TariffPage({
   const query = await searchParams;
   const { tariff } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'tariff.read')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'tariff.read')) return <NoAccess gate={gate} session={session} />;
   const result = await tariff.overview(session);
   if (!result.ok) {
-    if (result.error === 'forbidden') return <NoAccess gate={gate} partner={session.partner} />;
+    if (result.error === 'forbidden') return <NoAccess gate={gate} session={session} />;
     return (
       <section className="jy-card ad-noaccess" aria-labelledby="t-missing">
         <h1 id="t-missing" className="jy-card__title">

@@ -49,7 +49,7 @@ export default async function ReviewRowPage({
   const query = await searchParams;
   const { shipments } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'shipments.review')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'shipments.review')) return <NoAccess gate={gate} session={session} />;
   const result = await shipments.row(session, id, row, { order: one(query, 'order') });
   if (!result.ok) notFound();
   const { review, manual, manualError, now, money } = result.value;

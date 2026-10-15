@@ -138,6 +138,22 @@ export async function disableAdminAction(_state: FormState, form: FormData): Pro
   redirect(panelPath(gate, '/admins'));
 }
 
+/**
+ * «عوض کردن نقش» (۹٫۴): موفق به «ادمین‌ها» با «نقش … شد»؛ فرم کهنه (کس دیگری همین حالا نقش را عوض کرد) صفحه را با نقش تازه دوباره
+ * می‌سازد، چون «همان که دیده شد» در خود صفحه است؛ بقیهٔ شکست‌ها با همان انتخاب‌ها، هرگز کد.
+ */
+export async function changeRoleAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { auth } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const userId = field(form, 'userId');
+  const values = { role: field(form, 'role'), partner: field(form, 'partner').slice(0, 64) };
+  const result = await auth.changeRole(session, { userId, ...values, seen: field(form, 'seen'), code: form.get('code') }, await requestIp());
+  if (!result.ok && result.error === 'role_stale') redirect(`${panelPath(gate, `/admins/${encodeURIComponent(userId)}/role`)}?e=role_stale`);
+  if (!result.ok) return failure(result, values);
+  redirect(`${panelPath(gate, '/admins')}?done=role&id=${result.value.userId}`);
+}
+
 export async function revokeInviteAction(form: FormData): Promise<void> {
   const gate = field(form, 'gate');
   const { auth } = requirePanel(gate);
@@ -989,7 +1005,7 @@ function refundBack(gate: string, result: { ok: boolean; orderNumber?: unknown }
 }
 
 /**
- * «X تومان را برگردان» (برش ۷٫۳، طرح `m-refund`؛ فقط مالک، کد تازه): موفق به صفحهٔ سفارش با نتیجه (`done=refund`)؛ خطای کد و
+ * «X تومان را برگردان» (برش ۷٫۳، طرح `m-refund`؛ مالک و از ۹٫۴ حسابدار، کد تازه): موفق به صفحهٔ سفارش با نتیجه (`done=refund`)؛ خطای کد و
  * پیش‌استعلامی که جواب نداد همین‌جا؛ بقیه (همین حالا جای دیگری عوض شد، درگاه می‌گوید پولش برگشته) به صفحهٔ سفارش با پیامش.
  */
 export async function refundGatewayAction(_state: FormState, form: FormData): Promise<FormState> {
@@ -1009,7 +1025,7 @@ export async function refundGatewayAction(_state: FormState, form: FormData): Pr
 }
 
 /**
- * «ثبت بازپرداخت دستی» (برش ۷٫۳، طرح `m-refund-manual`؛ فقط مالک، کد تازه): خطای هر فیلد و کد همین‌جا با نوشته‌ها (هرگز کد)؛ موفق
+ * «ثبت بازپرداخت دستی» (برش ۷٫۳، طرح `m-refund-manual`؛ مالک و از ۹٫۴ حسابدار، کد تازه): خطای هر فیلد و کد همین‌جا با نوشته‌ها (هرگز کد)؛ موفق
  * به صفحهٔ سفارش با «برگشت داده شد».
  */
 export async function refundManualAction(_state: FormState, form: FormData): Promise<FormState> {
