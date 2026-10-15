@@ -361,6 +361,16 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
     expect(printFile.status()).toBe(200);
     expect(createHash('sha256').update(await printFile.body()).digest('hex')).toBe(file!.sha256);
     expect((await page.request.get(at(`/orders/${o.A.number}/ticket/pdf`))).status()).toBe(200);
+    // همهٔ فایل‌ها (zip، ۹٫۱) هم، برای سفارش خودش؛ و در فهرست جمع‌وجور بی مبلغ و بی نام چاپخانه.
+    const zip = await page.request.get(at(`/orders/${o.A.number}/zip`));
+    expect(zip.status()).toBe(200);
+    expect(zip.headers()['content-type']).toBe('application/zip');
+    expect((await zip.body()).includes(Buffer.from(`jozve-${o.A.number}-1.pdf`))).toBe(true);
+    await page.goto(at('/orders'));
+    const row = page.locator(`details.ad-fold:has(> summary[data-order="${o.A.number}"])`);
+    await row.locator('summary').click();
+    await expect(row.getByRole('link', { name: 'همهٔ فایل‌ها (zip)' })).toBeVisible();
+    await expect(row.locator('.ad-row__prt, .ad-row__sum')).toHaveCount(0);
     await page.goto(at(`/orders/${o.A.number}/ticket`));
     await expect(page.getByRole('img', { name: new RegExp(`برگهٔ سفارش ${o.A.number}`) })).toBeVisible();
 
@@ -372,13 +382,14 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
     await expect(page.locator('.ad-title-row .jy-badge')).toHaveText('تحویل پست شد');
     await expect(side(page).getByRole('link', { name: /برگرداندن/ })).toHaveCount(0);
     expect(await statusOf(o.A)).toBe('handed_to_post');
-    expect(await eventsOf(o.A)).toEqual(['orders.print_download', 'orders.ticket_download', 'orders.status', 'orders.status']);
+    expect(await eventsOf(o.A)).toEqual(['orders.print_download', 'orders.ticket_download', 'orders.zip_download', 'orders.status', 'orders.status']);
 
     // مالک همان کارها را با نام حسن می‌بیند، در سفارش و در «رویدادها».
     await ownerPage.goto(at(`/orders/${o.A.number}`));
     const log = ownerPage.locator('.ad-log li');
     await expect(log.filter({ hasText: 'در صف چاپ ← در حال چاپ' })).toContainText('· حسن نوری');
     await expect(log.filter({ hasText: 'فایل چاپ دانلود شد' })).toContainText('· حسن نوری');
+    await expect(log.filter({ hasText: 'همهٔ فایل‌ها (zip) دانلود شد، 2 فایل' })).toContainText('· حسن نوری');
     await ownerPage.goto(at('/events?kind=orders'));
     await expect(ownerPage.locator('.ad-log li', { hasText: `سفارش ${o.A.number}: در صف چاپ ← در حال چاپ` })).toContainText('حسن نوری');
 
@@ -427,6 +438,7 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
       `/orders/${o.B.number}/pdf/1`,
       `/orders/${o.B.number}/print/1/1`,
       `/orders/${o.B.number}/ticket/pdf`,
+      `/orders/${o.B.number}/zip`,
     ]) {
       expect(await shown(path), path).toBe(404);
     }

@@ -664,7 +664,7 @@
     margin-inline-start: auto;
   }
   /* ستون کنار صفحهٔ سفارش: zip زیر کار بعدی */
-  .ad-zip91 {
+  .ad-status__zip {
     display: flex;
     flex-direction: column;
     gap: 4px;

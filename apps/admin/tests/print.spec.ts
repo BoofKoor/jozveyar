@@ -181,6 +181,30 @@ const printFiles = async (o: Seeded) =>
       FROM order_print_files f JOIN order_items i ON i.id = f.order_item_id
      WHERE i.order_id = ${o.id} ORDER BY i.seq, f.volume`;
 const side = (page: Page) => page.locator('.ad-status');
+/** ردیف یک سفارش در فهرست جمع‌وجور (۹٫۱): `details` با `summary` همان ردیف. */
+const fold = (page: Page, n: number) => page.locator(`details.ad-fold:has(> summary[data-order="${n}"])`);
+
+/**
+ * فایل‌های درون zip «همهٔ فایل‌ها» (برش ۹٫۱) به ترتیب فهرست مرکزی؛ بی فشرده‌سازی (stored)، پس بایت‌های هر فایل همان‌اند که در
+ * استوریج است. فایل‌های این تست کوچک‌اند، پس بی ZIP64.
+ */
+function unzipped(zip: Buffer): { name: string; bytes: Buffer }[] {
+  const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const count = zip.readUInt16LE(end + 10);
+  let at = zip.readUInt32LE(end + 16);
+  const files: { name: string; bytes: Buffer }[] = [];
+  for (let i = 0; i < count; i += 1) {
+    expect(zip.readUInt32LE(at)).toBe(0x02014b50);
+    expect(zip.readUInt16LE(at + 10)).toBe(0);
+    const size = zip.readUInt32LE(at + 24);
+    const nameLength = zip.readUInt16LE(at + 28);
+    const offset = zip.readUInt32LE(at + 42);
+    const local = offset + 30 + zip.readUInt16LE(offset + 26) + zip.readUInt16LE(offset + 28);
+    files.push({ name: zip.subarray(at + 46, at + 46 + nameLength).toString('latin1'), bytes: zip.subarray(local, local + size) });
+    at += 46 + nameLength + zip.readUInt16LE(at + 30) + zip.readUInt16LE(at + 32);
+  }
+  return files;
+}
 
 async function downloaded(page: Page, link: ReturnType<Page['locator']>) {
   const [download] = await Promise.all([page.waitForEvent('download'), link.click()]);
@@ -248,6 +272,18 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     await expect(ownerPage.locator('[data-print="building"] .ad-print__meta')).toHaveText('در حال ساختن فایل چاپ…');
     await expect(side(ownerPage).getByRole('button', { name: 'اول فایل چاپ ساخته شود' })).toHaveAttribute('aria-disabled', 'true');
     await expect(side(ownerPage).getByRole('button', { name: 'شروع چاپ' })).toHaveCount(0);
+    // zip (۹٫۱) تا فایل چاپ نیامده بسته است، با دلیلش؛ در ستون کنار و در مشخصات فهرست جمع‌وجور هر دو.
+    const waiting = 'فایل چاپ در حال ساخته شدن است؛ zip پس از آن باز می‌شود.';
+    await expect(side(ownerPage).getByRole('button', { name: 'همهٔ فایل‌ها (zip)' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(side(ownerPage).locator('.ad-status__zip .ad-hint')).toHaveText(waiting);
+    await ownerPage.goto(at('/orders'));
+    await fold(ownerPage, n).locator('summary').click();
+    await expect(fold(ownerPage, n).locator('[data-zip="waiting"]')).toHaveAttribute('aria-disabled', 'true');
+    await expect(fold(ownerPage, n).locator('.ad-zip__meta')).toHaveText(waiting);
+    await expect(fold(ownerPage, n).locator('.ad-jz__sum')).toHaveText('8 صفحه، 4 برگ، دو جلد (2 و 2 برگ)');
+    await ownerPage.goto(at(`/orders/${n}/zip`));
+    await expect(ownerPage).toHaveURL(new RegExp(`/orders/${n}\\?e=zip_not_ready$`));
+    await expect(alertOf(ownerPage)).toHaveText('همهٔ فایل‌های این سفارش هنوز آماده نیست؛ دلیلش کنار «همهٔ فایل‌ها (zip)» است. پس از آن دوباره بزن.');
 
     await release(o.P, 'prepare_order');
     await expect.poll(() => jobStatus(o.P, 'prepare_order'), { timeout: 60_000 }).toBe('done');
@@ -290,14 +326,26 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     expect(sha256(original.bytes)).toBe(item!.sha);
     expect(files.map((f) => f.sha)).not.toContain(item!.sha);
 
+    // zip همهٔ فایل‌ها از ستون کنار: هر دو جلد و برگه، با نام‌های تکی و همان sha256 کارگر؛ کنارش شمار فایل.
+    await ownerPage.reload();
+    const zipLink = side(ownerPage).getByRole('link', { name: 'همهٔ فایل‌ها (zip)' });
+    await expect(side(ownerPage).locator('.ad-status__zip .ad-hint')).toHaveText(/^3 فایل، [\d.]+ \S+: فایل چاپ و برگهٔ سفارش$/);
+    const zip = await downloaded(ownerPage, zipLink);
+    expect(zip.name).toBe(`sefaresh-${n}.zip`);
+    const inside = unzipped(zip.bytes);
+    expect(inside.map((f) => f.name)).toEqual([`jozve-${n}-1-jeld-1.pdf`, `jozve-${n}-1-jeld-2.pdf`, `barge-sefaresh-${n}.pdf`]);
+    expect(inside.map((f) => sha256(f.bytes))).toEqual([...files.map((f) => f.sha), (await ticketRow(o.P))!.sha]);
+
     await ownerPage.reload();
     const log = ownerPage.locator('.ad-log li');
+    await expect(log.filter({ hasText: 'همهٔ فایل‌ها (zip) دانلود شد، 3 فایل' })).toContainText('· سارا رضایی');
     await expect(log.filter({ hasText: 'PDF جزوه و فایل چاپ ساخته شد' })).toContainText('· سیستم');
     await expect(log.filter({ hasText: 'فایل چاپ جلد 1 دانلود شد' })).toContainText('· سارا رضایی');
     await expect(log.filter({ hasText: 'فایل چاپ جلد 2 دانلود شد' })).toContainText('· سارا رضایی');
     await expect(log.filter({ hasText: 'PDF اصلی جزوه دانلود شد' })).toContainText('· سارا رضایی');
     await ownerPage.goto(at('/events?kind=orders'));
     await expect(ownerPage.locator('.ad-log').getByText(`فایل چاپ سفارش ${n} جلد 2 دانلود شد`).first()).toBeVisible();
+    await expect(ownerPage.locator('.ad-log').getByText(`همهٔ فایل‌های سفارش ${n} (zip، 3 فایل) دانلود شد`).first()).toBeVisible();
     expect(ownerProblems).toEqual([]);
   });
 
@@ -353,6 +401,10 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     await expect(ticket.getByRole('link')).toHaveCount(0);
     expect(await jobStatus(o.Q, 'prepare_ticket')).toBe('running');
     expect((await ticketRow(o.Q))!.fresh).toBe(false);
+    // zip (۹٫۱) هم برگهٔ کهنه نمی‌دهد: بسته، با علت؛ و نشانی مستقیمش برمی‌گردد با پیام.
+    await expect(side(ownerPage).getByRole('button', { name: 'همهٔ فایل‌ها (zip)' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(side(ownerPage).locator('.ad-status__zip .ad-hint')).toHaveText('برگهٔ سفارش با نام و نشانی تازه دوباره ساخته می‌شود؛ zip پس از آن باز می‌شود.');
+    expect((await ownerContext.request.get(at(`/orders/${n}/zip`), { maxRedirects: 0 })).headers().location).toContain(`/orders/${n}?e=zip_not_ready`);
 
     // هیچ راهی برگهٔ کهنه را نمی‌دهد: نه دانلود، نه پیش‌نمایش، نه صفحهٔ برگه.
     await ownerPage.goto(at(`/orders/${n}/ticket/pdf`));
@@ -416,6 +468,19 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     await expect(log.filter({ hasText: 'PDF جزوهٔ 1 و فایل چاپ ساخته شد' })).toContainText('· سیستم');
     await expect(log.filter({ hasText: 'PDF جزوهٔ 2 و فایل چاپ ساخته شد' })).toContainText('· سیستم');
     await expect(log.filter({ hasText: 'فایل چاپ جزوهٔ 2 دانلود شد' })).toContainText('· سارا رضایی');
+
+    // فهرست جمع‌وجور (۹٫۱): یک کارت برای هر جزوه، و zip همان‌جا با فایل چاپ هر دو جزوه و برگه.
+    await ownerPage.goto(at('/orders'));
+    const row = fold(ownerPage, n);
+    await row.locator('summary').click();
+    await expect(row.locator('.ad-jz__head b')).toHaveText(['جزوهٔ 1', 'جزوهٔ 2']);
+    await expect(row.locator('.ad-jz .ad-files__name')).toHaveText(['ریاضی ۲ - جلسه ۱.pdf', 'نقشه - پیوست.pdf']);
+    await expect(row.locator('.ad-zip__meta')).toHaveText(/^3 فایل، [\d.]+ \S+: فایل چاپ دو جزوه و برگهٔ سفارش$/);
+    const zip = await downloaded(ownerPage, row.getByRole('link', { name: 'همهٔ فایل‌ها (zip)' }));
+    expect(zip.name).toBe(`sefaresh-${n}.zip`);
+    const inside = unzipped(zip.bytes);
+    expect(inside.map((f) => f.name)).toEqual([`jozve-${n}-1.pdf`, `jozve-${n}-2.pdf`, `barge-sefaresh-${n}.pdf`]);
+    expect(inside.map((f) => sha256(f.bytes))).toEqual([...files.map((f) => f.sha), (await ticketRow(o.M))!.sha]);
     expect(ownerProblems).toEqual([]);
   });
 
@@ -457,7 +522,9 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     const blocked = await sql`UPDATE orders SET status = 'printing', handed_to_post_at = NULL WHERE id = ${o.R.id}`.catch((error: unknown) => error);
     expect((blocked as { constraint_name?: string }).constraint_name).toBe('orders_files_deleted');
 
-    for (const path of [`/orders/${n}/print/1/1`, `/orders/${n}/pdf/1`, `/orders/${n}/ticket/pdf`]) {
+    await ownerPage.goto(at(`/orders/${n}`));
+    await expect(ownerPage.locator('[data-zip]')).toHaveCount(0);
+    for (const path of [`/orders/${n}/print/1/1`, `/orders/${n}/pdf/1`, `/orders/${n}/ticket/pdf`, `/orders/${n}/zip`]) {
       await ownerPage.goto(at(path));
       await expect(ownerPage, path).toHaveURL(new RegExp(`/orders/${n}\\?e=files_deleted$`));
       await expect(alertOf(ownerPage)).toHaveText(FILES_DELETED);
@@ -488,6 +555,14 @@ test.describe.serial('خروجی چاپ در پنل', () => {
         expect(small, `${width} ${path}`).toEqual([]);
         expect(blank, `${width} ${path}`).toEqual([]);
       }
+      // فهرست جمع‌وجور با دو ردیف باز (۹٫۱): دو جزوه، و zip آماده.
+      await page.goto(at('/orders'));
+      await fold(page, o.M.number).locator('summary').click();
+      await fold(page, o.P.number).locator('summary').click();
+      const opened = await layoutProblems(page);
+      expect(opened.overflow, `${width} folds`).toBeLessThanOrEqual(0);
+      expect(opened.small, `${width} folds`).toEqual([]);
+      expect(opened.blank, `${width} folds`).toEqual([]);
       // برگه در گوشی هم کل پهنا را می‌گیرد و بیرون نمی‌زند.
       await page.goto(at(`/orders/${o.P.number}/ticket`));
       const sheet = await page.locator('.ad-sheet img').boundingBox();

@@ -1331,9 +1331,11 @@ describe('فهرست جمع‌وجور و zip (برش ۹٫۱)', () => {
     expect(zipView({ ...spec, lastAssignmentAt: moved, lastRecipientEditAt: null }, NOW)).toEqual({ kind: 'waiting', what: 'ticket', cause: 'partner' });
   });
 
-  it('رویداد دانلود zip در رویدادهای سفارش، با شمار فایل', () => {
+  it('رویداد دانلود zip در رویدادهای سفارش، با شمار فایل؛ از چشم چاپخانه هم', () => {
     const d = details({ rest: { events: [{ id: 3, at: tehran('2026-10-05 11:12'), action: 'orders.zip_download', adminName: 'حسن', detail: { orderNumber: 10027, files: 2 } }] } });
     const entry = orderTimeline(d).find((e) => e.who === 'حسن');
     expect(entry && text(entry.text)).toBe('همهٔ فایل‌ها (zip) دانلود شد، 2 فایل');
+    const seen = orderTimeline(partnerView(d, 'partner-noor')).find((e) => e.who === 'حسن');
+    expect(seen && text(seen.text)).toBe('همهٔ فایل‌ها (zip) دانلود شد، 2 فایل');
   });
 });

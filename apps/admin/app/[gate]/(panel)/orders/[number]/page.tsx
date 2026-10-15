@@ -432,7 +432,7 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
   const zipState = view.canDownload ? zipView(details, now) : null;
   const zip =
     zipState && (zipState.kind === 'ready' || zipState.kind === 'waiting' || zipState.kind === 'failed') ? (
-      <div className="ad-zip91">
+      <div className="ad-status__zip">
         <ZipButton gate={gate} orderNumber={order.orderNumber} view={zipState} block />
       </div>
     ) : null;
