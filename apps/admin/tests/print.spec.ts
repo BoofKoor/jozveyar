@@ -329,6 +329,7 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     // zip همهٔ فایل‌ها از ستون کنار: هر دو جلد و برگه، با نام‌های تکی و همان sha256 کارگر؛ کنارش شمار فایل.
     await ownerPage.reload();
     const zipLink = side(ownerPage).getByRole('link', { name: 'همهٔ فایل‌ها (zip)' });
+    await expect(zipLink).toHaveAttribute('data-zip', 'ready');
     await expect(side(ownerPage).locator('.ad-status__zip .ad-hint')).toHaveText(/^3 فایل، [\d.]+ \S+: فایل چاپ و برگهٔ سفارش$/);
     const zip = await downloaded(ownerPage, zipLink);
     expect(zip.name).toBe(`sefaresh-${n}.zip`);
@@ -476,7 +477,9 @@ test.describe.serial('خروجی چاپ در پنل', () => {
     await expect(row.locator('.ad-jz__head b')).toHaveText(['جزوهٔ 1', 'جزوهٔ 2']);
     await expect(row.locator('.ad-jz .ad-files__name')).toHaveText(['ریاضی ۲ - جلسه ۱.pdf', 'نقشه - پیوست.pdf']);
     await expect(row.locator('.ad-zip__meta')).toHaveText(/^3 فایل، [\d.]+ \S+: فایل چاپ دو جزوه و برگهٔ سفارش$/);
-    const zip = await downloaded(ownerPage, row.getByRole('link', { name: 'همهٔ فایل‌ها (zip)' }));
+    const rowZip = row.getByRole('link', { name: 'همهٔ فایل‌ها (zip)' });
+    await expect(rowZip).toHaveAttribute('data-zip', 'ready');
+    const zip = await downloaded(ownerPage, rowZip);
     expect(zip.name).toBe(`sefaresh-${n}.zip`);
     const inside = unzipped(zip.bytes);
     expect(inside.map((f) => f.name)).toEqual([`jozve-${n}-1.pdf`, `jozve-${n}-2.pdf`, `barge-sefaresh-${n}.pdf`]);
