@@ -1280,7 +1280,7 @@ describe('فهرست جمع‌وجور و zip (برش ۹٫۱)', () => {
     expect(text(zipNote(two))).toMatch(/^4 فایل، .* مگابایت: فایل چاپ دو جزوه و برگهٔ سفارش$/);
   });
 
-  it('zip بسته، با دلیل و راه جلو؛ «ساخته نشد» پیش از «در حال ساختن»، و فایل چاپ پیش از برگه', () => {
+  it('zip بسته، با دلیل و راه جلو؛ فایل چاپ پیش از برگه', () => {
     const building = { status: 'running', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: null } as PanelPdfJob;
     const failed = { ...building, status: 'failed', attempts: 3, lastError: 'transient: x', finishedAt: NOW } as PanelPdfJob;
     const view = (over: Partial<PanelOrderDetails>, item: Partial<PanelOrderItem> = {}) =>
@@ -1303,8 +1303,10 @@ describe('فهرست جمع‌وجور و zip (برش ۹٫۱)', () => {
     expect(view({ ticket: null, ticketJob: building }, printedItem)).toEqual({ kind: 'waiting', what: 'ticket', cause: null });
     expect(text(zipNote(view({ ticket: null, ticketJob: building }, printedItem)))).toBe('برگهٔ سفارش در حال ساخته شدن است؛ zip پس از آن باز می‌شود.');
     expect(view({ ticket: null, ticketJob: failed }, printedItem)).toEqual({ kind: 'failed', what: 'ticket' });
-    // هر دو کار دارند: اول فایل چاپ.
+    // هر دو کار دارند: اول فایل چاپ، ساخته نشد یا در حال ساختن، پیش از هر حال برگه.
     expect(view({ pdfJob: failed, ticket: null, ticketJob: failed })).toEqual({ kind: 'failed', what: 'print' });
+    expect(view({ pdfJob: building, ...stale, events: [edited] })).toEqual({ kind: 'waiting', what: 'print', cause: null });
+    expect(view({ pdfJob: building, ticket: null, ticketJob: failed })).toEqual({ kind: 'waiting', what: 'print', cause: null });
   });
 
   it('بی دکمه: پرداخت‌نشده، بسته‌ای که فایل چاپ نساخت، و فایل‌های پاک‌شده؛ هر کدام با یادداشت صفحهٔ سفارش', () => {

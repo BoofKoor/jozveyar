@@ -1055,8 +1055,8 @@ export type ZipView =
 
 /**
  * «همهٔ فایل‌ها (zip)» یک سفارش (سؤال‌های ۲۳۱ و ۲۳۲): فایل چاپ همهٔ جلدهای همهٔ جزوه‌ها به ترتیب، و برگهٔ سفارش؛ بی PDF اصلی جزوه.
- * فقط وقتی همه ساخته و تازه‌اند، چون zip نیمه‌کاره یا با برگهٔ کهنه همان است که ۵٫۱ برای برگه بست؛ وگرنه چرا نه، و اول آنچه کار
- * می‌خواهد (ساخته نشد) پیش از آنچه فقط صبر (در حال ساختن).
+ * فقط وقتی همه ساخته و تازه‌اند، چون zip نیمه‌کاره یا با برگهٔ کهنه همان است که ۵٫۱ برای برگه بست؛ وگرنه چرا نه، با یک دلیل: اول
+ * فایل چاپ و بعد برگه.
  */
 export function zipView(source: PrintSource & TicketSource, at: Date): ZipView {
   const { order } = source;
@@ -1065,8 +1065,9 @@ export function zipView(source: PrintSource & TicketSource, at: Date): ZipView {
   const prints = source.items.map((item) => ({ item, view: printView(source, item, at) }));
   const ticket = ticketView(source);
   if (prints.length === 0 || prints.some(({ view }) => view.kind === 'closed') || ticket.kind === 'closed') return { kind: 'closed' };
-  if (prints.some(({ view }) => view.kind === 'failed')) return { kind: 'failed', what: 'print' };
-  if (prints.some(({ view }) => view.kind === 'building')) return { kind: 'waiting', what: 'print', cause: null };
+  // جزوه‌ای که فایل چاپ ندارد حال همان یک کار `prepare_order` سفارش را دارد: همه در حال ساختن‌اند، یا همه ساخته نشد.
+  const missing = prints.find(({ view }) => view.kind !== 'ready');
+  if (missing) return missing.view.kind === 'failed' ? { kind: 'failed', what: 'print' } : { kind: 'waiting', what: 'print', cause: null };
   if (ticket.kind === 'failed') return { kind: 'failed', what: 'ticket' };
   if (ticket.kind === 'updating') return { kind: 'waiting', what: 'ticket', cause: ticket.cause };
   if (ticket.kind !== 'ready' || !source.ticket) return { kind: 'waiting', what: 'ticket', cause: null };
