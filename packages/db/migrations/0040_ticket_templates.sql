@@ -13,6 +13,8 @@ CREATE TABLE "ticket_templates" (
 	"preview_at" timestamp with time zone,
 	"preview_order_number" integer,
 	"preview_pages" integer,
+	"preview_pdf_key" text,
+	"preview_png_key" text,
 	"preview_blocked" text[] DEFAULT '{}'::text[] NOT NULL,
 	"preview_error" text,
 	CONSTRAINT "ticket_templates_size" CHECK (octet_length("ticket_templates"."html") BETWEEN 1 AND 2097152),
@@ -21,7 +23,9 @@ CREATE TABLE "ticket_templates" (
 	CONSTRAINT "ticket_templates_file_name" CHECK (length("ticket_templates"."file_name") BETWEEN 1 AND 200),
 	CONSTRAINT "ticket_templates_activated" CHECK (NOT "ticket_templates"."is_active" OR "ticket_templates"."activated_at" IS NOT NULL),
 	CONSTRAINT "ticket_templates_preview" CHECK (("ticket_templates"."preview_at" IS NULL AND "ticket_templates"."preview_pages" IS NULL AND "ticket_templates"."preview_error" IS NULL)
-          OR ("ticket_templates"."preview_at" IS NOT NULL AND ("ticket_templates"."preview_pages" IS NULL) <> ("ticket_templates"."preview_error" IS NULL)))
+          OR ("ticket_templates"."preview_at" IS NOT NULL AND ("ticket_templates"."preview_pages" IS NULL) <> ("ticket_templates"."preview_error" IS NULL))),
+	CONSTRAINT "ticket_templates_preview_files" CHECK (("ticket_templates"."preview_pages" IS NULL) = ("ticket_templates"."preview_pdf_key" IS NULL) AND ("ticket_templates"."preview_pages" IS NULL) = ("ticket_templates"."preview_png_key" IS NULL)
+          AND ("ticket_templates"."preview_pages" IS NULL OR "ticket_templates"."preview_pages" >= 1))
 );
 --> statement-breakpoint
 ALTER TABLE "jobs" DROP CONSTRAINT "jobs_one_target";--> statement-breakpoint

@@ -1771,8 +1771,9 @@ export const TICKET_TEMPLATE_MAX_BYTES = 2 * 1024 * 1024;
  * نمی‌شود (`ticket_templates_frozen`، 0041)؛ عوض‌شدنی فقط فعال بودن و نتیجهٔ آخرین پیش‌نمایش است. یک نسخهٔ فعال برای هر نوع، برای
  * همهٔ چاپخانه‌ها؛ بی نسخهٔ فعال، قالب پیش‌فرض کارگر (`services/docworker/docworker/templates/`). برگشت = فعال کردن نسخهٔ قبل یا پیش‌فرض.
  *
- * پیش‌نمایش را کارگر می‌سازد (`preview_ticket_template`، با دادهٔ ساختگی یا یک سفارش واقعی) و نتیجه‌اش همین‌جاست: شمار صفحه و نشانی‌های
- * ردشده (فقط `data:` بار می‌شود)، یا خطای قالب با خط.
+ * پیش‌نمایش را کارگر می‌سازد (`preview_ticket_template`، با دادهٔ ساختگی یا یک سفارش واقعی) و نتیجه‌اش همین‌جاست: شمار صفحه، فایل‌ها و
+ * نشانی‌های ردشده (فقط `data:` بار می‌شود)، یا خطای قالب با خط. پیش‌نمایش با دادهٔ یک سفارش کنار فایل‌های همان سفارش است و با آنها پاک
+ * می‌شود (ADR-044)، چون نام و نشانی گیرنده را دارد.
  */
 export const ticketTemplates = pgTable(
   'ticket_templates',
@@ -1796,6 +1797,9 @@ export const ticketTemplates = pgTable(
     /** سفارشی که پیش‌نمایش با دادهٔ آن ساخته شد؛ null یعنی دادهٔ ساختگی. */
     previewOrderNumber: integer('preview_order_number'),
     previewPages: integer('preview_pages'),
+    /** PDF پیش‌نمایش و PNG صفحهٔ اولش؛ صفحهٔ n ام کنارش (`-n.png`)، مثل برگهٔ سفارش. */
+    previewPdfKey: text('preview_pdf_key'),
+    previewPngKey: text('preview_png_key'),
     previewBlocked: text('preview_blocked').array().notNull().default(sql`'{}'::text[]`),
     previewError: text('preview_error'),
   },
@@ -1814,6 +1818,12 @@ export const ticketTemplates = pgTable(
       'ticket_templates_preview',
       sql`(${t.previewAt} IS NULL AND ${t.previewPages} IS NULL AND ${t.previewError} IS NULL)
           OR (${t.previewAt} IS NOT NULL AND (${t.previewPages} IS NULL) <> (${t.previewError} IS NULL))`,
+    ),
+    /** فایل‌های پیش‌نمایش با صفحه‌هایش، نه بی آن. */
+    check(
+      'ticket_templates_preview_files',
+      sql`(${t.previewPages} IS NULL) = (${t.previewPdfKey} IS NULL) AND (${t.previewPages} IS NULL) = (${t.previewPngKey} IS NULL)
+          AND (${t.previewPages} IS NULL OR ${t.previewPages} >= 1)`,
     ),
   ],
 );

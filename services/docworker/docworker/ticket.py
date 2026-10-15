@@ -60,11 +60,12 @@ FONT_DIRS = (
 FONT_FILES = ("Vazirmatn-Regular.ttf", "Vazirmatn-SemiBold.ttf")
 
 
-def ticket_keys(order_number: int, stamp: str) -> tuple[str, str]:
-    """PDF و پیش‌نمایش صفحهٔ اول برگه، به نام اثر انگشت داده‌اش: فایلی که زیر یک کلید نشست دیگر عوض نمی‌شود، پس ردیفی که به آن
-    اشاره می‌کند هیچ‌وقت فایل دادهٔ دیگری را نمی‌دهد، حتی وسط ساختن دوباره. صفحهٔ n ام (از ۲) `-n.png` (`preview_key_of`). برگه‌های
-    کهنه با بقیهٔ فایل‌های سفارش پاک می‌شوند (ADR-044)."""
-    base = f"{ORDERS_PREFIX}{order_number}/ticket-{stamp[:16]}"
+def ticket_keys(order_number: int, digest: str) -> tuple[str, str]:
+    """PDF و پیش‌نمایش صفحهٔ اول برگه، به نام sha256 خود PDF: فایلی که زیر یک کلید نشست دیگر عوض نمی‌شود، پس ردیفی که به آن
+    اشاره می‌کند هیچ‌وقت فایل دیگری را نمی‌دهد، حتی وسط ساختن دوباره با دادهٔ تازه یا قالب تازه (۹٫۲)؛ تا ۹٫۱ اثر انگشت داده بود، که
+    قالب تازه با همان داده بازنویسی‌اش می‌کرد. صفحهٔ n ام (از ۲) `-n.png` (`preview_key_of`). برگه‌های کهنه با بقیهٔ فایل‌های سفارش
+    پاک می‌شوند (ADR-044)."""
+    base = f"{ORDERS_PREFIX}{order_number}/ticket-{digest[:16]}"
     return f"{base}.pdf", f"{base}.png"
 
 
@@ -334,11 +335,11 @@ def prepare_ticket(conn: psycopg.Connection, storage: S3Storage, order_id: str) 
         templates = active_templates(conn)
         # پیش از ساختن و بارگذاری: کار تراکنش بازی نگه نمی‌دارد.
         conn.commit()
-        pdf_key, png_key = ticket_keys(data.order_number, stamp)
         with tempfile.TemporaryDirectory(prefix="docworker-ticket-") as workdir:
             pdf, png = os.path.join(workdir, "ticket.pdf"), os.path.join(workdir, "ticket.png")
             pages = render_ticket(data, templates, pdf, png)
             size, digest = os.path.getsize(pdf), _sha256(pdf)
+            pdf_key, png_key = ticket_keys(data.order_number, digest)
             storage.upload(pdf_key, pdf, "application/pdf")
             for n in range(1, pages + 1):
                 storage.upload(preview_key_of(png_key, n), preview_key_of(png, n), "image/png")
@@ -353,8 +354,6 @@ def prepare_ticket(conn: psycopg.Connection, storage: S3Storage, order_id: str) 
             conn.rollback()
             continue
         bijak_id, first_id = _ids(templates)
-        # کلید برگه از اثر انگشت داده است، نه قالب: قالب تازه همان کلید را بازنویسی می‌کند، پس هر صفحه‌ای که دیگر نیست پاک
-        # نمی‌شود ولی با `page_count` دیده نمی‌شود.
         conn.execute(
             """INSERT INTO order_tickets (order_id, storage_key, size_bytes, sha256, preview_key, stamp, built_at, page_count,
                                           bijak_template_id, first_page_template_id)
@@ -371,48 +370,68 @@ def prepare_ticket(conn: psycopg.Connection, storage: S3Storage, order_id: str) 
     raise RuntimeError(f"دادهٔ برگهٔ سفارش {order_id} {MAX_REBUILDS} بار وسط ساختن عوض شد")
 
 
-def template_preview_keys(template_id: int) -> tuple[str, str]:
-    """PDF و پیش‌نمایش صفحهٔ اول پیش‌نمایش یک نسخهٔ قالب؛ صفحهٔ n ام با `preview_key_of`."""
-    base = f"{TEMPLATES_PREFIX}{template_id}/preview"
+def template_preview_keys(template_id: int, order_number: int | None = None) -> tuple[str, str]:
+    """PDF و PNG صفحهٔ اول پیش‌نمایش یک نسخهٔ قالب؛ صفحهٔ n ام با `preview_key_of`. پیش‌نمایش با دادهٔ یک سفارش کنار فایل‌های همان
+    سفارش است، تا با آنها پاک شود (`retention.py`، ADR-044): نام، نشانی و موبایل گیرنده را دارد."""
+    if order_number is None:
+        base = f"{TEMPLATES_PREFIX}{template_id}/preview"
+    else:
+        base = f"{ORDERS_PREFIX}{order_number}/template-{template_id}-preview"
     return f"{base}.pdf", f"{base}.png"
 
 
 def preview_ticket_template(conn: psycopg.Connection, storage: S3Storage, template_id: int, payload: dict) -> dict:
     """پیش‌نمایش یک نسخهٔ قالب (۹٫۲، پیش از فعال کردن): با دادهٔ سفارشی که مالک داد (`payload.orderNumber`) یا دادهٔ ساختگی، فقط
-    صفحه‌های همان نوع. نتیجه روی ردیف همان نسخه: شمار صفحه و نشانی‌های ردشده، یا خطای قالب با خط. خطای قالب شکست کار نیست:
-    پیش‌نمایش همان را گزارش می‌کند."""
+    صفحه‌های همان نوع. نتیجه روی ردیف همان نسخه: شمار صفحه، فایل‌ها و نشانی‌های ردشده، یا خطای قالب با خط. خطای قالب شکست کار
+    نیست: پیش‌نمایش همان را گزارش می‌کند. سفارشی که فایل‌هایش پاک شده پیش‌نمایش نمی‌دهد، چون فایل تازه‌اش را دیگر کسی پاک نمی‌کرد."""
     row = conn.execute("SELECT kind, html FROM ticket_templates WHERE id = %s", (template_id,)).fetchone()
     if row is None:
         raise PermanentFailure("template_missing")
     kind, html = row
     number = payload.get("orderNumber")
+    order_id = None
     if number is None:
         data = sample()
     else:
-        found = conn.execute("SELECT id::text FROM orders WHERE order_number = %s", (number,)).fetchone()
+        found = conn.execute(
+            "SELECT id::text, files_deleted_at IS NOT NULL FROM orders WHERE order_number = %s", (number,)
+        ).fetchone()
         if found is None:
             raise PermanentFailure("order_missing", str(number))
-        data, _ = _load(conn, found[0], closed_ok=True)
+        order_id, deleted = found
+        if deleted:
+            raise PermanentFailure("files_deleted", str(number))
+        data, _ = _load(conn, order_id, closed_ok=True)
     conn.commit()
     templates = {kind: Template(kind, template_id, html)}
-    pdf_key, png_key = template_preview_keys(template_id)
-    pages, blocked, error = 0, [], None
+    pdf_key, png_key = template_preview_keys(template_id, number)
     with tempfile.TemporaryDirectory(prefix="docworker-preview-") as workdir:
         try:
             rendered = render(templates, ticket_pages(data, (kind,)), workdir)
         except TemplateFailure as failure:
-            error = str(failure)
+            pages, blocked, error = None, [], str(failure)
         else:
             pdf, png = os.path.join(workdir, "preview.pdf"), os.path.join(workdir, "preview.png")
             pages = merge(rendered, pdf, png, f"پیش‌نمایش قالب {template_id}")
-            blocked = rendered.blocked
+            blocked, error = rendered.blocked, None
+            if order_id is not None:
+                # زیر قفل اشتراکی ردیف سفارش تا commit همین کار: پاک کردن فایل‌های سفارش (`FOR UPDATE SKIP LOCKED`) یا پیش از این
+                # بود و اینجا دیده می‌شود، یا پس از این و این فایل‌ها را هم می‌برد.
+                gone = conn.execute(
+                    "SELECT files_deleted_at IS NOT NULL FROM orders WHERE id = %s FOR SHARE", (order_id,)
+                ).fetchone()[0]
+                if gone:
+                    conn.rollback()
+                    raise PermanentFailure("files_deleted", str(number))
             storage.upload(pdf_key, pdf, "application/pdf")
             for n in range(1, pages + 1):
                 storage.upload(preview_key_of(png_key, n), preview_key_of(png, n), "image/png")
+    done = error is None
     conn.execute(
         """UPDATE ticket_templates
-              SET preview_at = now(), preview_order_number = %s, preview_pages = %s, preview_blocked = %s, preview_error = %s
+              SET preview_at = now(), preview_order_number = %s, preview_pages = %s, preview_pdf_key = %s, preview_png_key = %s,
+                  preview_blocked = %s, preview_error = %s
             WHERE id = %s""",
-        (number, pages if error is None else None, blocked, error, template_id),
+        (number, pages, pdf_key if done else None, png_key if done else None, blocked, error, template_id),
     )
     return {"template": template_id, "pages": pages, "error": error}

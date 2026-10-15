@@ -31,6 +31,7 @@ export * from './candidates.js';
 export * from './shipments.js';
 export * from './report.js';
 export * from './tariff.js';
+export * from './templates.js';
 export * from './settings.js';
 export * from './checkout.js';
 export * from './secrets.js';

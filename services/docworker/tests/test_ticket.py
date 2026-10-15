@@ -20,7 +20,7 @@ DUE = datetime.fromisoformat("2026-10-06T00:00:00+03:30")  # «تا پایان �
 PAID = datetime.fromisoformat("2026-10-03T14:05:00+03:30")
 
 
-def test_ticket_keys_carry_the_stamp_and_every_page_has_a_preview():
+def test_ticket_keys_carry_the_pdf_digest_and_every_page_has_a_preview():
     pdf, png = ticket_keys(10027, "0123456789abcdef0123456789abcdef")
     assert (pdf, png) == ("orders/10027/ticket-0123456789abcdef.pdf", "orders/10027/ticket-0123456789abcdef.png")
     # صفحهٔ اول همان کلید پیش از ۹٫۲؛ بقیه کنارش.
@@ -30,6 +30,8 @@ def test_ticket_keys_carry_the_stamp_and_every_page_has_a_preview():
         "orders/10027/ticket-0123456789abcdef-3.png",
     ]
     assert template_preview_keys(7) == ("ticket-templates/7/preview.pdf", "ticket-templates/7/preview.png")
+    # با دادهٔ یک سفارش کنار فایل‌های همان سفارش، تا با آنها پاک شود.
+    assert template_preview_keys(7, 10027) == ("orders/10027/template-7-preview.pdf", "orders/10027/template-7-preview.png")
 
 
 def test_without_vazirmatn_the_ticket_fails_clearly(monkeypatch, tmp_path):
@@ -163,7 +165,7 @@ def ticket_job(conn, order_id):
 def ticket_row(conn, order_id):
     return conn.execute(
         """SELECT t.storage_key, t.preview_key, t.size_bytes, t.stamp, t.stamp = order_ticket_stamp(o), t.page_count,
-                  t.bijak_template_id, t.first_page_template_id
+                  t.bijak_template_id, t.first_page_template_id, t.sha256
              FROM order_tickets t JOIN orders o ON o.id = t.order_id WHERE t.order_id = %s""",
         (order_id,),
     ).fetchone()
@@ -189,9 +191,9 @@ def test_a_paid_order_gets_the_bijak_and_a_first_page_with_a_preview_of_each(tmp
     order_id, number = paid_order(conn)
     drain(worker, conn)
     assert ticket_job(conn, order_id) == ("done", 1, None)
-    key, preview, size, stamp, fresh, pages, bijak_id, first_id = ticket_row(conn, order_id)
+    key, preview, size, stamp, fresh, pages, bijak_id, first_id, digest = ticket_row(conn, order_id)
     # بیجک و برگهٔ اول تنها جزوه، با قالب‌های پیش‌فرض (بی نسخهٔ فعال).
-    assert fresh and (key, preview) == ticket_keys(number, stamp)
+    assert fresh and (key, preview) == ticket_keys(number, digest)
     assert (pages, bijak_id, first_id) == (2, None, None)
     # دادهٔ برگه همان سفارش: شهر و استان، فایل‌ها با بازهٔ صفحه، کاغذ و صحافی همان نسخهٔ تعرفه، و مهلت.
     [data] = rendered
@@ -211,7 +213,7 @@ def test_a_paid_order_gets_the_bijak_and_a_first_page_with_a_preview_of_each(tmp
     assert len(texts) == 2 and all(str(number) in text for text in texts)
     path = str(tmp_path / "ticket.pdf")
     worker.storage.download(key, path)
-    assert os.path.getsize(path) == size
+    assert os.path.getsize(path) == size and ticket._sha256(path) == digest
     for n in (1, 2):
         worker.storage.download(preview_key_of(preview, n), str(tmp_path / f"{n}.png"))
         with open(tmp_path / f"{n}.png", "rb") as f:
@@ -224,20 +226,21 @@ def test_an_active_template_builds_its_pages_and_is_recorded_on_the_ticket(tmp_p
     first = template(conn, "first_page", "<p>FIRST-{{ jozve.seq }}-{{ print_info.file_info.pages }}</p>", active=True)
     order_id, number = paid_order(conn)
     drain(worker, conn)
-    key, _, _, _, fresh, pages, bijak_id, first_id = ticket_row(conn, order_id)
+    key, _, _, _, fresh, pages, bijak_id, first_id, _ = ticket_row(conn, order_id)
     assert fresh and (pages, bijak_id, first_id) == (2, bijak, first)
     texts = pdf_text(worker, key, tmp_path)
     assert f"BIJAK-V-{number}-1" in texts[0] and "FIRST-1-120" in texts[1]
 
 
 @services
-def test_a_template_activated_while_the_ticket_is_built_rebuilds_it(conn, worker, monkeypatch):
+def test_a_template_activated_while_the_ticket_is_built_rebuilds_it(tmp_path, conn, worker, monkeypatch):
     """فعال کردن قالب وسط ساختن (کار در دست کارگر، پس فعال کردن آن را دوباره در صف نمی‌گذارد): کارگر پیش از ثبت قالب‌های فعال را
     زیر قفل می‌سنجد و برگه را با قالب تازه از نو می‌سازد. شاهد: بی فعال کردن، یک بار."""
-    order_id, _ = paid_order(conn)
+    order_id, number = paid_order(conn)
     late = template(conn, "bijak", "<p>LATE {{ order.number }}</p>")
-    used = []
+    used, uploaded = [], []
     real = ticket.render_ticket
+    real_upload = worker.storage.upload
 
     def render(data, templates, *paths):
         used.append(templates["bijak"].id)
@@ -246,11 +249,23 @@ def test_a_template_activated_while_the_ticket_is_built_rebuilds_it(conn, worker
                 activate(other, late, "bijak")
         return real(data, templates, *paths)
 
+    def upload(key, *rest):
+        uploaded.append(key)
+        return real_upload(key, *rest)
+
     monkeypatch.setattr(ticket, "render_ticket", render)
+    monkeypatch.setattr(worker.storage, "upload", upload)
     drain(worker, conn)
     assert used == [None, late]
     assert ticket_job(conn, order_id) == ("done", 1, None)
-    assert ticket_row(conn, order_id)[6] == late
+    key, *_, bijak_id, _, _ = ticket_row(conn, order_id)
+    assert bijak_id == late
+    # کلید از sha256 خود PDF است: برگهٔ قالب پیش‌فرض که کنار رفت زیر کلید خودش همان ماند، و برگهٔ تازه کلید دیگری دارد، پس دانلودی
+    # که پیش از ثبت شروع شده بود فایل نیمه‌عوض‌شده نمی‌گیرد.
+    first, second = [k for k in uploaded if k.endswith(".pdf")]
+    assert second == key and first != key and first.startswith(f"orders/{number}/ticket-")
+    assert f"LATE {number}" not in pdf_text(worker, first, tmp_path)[0]
+    assert f"LATE {number}" in pdf_text(worker, key, tmp_path)[0]
 
 
 @services
@@ -353,6 +368,20 @@ def preview_row(conn, template_id):
     ).fetchone()
 
 
+def preview_files(conn, template_id):
+    return conn.execute("SELECT preview_pdf_key, preview_png_key FROM ticket_templates WHERE id = %s", (template_id,)).fetchone()
+
+
+def preview_job_state(conn, template_id):
+    return conn.execute(
+        "SELECT status::text, last_error FROM jobs WHERE ticket_template_id = %s AND kind = %s", (template_id, PREVIEW_TICKET_TEMPLATE)
+    ).fetchone()
+
+
+def stored(worker, prefix):
+    return sorted(o.key for o in worker.storage.list_objects(prefix))
+
+
 @services
 def test_a_template_preview_with_sample_or_real_data_and_its_errors(tmp_path, conn, worker):
     first = template(conn, "first_page", '<p>PREVIEW-{{ jozve.seq }}</p><img src="https://example.com/logo.png">')
@@ -361,6 +390,7 @@ def test_a_template_preview_with_sample_or_real_data_and_its_errors(tmp_path, co
     drain(worker, conn)
     assert preview_row(conn, first) == (None, 2, ["https://example.com/logo.png"], None, True)
     pdf, png = template_preview_keys(first)
+    assert preview_files(conn, first) == (pdf, png)
     texts = pdf_text(worker, pdf, tmp_path)
     assert ["PREVIEW-1" in texts[0], "PREVIEW-2" in texts[1]] == [True, True]
     worker.storage.download(preview_key_of(png, 2), str(tmp_path / "p2.png"))
@@ -377,7 +407,66 @@ def test_a_template_preview_with_sample_or_real_data_and_its_errors(tmp_path, co
     drain(worker, conn)
     number_used, pages, _, error, done = preview_row(conn, broken)
     assert (number_used, pages, done) == (None, None, True) and error.startswith("bijak خط 2:")
-    status = conn.execute(
-        "SELECT status::text FROM jobs WHERE ticket_template_id = %s AND kind = %s", (broken, PREVIEW_TICKET_TEMPLATE)
-    ).fetchone()[0]
-    assert status == "done"
+    assert preview_files(conn, broken) == (None, None)
+    assert preview_job_state(conn, broken) == ("done", None)
+
+
+@services
+def test_a_preview_with_order_data_sits_with_the_order_files_and_goes_with_them(conn, worker):
+    """پیش‌نمایش با دادهٔ یک سفارش نام، نشانی و موبایل گیرنده را دارد: کنار فایل‌های همان سفارش است و با پاک شدن آنها می‌رود
+    (`retention.py`، ADR-044)؛ و سفارشی که فایل‌هایش پاک شده دیگر پیش‌نمایش نمی‌دهد. شاهد: پیش‌نمایش ساختگی زیر پیشوند قالب‌ها می‌ماند."""
+    from docworker import retention
+
+    bijak = template(conn, "bijak", "<p>RET {{ order.number }}</p>")
+    preview_job(conn, bijak)
+    drain(worker, conn)
+    sample_pdf, _ = template_preview_keys(bijak)
+    order_id, number = paid_order(conn, status="printing")
+    conn.execute(
+        "UPDATE orders SET status = 'handed_to_post', handed_to_post_at = now() - interval '400 days' WHERE id = %s", (order_id,)
+    )
+    conn.commit()
+    preview_job(conn, bijak, {"orderNumber": number})
+    drain(worker, conn)
+    pdf, png = template_preview_keys(bijak, number)
+    assert preview_files(conn, bijak) == (pdf, png) and preview_row(conn, bijak)[:2] == (number, 1)
+    mine = f"orders/{number}/template-{bijak}-"
+    assert stored(worker, mine) == [pdf, png]
+
+    while number not in retention.sweep(conn, worker.storage, batch=50):
+        pass
+    assert stored(worker, f"orders/{number}/") == [] and stored(worker, sample_pdf) == [sample_pdf]
+
+    preview_job(conn, bijak, {"orderNumber": number})
+    drain(worker, conn)
+    assert preview_job_state(conn, bijak) == ("failed", f"files_deleted: {number}")
+    assert stored(worker, mine) == []
+
+
+@services
+def test_order_files_deleted_while_the_preview_renders_leave_no_preview_behind(conn, worker, monkeypatch):
+    """پاک شدن فایل‌های سفارش وسط ساختن پیش‌نمایش: بارگذاری زیر قفل ردیف سفارش است و پاک شدن را دوباره می‌سنجد، پس فایلی که
+    دیگر کسی پاکش نمی‌کرد نمی‌ماند. شاهد: بی پاک شدن، پیش‌نمایش ساخته می‌شود."""
+    bijak = template(conn, "bijak", "<p>LATE-DELETE {{ order.number }}</p>")
+    order_id, number = paid_order(conn, status="cancelled")
+    real = ticket.render
+    calls = []
+
+    def render(*args):
+        calls.append(1)
+        if len(calls) == 1:
+            with psycopg.connect(os.environ["DATABASE_URL"]) as other:
+                other.execute("UPDATE orders SET files_deleted_at = now() WHERE id = %s", (order_id,))
+        return real(*args)
+
+    monkeypatch.setattr(ticket, "render", render)
+    preview_job(conn, bijak, {"orderNumber": number})
+    drain(worker, conn)
+    assert preview_job_state(conn, bijak) == ("failed", f"files_deleted: {number}")
+    assert stored(worker, f"orders/{number}/template-") == [] and preview_files(conn, bijak) == (None, None)
+
+    _, other_number = paid_order(conn, status="cancelled")
+    preview_job(conn, bijak, {"orderNumber": other_number})
+    drain(worker, conn)
+    assert preview_job_state(conn, bijak) == ("done", None)
+    assert stored(worker, f"orders/{other_number}/template-") == list(template_preview_keys(bijak, other_number))

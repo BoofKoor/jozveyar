@@ -16,7 +16,8 @@ BEGIN
   END IF;
   IF TG_OP = 'INSERT' THEN
     IF NEW.is_active OR NEW.activated_at IS NOT NULL OR NEW.preview_at IS NOT NULL OR NEW.preview_order_number IS NOT NULL
-       OR NEW.preview_pages IS NOT NULL OR NEW.preview_error IS NOT NULL OR cardinality(NEW.preview_blocked) > 0 THEN
+       OR NEW.preview_pages IS NOT NULL OR NEW.preview_pdf_key IS NOT NULL OR NEW.preview_png_key IS NOT NULL
+       OR NEW.preview_error IS NOT NULL OR cardinality(NEW.preview_blocked) > 0 THEN
       RAISE EXCEPTION 'نسخهٔ تازهٔ قالب غیرفعال و بی پیش‌نمایش ساخته می‌شود'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'ticket_templates_insert_state';
     END IF;

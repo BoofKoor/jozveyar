@@ -1,5 +1,5 @@
 {
-  "id": "caba7d32-fae3-4fa6-973d-67b7ee964c18",
+  "id": "945d9662-c3e1-48f6-8c99-7f91094ff289",
   "prevId": "b332ed3f-e5b1-4c97-8144-832597928779",
   "version": "7",
   "dialect": "postgresql",
@@ -5747,6 +5747,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "preview_pdf_key": {
+          "name": "preview_pdf_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "preview_png_key": {
+          "name": "preview_png_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "preview_blocked": {
           "name": "preview_blocked",
           "type": "text[]",
@@ -5842,6 +5854,10 @@
         "ticket_templates_preview": {
           "name": "ticket_templates_preview",
           "value": "(\"ticket_templates\".\"preview_at\" IS NULL AND \"ticket_templates\".\"preview_pages\" IS NULL AND \"ticket_templates\".\"preview_error\" IS NULL)\n          OR (\"ticket_templates\".\"preview_at\" IS NOT NULL AND (\"ticket_templates\".\"preview_pages\" IS NULL) <> (\"ticket_templates\".\"preview_error\" IS NULL))"
+        },
+        "ticket_templates_preview_files": {
+          "name": "ticket_templates_preview_files",
+          "value": "(\"ticket_templates\".\"preview_pages\" IS NULL) = (\"ticket_templates\".\"preview_pdf_key\" IS NULL) AND (\"ticket_templates\".\"preview_pages\" IS NULL) = (\"ticket_templates\".\"preview_png_key\" IS NULL)\n          AND (\"ticket_templates\".\"preview_pages\" IS NULL OR \"ticket_templates\".\"preview_pages\" >= 1)"
         }
       },
       "isRLSEnabled": false
