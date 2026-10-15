@@ -306,7 +306,22 @@ test.describe.serial('سفارش‌ها در پنل', () => {
 
   test('جزئیات و دانلود فایل چاپ و PDF اصلی جزوه از استوریج داخلی، با رویدادشان', async () => {
     await ownerPage.goto(at('/orders'));
-    await ownerPage.locator(`.ad-row[data-order="${o.A.number}"]`).click();
+    // فهرست جمع‌وجور (۹٫۱): کلیک روی ردیف مشخصات فایل‌ها را همان‌جا باز می‌کند، دوباره بسته؛ «صفحهٔ کامل سفارش» درون مشخصات.
+    const fold = ownerPage.locator(`details.ad-fold:has(> summary[data-order="${o.A.number}"])`);
+    await expect(fold).not.toHaveAttribute('open');
+    await fold.locator('summary').click();
+    await expect(fold).toHaveAttribute('open', '');
+    await expect(fold.locator('.ad-jz__head b')).toHaveText('جزوه');
+    await expect(fold.locator('.ad-jz__spec')).toHaveText('سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم · طلق و سیم · 1 نسخه');
+    await expect(fold.locator('.ad-files li')).toHaveText(['1ریاضی ۲ - جلسه ۱.pdf10 صفحه', '2ریاضی ۲ - جلسه ۲.pdf10 صفحه']);
+    await expect(fold.locator('.ad-jz__sum')).toHaveText('20 صفحه، 10 برگ، یک جلد');
+    const [partner] = await sql<{ name: string }[]>`SELECT p.name FROM orders o JOIN print_partners p ON p.id = o.print_partner_id WHERE o.id = ${o.A.id}`;
+    await expect(fold.locator('summary .ad-row__state')).toHaveText('در صف چاپ');
+    await expect(fold.locator('summary .ad-row__prt')).toHaveText(partner!.name);
+    await fold.locator('summary').click();
+    await expect(fold).not.toHaveAttribute('open');
+    await fold.locator('summary').click();
+    await fold.getByRole('link', { name: 'صفحهٔ کامل سفارش' }).click();
     await expect(ownerPage.getByRole('heading', { name: `سفارش ${o.A.number}` })).toBeVisible();
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('در صف چاپ');
     await expect(ownerPage.locator('.ad-status .jy-card__title')).toHaveText('تحویل به پست تا امروز');
@@ -418,7 +433,9 @@ test.describe.serial('سفارش‌ها در پنل', () => {
     const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
     await nav.getByRole('link', { name: 'سفارش‌ها' }).click();
     await expect(nav.getByRole('link', { name: 'سفارش‌ها' })).toHaveAttribute('aria-current', 'page');
-    await page.locator(`.ad-row[data-order="${o.E.number}"]`).click();
+    const fold = page.locator(`details.ad-fold:has(> summary[data-order="${o.E.number}"])`);
+    await fold.locator('summary').click();
+    await fold.getByRole('link', { name: 'صفحهٔ کامل سفارش' }).click();
     await expect(page.getByRole('heading', { name: `سفارش ${o.E.number}` })).toBeVisible();
     await expect.poll(() => jobStatus(o.E), { timeout: 60_000 }).toBe('done');
     await page.reload();
@@ -453,6 +470,13 @@ test.describe.serial('سفارش‌ها در پنل', () => {
         expect(small, `${width} ${path}`).toEqual([]);
         expect(blank, `${width} ${path}`).toEqual([]);
       }
+      // فهرست جمع‌وجور با ردیف باز (۹٫۱): مشخصات، zip و «صفحهٔ کامل سفارش» هم بی سرریز و با هدف لمسی ۴۴.
+      await page.goto(at('/orders'));
+      await page.locator(`details.ad-fold:has(> summary[data-order="${o.A.number}"]) > summary`).click();
+      const opened = await layoutProblems(page);
+      expect(opened.overflow, `${width} fold`).toBeLessThanOrEqual(0);
+      expect(opened.small, `${width} fold`).toEqual([]);
+      expect(opened.blank, `${width} fold`).toEqual([]);
       // جدول در دسکتاپ با سرستون؛ کارت فشرده در گوشی بی سرستون و با «تومان» کنار مبلغ.
       await page.goto(at('/orders'));
       if (width <= 860) {

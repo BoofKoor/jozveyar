@@ -18,6 +18,8 @@ import {
   type PanelDueSummary,
   type PanelJozveFile,
   type PanelOrderDetails,
+  type PanelOrderLine,
+  type PanelOrderSpec,
   type PanelOrderStore,
   type PanelScope,
   type PanelStatusChange,
@@ -117,6 +119,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       ],
     }),
     list: record('list', []),
+    specs: record('specs', new Map()),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
     stats: record('stats', { printing: 2, handed: 42, onTime: 41 }),
     details: record('details', null),
@@ -330,12 +333,12 @@ describe('فهرست', () => {
     const { orders, calls } = service();
     const open = await orders.list(session(), {});
     expect(open).toMatchObject({ ok: true, value: { bucket: 'open', page: 1, pages: 1, q: '' } });
-    expect(calls.at(-1)!.args[0]).toMatchObject({ bucket: 'open', search: null, limit: 50, offset: 0 });
+    expect(calls.filter((c) => c.method === 'list').at(-1)!.args[0]).toMatchObject({ bucket: 'open', search: null, limit: 50, offset: 0 });
 
     // «همه» ۱۲۰ سفارش: سه صفحه؛ صفحهٔ ۹ یعنی صفحهٔ ۳، از ردیف ۱۰۰.
     const all = await orders.list(session(), { q: ' ۱۰۰۲۷ ', page: '9' });
     expect(all).toMatchObject({ ok: true, value: { bucket: 'all', page: 3, pages: 3, q: '۱۰۰۲۷' } });
-    expect(calls.at(-1)!.args[0]).toMatchObject({
+    expect(calls.filter((c) => c.method === 'list').at(-1)!.args[0]).toMatchObject({
       bucket: 'all',
       search: { kind: 'digits', orderNumber: 10027, phoneSuffix: '10027' },
       limit: 50,
@@ -356,7 +359,7 @@ describe('فهرست', () => {
       value: { bucket: 'handed', q: '', untracked: { key: '1405-07', label: ['مهر ', { num: '1405' }] } },
     });
     const search = { kind: 'untracked', from: new Date('2026-09-22T20:30:00Z'), to: new Date('2026-10-22T20:30:00Z') };
-    expect(calls.at(-1)!.args[0]).toMatchObject({ bucket: 'handed', search });
+    expect(calls.filter((c) => c.method === 'list').at(-1)!.args[0]).toMatchObject({ bucket: 'handed', search });
     expect(calls.filter((c) => c.method === 'counts').at(-1)!.args[0]).toMatchObject({ search });
     for (const bad of ['1405-13', '1405/07', 'x']) {
       const plain = await orders.list(session(), { untracked: bad });
@@ -938,6 +941,115 @@ describe('دانلود فایل چاپ و برگه', () => {
   });
 });
 
+/* ───────────── همهٔ فایل‌ها (zip) و فهرست جمع‌وجور (۹٫۱) ───────────── */
+
+describe('همهٔ فایل‌ها (zip، ۹٫۱، ADR-056)', () => {
+  const file = (volume: number, key: string) => ({ volume, firstPage: 1, lastPage: 10, storageKey: key, sizeBytes: 999, changes: null, createdAt: NOW });
+  const DONE = { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: NOW };
+  const BYTES: Record<string, string> = {
+    'orders/10040/print-1-1.pdf': '%PDF-1.4 jozve-1',
+    'orders/10040/print-2-1.pdf': '%PDF-1.4 jozve-2 jeld-1',
+    'orders/10040/print-2-2.pdf': '%PDF-1.4 jozve-2 jeld-2',
+    'orders/10040/ticket.pdf': '%PDF-1.4 barge',
+  };
+  /** سفارش آماده: دو جزوه، دومی دو جلد، و برگهٔ تازه. */
+  function ready(over: Record<string, unknown> = {}) {
+    const base = failedDetails({ job: null, ticket: 'fresh' });
+    const [item] = base.items as unknown as Record<string, unknown>[];
+    return {
+      ...base,
+      order: { ...base.order, orderNumber: 10040 },
+      items: [
+        { ...item, printFiles: [file(1, 'orders/10040/print-1-1.pdf')] },
+        { ...item, seq: 2, printFiles: [file(1, 'orders/10040/print-2-1.pdf'), file(2, 'orders/10040/print-2-2.pdf')] },
+      ],
+      pdfJob: DONE,
+      ticketJob: DONE,
+      ticket: { storageKey: 'orders/10040/ticket.pdf', sizeBytes: 999, builtAt: NOW, fresh: true },
+      ...over,
+    } as unknown as PanelOrderDetails;
+  }
+  const stored = () => {
+    const storage = new MemoryDriver();
+    for (const [key, text] of Object.entries(BYTES)) storage.putObject(key, new TextEncoder().encode(text));
+    return storage;
+  };
+
+  it('آماده: فایل چاپ همهٔ جلدها و برگه، به ترتیب و با نام‌های تکی؛ طول همان zip؛ رویداد با شمار فایل پیش از جریان', async () => {
+    const { orders, events, calls } = service({ details: async (scope, ...args) => (calls.push({ method: 'details', args, scope }), ready()) }, stored());
+    const result = await orders.downloadZip(session(), '10040', '1.2.3.4');
+    expect(calls).toEqual([{ method: 'details', args: [10040], scope: ALL_ORDERS }]);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.fileName).toBe('sefaresh-10040.zip');
+    // رویداد پیش از خواندن جریان، مثل بقیهٔ دانلودها؛ ردیف‌ها از خود استوریج، نه اندازهٔ پایگاه داده.
+    expect(events).toEqual([
+      expect.objectContaining({ action: 'orders.zip_download', targetType: 'order', targetId: 'order-1', detail: { orderNumber: 10040, files: 4 } }),
+    ]);
+    const zip = Buffer.from(await new Response(result.value.body).arrayBuffer());
+    expect(zip.length).toBe(result.value.sizeBytes);
+    const at = (text: string) => zip.indexOf(Buffer.from(text));
+    const names = ['jozve-10040-1.pdf', 'jozve-10040-2-jeld-1.pdf', 'jozve-10040-2-jeld-2.pdf', 'barge-sefaresh-10040.pdf'];
+    const contents = Object.values(BYTES);
+    // هر نام پیش از بایت‌های خودش، و همه به همین ترتیب.
+    const order = names.flatMap((name, i) => [at(name), at(contents[i]!)]);
+    expect(order.every((n) => n >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('بسته، با کار روشن و بی رویداد: فایل چاپ در حال ساختن یا ساخته نشد، برگهٔ کهنه، پاک‌شده، پرداخت‌نشده، نیست، بی مجوز', async () => {
+    const run = async (details: PanelOrderDetails | null, permissions?: string[]) => {
+      const { orders, events } = service({ details: async () => details }, stored());
+      const result = await orders.downloadZip(session(permissions), '10040', 'ip');
+      return [result.ok ? 'ok' : `${result.status} ${result.error}`, events.length];
+    };
+    const building = { ...DONE, status: 'running', finishedAt: null };
+    const half = ready();
+    expect(await run(ready())).toEqual(['ok', 1]);
+    expect(await run({ ...half, items: [half.items[0]!, { ...half.items[1]!, printFiles: [] }], pdfJob: building } as PanelOrderDetails)).toEqual(['409 zip_not_ready', 0]);
+    expect(await run({ ...half, items: [half.items[0]!, { ...half.items[1]!, printFiles: [] }] } as PanelOrderDetails)).toEqual(['409 zip_not_ready', 0]);
+    expect(await run(ready({ ticket: { storageKey: 'orders/10040/ticket.pdf', sizeBytes: 999, builtAt: NOW, fresh: false }, ticketJob: building }))).toEqual([
+      '409 zip_not_ready',
+      0,
+    ]);
+    expect(await run(ready({ order: { ...ready().order, status: 'handed_to_post', filesDeletedAt: NOW } }))).toEqual(['410 files_deleted', 0]);
+    expect(await run(ready({ order: { ...ready().order, status: 'awaiting_payment' } }))).toEqual(['409 zip_not_ready', 0]);
+    // لغوشدهٔ آماده هنوز zip دارد، تا فایل‌ها پاک شوند (سؤال ۲۳۲).
+    expect(await run(ready({ order: { ...ready().order, status: 'cancelled' } }))).toEqual(['ok', 1]);
+    expect(await run(null)).toEqual(['404 order_not_found', 0]);
+    expect(await run(ready(), ['orders.read'])).toEqual(['403 forbidden', 0]);
+  });
+
+  it('فایل گمشده پیش از پاسخ «در دسترس نیست»، بی رویداد و با خط لاگ؛ بی استوریج هم', async () => {
+    const storage = stored();
+    storage.deleteObject('orders/10040/print-2-2.pdf');
+    const missing = service({ details: async () => ready() }, storage);
+    expect(await missing.orders.downloadZip(session(), '10040', 'ip')).toMatchObject({ ok: false, status: 503, error: 'storage_unavailable' });
+    expect(missing.events).toEqual([]);
+    expect(missing.logs.join('\n')).toContain('zip سفارش 10040 از استوریج خوانده نشد');
+    const none = service({ details: async () => ready() }, null);
+    expect(await none.orders.downloadZip(session(), '10040', 'ip')).toMatchObject({ ok: false, status: 503, error: 'storage_unavailable' });
+  });
+
+  it('فهرست: مشخصات همهٔ ردیف‌های صفحه با یک فراخوانی و همان محدوده؛ بی مبلغ برای نشستی که orders.money ندارد؛ zip با files.download', async () => {
+    const spec = { order: { id: 'o1', totalRials: 3_747_500, priceBreakdown: { totalRials: 3_747_500, items: [] } }, items: [] } as unknown as PanelOrderSpec;
+    const rows = [{ id: 'o1', orderNumber: 10027, totalRials: 3_747_500 }, { id: 'o2', orderNumber: 10039, totalRials: 3_747_500 }] as unknown as PanelOrderLine[];
+    const { orders, calls } = service({
+      list: async () => rows,
+      specs: async (scope, ...args) => (calls.push({ method: 'specs', args, scope }), new Map([['o1', spec]])),
+    });
+    const owner = await orders.list(session(['orders.read', 'orders.money', 'files.download']), {});
+    expect(calls.filter((c) => c.method === 'specs')).toEqual([{ method: 'specs', args: [['o1', 'o2']], scope: ALL_ORDERS }]);
+    expect(owner.ok && owner.value.specs.get('o1')!.order.totalRials).toBe(3_747_500);
+    expect(owner.ok && owner.value.canZip).toBe(true);
+    const partner = await orders.list(session(['orders.read', 'files.download'], { id: PARTNER_B, name: 'چاپ نور' }), {});
+    expect(calls.filter((c) => c.method === 'specs').at(-1)!.scope).toEqual({ kind: 'partner', partnerId: PARTNER_B });
+    expect(partner.ok && partner.value.specs.get('o1')!.order).toMatchObject({ totalRials: 0, priceBreakdown: { totalRials: 0 } });
+    expect(partner.ok && partner.value.rows.map((r) => r.totalRials)).toEqual([0, 0]);
+    const reader = await orders.list(session(['orders.read']), {});
+    expect(reader.ok && reader.value.canZip).toBe(false);
+  });
+});
+
 /* ───────────── چاپخانهٔ سفارش و جابه‌جایی (۵٫۲) ───────────── */
 
 describe('جابه‌جایی چاپخانه', () => {
@@ -1072,7 +1184,7 @@ describe('نقش چاپخانه و محدوده', () => {
     await everything(partner.orders, noor());
     const scoped = partner.calls.filter((c) => c.method !== 'setting');
     expect(new Set(scoped.map((c) => c.method))).toEqual(
-      new Set(['dueSummary', 'alerts', 'list', 'stats', 'counts', 'details', 'changeStatus', 'requeue', 'jozveFile', 'printVolume', 'ticketFile']),
+      new Set(['dueSummary', 'alerts', 'list', 'specs', 'stats', 'counts', 'details', 'changeStatus', 'requeue', 'jozveFile', 'printVolume', 'ticketFile']),
     );
     expect(scoped.filter((c) => JSON.stringify(c.scope) !== JSON.stringify(NOOR_SCOPE))).toEqual([]);
 

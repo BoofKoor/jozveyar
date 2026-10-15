@@ -279,6 +279,12 @@ test.describe.serial('هشدارهای فایل در پنل (۸٫۱)', () => {
       await expect(warningsOf(page).getByRole('listitem'), key).toHaveText(MULTI);
       await page.goto(at(`/orders/${o.S.number}`));
       await expect(warningsOf(page).getByRole('listitem'), key).toHaveText(['حاشیهٔ کم، صحافی ممکن است لبهٔ متن را بگیرد: صفحهٔ 10.']);
+      // فهرست جمع‌وجور (۹٫۱): همان هشدارها در مشخصات بازشدهٔ ردیف، نه روی ردیف بسته (سؤال ۲۳۴).
+      await page.goto(at('/orders'));
+      const row = page.locator(`details.ad-fold:has(> summary[data-order="${o.W.number}"])`);
+      await expect(row.locator('summary .ad-warnings')).toHaveCount(0);
+      await row.locator('summary').click();
+      await expect(row.locator('.ad-warnings').getByRole('listitem'), key).toHaveText(MULTI);
       expect(problems, key).toEqual([]);
     }
   });

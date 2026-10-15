@@ -29,6 +29,7 @@ import {
   type PanelOrderDetails,
   type PanelOrderItem,
   type PanelOrderLine,
+  type PanelOrderSpec,
   type PanelPdfJob,
   type PanelScope,
   type PanelSearch,
@@ -38,6 +39,7 @@ import {
 } from '@jozveyar/db';
 import { CARD_REASONS, parsePaymentErrorTag, statusLabel } from '@jozveyar/payments';
 import {
+  bytesParts,
   formatCardMask,
   formatDeadlineDay,
   formatJalaliWeekday,
@@ -418,21 +420,29 @@ export interface Fact {
  * مشخصات چاپ یک جزوه: «سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم» (اندازه از ۸٫۳)، صحافی با صفحه و برگ و جلد («دو جلد (413 و 412
  * برگ)»، طرح برش ۵)، و تعداد.
  */
-export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefined): Fact[] {
-  const papers = [...new Set(item.rules.map((rule) => rule.paperName ?? rule.paperTypeId))];
+/** «دو جلد (413 و 412 برگ)»: شمار جلد، و برگ‌های هر جلد از ریز قیمت منجمد وقتی بیش از یکی است. */
+function volumesWithSheets(priced: ItemBreakdown | undefined): Seg[] {
   const volumes = priced?.volumes ?? 1;
   const perVolume = priced?.sheetsPerVolume ?? [];
   const sheetsOf: Seg[] =
     volumes > 1 && perVolume.length === volumes
       ? [' (', ...joined(perVolume.map((sheets) => [num(sheets)]), '، ', ' و '), ' برگ)']
       : [];
+  return [...volumesSegs(volumes), ...sheetsOf];
+}
+
+/** «سیاه‌سفید، دورو، A4»: رنگ، یکرو یا دورو، و اندازهٔ کاغذ یک جزوه (اندازه از ۸٫۳). */
+const printText = (item: PanelOrderItem) =>
+  `${colorText(item.rules.map((r) => r.colorMode))}، ${SIDES[item.sidesMode] ?? item.sidesMode}، ${paperSizeText(item.paperSize)}`;
+
+/** کاغذهای جزوه، از قاعده‌های رنگ و کاغذ، با نام همان نسخهٔ تعرفهٔ سفارش. */
+const papersText = (item: PanelOrderItem) => [...new Set(item.rules.map((rule) => rule.paperName ?? rule.paperTypeId))].join('، ');
+
+export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefined): Fact[] {
   return [
     {
       label: 'چاپ',
-      value: joined([
-        [`${colorText(item.rules.map((r) => r.colorMode))}، ${SIDES[item.sidesMode] ?? item.sidesMode}، ${paperSizeText(item.paperSize)}`],
-        [papers.join('، ')],
-      ]),
+      value: joined([[printText(item)], [papersText(item)]]),
     },
     {
       label: 'صحافی',
@@ -443,12 +453,35 @@ export function specFacts(item: PanelOrderItem, priced: ItemBreakdown | undefine
           ' صفحه',
           ...(priced ? ['، ', num(priced.sheets), ' برگ'] : []),
           '، ',
-          ...volumesSegs(volumes),
-          ...sheetsOf,
+          ...volumesWithSheets(priced),
         ],
       ]),
     },
     { label: 'تعداد', value: [num(item.copies), ' نسخه'] },
+  ];
+}
+
+/**
+ * خط مشخصات یک جزوه در فهرست جمع‌وجور (برش ۹٫۱، طرح `m-l91`): «سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم · طلق و سیم · 1 نسخه». رنگ
+ * همان قاعدهٔ جزوه است (سؤال ۲۳۰): «رنگی» یعنی همهٔ صفحه‌ها، تا رنگ صفحه‌به‌صفحه خاموش است.
+ */
+export function specLine(item: PanelOrderItem): Seg[] {
+  return joined([[printText(item)], [papersText(item)], [item.bindingName ?? item.bindingTypeId], [num(item.copies), ' نسخه']]);
+}
+
+/**
+ * خط جمع همان جزوه: «97 صفحه (فرد: پشت برگ آخر سفید)، 49 برگ، یک جلد»؛ چند جلد مثل صفحهٔ سفارش. «فرد» فقط در دورو، چون فقط آنجا
+ * پشت برگ آخر سفید می‌ماند (سؤال ۲۳۰).
+ */
+export function specSum(item: PanelOrderItem, priced: ItemBreakdown | undefined): Seg[] {
+  const odd = item.sidesMode === 'double' && item.pageCount % 2 === 1;
+  return [
+    num(item.pageCount),
+    ' صفحه',
+    ...(odd ? [' (فرد: پشت برگ آخر سفید)'] : []),
+    ...(priced ? ['، ', num(priced.sheets), ' برگ'] : []),
+    '، ',
+    ...volumesWithSheets(priced),
   ];
 }
 
@@ -828,7 +861,10 @@ export type PrintView =
  * «دوباره بساز» تا وقتی ممکن است. کار `prepare_order` مال کل سفارش است؛ جزوه‌ای که ساخته شد، ساخته شده می‌ماند. سفارشی که
  * لغو شد یا به پست رسید و فایل چاپش ساخته نشد، دیگر لازمش ندارد (`closed`)؛ و سفارشی که فایل‌هایش پاک شد هیچ (`purged`).
  */
-export function printView(details: PanelOrderDetails, item: PanelOrderItem, at: Date): PrintView {
+/** آنچه فایل چاپ یک جزوه از سفارش می‌خواهد: `details` صفحهٔ سفارش و `specs` فهرست جمع‌وجور (برش ۹٫۱) هر دو دارندش. */
+export type PrintSource = Pick<PanelOrderDetails, 'order' | 'pdfJob' | 'items'>;
+
+export function printView(details: PrintSource, item: PanelOrderItem, at: Date): PrintView {
   const { order } = details;
   if (!isPaidStatus(order.status)) return { kind: 'unpaid' };
   if (order.filesDeletedAt) return { kind: 'purged' };
@@ -859,7 +895,7 @@ export function printView(details: PanelOrderDetails, item: PanelOrderItem, at: 
 }
 
 /** همهٔ جزوه‌های سفارش فایل چاپ دارند: «شروع چاپ» فقط بعد از این (طرح: «اول فایل چاپ ساخته شود»). */
-export const printReady = (details: PanelOrderDetails) =>
+export const printReady = (details: Pick<PanelOrderDetails, 'order' | 'items'>) =>
   details.order.filesDeletedAt === null && details.items.length > 0 && details.items.every((item) => item.printFiles.length > 0);
 
 /* «چه عوض شد»: بازه‌های صفحه به فایل مشتری، با نام اندازه همان `paperSizeName` سایت. */
@@ -958,7 +994,17 @@ export type TicketView =
  * چاپخانه پس از آن عوض شد؛ تازه‌ترین تغییر پس از ساختنش علت را می‌گوید)، در حال ساختن، یا ساخته نشد با «دوباره بساز». برگهٔ
  * کهنه هرگز داده نمی‌شود.
  */
-export function ticketView(details: PanelOrderDetails): TicketView {
+/**
+ * آنچه برگه از سفارش می‌خواهد: صفحهٔ سفارش تخصیص‌ها و رویدادها را دارد، و فهرست جمع‌وجور (برش ۹٫۱، `PanelOrderSpec`) فقط زمان
+ * آخرینشان را؛ علت «در حال به‌روز شدن» از همین دوتاست.
+ */
+export type TicketSource = Pick<PanelOrderDetails, 'order' | 'ticket' | 'ticketJob'> &
+  (
+    | Pick<PanelOrderDetails, 'assignments' | 'events'>
+    | Pick<PanelOrderSpec, 'lastAssignmentAt' | 'lastRecipientEditAt'>
+  );
+
+export function ticketView(details: TicketSource): TicketView {
   const { order, ticket, ticketJob } = details;
   if (!isPaidStatus(order.status)) return { kind: 'unpaid' };
   if (order.filesDeletedAt) return { kind: 'purged' };
@@ -966,9 +1012,13 @@ export function ticketView(details: PanelOrderDetails): TicketView {
   if (!isOpen(order.status)) return { kind: 'closed' };
   if (busy(ticketJob)) {
     if (!ticket) return { kind: 'building', retrying: Boolean(ticketJob!.attempts > 0 && ticketJob!.lastError) };
-    const after = (at: Date | undefined) => (at && at.getTime() >= ticket.builtAt.getTime() ? at.getTime() : -1);
-    const moved = after(details.assignments.at(-1)?.at);
-    const edited = after(details.events.filter((event) => event.action === 'orders.recipient').at(-1)?.at);
+    const after = (at: Date | null | undefined) => (at && at.getTime() >= ticket.builtAt.getTime() ? at.getTime() : -1);
+    const moved = after('assignments' in details ? details.assignments.at(-1)?.at : details.lastAssignmentAt);
+    const edited = after(
+      'events' in details
+        ? details.events.filter((event) => event.action === 'orders.recipient').at(-1)?.at
+        : details.lastRecipientEditAt,
+    );
     const cause: TicketStaleCause = moved < 0 && edited < 0 ? 'data' : moved > edited ? 'partner' : 'recipient';
     return { kind: 'updating', cause };
   }
@@ -981,6 +1031,88 @@ export const TICKET_UPDATING_WITH: Record<TicketStaleCause, string> = {
   partner: 'با چاپخانهٔ تازه',
   data: 'با دادهٔ تازهٔ سفارش',
 };
+
+/* ───────────────────────── همهٔ فایل‌ها (zip، برش ۹٫۱) ───────────────────────── */
+
+/** نام zip همهٔ فایل‌های یک سفارش. */
+export const zipFileName = (orderNumber: number) => `sefaresh-${orderNumber}.zip`;
+
+/** یک فایل درون zip: نامش (همان نام دانلود تکی)، کلید استوریج، اندازه و زمان ساختن. */
+export interface ZipFile {
+  name: string;
+  key: string;
+  bytes: number;
+  builtAt: Date;
+}
+
+export type ZipView =
+  | { kind: 'unpaid' }
+  | { kind: 'purged' }
+  | { kind: 'closed' }
+  | { kind: 'ready'; files: ZipFile[]; bytes: number; jozves: number }
+  | { kind: 'waiting'; what: 'print' | 'ticket'; cause: TicketStaleCause | null }
+  | { kind: 'failed'; what: 'print' | 'ticket' };
+
+/**
+ * «همهٔ فایل‌ها (zip)» یک سفارش (سؤال‌های ۲۳۱ و ۲۳۲): فایل چاپ همهٔ جلدهای همهٔ جزوه‌ها به ترتیب، و برگهٔ سفارش؛ بی PDF اصلی جزوه.
+ * فقط وقتی همه ساخته و تازه‌اند، چون zip نیمه‌کاره یا با برگهٔ کهنه همان است که ۵٫۱ برای برگه بست؛ وگرنه چرا نه، با یک دلیل: اول
+ * فایل چاپ و بعد برگه.
+ */
+export function zipView(source: PrintSource & TicketSource, at: Date): ZipView {
+  const { order } = source;
+  if (!isPaidStatus(order.status)) return { kind: 'unpaid' };
+  if (order.filesDeletedAt) return { kind: 'purged' };
+  const prints = source.items.map((item) => ({ item, view: printView(source, item, at) }));
+  const ticket = ticketView(source);
+  if (prints.length === 0 || prints.some(({ view }) => view.kind === 'closed') || ticket.kind === 'closed') return { kind: 'closed' };
+  // جزوه‌ای که فایل چاپ ندارد حال همان یک کار `prepare_order` سفارش را دارد: همه در حال ساختن‌اند، یا همه ساخته نشد.
+  const missing = prints.find(({ view }) => view.kind !== 'ready');
+  if (missing) return missing.view.kind === 'failed' ? { kind: 'failed', what: 'print' } : { kind: 'waiting', what: 'print', cause: null };
+  if (ticket.kind === 'failed') return { kind: 'failed', what: 'ticket' };
+  if (ticket.kind === 'updating') return { kind: 'waiting', what: 'ticket', cause: ticket.cause };
+  if (ticket.kind !== 'ready' || !source.ticket) return { kind: 'waiting', what: 'ticket', cause: null };
+  const files: ZipFile[] = prints.flatMap(({ item, view }) =>
+    view.kind === 'ready'
+      ? view.volumes.map((volume) => ({
+          name: volume.fileName,
+          key: item.printFiles.find((file) => file.volume === volume.volume)!.storageKey,
+          bytes: volume.bytes,
+          builtAt: volume.builtAt,
+        }))
+      : [],
+  );
+  files.push({ name: `${ticketFileName(order.orderNumber)}.pdf`, key: source.ticket.storageKey, bytes: ticket.bytes, builtAt: ticket.builtAt });
+  return { kind: 'ready', files, bytes: files.reduce((sum, file) => sum + file.bytes, 0), jozves: prints.length };
+}
+
+/**
+ * کنار دکمهٔ zip: «2 فایل، 38.8 مگابایت: فایل چاپ و برگهٔ سفارش»، یا چرا بسته است و راه جلو؛ و برای سفارش پرداخت‌نشده، بسته یا
+ * پاک‌شده، که دکمه ندارد، همان یادداشت صفحهٔ سفارش.
+ */
+export function zipNote(view: ZipView): Seg[] {
+  switch (view.kind) {
+    case 'ready': {
+      const { value, unit } = bytesParts(view.bytes);
+      const what: Seg[] =
+        view.jozves > 1 ? ['فایل چاپ ', VOLUME_WORDS[view.jozves] ?? num(view.jozves), ' جزوه و برگهٔ سفارش'] : ['فایل چاپ و برگهٔ سفارش'];
+      return [num(view.files.length), ' فایل، ', { num: value }, ` ${unit}: `, ...what];
+    }
+    case 'waiting':
+      return view.what === 'print'
+        ? ['فایل چاپ در حال ساخته شدن است؛ zip پس از آن باز می‌شود.']
+        : view.cause
+          ? [`برگهٔ سفارش ${TICKET_UPDATING_WITH[view.cause]} دوباره ساخته می‌شود؛ zip پس از آن باز می‌شود.`]
+          : ['برگهٔ سفارش در حال ساخته شدن است؛ zip پس از آن باز می‌شود.'];
+    case 'failed':
+      return [view.what === 'print' ? 'فایل چاپ ساخته نشد' : 'برگهٔ سفارش ساخته نشد', '؛ در صفحهٔ سفارش «دوباره بساز» را بزن.'];
+    case 'unpaid':
+      return ['فایل چاپ و برگهٔ سفارش بعد از پرداخت ساخته می‌شوند.'];
+    case 'closed':
+      return ['فایل چاپ ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.'];
+    case 'purged':
+      return ['فایل‌های این سفارش پاک شد؛ مشخصات می‌ماند.'];
+  }
+}
 
 /** «فایل‌های این سفارش … سه‌شنبه 7 مهر پاک شد: 30 روز پس از تحویل پست.» (طرح پنل، ADR-044). */
 export function purgedNote(details: PanelOrderDetails): Seg[] | null {
@@ -1202,6 +1334,10 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     else if (event.action === 'orders.print_download') {
       entries.push({ at: event.at, text: ['فایل چاپ', ...ofJozve(seq), ...(volume ? [' جلد ', num(volume)] : []), ' دانلود شد'], who });
     } else if (event.action === 'orders.ticket_download') entries.push({ at: event.at, text: ['برگهٔ سفارش دانلود شد'], who });
+    else if (event.action === 'orders.zip_download') {
+      const files = (detail as { files?: unknown }).files;
+      entries.push({ at: event.at, text: ['همهٔ فایل‌ها (zip) دانلود شد', ...(typeof files === 'number' ? ['، ', num(files), ' فایل'] : [])], who });
+    }
     else if (event.action === 'orders.pdf_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ فایل چاپ'], who });
     else if (event.action === 'orders.ticket_rebuild') entries.push({ at: event.at, text: ['ساختن دوبارهٔ برگهٔ سفارش'], who });
     else if (event.action === 'shipments.sms_resend') {
@@ -1286,8 +1422,11 @@ export function withoutPartnerSms(details: PanelOrderDetails): PanelOrderDetails
 /** ردیف‌های فهرست و صف پیشخوان بی مبلغ؛ همان `withoutMoney`. */
 export const linesWithoutMoney = (lines: readonly PanelOrderLine[]): PanelOrderLine[] => lines.map(zeroRials);
 
+/** مشخصات فهرست جمع‌وجور (۹٫۱) بی مبلغ: هر مبلغ سفارش و ریز قیمت منجمدش صفر؛ برگ و جلد می‌مانند، چون مشخصات چاپ‌اند. */
+export const specWithoutMoney = (spec: PanelOrderSpec): PanelOrderSpec => ({ ...spec, order: zeroRials(spec.order) });
+
 /** جزئیات رویدادهای ادمین که رویدادهای سفارش لازم دارد؛ بقیه (مقدار پیشین گیرنده، دلیل‌ها) از چشم چاپخانه نه. */
-const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed', 'barcode', 'outcome'];
+const EVENT_DETAIL_KEYS = ['orderNumber', 'item', 'volume', 'volumes', 'changed', 'barcode', 'outcome', 'files'];
 
 /**
  * جزئیات از چشم چاپخانه (برش ۵٫۳، ADR-042): یادداشت‌های درونی نه (دلیل لغو، که برگشت پول را می‌گوید، و دلیل برگرداندن و

@@ -258,6 +258,17 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
     }
     case 'orders.ticket_download':
       return { badge: null, text: ['برگهٔ سفارش ', ...orderRef(detail), ' دانلود شد'] };
+    case 'orders.zip_download':
+      // همهٔ فایل‌های سفارش در یک zip (برش ۹٫۱): «همهٔ فایل‌های سفارش 10027 (zip، 2 فایل) دانلود شد».
+      return {
+        badge: null,
+        text: [
+          'همهٔ فایل‌های سفارش ',
+          ...orderRef(detail),
+          ...(typeof detail.files === 'number' ? [' (zip، ', { ltr: String(detail.files) }, ' فایل)'] : [' (zip)']),
+          ' دانلود شد',
+        ],
+      };
     case 'orders.pdf_rebuild':
       return { badge: null, text: ['ساختن دوبارهٔ فایل چاپ سفارش ', ...orderRef(detail)] };
     case 'orders.ticket_rebuild':

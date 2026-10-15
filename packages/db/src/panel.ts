@@ -210,6 +210,8 @@ export interface PanelOrderLine {
   pdfJob: 'queued' | 'running' | 'done' | 'failed' | null;
   /** چاپخانهٔ سفارش (برش ۵٫۲)؛ null یعنی بی چاپخانه. */
   printPartnerId: string | null;
+  /** نام همان چاپخانه، زیر وضعیت ردیف فهرست جمع‌وجور برای مالک و متصدی (برش ۹٫۱)؛ null یعنی بی چاپخانه. */
+  partnerName: string | null;
   /** تلاش‌های پرداختی که هنوز در انتظارند و از مهلتشان گذشته. */
   unreturnedPayments: number;
   /** فایلی از جزوه پاک شده، بی مهلت است، یا پیش از `staleBefore` پاک می‌شود. */
@@ -395,6 +397,8 @@ export interface PanelOrderItem extends OrderItemRow {
 
 /** برگهٔ سفارش (`order_tickets`). */
 export interface PanelTicket {
+  /** کلید PDF برگه در استوریج؛ zip سفارش (برش ۹٫۱) همین را می‌خواند. */
+  storageKey: string;
   sizeBytes: number;
   builtAt: Date;
   /** با دادهٔ امروز سفارش ساخته شده (`order_ticket_stamp`)؛ نه یعنی کهنه، تا کارگر دوباره بسازدش. */
@@ -518,6 +522,22 @@ export interface PanelOrderDetails {
   refunds: PanelRefund[];
 }
 
+/**
+ * مشخصات فایل‌های یک سفارش برای فهرست جمع‌وجور (برش ۹٫۱، ADR-056): همان جزوه‌ها، فایل چاپ، کارها و برگهٔ `details`، بی پرداخت،
+ * رویداد و بستهٔ پستی؛ و از تخصیص و ویرایش گیرنده فقط زمان آخرینشان، که «در حال به‌روز شدن» برگه علتش را با آن می‌گوید.
+ */
+export interface PanelOrderSpec {
+  order: OrderRow;
+  items: PanelOrderItem[];
+  pdfJob: PanelPdfJob | null;
+  ticketJob: PanelPdfJob | null;
+  ticket: PanelTicket | null;
+  /** آخرین تخصیص چاپخانه (`order_assignments`)؛ null بی تخصیص. */
+  lastAssignmentAt: Date | null;
+  /** آخرین ویرایش گیرنده از پنل (رویداد `orders.recipient`)؛ null یعنی هرگز. */
+  lastRecipientEditAt: Date | null;
+}
+
 /** سفارشِ یک فایل: برای مجوز وضعیت و «پاک شد». */
 interface PanelFileOwner {
   orderId: string;
@@ -618,6 +638,11 @@ export interface PanelOrderStore {
   /** شمارش هر سطل با همان جست‌وجو. */
   counts(scope: PanelScope, query: { search: PanelSearch | null; clock: PanelClock }): Promise<Record<PanelBucket, number>>;
   details(scope: PanelScope, orderNumber: number): Promise<PanelOrderDetails | null>;
+  /**
+   * مشخصات فایل‌های همین سفارش‌ها برای فهرست جمع‌وجور (برش ۹٫۱): یک بار برای همهٔ ردیف‌های صفحه، نه یک `details` برای هر ردیف.
+   * سفارشی که در محدوده نیست در نقشه نمی‌آید.
+   */
+  specs(scope: PanelScope, orderIds: readonly string[]): Promise<Map<string, PanelOrderSpec>>;
   /** null یعنی چنین سفارش یا جزوه‌ای (در این محدوده) نیست. */
   jozveFile(scope: PanelScope, orderNumber: number, itemSeq: number): Promise<PanelJozveFile | null>;
   printVolume(scope: PanelScope, orderNumber: number, itemSeq: number, volume: number): Promise<PanelVolumeFile | null>;
@@ -881,6 +906,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         FROM order_items i WHERE i.order_id = ${orders.id})`,
       pdfJob: jobs.status,
       printPartnerId: orders.printPartnerId,
+      partnerName: sql<string | null>`(SELECT p.name FROM print_partners p WHERE p.id = ${orders.printPartnerId})`,
       unreturnedPayments: sql<number>`(SELECT count(*)::int FROM payments p WHERE p.order_id = ${orders.id}
         AND p.status = 'pending' AND p.created_at < ${ts(clock.unreturnedBefore)})`,
       stale: sql<boolean>`${staleFiles(clock.staleBefore)}`,
@@ -891,6 +917,119 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
   }
 
   const pdfJobJoin = and(eq(jobs.orderId, orders.id), eq(jobs.kind, PREPARE_ORDER_JOB));
+
+  /**
+   * جزوه‌های این سفارش‌ها به ترتیب قلم، هر کدام با فایل‌ها و صفحه‌های هشداردارشان، قاعده‌های رنگ و کاغذ و فایل چاپ هر جلد؛ نام
+   * صحافی و کاغذ از همان نسخهٔ تعرفهٔ سفارش. `details` یک سفارش می‌دهد و `specs` (برش ۹٫۱) همهٔ ردیف‌های یک صفحهٔ فهرست، با همین
+   * چهار کوئری، نه چهار کوئری برای هر سفارش. هر شناسه در نقشه هست، بی جزوه هم.
+   */
+  async function itemsOf(orderIds: readonly string[]): Promise<Map<string, PanelOrderItem[]>> {
+    const out = new Map<string, PanelOrderItem[]>(orderIds.map((id) => [id, []]));
+    if (orderIds.length === 0) return out;
+    const itemRows = await db
+      .select({ item: orderItems, bindingName: bindingTypes.nameFa })
+      .from(orderItems)
+      .innerJoin(orders, eq(orders.id, orderItems.orderId))
+      .leftJoin(
+        bindingTypes,
+        and(eq(bindingTypes.priceListVersion, orders.priceListVersion), eq(bindingTypes.id, orderItems.bindingTypeId)),
+      )
+      .where(inArray(orderItems.orderId, [...orderIds]))
+      .orderBy(orderItems.orderId, orderItems.seq);
+    const itemIds = itemRows.map((row) => row.item.id);
+    if (itemIds.length === 0) return out;
+    const [sectionRows, ruleRows, printRows, flaggedRows] = await Promise.all([
+      db
+        .select({
+          orderItemId: orderItemSections.orderItemId,
+          seq: orderItemSections.seq,
+          documentId: orderItemSections.documentId,
+          pageCount: orderItemSections.pageCount,
+          originalName: documents.originalName,
+          sourceKind: documents.sourceKind,
+          fileExpiresAt: documents.fileExpiresAt,
+          fileDeletedAt: documents.fileDeletedAt,
+          conversion: documents.conversion,
+        })
+        .from(orderItemSections)
+        .innerJoin(documents, eq(documents.id, orderItemSections.documentId))
+        .where(inArray(orderItemSections.orderItemId, itemIds))
+        .orderBy(orderItemSections.orderItemId, orderItemSections.seq),
+      db
+        .select({ rule: printRules, paperName: paperTypes.nameFa })
+        .from(printRules)
+        .innerJoin(orderItems, eq(orderItems.id, printRules.orderItemId))
+        .innerJoin(orders, eq(orders.id, orderItems.orderId))
+        .leftJoin(paperTypes, and(eq(paperTypes.priceListVersion, orders.priceListVersion), eq(paperTypes.id, printRules.paperTypeId)))
+        .where(inArray(printRules.orderItemId, itemIds))
+        .orderBy(printRules.orderItemId, printRules.seq),
+      db
+        .select()
+        .from(orderPrintFiles)
+        .where(inArray(orderPrintFiles.orderItemId, itemIds))
+        .orderBy(orderPrintFiles.orderItemId, orderPrintFiles.volume),
+      flaggedPagesOf(db, itemIds),
+    ]);
+    const grouped = <T, K>(rows: readonly T[], keyOf: (row: T) => K) => {
+      const map = new Map<K, T[]>();
+      for (const row of rows) map.set(keyOf(row), [...(map.get(keyOf(row)) ?? []), row]);
+      return map;
+    };
+    const sectionsBy = grouped(sectionRows, (row) => row.orderItemId);
+    const rulesBy = grouped(ruleRows, (row) => row.rule.orderItemId);
+    const printsBy = grouped(printRows, (row) => row.orderItemId);
+    const flaggedBy = grouped(flaggedRows, (row) => row.documentId);
+    for (const { item, bindingName } of itemRows) {
+      out.get(item.orderId)!.push({
+        ...item,
+        bindingName,
+        sections: (sectionsBy.get(item.id) ?? []).map(({ orderItemId: _item, ...section }) => ({
+          ...section,
+          flaggedPages: (flaggedBy.get(section.documentId) ?? []).map(({ documentId: _doc, ...page }) => page),
+        })),
+        rules: (rulesBy.get(item.id) ?? []).map(({ rule, paperName }) => ({
+          seq: rule.seq,
+          pageRanges: rule.pageRanges as [number, number][],
+          colorMode: rule.colorMode,
+          paperTypeId: rule.paperTypeId,
+          paperName,
+        })),
+        printFiles: (printsBy.get(item.id) ?? []).map(({ orderItemId: _item, sha256: _sha, changes, ...file }) => ({
+          ...file,
+          changes: changes as PrintChanges | null,
+        })),
+      });
+    }
+    return out;
+  }
+
+  /** کار `prepare_order` یا `prepare_ticket` یک سفارش، بی ستون‌هایی که پنل نشان نمی‌دهد. */
+  const pdfJobOf = (job: typeof jobs.$inferSelect | undefined): PanelPdfJob | null =>
+    job
+      ? {
+          status: job.status,
+          attempts: job.attempts,
+          maxAttempts: job.maxAttempts,
+          lastError: job.lastError,
+          createdAt: job.createdAt,
+          updatedAt: job.updatedAt,
+          finishedAt: job.finishedAt,
+        }
+      : null;
+
+  /** برگهٔ سفارش‌ها، و اینکه هر کدام با دادهٔ امروز همان سفارش ساخته شده (`order_ticket_stamp`). */
+  const ticketsOf = (orderIds: readonly string[]) =>
+    db
+      .select({
+        orderId: orderTickets.orderId,
+        storageKey: orderTickets.storageKey,
+        sizeBytes: orderTickets.sizeBytes,
+        builtAt: orderTickets.builtAt,
+        fresh: sql<boolean>`${orderTickets.stamp} = order_ticket_stamp(${orders})`,
+      })
+      .from(orderTickets)
+      .innerJoin(orders, eq(orders.id, orderTickets.orderId))
+      .where(inArray(orderTickets.orderId, [...orderIds]));
 
   return {
     async dueSummary(scope, { at, tomorrowStart, dayAfterStart }) {
@@ -1154,63 +1293,21 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
       if (!head) return null;
       const { order } = head;
 
-      const itemRows = await db
-        .select({ item: orderItems, bindingName: bindingTypes.nameFa })
-        .from(orderItems)
-        .leftJoin(
-          bindingTypes,
-          and(eq(bindingTypes.priceListVersion, order.priceListVersion), eq(bindingTypes.id, orderItems.bindingTypeId)),
-        )
-        .where(eq(orderItems.orderId, order.id))
-        .orderBy(orderItems.seq);
-      const itemIds = itemRows.map((row) => row.item.id);
-
       const fromPartner = alias(printPartners, 'from_partner');
       const toPartner = alias(printPartners, 'to_partner');
       const [
-        sectionRows,
-        ruleRows,
+        itemMap,
         paymentRows,
         statusRows,
         jobRows,
         eventRows,
-        printRows,
         ticketRows,
         partnerRows,
         assignmentRows,
         shipmentRows,
         refundRows,
-        flaggedRows,
       ] = await Promise.all([
-        itemIds.length === 0
-          ? []
-          : db
-              .select({
-                orderItemId: orderItemSections.orderItemId,
-                seq: orderItemSections.seq,
-                documentId: orderItemSections.documentId,
-                pageCount: orderItemSections.pageCount,
-                originalName: documents.originalName,
-                sourceKind: documents.sourceKind,
-                fileExpiresAt: documents.fileExpiresAt,
-                fileDeletedAt: documents.fileDeletedAt,
-                conversion: documents.conversion,
-              })
-              .from(orderItemSections)
-              .innerJoin(documents, eq(documents.id, orderItemSections.documentId))
-              .where(inArray(orderItemSections.orderItemId, itemIds))
-              .orderBy(orderItemSections.orderItemId, orderItemSections.seq),
-        itemIds.length === 0
-          ? []
-          : db
-              .select({ rule: printRules, paperName: paperTypes.nameFa })
-              .from(printRules)
-              .leftJoin(
-                paperTypes,
-                and(eq(paperTypes.priceListVersion, order.priceListVersion), eq(paperTypes.id, printRules.paperTypeId)),
-              )
-              .where(inArray(printRules.orderItemId, itemIds))
-              .orderBy(printRules.orderItemId, printRules.seq),
+        itemsOf([order.id]),
         db
           .select({ payment: payments, ...shipmentSmsFields })
           .from(payments)
@@ -1239,23 +1336,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(adminUsers, eq(adminUsers.id, adminEvents.adminUserId))
           .where(and(eq(adminEvents.targetType, 'order'), eq(adminEvents.targetId, order.id)))
           .orderBy(asc(adminEvents.at), asc(adminEvents.id)),
-        itemIds.length === 0
-          ? []
-          : db
-              .select()
-              .from(orderPrintFiles)
-              .where(inArray(orderPrintFiles.orderItemId, itemIds))
-              .orderBy(orderPrintFiles.orderItemId, orderPrintFiles.volume),
-        db
-          .select({
-            sizeBytes: orderTickets.sizeBytes,
-            builtAt: orderTickets.builtAt,
-            fresh: sql<boolean>`${orderTickets.stamp} = order_ticket_stamp(${orders})`,
-          })
-          .from(orderTickets)
-          .innerJoin(orders, eq(orders.id, orderTickets.orderId))
-          .where(eq(orderTickets.orderId, order.id))
-          .limit(1),
+        ticketsOf([order.id]),
         order.printPartnerId === null
           ? []
           : db
@@ -1324,53 +1405,16 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(adminUsers, eq(adminUsers.id, refunds.adminUserId))
           .where(eq(refunds.orderId, order.id))
           .orderBy(desc(refunds.createdAt), desc(refunds.id)),
-        itemIds.length === 0 ? [] : flaggedPagesOf(db, itemIds),
       ]);
 
-      const jobOf = (kind: OrderJobKind): PanelPdfJob | null => {
-        const job = jobRows.find((row) => row.kind === kind);
-        return job
-          ? {
-              status: job.status,
-              attempts: job.attempts,
-              maxAttempts: job.maxAttempts,
-              lastError: job.lastError,
-              createdAt: job.createdAt,
-              updatedAt: job.updatedAt,
-              finishedAt: job.finishedAt,
-            }
-          : null;
-      };
+      const jobOf = (kind: OrderJobKind): PanelPdfJob | null => pdfJobOf(jobRows.find((row) => row.kind === kind));
       return {
         order,
         provinceName: head.provinceName,
         cityName: head.cityName,
         zoneName: head.zoneName,
         shippingMethodName: head.shippingMethodName,
-        items: itemRows.map(({ item, bindingName }) => ({
-          ...item,
-          bindingName,
-          sections: sectionRows
-            .filter((s) => s.orderItemId === item.id)
-            .map(({ orderItemId: _item, ...section }) => ({
-              ...section,
-              flaggedPages: flaggedRows
-                .filter((page) => page.documentId === section.documentId)
-                .map(({ documentId: _doc, ...page }) => page),
-            })),
-          rules: ruleRows
-            .filter((r) => r.rule.orderItemId === item.id)
-            .map(({ rule, paperName }) => ({
-              seq: rule.seq,
-              pageRanges: rule.pageRanges as [number, number][],
-              colorMode: rule.colorMode,
-              paperTypeId: rule.paperTypeId,
-              paperName,
-            })),
-          printFiles: printRows
-            .filter((row) => row.orderItemId === item.id)
-            .map(({ orderItemId: _item, sha256: _sha, changes, ...file }) => ({ ...file, changes: changes as PrintChanges | null })),
-        })),
+        items: itemMap.get(order.id) ?? [],
         payments: paymentRows.map(({ payment, smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }) => ({
           ...payment,
           sms: shipmentSmsOf({ smsId, smsToMobile, smsStatus, smsError, smsAttempts, smsCreatedAt, smsAttemptedAt, smsSentAt }),
@@ -1378,7 +1422,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         statusEvents: statusRows.map(({ event, adminName }) => ({ ...event, adminName })),
         pdfJob: jobOf(PREPARE_ORDER_JOB),
         ticketJob: jobOf(PREPARE_TICKET_JOB),
-        ticket: ticketRows[0] ?? null,
+        ticket: ticketRows.map(({ orderId: _order, ...ticket }) => ticket)[0] ?? null,
         events: eventRows,
         partner: partnerRows[0] ?? null,
         assignments: assignmentRows.map((row) => {
@@ -1399,6 +1443,50 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         }),
         refunds: refundRows.map(({ refund, adminName }) => ({ ...refund, adminName })),
       };
+    },
+
+    async specs(scope, orderIds) {
+      const out = new Map<string, PanelOrderSpec>();
+      if (orderIds.length === 0) return out;
+      // محدوده در خود کوئری (برش ۵٫۳)، مثل هر تابع دیگر؛ بقیه فقط با شناسهٔ همین سفارش‌ها.
+      const orderRows = await db
+        .select()
+        .from(orders)
+        .where(and(inArray(orders.id, [...orderIds]), inScope(scope)));
+      const ids = orderRows.map((order) => order.id);
+      if (ids.length === 0) return out;
+      const [itemMap, jobRows, ticketRows, assignedRows, editedRows] = await Promise.all([
+        itemsOf(ids),
+        db
+          .select()
+          .from(jobs)
+          .where(and(inArray(jobs.orderId, ids), inArray(jobs.kind, [PREPARE_ORDER_JOB, PREPARE_TICKET_JOB]))),
+        ticketsOf(ids),
+        db
+          .select({ orderId: orderAssignments.orderId, at: sql<Date>`max(${orderAssignments.at})`.mapWith(orderAssignments.at) })
+          .from(orderAssignments)
+          .where(inArray(orderAssignments.orderId, ids))
+          .groupBy(orderAssignments.orderId),
+        db
+          .select({ orderId: adminEvents.targetId, at: sql<Date>`max(${adminEvents.at})`.mapWith(adminEvents.at) })
+          .from(adminEvents)
+          .where(and(eq(adminEvents.targetType, 'order'), eq(adminEvents.action, 'orders.recipient'), inArray(adminEvents.targetId, ids)))
+          .groupBy(adminEvents.targetId),
+      ]);
+      for (const order of orderRows) {
+        const job = (kind: OrderJobKind) => pdfJobOf(jobRows.find((row) => row.orderId === order.id && row.kind === kind));
+        const ticket = ticketRows.find((row) => row.orderId === order.id);
+        out.set(order.id, {
+          order,
+          items: itemMap.get(order.id) ?? [],
+          pdfJob: job(PREPARE_ORDER_JOB),
+          ticketJob: job(PREPARE_TICKET_JOB),
+          ticket: ticket ? { storageKey: ticket.storageKey, sizeBytes: ticket.sizeBytes, builtAt: ticket.builtAt, fresh: ticket.fresh } : null,
+          lastAssignmentAt: assignedRows.find((row) => row.orderId === order.id)?.at ?? null,
+          lastRecipientEditAt: editedRows.find((row) => row.orderId === order.id)?.at ?? null,
+        });
+      }
+      return out;
     },
 
     async jozveFile(scope, orderNumber, itemSeq) {

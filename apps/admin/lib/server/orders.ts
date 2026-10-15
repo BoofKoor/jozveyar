@@ -52,6 +52,7 @@ import {
   type PanelDashboardStats,
   type PanelOrderDetails,
   type PanelOrderLine,
+  type PanelOrderSpec,
   type PanelOrderStore,
   type PanelPartnerOption,
   type PanelSearch,
@@ -84,12 +85,15 @@ import {
   printReady,
   printView,
   rebuildable,
+  specWithoutMoney,
   ticketFileName,
   ticketView,
   transitionOf,
   volumeFileName,
   withoutMoney,
   withoutPartnerSms,
+  zipFileName,
+  zipView,
   type DayBounds,
   type DueTile,
   type Seg,
@@ -100,6 +104,7 @@ import { monthKey, monthLabel, monthRange, parseMonthKey } from '../report';
 import { maskMobile } from '../settings';
 import { can, ipHashOf, scopeOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
+import { zipSize, zipStream, type ZipEntry } from './zip';
 
 /** ردیف‌های هر صفحهٔ فهرست. */
 export const ORDERS_PAGE = 50;
@@ -185,6 +190,13 @@ export interface OrdersListView {
   page: number;
   pages: number;
   rows: PanelOrderLine[];
+  /**
+   * مشخصات فایل‌های همین ردیف‌ها برای فهرست جمع‌وجور (برش ۹٫۱): شناسهٔ سفارش ← مشخصات، با یک فراخوانی ذخیره‌گاه، و بی مبلغ برای نشستی
+   * که `orders.money` ندارد. ردیفی که در نقشه نیست فقط پیوند صفحهٔ سفارش را دارد.
+   */
+  specs: Map<string, PanelOrderSpec>;
+  /** «همهٔ فایل‌ها (zip)» برای این نشست (`files.download`). */
+  canZip: boolean;
 }
 
 export interface OrderDetailsView {
@@ -400,6 +412,11 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const pages = Math.max(1, Math.ceil(counts[bucket] / ORDERS_PAGE));
       const page = Math.min(pageOf(params.page), pages);
       const rows = await store.list(scope, { bucket, search, clock, limit: ORDERS_PAGE, offset: (page - 1) * ORDERS_PAGE });
+      const money = can(session, 'orders.money');
+      const specs = await store.specs(
+        scope,
+        rows.map((row) => row.id),
+      );
       return ok({
         bounds: dayBounds(at),
         untracked: month ? { key: monthKey(month), label: monthLabel(month, false) } : null,
@@ -410,7 +427,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         counts,
         page,
         pages,
-        rows: can(session, 'orders.money') ? rows : linesWithoutMoney(rows),
+        rows: money ? rows : linesWithoutMoney(rows),
+        specs: money ? specs : new Map([...specs].map(([id, spec]) => [id, specWithoutMoney(spec)])),
+        canZip: can(session, 'files.download'),
       });
     },
 
@@ -722,6 +741,69 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         detail: { orderNumber: file.orderNumber },
         what: `برگهٔ سفارش ${file.orderNumber}`,
       });
+    },
+
+    /**
+     * «همهٔ فایل‌ها (zip)» یک سفارش (برش ۹٫۱، ADR-056؛ سؤال‌های ۲۳۱ تا ۲۳۳): فایل چاپ همهٔ جلدهای همهٔ جزوه‌ها و برگهٔ سفارش، جریانی از
+     * استوریج داخلی، با همان مجوز و محدودهٔ دانلود تکی (`files.download`؛ چاپخانه فقط سفارش خودش، بیرون از آن «نیست»). فقط وقتی همه
+     * ساخته و تازه‌اند (`zipView`)، در هر وضعیت پس از پرداخت تا فایل‌ها پاک شوند. اندازهٔ هر فایل پیش از پاسخ از خود استوریج
+     * (`headObject`)، تا Content-Length درست باشد و فایل گمشده پیش از شروع «در دسترس نیست» بگیرد، نه zip نیمه‌کاره؛ رویداد پیش از
+     * جریان، مثل بقیهٔ دانلودها، با شمار فایل.
+     */
+    async downloadZip(session: AdminSession, numberParam: string, ip: string): Promise<Result<DownloadFile>> {
+      if (!can(session, 'files.download')) return fail(403, 'forbidden');
+      const orderNumber = orderNumberOf(numberParam);
+      const details = orderNumber === null ? null : await store.details(scopeOf(session), orderNumber);
+      if (!details) return fail(404, 'order_not_found');
+      if (details.order.filesDeletedAt) return fail(410, 'files_deleted');
+      const view = zipView(details, now());
+      if (view.kind !== 'ready') return fail(409, 'zip_not_ready');
+      const storage = deps.storage;
+      if (!storage) return fail(503, 'storage_unavailable');
+      const what = `zip سفارش ${details.order.orderNumber}`;
+      let sizes: number[];
+      try {
+        sizes = await Promise.all(
+          view.files.map(async (file) => {
+            const info = await storage.headObject(file.key);
+            if (!info) throw new Error(`${file.name} ساخته شده ولی در استوریج نیست`);
+            return info.sizeBytes;
+          }),
+        );
+      } catch (error) {
+        log(`✗ ${what} از استوریج خوانده نشد:`, error);
+        return fail(503, 'storage_unavailable');
+      }
+      const entries: ZipEntry[] = view.files.map((file, i) => ({
+        name: file.name,
+        size: sizes[i]!,
+        modifiedAt: file.builtAt,
+        async open() {
+          // میان HEAD و GET فایل سفارش عوض نمی‌شود (ADR-043)؛ اگر شد، جریان با خطا می‌بندد، نه zip خراب.
+          try {
+            const object = await storage.getObject(file.key);
+            if (!object) throw new Error(`${file.name} در استوریج نیست`);
+            if (object.sizeBytes !== sizes[i]) {
+              await object.body.cancel().catch(() => undefined);
+              throw new Error(`${file.name} ${object.sizeBytes} بایت است، نه ${sizes[i]}`);
+            }
+            return object.body;
+          } catch (error) {
+            log(`✗ ${what} نیمه‌راه ماند:`, error);
+            throw error;
+          }
+        },
+      }));
+      await store.logEvent({
+        adminUserId: session.userId,
+        action: 'orders.zip_download',
+        targetType: 'order',
+        targetId: details.order.id,
+        ipHash: ipHashOf(deps.secret, ip),
+        detail: { orderNumber: details.order.orderNumber, files: entries.length },
+        at: now(),
+      });
+      return ok({ body: zipStream(entries), sizeBytes: zipSize(entries), fileName: zipFileName(details.order.orderNumber) });
     },
 
     /**

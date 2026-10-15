@@ -3996,6 +3996,38 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       ]);
     });
 
+    it('مشخصات فهرست جمع‌وجور (برش ۹٫۱): همان جزوه، فایل چاپ، برگه و کارهای details برای چند سفارش با یک فراخوانی', async () => {
+      const panel = createPanelOrderStore(conn);
+      const small = await paidOrder(20);
+      const big = await paidOrder(1650, 'امیر حسینی');
+      await builtTicket(small.id);
+      await writeVolumes([volume(small.itemId, 1, 1, 20, { storageKey: `orders/${small.orderNumber}/print-1-1.pdf`, sizeBytes: 9_000 })]);
+      // سفارشی که نیست در نقشه نمی‌آید؛ فهرست خالی بی کوئری.
+      const specs = await panel.specs(ALL_ORDERS, [small.id, big.id, randomUUID()]);
+      expect([...specs.keys()].sort()).toEqual([small.id, big.id].sort());
+      expect(await panel.specs(ALL_ORDERS, [])).toEqual(new Map());
+      for (const o of [small, big]) {
+        const details = (await panel.details(ALL_ORDERS, o.orderNumber))!;
+        expect(specs.get(o.id)).toEqual({
+          order: details.order,
+          items: details.items,
+          pdfJob: details.pdfJob,
+          ticketJob: details.ticketJob,
+          ticket: details.ticket,
+          lastAssignmentAt: details.assignments.at(-1)?.at ?? null,
+          lastRecipientEditAt: null,
+        });
+      }
+      expect(specs.get(small.id)).toMatchObject({
+        ticket: { storageKey: `orders/${small.orderNumber}/ticket.pdf`, sizeBytes: 2400, fresh: true },
+        items: [{ seq: 1, printFiles: [{ volume: 1, storageKey: `orders/${small.orderNumber}/print-1-1.pdf`, sizeBytes: 9_000 }] }],
+      });
+      expect(specs.get(big.id)).toMatchObject({ ticket: null, items: [{ printFiles: [], sections: [{ pageCount: 1650, originalName: 'آمار 1650.pdf' }] }] });
+      // ویرایش گیرنده: زمان آخرینش، و برگهٔ کهنه.
+      await edit(small.id, { recipientName: 'مریم کاظمی‌نژاد', addressText: 'بلوار سجاد، سجاد 18، پلاک 42', postalCode: null });
+      expect((await panel.specs(ALL_ORDERS, [small.id])).get(small.id)).toMatchObject({ lastRecipientEditAt: NOW, ticket: { fresh: false } });
+    });
+
     it('دادهٔ پایه نگهداری فایل‌ها را ۳۰ روز می‌نشاند', async () => {
       await conn.db.delete(settings).where(eq(settings.key, FILES_RETENTION_SETTING));
       const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -4276,7 +4308,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const panel = createPanelOrderStore(conn);
       const clock: PanelClock = { at: NOW, staleBefore: new Date(NOW.getTime() + 60 * MINUTE), unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE), untrackedSince: new Date(NOW.getTime() - 45 * 86_400_000) };
       expect((await panel.alerts(ALL_ORDERS, clock)).unassigned).toEqual([order.orderNumber]);
-      expect((await panel.list(ALL_ORDERS, { bucket: 'open', search: null, clock, limit: 10, offset: 0 }))[0]).toMatchObject({ printPartnerId: null });
+      expect((await panel.list(ALL_ORDERS, { bucket: 'open', search: null, clock, limit: 10, offset: 0 }))[0]).toMatchObject({ printPartnerId: null, partnerName: null });
       expect((await panel.details(ALL_ORDERS, order.orderNumber))!).toMatchObject({ partner: null, assignments: [] });
       // مالک چاپخانه‌ای را فعال می‌کند و متصدی سفارش را به آن می‌سپارد: از هیچ، با دلیل.
       await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, first));
@@ -4843,6 +4875,15 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(await panel.jozveFile(NOOR, mine.orderNumber, 1)).toMatchObject({ orderId: mine.id });
         expect(await panel.printVolume(NOOR, mine.orderNumber, 1, 1)).toMatchObject({ orderId: mine.id });
         expect(await panel.ticketFile(NOOR, mine.orderNumber)).toMatchObject({ orderId: mine.id });
+        // مشخصات فهرست جمع‌وجور (۹٫۱) هم: سفارش چاپخانهٔ دیگر در نقشه نیست، حتی با شناسه‌اش.
+        expect([...(await panel.specs(NOOR, [mine.id, theirs.id])).keys()]).toEqual([mine.id]);
+        expect([...(await panel.specs(ALL_ORDERS, [mine.id, theirs.id])).keys()].sort()).toEqual([mine.id, theirs.id].sort());
+        // نام چاپخانه در ردیف فهرست، برای مالک و متصدی.
+        const lines = await panel.list(ALL_ORDERS, { bucket: 'all', search: null, clock, limit: 50, offset: 0 });
+        expect(Object.fromEntries(lines.map((row) => [row.orderNumber, row.partnerName]))).toEqual({
+          [mine.orderNumber]: 'چاپ نور',
+          [theirs.orderNumber]: (await conn.db.select().from(printPartners).where(eq(printPartners.id, first)))[0]!.name,
+        });
         // گزینه‌های جابه‌جایی: در محدودهٔ چاپخانه فقط خودش.
         expect((await panel.partnerOptions(NOOR)).map((p) => p.id)).toEqual([noor]);
         expect((await panel.partnerOptions(ALL_ORDERS)).map((p) => p.id).sort()).toEqual([first, noor].sort());
