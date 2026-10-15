@@ -9,7 +9,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PriceList } from '@jozveyar/contracts';
-import type { TariffActivation, TariffActor, TariffStore, TariffVersion } from '@jozveyar/db';
+import type { AdminEventInput, SettingsStore, TariffActivation, TariffActor, TariffStore, TariffVersion } from '@jozveyar/db';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { canonicalJson, draftFormOf, type DraftForm } from '../tariff';
@@ -34,8 +34,10 @@ function session(permissions: string[]): AdminSession {
     partner: null,
   };
 }
-const OWNER = session(['tariff.read', 'tariff.edit']);
-const OPERATOR = session(['orders.read', 'tariff.read']);
+const OWNER = session(['tariff.read', 'tariff.edit', 'tariff.pause']);
+const OPERATOR = session(['orders.read', 'tariff.read', 'tariff.pause']);
+/** دیدن بی خاموش کردن (نقشی که `tariff.pause` ندارد). */
+const VIEWER = session(['tariff.read']);
 
 interface Row extends TariffVersion {
   list: PriceList;
@@ -113,11 +115,32 @@ function memoryStore() {
   return { store, rows, writes, add };
 }
 
+/** ذخیره‌گاه تنظیم‌ها با همان قرارداد نسخهٔ پستگرس (قفل و تراکنش در تست یکپارچگی `packages/db`). */
+function memorySettings() {
+  const values = new Map<string, unknown>();
+  const events: AdminEventInput[] = [];
+  const store: SettingsStore = {
+    async read(key) {
+      return values.get(key);
+    },
+    async change(input) {
+      const decision = input.decide(values.get(input.key));
+      if (decision.kind === 'reject') return { ok: false, reason: decision.reason };
+      if (decision.kind === 'same') return { ok: true, written: false };
+      values.set(input.key, decision.value);
+      events.push({ adminUserId: input.actor.adminUserId, action: input.action, targetType: 'setting', targetId: input.key, ipHash: input.actor.ipHash, detail: decision.detail, at: input.at });
+      return { ok: true, written: true };
+    },
+  };
+  return { store, values, events };
+}
+
 function service(stepUpResult: Result<true> = ok(true)) {
   const memory = memoryStore();
+  const settings = memorySettings();
   const stepUp = vi.fn(async (_session: AdminSession, _code: unknown, _ip: string) => stepUpResult);
-  const tariff = createPanelTariff({ store: memory.store, stepUp, secret: SECRET, now: () => NOW });
-  return { tariff, stepUp, ...memory };
+  const tariff = createPanelTariff({ store: memory.store, settings: settings.store, stepUp, secret: SECRET, now: () => NOW });
+  return { tariff, stepUp, settings, ...memory };
 }
 
 const mutations = (writes: { method: string }[]) => writes.map((w) => w.method);
@@ -344,5 +367,121 @@ describe('فعال کردن با کد تازه', () => {
       'عوض شد (روش‌های ارسال)',
     ]);
     expect(await tariff.activate(OWNER, '1', { active: '2', fingerprint: back.value.fingerprint, code: '123456' }, 'ip')).toEqual(ok({ version: 1, previous: 2 }));
+  });
+});
+
+describe('خاموش موقت گزینه‌های تعرفهٔ فعال (۸٫۴، سؤال ۱۸۸)', () => {
+  const spiral = V1.bindingTypes.spiral_clear!;
+  /** نسخهٔ فعال با A5 و A3، گلاسه، کاغذ خاموش، منگنه و صحافی‌ای که در هیچ اندازه‌ای بازه ندارد. */
+  const CATALOG: PriceList = {
+    ...V1,
+    printRates: {
+      ...V1.printRates,
+      a5: { single: { bw: 12_000, color: 15_000 }, double: { bw: 10_000, color: 13_000 } },
+      a3: { single: { bw: 30_000, color: 40_000 }, double: { bw: 28_000, color: 38_000 } },
+    },
+    paperTypes: {
+      tahrir80: { ...V1.paperTypes.tahrir80!, sheetRates: { a4: 0, a5: 0, a3: 0 } },
+      glossy: { nameFa: 'گلاسه', gsm: 135, enabled: true, sheetRates: { a4: 15_000 } },
+      old: { nameFa: 'کاهی', gsm: 70, enabled: false, sheetRates: { a4: 0 } },
+    },
+    bindingTypes: {
+      spiral_clear: { ...spiral, bands: { ...spiral.bands, a5: spiral.bands.a4!, a3: spiral.bands.a4! } },
+      staple: { nameFa: 'منگنه', enabled: true, minSheets: 1, maxSheetsPerVolume: 50, splitsVolumes: false, weightPerVolumeGrams: 1, bands: { a4: [{ minSheets: 1, maxSheets: 50, priceRials: 80_000 }] } },
+      none: { nameFa: 'بی بازه', enabled: true, minSheets: 1, maxSheetsPerVolume: 50, splitsVolumes: false, weightPerVolumeGrams: 1, bands: {} },
+    },
+  };
+  function catalog() {
+    const built = service();
+    built.rows.get(1)!.list = CATALOG;
+    return built;
+  }
+  const items = async (tariff: ReturnType<typeof service>['tariff'], who = OWNER) => {
+    const overview = await tariff.overview(who);
+    if (!overview.ok) throw new Error(overview.error);
+    return overview.value.availability;
+  };
+
+  it('کارت: اندازه‌های ارائه‌شده جز A4، و کاغذ و صحافی روشنی که اندازه‌ای دارند، جز پیش‌فرض‌ها؛ هر دو نقش می‌بینند', async () => {
+    const { tariff } = catalog();
+    expect(await items(tariff)).toEqual({
+      canPause: true,
+      items: [
+        { kind: 'size', id: 'a5', name: 'A5', paused: false },
+        { kind: 'size', id: 'a3', name: 'A3', paused: false },
+        { kind: 'paper', id: 'glossy', name: 'گلاسه', paused: false },
+        { kind: 'binding', id: 'staple', name: 'منگنه', paused: false },
+      ],
+    });
+    expect((await items(tariff, VIEWER)).canPause).toBe(false);
+    // تعرفهٔ پایه هیچ گزینهٔ خاموش‌شدنی ندارد: فقط پیش‌فرض‌ها و A4.
+    expect(await items(service().tariff)).toEqual({ canPause: true, items: [] });
+  });
+
+  it('خاموش و روشن، هر کدام با رویداد `tariff.availability`؛ مقصد یکسان موفق و بی رویداد؛ متصدی هم', async () => {
+    const { tariff, settings } = catalog();
+    expect(await tariff.setAvailability(OPERATOR, { kind: 'size', id: 'a3', paused: '1', seen: '0' }, 'ip')).toEqual(
+      ok({ item: { kind: 'size', id: 'a3', name: 'A3', paused: true }, written: true }),
+    );
+    expect(await tariff.setAvailability(OWNER, { kind: 'binding', id: 'staple', paused: '1', seen: '0' }, 'ip')).toMatchObject({ ok: true });
+    expect(settings.values.get('catalog.paused')).toEqual({ sizes: ['a3'], papers: [], bindings: ['staple'] });
+    expect((await items(tariff)).items.filter((item) => item.paused).map((item) => item.id)).toEqual(['a3', 'staple']);
+    expect(await tariff.setAvailability(OWNER, { kind: 'size', id: 'a3', paused: '1', seen: '1' }, 'ip')).toEqual(
+      ok({ item: { kind: 'size', id: 'a3', name: 'A3', paused: true }, written: false }),
+    );
+    expect(await tariff.setAvailability(OWNER, { kind: 'size', id: 'a3', paused: '0', seen: '1' }, 'ip')).toMatchObject({ ok: true });
+    expect(settings.values.get('catalog.paused')).toEqual({ sizes: [], papers: [], bindings: ['staple'] });
+    expect(settings.events.map((e) => [e.action, e.targetId, e.detail])).toEqual([
+      ['tariff.availability', 'catalog.paused', { kind: 'size', id: 'a3', name: 'A3', paused: true, version: 1 }],
+      ['tariff.availability', 'catalog.paused', { kind: 'binding', id: 'staple', name: 'منگنه', paused: true, version: 1 }],
+      ['tariff.availability', 'catalog.paused', { kind: 'size', id: 'a3', name: 'A3', paused: false, version: 1 }],
+    ]);
+  });
+
+  it('بی مجوز پیش از هر خواندن؛ پیش‌فرض‌ها، A4، گزینهٔ خاموش نسخه، بی اندازه و ناشناس «پیدا نشد»', async () => {
+    const { tariff, settings } = catalog();
+    expect(await tariff.setAvailability(VIEWER, { kind: 'size', id: 'a5', paused: '1', seen: '0' }, 'ip')).toMatchObject({ status: 403 });
+    for (const [kind, id] of [
+      ['size', 'a4'],
+      ['paper', 'tahrir80'],
+      ['binding', 'spiral_clear'],
+      ['paper', 'old'],
+      ['binding', 'none'],
+      ['paper', 'staple'],
+      ['binding', 'constructor'],
+      ['size', 'b5'],
+      [undefined, 'a5'],
+    ] as const) {
+      expect(await tariff.setAvailability(OWNER, { kind, id, paused: '1', seen: '0' }, 'ip'), `${kind}:${id}`).toMatchObject({
+        status: 404,
+        error: 'option_not_found',
+      });
+    }
+    expect(settings.events).toEqual([]);
+  });
+
+  it('مقصد، نه برعکس کردن: صفحهٔ کهنه‌ای که همان را می‌خواهد که همین حالا هست موفق است، بی رویداد؛ ورودی ناجور رد', async () => {
+    const { tariff, settings } = catalog();
+    // صفحه «روشن» دید و «خاموش کن» زد؛ کس دیگری همین حالا خاموشش کرده بود.
+    settings.values.set('catalog.paused', { sizes: [], papers: ['glossy'], bindings: [] });
+    expect(await tariff.setAvailability(OWNER, { kind: 'paper', id: 'glossy', paused: '1', seen: '0' }, 'ip')).toMatchObject({ ok: true, value: { written: false } });
+    // صفحه «خاموش» دید و «روشن کن» زد؛ همین حالا روشن است.
+    settings.values.set('catalog.paused', { sizes: [], papers: [], bindings: [] });
+    expect(await tariff.setAvailability(OWNER, { kind: 'paper', id: 'glossy', paused: '0', seen: '1' }, 'ip')).toMatchObject({ ok: true, value: { written: false } });
+    // مقصد همان حالی که صفحه دید (فرم دست‌ساز؛ دکمهٔ صفحه همیشه برعکس آن است) و امروز چیز دیگری: «همین حالا جای دیگری عوض شد».
+    settings.values.set('catalog.paused', { sizes: [], papers: ['glossy'], bindings: [] });
+    expect(await tariff.setAvailability(OWNER, { kind: 'paper', id: 'glossy', paused: '0', seen: '0' }, 'ip')).toEqual(fail(409, 'availability_changed'));
+    expect(settings.events).toEqual([]);
+  });
+
+  it('خاموشی مال گزینه است، نه نسخه: گزینه‌ای که در نسخهٔ فعال نیست در فهرست می‌ماند؛ مقدار خراب پیش‌فرض است', async () => {
+    const { tariff, settings } = catalog();
+    settings.values.set('catalog.paused', { sizes: ['a3'], papers: ['paper_gone'], bindings: [] });
+    await tariff.setAvailability(OWNER, { kind: 'size', id: 'a5', paused: '1', seen: '0' }, 'ip');
+    expect(settings.values.get('catalog.paused')).toEqual({ sizes: ['a3', 'a5'], papers: ['paper_gone'], bindings: [] });
+    settings.values.set('catalog.paused', 'خراب');
+    expect((await items(tariff)).items.every((item) => !item.paused)).toBe(true);
+    await tariff.setAvailability(OWNER, { kind: 'paper', id: 'glossy', paused: '1', seen: '0' }, 'ip');
+    expect(settings.values.get('catalog.paused')).toEqual({ sizes: [], papers: ['glossy'], bindings: [] });
   });
 });

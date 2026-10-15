@@ -16,8 +16,8 @@
  * - **هشدار، نه خطا:** عددی بیش از ده برابر همان عدد نسخهٔ فعال، «شاید ریال نوشته‌ای».
  */
 
-import type { BindingBand, BindingType, PaperSize, PaperType, PriceList, PrintRate, ShippingRate } from '@jozveyar/contracts';
-import { PAPER_SIZES, PAPER_SIZE_ORDER, offeredSizes, quote, wholeDocumentRule } from '@jozveyar/pricing';
+import type { BindingBand, BindingType, CatalogPaused, PaperSize, PaperType, PriceList, PrintRate, ShippingRate } from '@jozveyar/contracts';
+import { PAPER_SIZES, PAPER_SIZE_ORDER, offeredSizes, pausedOf, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatJalali, formatJalaliNumeric, formatNumber, formatTehranTime, rialsToTomans, toLatinDigits, tomansToRials } from '@jozveyar/text';
 import { tidyInputFa } from '@jozveyar/text/input';
@@ -38,7 +38,7 @@ export const TOMANS_MAX = 100_000_000;
 export const SHEETS_MAX = 100_000;
 /** بزرگ‌ترین گرماژ کاغذ. */
 export const GSM_MAX = 1_000;
-/** بزرگ‌ترین وزن یک جلد صحافی، گرم. */
+/** بزرگ‌ترین وزن یک جلد صحافی، و وزن بسته‌بندی، گرم. */
 export const WEIGHT_MAX = 10_000;
 /** «شاید ریال نوشته‌ای»: عددی بیش از این چند برابر همان عدد نسخهٔ فعال. */
 export const WARN_FACTOR = 10;
@@ -119,6 +119,17 @@ export interface BindingInput {
   bands: Record<PaperSize, BandInput[]>;
 }
 
+/**
+ * «بقیه» (برش ۸٫۴، سؤال ۱۸۹): گرد کردن و حداقل سفارش تومان، وزن بسته‌بندی گرم. null یعنی فرمی که این فیلد را نفرستاد (زبانه‌ای که
+ * پیش از ۸٫۴ باز شده بود): همان مقدار پیش‌نویس می‌ماند. مالیات فرم ندارد و همان پیش‌نویس می‌ماند: موتور قیمت آن را در «جمع پیش از
+ * ارسال» و «ارسال از …» حساب نمی‌کند، پس مالیاتِ بیش از صفر مشتری را در قدم شهر غافلگیر می‌کرد (اجرای ۸٫۴، پرسش باز ۲۲۶).
+ */
+export interface RestInput {
+  rounding: string | null;
+  minOrder: string | null;
+  packaging: string | null;
+}
+
 /** فرم پیش‌نویس، همان که تایپ شد. پول تومان است؛ کرایه هر خانه با کلید `rateKey`. */
 export interface DraftForm {
   label: string;
@@ -128,12 +139,14 @@ export interface DraftForm {
   papers: PaperInput[];
   bindings: BindingInput[];
   ship: Record<string, string>;
+  rest: RestInput;
 }
 
 /**
  * جای یک خطا یا هشدار: `label`؛ `print.<اندازه>.<یکرو|دورو>.<رنگ>`؛ `paper.<ردیف>.name|gsm|enabled|rate.<اندازه>`؛
  * `binding.<ردیف>.name|enabled|min|max|splits|weight|bands.<اندازه>` و `binding.<ردیف>.band.<اندازه>.<ردیف بازه>.from|to|price`؛
- * `papers` و `bindings` (کل فهرست)؛ `ship.<کلید>`؛ و `list` برای چیزی که فرم ندارد (روش ارسال پیش‌فرض).
+ * `papers` و `bindings` (کل فهرست)؛ `ship.<کلید>`؛ `rest.rounding|minOrder|packaging` (۸٫۴)؛ و `list` برای چیزی که فرم ندارد
+ * (روش ارسال پیش‌فرض).
  */
 export interface DraftIssue {
   field: string;
@@ -196,6 +209,11 @@ export function draftFormOf(list: PriceList): DraftForm {
       bands: bySize((size) => bandsField(binding.bands[size])),
     })),
     ship,
+    rest: {
+      rounding: tomansField(list.settings.roundingStepRials),
+      minOrder: tomansField(list.settings.minOrderRials),
+      packaging: String(list.settings.packagingWeightGrams),
+    },
   };
 }
 
@@ -227,9 +245,9 @@ export function newBinding(at?: number, random?: number): BindingInput {
 /**
  * فرم پیش‌نویس از فیلدهای فرم HTML (server action)، به نام‌های `DraftIssue`: `label`؛ `size.a5|a3` (تیک)؛
  * `print.<اندازه>.<یکرو|دورو>.<رنگ>`؛ `paper.<ردیف>.id|name|gsm|enabled|rate.<اندازه>`؛
- * `binding.<ردیف>.id|name|enabled|min|max|splits|weight` و `binding.<ردیف>.band.<اندازه>.<ردیف>.from|to|price`؛ و
- * `ship.<منطقه>:<آغاز وزن>`. تیکی که نیامد خاموش است؛ ردیف بی شناسه نادیده؛ هر چیز دیگر نادیده؛ هر مقدار کوتاه‌شده، و ردیف‌ها به
- * ترتیب شماره‌شان. سنجش با `readDraft`.
+ * `binding.<ردیف>.id|name|enabled|min|max|splits|weight` و `binding.<ردیف>.band.<اندازه>.<ردیف>.from|to|price`؛
+ * `ship.<منطقه>:<آغاز وزن>`؛ و `rest.rounding|minOrder|packaging`. تیکی که نیامد خاموش است؛ فیلد «بقیه»ای که نیامد null (همان
+ * پیش‌نویس)؛ ردیف بی شناسه نادیده؛ هر چیز دیگر نادیده؛ هر مقدار کوتاه‌شده، و ردیف‌ها به ترتیب شماره‌شان. سنجش با `readDraft`.
  */
 export function draftFormFromEntries(entries: Iterable<[string, unknown]>): DraftForm {
   const form: DraftForm = {
@@ -239,6 +257,7 @@ export function draftFormFromEntries(entries: Iterable<[string, unknown]>): Draf
     papers: [],
     bindings: [],
     ship: {},
+    rest: { rounding: null, minOrder: null, packaging: null },
   };
   const papers = new Map<number, PaperInput>();
   const bindings = new Map<number, { row: BindingInput; bands: Record<PaperSize, Map<number, BandInput>> }>();
@@ -284,6 +303,7 @@ export function draftFormFromEntries(entries: Iterable<[string, unknown]>): Draf
       band[m[4] as keyof BandInput] = value;
       rows.set(index, band);
     } else if ((m = /^ship\.([a-z_]{1,20}:\d{1,9})$/.exec(key))) form.ship[m[1]!] = value;
+    else if ((m = /^rest\.(rounding|minOrder|packaging)$/.exec(key))) form.rest[m[1] as keyof RestInput] = value;
   }
   const ordered = <T>(map: Map<number, T>) => [...map.entries()].sort(([a], [b]) => a - b).map(([, value]) => value);
   form.papers = ordered(papers).filter((row) => row.id !== '');
@@ -460,8 +480,8 @@ function tenfold(rials: number, activeRials: number | undefined): Seg[] | null {
 
 /**
  * فرم پیش‌نویس به تعرفه: هر خطا با جایش، هشدارها جدا، و تعرفهٔ ساخته‌شده اگر خطایی نیست. هرچه فرم ندارد (روش‌های ارسال، وزن‌ها،
- * مالیات و …) از `base` می‌آید، یعنی همان پیش‌نویس ذخیره‌شده؛ `active` فقط برای هشدار ده برابر. نرخ کاغذ و بازهٔ صحافی اندازه‌ای
- * که ارائه نمی‌شود ذخیره نمی‌شود.
+ * منطقه‌ها، مالیات، و فیلد «بقیه»ای که نیامد) از `base` می‌آید، یعنی همان پیش‌نویس ذخیره‌شده؛ `active` فقط برای هشدار ده برابر. نرخ کاغذ
+ * و بازهٔ صحافی اندازه‌ای که ارائه نمی‌شود ذخیره نمی‌شود.
  */
 export function readDraft(form: DraftForm, base: PriceList, active: PriceList | null): DraftCheck {
   const errors: DraftIssue[] = [];
@@ -672,6 +692,28 @@ export function readDraft(form: DraftForm, base: PriceList, active: PriceList | 
     warn(`ship.${key}`, tenfold(rials, activeRates.get(key)));
   }
 
+  // ── بقیه (۸٫۴، سؤال ۱۸۹): گرد کردن، حداقل سفارش و وزن بسته‌بندی؛ مالیات همان پیش‌نویس ──
+  const settings = { ...base.settings };
+  const { rest } = form;
+  if (rest.rounding !== null) {
+    const rials = money('rest.rounding', rest.rounding, 0);
+    if (rials !== null) {
+      settings.roundingStepRials = rials;
+      warn('rest.rounding', tenfold(rials, active?.settings.roundingStepRials));
+    }
+  }
+  if (rest.minOrder !== null) {
+    const rials = money('rest.minOrder', rest.minOrder, 0);
+    if (rials !== null) {
+      settings.minOrderRials = rials;
+      warn('rest.minOrder', tenfold(rials, active?.settings.minOrderRials));
+    }
+  }
+  if (rest.packaging !== null) {
+    const grams = whole('rest.packaging', rest.packaging, 0, WEIGHT_MAX, ['وزن بسته‌بندی از ', num(0), ' تا ', num(WEIGHT_MAX), ' گرم است.']);
+    if (grams !== null) settings.packagingWeightGrams = grams;
+  }
+
   if (errors.length > 0) return { list: null, errors, warnings };
   const list: PriceList = {
     ...base,
@@ -679,6 +721,7 @@ export function readDraft(form: DraftForm, base: PriceList, active: PriceList | 
     printRates,
     paperTypes,
     bindingTypes,
+    settings,
     shippingRates: base.shippingRates.map((rate) => {
       const rials = rate.methodId === DEFAULT_SHIPPING_METHOD_ID ? shipRials.get(rateKey(rate)) : undefined;
       return rials === undefined ? rate : { ...rate, priceRials: rials };
@@ -1035,6 +1078,63 @@ export function tariffChanges(from: PriceList, to: PriceList): TariffChanges {
     lines: lines.map(({ key, value }) => ({ key, value })),
     unchanged: GROUPS.filter((group) => !touched.has(group)),
   };
+}
+
+/* ───────────────────────── در دسترس بودن زنده (۸٫۴) ───────────────────────── */
+
+export type AvailabilityKind = 'size' | 'paper' | 'binding';
+
+/** یک گزینهٔ خاموش‌شدنی تعرفهٔ فعال، با حال امروزش. */
+export interface AvailabilityItem {
+  kind: AvailabilityKind;
+  id: string;
+  /** «A5»، «گلاسه»، «چسب گرم»: نام کارت و رویداد. */
+  name: string;
+  paused: boolean;
+}
+
+/**
+ * گزینه‌هایی از تعرفهٔ فعال که موقتاً خاموش‌شدنی‌اند (برش ۸٫۴، سؤال ۱۸۸): هر اندازهٔ ارائه‌شده جز A4، و هر کاغذ و صحافی روشنی که در
+ * یکی از اندازه‌های ارائه‌شده هست، جز پیش‌فرض‌ها؛ همان که میز سایت نشان می‌دهد، به ترتیب ویرایشگر. حال هر کدام از همان `pausedOf`
+ * که سایت و سرور مسیر خرید می‌خوانند.
+ */
+export function availabilityItems(list: PriceList, paused: CatalogPaused | null): AvailabilityItem[] {
+  const live = pausedOf(list, paused);
+  const sizes = offeredSizes(list);
+  const items: AvailabilityItem[] = [];
+  for (const size of sizes) {
+    if (size !== 'a4') items.push({ kind: 'size', id: size, name: PAPER_SIZES[size].label, paused: live.sizes.has(size) });
+  }
+  for (const [id, paper] of defaultFirst(list.paperTypes, DEFAULT_PAPER_TYPE_ID)) {
+    if (id === DEFAULT_PAPER_TYPE_ID || !paper.enabled || !sizes.some((size) => paper.sheetRates[size] !== undefined)) continue;
+    items.push({ kind: 'paper', id, name: paper.nameFa, paused: live.papers.has(id) });
+  }
+  for (const [id, binding] of defaultFirst(list.bindingTypes, DEFAULT_BINDING_TYPE_ID)) {
+    if (id === DEFAULT_BINDING_TYPE_ID || !binding.enabled || !sizes.some((size) => binding.bands[size]?.length)) continue;
+    items.push({ kind: 'binding', id, name: binding.nameFa, paused: live.bindings.has(id) });
+  }
+  return items;
+}
+
+/**
+ * فهرست تازهٔ «موقتاً خاموش» با همین یک گزینه خاموش یا روشن؛ بقیهٔ فهرست همان که بود، حتی گزینه‌ای که در تعرفهٔ فعال نیست: خاموشی
+ * مال گزینه است، نه نسخه، پس اندازه‌ای که در نسخهٔ بعد برگردد همان‌طور خاموش برمی‌گردد تا کسی روشنش کند.
+ */
+export function togglePaused(current: CatalogPaused, item: Pick<AvailabilityItem, 'kind' | 'id'>, paused: boolean): CatalogPaused {
+  const next: CatalogPaused = { sizes: [...current.sizes], papers: [...current.papers], bindings: [...current.bindings] };
+  if (item.kind === 'size') {
+    const size = item.id as CatalogPaused['sizes'][number];
+    next.sizes = [...next.sizes.filter((s) => s !== size), ...(paused ? [size] : [])];
+  } else {
+    const field = item.kind === 'paper' ? 'papers' : 'bindings';
+    next[field] = [...next[field].filter((id) => id !== item.id), ...(paused ? [item.id] : [])];
+  }
+  return next;
+}
+
+/** «اندازهٔ A5»، «کاغذ «گلاسه»»، «صحافی «چسب گرم»»: نام گزینه با جنسش، برای کارت و رویداد. */
+export function availabilityName(item: Pick<AvailabilityItem, 'kind' | 'name'>): Seg[] {
+  return item.kind === 'size' ? ['اندازهٔ ', { ltr: item.name }] : [item.kind === 'paper' ? 'کاغذ' : 'صحافی', ' «', { name: item.name }, '»'];
 }
 
 /* ───────────────────────── دوره‌های فعال بودن ───────────────────────── */

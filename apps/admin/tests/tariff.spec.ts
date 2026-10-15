@@ -14,7 +14,8 @@ import { alertOf, at, awayFromMidnight, BASE, codeFor, enroll, GATE, layoutProbl
  * چهار جزوهٔ طرح با همان `quote()`، سنجش با پیام دقیق طرح و «اول خطا را درست کن»، فعال کردن در صفحهٔ جدا با کد تازه،
  * برگشت با فعال کردن دوبارهٔ نسخهٔ قبل، و «همین حالا عوض شد» با پیام روشن. سایت (وب روی ۳۱۰۱، همان پایگاه داده) نسخهٔ
  * تازه را با ISR تا یک دقیقه نشان می‌دهد. کاتالوگ (۸٫۳): نرخ یکرو و دورو، A5 با تیک، کاغذ و صحافی تازه با بازه‌های هر
- * اندازه، پیش‌نمایش گزینهٔ تازه با «—» و «تازه»، و همان در پایگاه داده.
+ * اندازه، پیش‌نمایش گزینهٔ تازه با «—» و «تازه»، و همان در پایگاه داده. ۸٫۴: «بقیه» (گرد کردن، حداقل سفارش و وزن بسته‌بندی؛
+ * مالیات فقط‌خواندنی) و کارت «در دسترس بودن» با هر دو نقش.
  *
  * همان پنل و پایگاه دادهٔ `admin.spec.ts` (طرز اجرا بالای همان)، و برای سایت `E2E_WEB_BASE_URL=http://127.0.0.1:3101`.
  * تعرفهٔ فعال را عوض می‌کند، پس آخرین فایل پنل است (ترتیب نام) و در پایان نسخهٔ ۱ دوباره فعال است، هر جا که افتاده باشد.
@@ -102,6 +103,43 @@ async function fillA4(page: Page, bw: string, color: string) {
 /** خطوط «تغییرها»ی صفحهٔ فعال‌سازی: [چه، از ← به]. */
 const changesOf = (page: Page) =>
   page.locator('[data-changes] li').evaluateAll((items) => items.map((li) => [...li.children].map((cell) => (cell.textContent ?? '').trim())));
+/**
+ * نسخه‌ای فعال از روی نسخهٔ ۱ با «گلاسه» (فقط A4) و «منگنه» (تا 50 برگ، فقط A4)، با SQL (۸٫۴، کارت «در دسترس بودن»)؛ فعال شدنش
+ * `activated_at` را می‌گذارد و نسخه می‌ماند (فعال‌شده پاک نمی‌شود).
+ */
+async function catalogVersion(version: number) {
+  await sql.begin(async (tx) => {
+    await tx`INSERT INTO price_lists (version, label, settings, is_active) SELECT ${version}, ${'تست ۸٫۴ — در دسترس بودن'}, settings, false FROM price_lists WHERE version = 1`;
+    await tx`INSERT INTO print_rates (price_list_version, paper_size, sides_mode, color_mode, rate_rials)
+             SELECT ${version}, paper_size, sides_mode, color_mode, rate_rials FROM print_rates WHERE price_list_version = 1`;
+    await tx`INSERT INTO paper_types (price_list_version, id, name_fa, gsm, enabled) SELECT ${version}, id, name_fa, gsm, enabled FROM paper_types WHERE price_list_version = 1`;
+    await tx`INSERT INTO paper_rates (price_list_version, paper_type_id, paper_size, rate_rials)
+             SELECT ${version}, paper_type_id, paper_size, rate_rials FROM paper_rates WHERE price_list_version = 1`;
+    await tx`INSERT INTO binding_types (price_list_version, id, name_fa, enabled, min_sheets, max_sheets_per_volume, splits_volumes, weight_per_volume_grams)
+             SELECT ${version}, id, name_fa, enabled, min_sheets, max_sheets_per_volume, splits_volumes, weight_per_volume_grams
+               FROM binding_types WHERE price_list_version = 1`;
+    await tx`INSERT INTO binding_rate_bands (price_list_version, binding_type_id, paper_size, min_sheets, max_sheets, price_rials)
+             SELECT ${version}, binding_type_id, paper_size, min_sheets, max_sheets, price_rials FROM binding_rate_bands WHERE price_list_version = 1`;
+    await tx`INSERT INTO shipping_methods (price_list_version, id, name_fa, enabled) SELECT ${version}, id, name_fa, enabled FROM shipping_methods WHERE price_list_version = 1`;
+    await tx`INSERT INTO shipping_rates (price_list_version, method_id, zone_id, min_weight_grams, max_weight_grams, price_rials)
+             SELECT ${version}, method_id, zone_id, min_weight_grams, max_weight_grams, price_rials FROM shipping_rates WHERE price_list_version = 1`;
+    await tx`INSERT INTO paper_types (price_list_version, id, name_fa, gsm, enabled) VALUES (${version}, 'glossy', 'گلاسه', 135, true)`;
+    await tx`INSERT INTO paper_rates (price_list_version, paper_type_id, paper_size, rate_rials) VALUES (${version}, 'glossy', 'a4', 15000)`;
+    await tx`INSERT INTO binding_types (price_list_version, id, name_fa, enabled, min_sheets, max_sheets_per_volume, splits_volumes, weight_per_volume_grams)
+             VALUES (${version}, 'staple', 'منگنه', true, 1, 50, false, 5)`;
+    await tx`INSERT INTO binding_rate_bands (price_list_version, binding_type_id, paper_size, min_sheets, max_sheets, price_rials)
+             VALUES (${version}, 'staple', 'a4', 1, 50, 80000)`;
+  });
+  await sql.begin(async (tx) => {
+    await tx`UPDATE price_lists SET is_active = false WHERE is_active`;
+    await tx`UPDATE price_lists SET is_active = true WHERE version = ${version}`;
+  });
+}
+const pausedNow = async () => (await sql<{ value: unknown }[]>`SELECT value FROM settings WHERE key = 'catalog.paused'`)[0]?.value;
+const resetPaused = () =>
+  sql`INSERT INTO settings (key, value, updated_at) VALUES ('catalog.paused', ${sql.json({ sizes: [], papers: [], bindings: [] })}, now())
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`;
+
 const cells = (page: Page, selector: string) =>
   page.locator(`${selector} tbody tr`).evaluateAll((rows) => rows.map((row) => [...row.children].map((cell) => (cell.textContent ?? '').trim())));
 
@@ -141,6 +179,7 @@ test.describe.serial('تعرفه در پنل', () => {
     await operatorContext?.close();
     if (sql) {
       await restoreBase();
+      await resetPaused();
       await sql.end();
     }
   });
@@ -744,5 +783,118 @@ test.describe.serial('تعرفه در پنل', () => {
       await context.close();
     }
     expect(ownerProblems).toEqual([]);
+  });
+  test('«بقیه» (۸٫۴): گرد کردن، حداقل سفارش و وزن بسته‌بندی در ویرایشگر با پیش‌نمایش و «چه عوض می‌شود»؛ مالیات فقط‌خواندنی', async () => {
+    await ownerPage.goto(at('/tariff'));
+    await ownerPage.getByRole('button', { name: 'نسخهٔ تازه' }).click();
+    await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('پیش‌نویس');
+    const draft = await versionIn(ownerPage);
+    const rest = ownerPage.locator('[data-rest]');
+    await expect(rest).toContainText('مالیات 0٪ است و از اینجا عوض نمی‌شود.');
+    await expect(rest.getByRole('textbox')).toHaveCount(3);
+    await expect(ownerPage.locator('#d-rest-min')).toHaveValue('0');
+    await expect(ownerPage.locator('#d-rest-min-hint')).toHaveText('نسخهٔ فعال: ندارد');
+    await expect(ownerPage.locator('#d-rest-packaging-hint')).toHaveText('نسخهٔ فعال: 100');
+
+    // خطا زیر همان فیلد، و پیش‌نمایش تا درست شدنش نه.
+    await ownerPage.locator('#d-rest-packaging').fill('150 گرم');
+    await expect(ownerPage.locator('#d-rest-packaging-error')).toHaveText('فقط رقم بنویس، بی اعشار و بی واحد.');
+    await expect(ownerPage.getByText('تا خطای بقیه درست نشود، پیش‌نمایش حساب نمی‌شود.')).toBeVisible();
+    await ownerPage.locator('#d-rest-packaging').fill('150');
+    await ownerPage.locator('#d-rest-rounding').fill('5000');
+    await ownerPage.locator('#d-rest-rounding').blur();
+    await expect(ownerPage.locator('#d-rest-rounding')).toHaveValue('5,000');
+    await ownerPage.locator('#d-rest-min').fill('50,000');
+    await expect(ownerPage.locator('.jy-error')).toHaveCount(0);
+    // گرد کردن به 5,000 تومان: 280,200 تومانِ جزوهٔ اول طرح 280,000 می‌شود؛ بقیه همان.
+    expect((await cells(ownerPage, '[data-preview]')).slice(0, 4)).toEqual([
+      ['147 صفحه، سیاه‌سفید، دورو', '280,200', '280,000', '−200'],
+      ['120 صفحه، رنگی، دورو', '285,000', '285,000', '0'],
+      ['3 فایل، 300 صفحه، یکرو', '530,000', '530,000', '0'],
+      ['1,650 صفحه، دو جلد', '2,750,000', '2,750,000', '0'],
+    ]);
+
+    await bar(ownerPage).getByRole('button', { name: 'ذخیرهٔ پیش‌نویس' }).click();
+    await expect(note(ownerPage)).toHaveText('پیش‌نویس ذخیره شد.');
+    const [saved] = await sql<{ settings: Record<string, number> }[]>`SELECT settings FROM price_lists WHERE version = ${draft}`;
+    expect(saved!.settings).toEqual({ minOrderRials: 500_000, roundingStepRials: 50_000, vatPercent: 0, packagingWeightGrams: 150 });
+
+    await bar(ownerPage).getByRole('link', { name: 'فعال کن…' }).click();
+    await expect(ownerPage).toHaveURL(new RegExp(`/tariff/${draft}/activate$`));
+    expect(await changesOf(ownerPage)).toEqual([
+      ['گرد کردن', 'ندارد ← به 5,000 تومان'],
+      ['حداقل سفارش', 'ندارد ← 50,000 تومان'],
+      ['وزن بسته‌بندی', '100 گرم ← 150 گرم'],
+      ['چاپ، کاغذ، صحافی و پست', 'بی تغییر'],
+    ]);
+    await ownerPage.goto(at(`/tariff/${draft}`));
+    await bar(ownerPage).getByRole('button', { name: 'حذف پیش‌نویس' }).click();
+    await bar(ownerPage).getByRole('button', { name: 'پیش‌نویس را پاک کن' }).click();
+    await expect(ownerPage).toHaveURL(new RegExp(`/tariff\\?deleted=${draft}$`));
+    expect(ownerProblems).toEqual([]);
+  });
+
+  test('در دسترس بودن (۸٫۴): مالک و متصدی گزینه‌ای را بی نسخهٔ تازه موقتاً خاموش و روشن می‌کنند، با رویداد؛ گوشی هم', async ({ browser }) => {
+    const version = 90_000 + RUN;
+    await catalogVersion(version);
+    await resetPaused();
+    const card = (page: Page) => page.locator('[data-tariff="availability"]');
+    const option = (page: Page, id: string) => card(page).locator(`li[data-option="${id}"]`);
+    const flash = (page: Page) => card(page).locator('.ad-flash .jy-note');
+
+    for (const page of [ownerPage, operatorPage]) {
+      await page.goto(at('/tariff'));
+      await expect(card(page).locator('li')).toHaveCount(2);
+      await expect(option(page, 'paper:glossy').locator('.ad-versions__name')).toHaveText('کاغذ «گلاسه»');
+      await expect(option(page, 'binding:staple').locator('.ad-versions__name')).toHaveText('صحافی «منگنه»');
+      await expect(option(page, 'binding:staple').locator('.jy-badge')).toHaveText('در دسترس');
+    }
+
+    // متصدی منگنه را خاموش می‌کند؛ صفحهٔ مالک همان لحظه کهنه است.
+    await option(operatorPage, 'binding:staple').getByRole('button', { name: 'موقتاً خاموش کن' }).click();
+    await expect(flash(operatorPage)).toContainText('صحافی «منگنه» موقتاً خاموش شد: در سایت «موقتاً در دسترس نیست» است و سفارش نمی‌شود.');
+    await expect(option(operatorPage, 'binding:staple').locator('.jy-badge')).toHaveText('موقتاً در دسترس نیست');
+    expect(await pausedNow()).toEqual({ sizes: [], papers: [], bindings: ['staple'] });
+    // صفحهٔ کهنهٔ مالک هم «خاموش کن» می‌زند: همین حالا همان است، موفق و بی رویداد دوم.
+    await option(ownerPage, 'binding:staple').getByRole('button', { name: 'موقتاً خاموش کن' }).click();
+    await expect(option(ownerPage, 'binding:staple').locator('.jy-badge')).toHaveText('موقتاً در دسترس نیست');
+    await option(ownerPage, 'binding:staple').getByRole('button', { name: 'دوباره روشن کن' }).click();
+    await expect(flash(ownerPage)).toContainText('صحافی «منگنه» دوباره روشن شد و در سایت سفارش می‌شود.');
+    expect(await pausedNow()).toEqual({ sizes: [], papers: [], bindings: [] });
+
+    // رویدادها زیر «تعرفه»، با نام گزینه.
+    const events = await sql<{ action: string; detail: Record<string, unknown> }[]>`
+      SELECT action, detail FROM admin_events WHERE action = 'tariff.availability' AND id > ${eventsBefore} ORDER BY id`;
+    expect(events.map((e) => [e.detail.id, e.detail.paused, e.detail.version])).toEqual([
+      ['staple', true, version],
+      ['staple', false, version],
+    ]);
+    await ownerPage.goto(at('/events?kind=tariff'));
+    const lines = ownerPage.locator('.ad-log li');
+    await expect(lines.nth(0)).toContainText('صحافی «منگنه» دوباره روشن شد');
+    await expect(lines.nth(1)).toContainText('صحافی «منگنه» موقتاً خاموش شد');
+
+    // گوشی: کارت با یک ردیف خاموش و یکی روشن، بی سرریز و هدف لمسی ۴۴.
+    await ownerPage.goto(at('/tariff'));
+    await option(ownerPage, 'paper:glossy').getByRole('button', { name: 'موقتاً خاموش کن' }).click();
+    await expect(option(ownerPage, 'paper:glossy').locator('.jy-badge')).toHaveText('موقتاً در دسترس نیست');
+    for (const width of [320, 390]) {
+      const context = await newContext(browser, { width, height: 800 });
+      await context.addCookies(await operatorContext.cookies());
+      const page = await context.newPage();
+      await page.goto(at('/tariff'));
+      await expect(card(page).locator('li')).toHaveCount(2);
+      await expect(option(page, 'paper:glossy').getByRole('button', { name: 'دوباره روشن کن' })).toBeVisible();
+      const { overflow, small, blank } = await layoutProblems(page);
+      expect(overflow, String(width)).toBeLessThanOrEqual(0);
+      expect(small, String(width)).toEqual([]);
+      expect(blank, String(width)).toEqual([]);
+      await context.close();
+    }
+
+    await resetPaused();
+    await restoreBase();
+    expect(ownerProblems).toEqual([]);
+    expect(operatorProblems).toEqual([]);
   });
 });

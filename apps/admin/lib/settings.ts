@@ -10,6 +10,7 @@
  */
 
 import type { Holiday } from '@jozveyar/contracts';
+import { FILE_FAMILIES, type FileRules } from '@jozveyar/contracts/constants';
 import type { KeyCheck, ServiceKeyName } from '@jozveyar/db';
 import { SMS_TEMPLATES, paramMark, type SmsPurpose } from '@jozveyar/sms';
 import { formatJalaliNumeric, formatNumber, formatTehranTime, jalaliYear, toLatinDigits } from '@jozveyar/text';
@@ -34,8 +35,8 @@ export const HOLIDAYS_SHOWN = 5;
 export const NEXT_YEAR_WARNING_MONTH = 11;
 
 /**
- * تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044)، و از ۷٫۱ سقف ۲۴ ساعتهٔ کد و آستانهٔ
- * هشدار اعتبار پیامک (ADR-049).
+ * تنظیم‌های عددی صفحه، با نامشان در `settings`؛ از ۵٫۱ روزهای نگهداری فایل‌های سفارش (ADR-044)، از ۷٫۱ سقف ۲۴ ساعتهٔ کد و آستانهٔ
+ * هشدار اعتبار پیامک (ADR-049)، و از ۸٫۴ سقف حجم و صفحهٔ هر فایل (سؤال ۱۹۰).
  */
 export const NUMBER_SETTINGS = [
   'order.sla_days',
@@ -43,6 +44,8 @@ export const NUMBER_SETTINGS = [
   'otp.site_daily_limit',
   'order.files_retention_days',
   'sms.credit_alert_days',
+  'file.max_mb',
+  'file.max_pages',
 ] as const;
 export type NumberSettingKey = (typeof NUMBER_SETTINGS)[number];
 export const isNumberSetting = (value: unknown): value is NumberSettingKey =>
@@ -53,6 +56,26 @@ export function parseWholeNumber(input: unknown): number | null {
   if (typeof input !== 'string') return null;
   const digits = toLatinDigits(input).replace(/[,٬\s]/g, '');
   return /^\d{1,7}$/.test(digits) ? Number(digits) : null;
+}
+
+/* ───────────────────────── فایل‌ها (۸٫۴) ───────────────────────── */
+
+/** نام هر خانوادهٔ فرمت در کارت «فایل‌ها» و رویدادها، با پسوندهایش. */
+export const FAMILY_NAMES: Record<keyof FileRules['formats'], { name: string; detail: string }> = {
+  word: { name: 'Word', detail: 'doc و docx' },
+  slides: { name: 'پاورپوینت', detail: 'ppt و pptx' },
+  image: { name: 'عکس', detail: 'JPG، PNG، WebP و HEIC' },
+};
+
+/** «همان که دیده شد» فرمت‌ها: یک رقم برای هر خانواده، به ترتیب `FILE_FAMILIES` («101»: Word و عکس روشن). */
+export const formatsSeen = (formats: FileRules['formats']) => FILE_FAMILIES.map((family) => (formats[family] ? '1' : '0')).join('');
+
+/** «PDF، Word و عکس»، یا «فقط PDF»: فرمت‌های پذیرفته، هر نام لاتین جدا از جملهٔ فارسی. */
+export function formatsSegs(formats: FileRules['formats']): ({ ltr: string } | string)[] {
+  const latin = (name: string) => (/^[A-Za-z]/.test(name) ? { ltr: name } : name);
+  const names = [{ ltr: 'PDF' }, ...FILE_FAMILIES.filter((family) => formats[family]).map((family) => latin(FAMILY_NAMES[family].name))];
+  if (names.length === 1) return ['فقط ', { ltr: 'PDF' }];
+  return names.flatMap((name, i) => [...(i === 0 ? [] : [i === names.length - 1 ? ' و ' : '، ']), name]);
 }
 
 /* ───────────────────────── تعطیلی‌ها ───────────────────────── */

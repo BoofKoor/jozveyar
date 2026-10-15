@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { FILE_MAX_MB_LIMIT, FILE_MAX_PAGES_LIMIT } from './constants.js';
 
 /** یک تعطیلی رسمی: تاریخ شمسی به شکل `formatJalaliNumeric` (`1405/10/02`). */
 export const holidaySchema = z.object({
@@ -26,6 +27,20 @@ const reportBoundsSchema = z
   .min(1)
   .max(REPORT_BOUNDS_MAX)
   .refine((bounds) => bounds.every((grams, i) => i === 0 || grams > bounds[i - 1]!), { message: 'مرزها صعودی نیستند' });
+
+/** شناسهٔ گزینهٔ تعرفه (کاغذ یا صحافی)، همان قاعدهٔ ویرایشگر پنل (`OPTION_ID`). */
+const optionIdSchema = z.string().regex(/^[a-z][a-z0-9_]{1,39}$/);
+
+/**
+ * گزینه‌های تعرفهٔ فعال که موقتاً در دسترس نیستند (برش ۸٫۴، سؤال ۱۸۸). A4 در شکل هم نیست، و کاغذ و صحافی پیش‌فرض را خواننده
+ * (`pausedOf` موتور قیمت) نادیده می‌گیرد: هر جزوه همیشه کاغذ و صحافی‌ای دارد.
+ */
+export const catalogPausedSchema = z.object({
+  sizes: z.array(z.enum(['a5', 'a3'])),
+  papers: z.array(optionIdSchema),
+  bindings: z.array(optionIdSchema),
+});
+export type CatalogPaused = z.infer<typeof catalogPausedSchema>;
 
 /** مخاطب مسیر خرید در `live` (برش ۷٫۵، ADR-052)، به ترتیب نردبان: متوقف ← پیش‌نمایش مالک ← همه. */
 export const CHECKOUT_AUDIENCES = ['paused', 'preview', 'everyone'] as const;
@@ -71,6 +86,21 @@ export const SETTING_SCHEMAS = {
    * در `off` و `mock` خوانده نمی‌شود. فقط مالک از «تنظیمات» عوضش می‌کند: بالا بردن با کد تازه، پایین آوردن بی کد و همان لحظه.
    */
   'checkout.audience': z.enum(CHECKOUT_AUDIENCES),
+  /**
+   * خانواده‌های فایلی که پذیرفته می‌شوند (برش ۸٫۴، سؤال ۱۹۰)؛ PDF همیشه. خانوادهٔ خاموش همان لحظهٔ انداختن پیام روشن می‌گیرد و
+   * سرور آپلود تازه‌اش را با `format_off` رد می‌کند. فایلی که پیش از خاموش شدن رسیده دست نمی‌خورد.
+   */
+  'file.formats': z.object({ word: z.boolean(), slides: z.boolean(), image: z.boolean() }),
+  /** سقف حجم هر فایل، مگابایت (برش ۸٫۴)؛ مرورگر همان لحظه می‌سنجد و سرور در آپلود دوباره. */
+  'file.max_mb': z.number().int().min(1).max(FILE_MAX_MB_LIMIT),
+  /** سقف صفحهٔ هر فایل (برش ۸٫۴)؛ مرورگر با شمارش خودش یا سرور، و سرور در ثبت سفارش دوباره. */
+  'file.max_pages': z.number().int().min(1).max(FILE_MAX_PAGES_LIMIT),
+  /**
+   * در دسترس بودن زندهٔ گزینه‌های تعرفهٔ فعال (برش ۸٫۴، سؤال ۱۸۸): مالک یا متصدی بی نسخهٔ تازه موقتاً خاموش و روشن می‌کنند،
+   * از «تعرفه»، با رویداد `tariff.availability`. قیمت را دست نمی‌زند؛ سایت همراه JSON تعرفه می‌گیردش و سرور گزینهٔ خاموش را
+   * با ۴۰۹ `option_unavailable` رد می‌کند.
+   */
+  'catalog.paused': catalogPausedSchema,
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

@@ -549,6 +549,76 @@ export async function saveOtpLimitsAction(_state: OtpLimitsState, form: FormData
   return { error: result.error, invalid, values };
 }
 
+/**
+ * خاموش موقت یا روشن دوبارهٔ یک گزینهٔ تعرفهٔ فعال (۸٫۴، سؤال ۱۸۸): مالک و متصدی، بی کد تازه (برگشت‌پذیر است و قیمت را دست
+ * نمی‌زند)؛ به همان صفحه با پیامش، که حال تازه را نشان می‌دهد.
+ */
+export async function setAvailabilityAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { tariff } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await tariff.setAvailability(
+    session,
+    { kind: field(form, 'kind'), id: field(form, 'id'), paused: field(form, 'paused'), seen: field(form, 'seen') },
+    await requestIp(),
+  );
+  const home = panelPath(gate, '/tariff');
+  if (result.ok) {
+    const { item } = result.value;
+    redirect(`${home}?done=availability&k=${item.kind}&o=${encodeURIComponent(item.id)}&p=${item.paused ? 1 : 0}&${doneMark()}#availability`);
+  }
+  redirect(`${home}?e=${result.error}&${doneMark()}#availability`);
+}
+
+export interface FilesState {
+  error?: AdminErrorCode;
+  /** فیلدهایی که عدد درست نیستند. */
+  invalid?: ('maxMb' | 'maxPages')[];
+  values?: { word: boolean; slides: boolean; image: boolean; maxMb: string; maxPages: string };
+}
+
+/**
+ * کارت «فایل‌ها» (۸٫۴، سؤال ۱۹۰): خانواده‌های روشن، سقف حجم و سقف صفحهٔ هر فایل با یک «ذخیره»، هر کدام «همان که دیده شد». خطای هر
+ * عدد زیر خودش با نوشته‌ها؛ «همین حالا جای دیگری عوض شد» به صفحه با پیامش. کد تازه نمی‌خواهد: برگشت‌پذیر است، و رویدادش می‌ماند.
+ */
+export async function saveFilesAction(_state: FilesState, form: FormData): Promise<FilesState> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const values = {
+    word: form.get('word') !== null,
+    slides: form.get('slides') !== null,
+    image: form.get('image') !== null,
+    maxMb: field(form, 'maxMb').slice(0, 50),
+    maxPages: field(form, 'maxPages').slice(0, 50),
+  };
+  const result = await settings.saveFiles(
+    session,
+    {
+      formats: { word: values.word, slides: values.slides, image: values.image },
+      seenFormats: field(form, 'seenFormats'),
+      maxMb: values.maxMb,
+      seenMaxMb: field(form, 'seenMaxMb'),
+      maxPages: values.maxPages,
+      seenMaxPages: field(form, 'seenMaxPages'),
+    },
+    await requestIp(),
+  );
+  const home = panelPath(gate, '/settings');
+  // همان که ذخیره شد، تا صفحه پیام را فقط وقتی نشان دهد که هنوز راست است.
+  const f = `${values.word ? 1 : 0}${values.slides ? 1 : 0}${values.image ? 1 : 0}`;
+  if (result.ok) {
+    redirect(`${home}?done=files&f=${f}&mb=${parseWholeNumber(values.maxMb)}&p=${parseWholeNumber(values.maxPages)}&${doneMark()}#files`);
+  }
+  if (result.error === 'setting_changed') redirect(`${home}?e=setting_changed&${doneMark()}`);
+  const keys = Array.isArray(result.keys) ? (result.keys as string[]) : [];
+  const invalid = [
+    ...(keys.includes('file.max_mb') ? (['maxMb'] as const) : []),
+    ...(keys.includes('file.max_pages') ? (['maxPages'] as const) : []),
+  ];
+  return { error: result.error, invalid, values };
+}
+
 /* ───────────────────────── چاپخانه‌ها (۵٫۲) ───────────────────────── */
 
 export interface AssignState {

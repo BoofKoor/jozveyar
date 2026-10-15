@@ -88,7 +88,24 @@ export function FlowNav({
 }
 
 /**
- * ریز قیمت خلاصه: چاپ، کاغذ (اگر جدا حساب شده)، صحافی، تعداد، و بعد از شهر ردیف ارسال. همان ریز قیمت
+ * ردیف «گرد کردن» (برش ۸٫۴): وقتی تعرفه جمع را گرد می‌کند (`roundingStepRials`)، تا ردیف‌های خلاصه با جمع بخوانند؛ کم شدن با «−».
+ * صفر و null هیچ. همان `roundingRials` ریز قیمت، بی حساب تازه (قاعدهٔ ۱).
+ */
+function RoundingLine({ rials }: { rials: number | null | undefined }) {
+  if (!rials) return null;
+  return (
+    <div data-testid="summary-rounding">
+      <dt>گرد کردن</dt>
+      <dd className="num">
+        {rials < 0 ? '−' : ''}
+        {formatTomans(Math.abs(rials), false)}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * ریز قیمت خلاصه: چاپ، کاغذ (اگر جدا حساب شده)، صحافی، تعداد، بعد از شهر ردیف ارسال، و گرد کردن اگر هست. همان ریز قیمت
  * سرور، بی حساب تازه (قاعدهٔ ۱).
  */
 export function SummaryLines({
@@ -96,6 +113,7 @@ export function SummaryLines({
   print,
   bindingName,
   shipping,
+  rounding,
 }: {
   item: ItemBreakdown;
   /** «سیاه‌سفید، دورو». */
@@ -103,6 +121,8 @@ export function SummaryLines({
   bindingName: string;
   /** «ارسال پست پیشتاز به مشهد» و کرایه‌اش؛ null تا شهر معلوم نیست. */
   shipping?: { label: string; rials: number } | null;
+  /** `roundingRials` همان ریز قیمتی که جمعش زیر این ردیف‌هاست (۸٫۴)؛ null یعنی نه. */
+  rounding?: number | null;
 }) {
   return (
     <dl className="home-sum__lines">
@@ -145,6 +165,7 @@ export function SummaryLines({
           <dd className="num">{formatTomans(shipping.rials, false)}</dd>
         </div>
       ) : null}
+      <RoundingLine rials={rounding} />
     </dl>
   );
 }
@@ -176,7 +197,16 @@ export interface JozveLine {
  * خلاصهٔ سفارش چندجزوه (سؤال ۲۲۵): یک ردیف برای هر جزوه، «جزوهٔ 2» و زیرش مشخصات، صفحه و نسخه اگر بیش از یکی، با قیمت همان
  * جزوه؛ بعد از شهر ردیف ارسال. همان ریز قیمت سرور، بی حساب تازه (قاعدهٔ ۱).
  */
-export function JozveLines({ jozves, shipping }: { jozves: readonly JozveLine[]; shipping?: { label: string; rials: number } | null }) {
+export function JozveLines({
+  jozves,
+  shipping,
+  rounding,
+}: {
+  jozves: readonly JozveLine[];
+  shipping?: { label: string; rials: number } | null;
+  /** همان `rounding` ‏`SummaryLines` (۸٫۴). */
+  rounding?: number | null;
+}) {
   return (
     <dl className="home-sum__lines home-sum__lines--jozves">
       {jozves.map((jozve) => (
@@ -204,6 +234,7 @@ export function JozveLines({ jozves, shipping }: { jozves: readonly JozveLine[];
           <dd className="num">{formatTomans(shipping.rials, false)}</dd>
         </div>
       ) : null}
+      <RoundingLine rials={rounding} />
     </dl>
   );
 }

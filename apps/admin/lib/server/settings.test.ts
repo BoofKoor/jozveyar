@@ -236,7 +236,13 @@ describe('نمای صفحه', () => {
     const result = await panel.overview(OWNER);
     if (!result.ok) throw new Error(result.error);
     const view = result.value;
-    expect(view.values).toMatchObject({ slaDays: 3, otpLimit: 300, officialThrough: 1405 });
+    expect(view.values).toMatchObject({
+      slaDays: 3,
+      otpLimit: 300,
+      officialThrough: 1405,
+      // ۸٫۴: پیش‌فرض‌ها همان سایت
+      files: { formats: { word: true, slides: true, image: true }, maxMb: 1536, maxPages: 1500 },
+    });
     expect(view.values!.holidays).toEqual(OFFICIAL_HOLIDAYS);
     expect(view.keys.map((k) => [k.name, k.source, k.tail, k.updatedBy, k.envSet, k.envTail, k.value])).toEqual([
       ['SMS_API_KEY', 'env', '3f9a', null, true, '3f9a', null],
@@ -342,9 +348,79 @@ describe('تنظیم‌های عددی', () => {
     );
     expect(settings.values.get('order.sla_days')).toBe(4);
     expect(settings.events).toEqual([]);
-    for (const key of ['calendar.holidays', 'file.max_pages', '', undefined]) {
+    for (const key of ['calendar.holidays', 'checkout.audience', 'file.formats', '', undefined]) {
       expect(await panel.saveNumber(OWNER, { key, value: '3', seen: '2' }, 'ip'), String(key)).toMatchObject({ status: 404, error: 'setting_not_found' });
     }
+  });
+});
+
+describe('فایل‌ها (۸٫۴، سؤال ۱۹۰)', () => {
+  const ALL = { word: true, slides: true, image: true };
+  const input = (over: Partial<Parameters<ReturnType<typeof createPanelSettings>['saveFiles']>[1]> = {}) => ({
+    formats: ALL,
+    seenFormats: '111',
+    maxMb: '1536',
+    seenMaxMb: '1536',
+    maxPages: '1500',
+    seenMaxPages: '1500',
+    ...over,
+  });
+
+  it('فقط مالک (`settings.edit`)، پیش از هر سنجش', async () => {
+    const { panel, settings } = service();
+    expect(await panel.saveFiles(OPERATOR, input({ maxMb: 'x' }), 'ip')).toMatchObject({ status: 403 });
+    expect(await panel.saveNumber(OPERATOR, { key: 'file.max_mb', value: '10', seen: '1536' }, 'ip')).toMatchObject({ status: 403 });
+    expect(settings.events).toEqual([]);
+  });
+
+  it('یک «ذخیره»: فقط آنچه عوض شد نوشته می‌شود، هر کدام با رویداد از و به؛ ارقام فارسی و جداکننده', async () => {
+    const { panel, settings } = service();
+    expect(await panel.saveFiles(OWNER, input(), 'ip')).toEqual(ok({ written: [] }));
+    expect(settings.events).toEqual([]);
+    const result = await panel.saveFiles(OWNER, input({ formats: { word: false, slides: true, image: false }, maxPages: '۶۰۰' }), 'ip');
+    expect(result).toEqual(ok({ written: ['file.formats', 'file.max_pages'] }));
+    expect(settings.values.get('file.formats')).toEqual({ word: false, slides: true, image: false });
+    expect(settings.values.get('file.max_pages')).toBe(600);
+    expect(settings.values.get('file.max_mb')).toBe(1536);
+    expect(settings.events).toMatchObject([
+      { action: 'settings.update', targetId: 'file.formats', detail: { key: 'file.formats', from: ALL, to: { word: false, slides: true, image: false } } },
+      { action: 'settings.update', targetId: 'file.max_pages', detail: { key: 'file.max_pages', from: 1500, to: 600 } },
+    ]);
+    expect(await panel.saveFiles(OWNER, input({ seenFormats: '010', formats: { word: false, slides: false, image: false }, maxMb: '1,024', seenMaxPages: '600', maxPages: '600' }), 'ip')).toEqual(
+      ok({ written: ['file.formats', 'file.max_mb'] }),
+    );
+    // همه خاموش: فقط PDF
+    expect(settings.values.get('file.formats')).toEqual({ word: false, slides: false, image: false });
+    expect(settings.values.get('file.max_mb')).toBe(1024);
+  });
+
+  it('عدد بیرون از بازه یا نادرست: خطای هر کدام با نامش، و هیچ نوشته نمی‌شود، فرمت‌ها هم', async () => {
+    const { panel, settings } = service();
+    expect(await panel.saveFiles(OWNER, input({ formats: { ...ALL, word: false }, maxMb: '1537', maxPages: '0' }), 'ip')).toEqual(
+      fail(400, 'invalid_setting', { keys: ['file.max_mb', 'file.max_pages'] }),
+    );
+    expect(await panel.saveFiles(OWNER, input({ maxMb: '1.5' }), 'ip')).toEqual(fail(400, 'invalid_setting', { keys: ['file.max_mb'] }));
+    expect(await panel.saveFiles(OWNER, input({ maxPages: '1501' }), 'ip')).toEqual(fail(400, 'invalid_setting', { keys: ['file.max_pages'] }));
+    expect(settings.events).toEqual([]);
+    expect(settings.values.get('file.formats')).toEqual(ALL);
+    // مرزها خودشان پذیرفته‌اند
+    expect(await panel.saveFiles(OWNER, input({ maxMb: '1', maxPages: '1' }), 'ip')).toEqual(ok({ written: ['file.max_mb', 'file.max_pages'] }));
+  });
+
+  it('همان که دیده شد: صفحه‌ای که فرمت‌ها یا سقف کهنه را دید رونویسی نمی‌کند؛ مقصد یکسان موفق، بی رویداد', async () => {
+    const { panel, settings } = service();
+    settings.values.set('file.formats', { word: false, slides: true, image: true });
+    expect(await panel.saveFiles(OWNER, input({ formats: { word: true, slides: false, image: true } }), 'ip')).toEqual(
+      fail(409, 'setting_changed', { key: 'file.formats' }),
+    );
+    // همان که حالا هست: «همین حالا همان است»، موفق
+    expect(await panel.saveFiles(OWNER, input({ formats: { word: false, slides: true, image: true } }), 'ip')).toEqual(ok({ written: [] }));
+    settings.values.set('file.max_mb', 500);
+    expect(await panel.saveFiles(OWNER, input({ seenFormats: '011', formats: { word: false, slides: true, image: true }, maxMb: '400' }), 'ip')).toEqual(
+      fail(409, 'setting_changed', { key: 'file.max_mb' }),
+    );
+    expect(settings.values.get('file.max_mb')).toBe(500);
+    expect(settings.events).toEqual([]);
   });
 });
 

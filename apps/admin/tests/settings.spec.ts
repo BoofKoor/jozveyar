@@ -48,6 +48,9 @@ const SETTING_KEYS = [
   'sms.credit_alert_days',
   'calendar.holidays',
   'calendar.official_through',
+  'file.formats',
+  'file.max_mb',
+  'file.max_pages',
 ];
 /** شناسهٔ قالب‌هایی که sms.ir ساختگی می‌شناسد، با نام پارامترهای همان یک منبع (`@jozveyar/sms`). */
 const TPL = { otp: '100001', paid: '100002', tracking: '100003' };
@@ -120,6 +123,9 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await sql`UPDATE settings SET value = '30' WHERE key = 'order.files_retention_days'`;
     await sql`UPDATE settings SET value = '7' WHERE key = 'sms.credit_alert_days'`;
     await sql`UPDATE settings SET value = '1405' WHERE key = 'calendar.official_through'`;
+    await sql`UPDATE settings SET value = '{"word": true, "slides": true, "image": true}' WHERE key = 'file.formats'`;
+    await sql`UPDATE settings SET value = '1536' WHERE key = 'file.max_mb'`;
+    await sql`UPDATE settings SET value = '1500' WHERE key = 'file.max_pages'`;
     before = await sql<{ key: string; value: unknown }[]>`SELECT key, value FROM settings WHERE key IN ${sql(SETTING_KEYS)}`;
     eventsBefore = Number((await sql<{ id: string | null }[]>`SELECT max(id) AS id FROM admin_events`)[0]!.id ?? 0);
 
@@ -443,6 +449,60 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
       { key: 'order.files_retention_days', from: 30, to: 31 },
       { key: 'order.files_retention_days', from: 31, to: 30 },
     ]);
+    expect(ownerProblems).toEqual([]);
+  });
+
+  test('فایل‌ها (۸٫۴، سؤال ۱۹۰): فرمت‌ها با تیک و PDF همیشه، سقف حجم و صفحه با یک «ذخیره»، خطای هر عدد زیر خودش، و رویداد با قبل و بعد', async () => {
+    const page = ownerPage;
+    await page.goto(at('/settings'));
+    const files = card(page, 'file.rules');
+    const family = (name: RegExp) => files.getByRole('checkbox', { name });
+    const mb = files.getByLabel('حجم هر فایل، مگابایت');
+    const pages = files.getByLabel('صفحهٔ هر فایل');
+    await expect(files.getByRole('heading')).toHaveText('فایل‌ها');
+    for (const name of [/^Word \(doc و docx\)$/, /^پاورپوینت \(ppt و pptx\)$/, /^عکس \(JPG، PNG، WebP و HEIC\)$/]) await expect(family(name)).toBeChecked();
+    await expect(files).toContainText('PDF همیشه پذیرفته است.');
+    await expect(mb).toHaveValue('1,536');
+    await expect(pages).toHaveValue('1,500');
+
+    // Word خاموش و سقف صفحه با ارقام فارسی: فقط آنچه عوض شد نوشته می‌شود.
+    await family(/^Word/).uncheck();
+    await pages.fill('۶۰۰');
+    await files.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(successIn(page, '.ad-flash')).toHaveText(
+      'فایل‌ها ذخیره شد: PDF، پاورپوینت و عکس؛ هر فایل تا 1,536 مگابایت و 600 صفحه. صفحهٔ اصلی سایت تا یک دقیقه همین را نشان می‌دهد.',
+    );
+    expect(await settingOf('file.formats')).toEqual({ word: false, slides: true, image: true });
+    expect(await settingOf('file.max_pages')).toBe(600);
+    expect(await settingOf('file.max_mb')).toBe(1536);
+    await expect(family(/^Word/)).not.toBeChecked();
+
+    // بیرون از بازه: خطای هر عدد زیر خودش، با نوشته‌ها و تیک‌ها؛ هیچ ذخیره نمی‌شود.
+    await family(/^عکس/).uncheck();
+    await mb.fill('1537');
+    await pages.fill('0');
+    await files.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(files.locator('#s-maxmb-error')).toHaveText('حجم هر فایل عدد صحیح 1 تا 1,536 مگابایت باشد.');
+    await expect(files.locator('#s-maxpages-error')).toHaveText('صفحهٔ هر فایل عدد صحیح 1 تا 1,500 باشد.');
+    await expect(mb).toHaveAttribute('aria-invalid', 'true');
+    await expect(mb).toHaveValue('1537');
+    await expect(family(/^عکس/)).not.toBeChecked();
+    expect(await settingOf('file.formats')).toEqual({ word: false, slides: true, image: true });
+
+    // برگرداندن به پیش‌فرض‌ها.
+    await page.goto(at('/settings'));
+    await family(/^Word/).check();
+    await pages.fill('1500');
+    await files.getByRole('button', { name: 'ذخیره' }).click();
+    await expect(successIn(page, '.ad-flash')).toContainText('فایل‌ها ذخیره شد: PDF، Word، پاورپوینت و عکس؛ هر فایل تا 1,536 مگابایت و 1,500 صفحه.');
+    expect((await settingEvents()).filter((e) => e.target.startsWith('file.')).map((e) => [e.target, e.detail.from, e.detail.to])).toEqual([
+      ['file.formats', { word: true, slides: true, image: true }, { word: false, slides: true, image: true }],
+      ['file.max_pages', 1500, 600],
+      ['file.formats', { word: false, slides: true, image: true }, { word: true, slides: true, image: true }],
+      ['file.max_pages', 600, 1500],
+    ]);
+    await page.goto(at('/events?kind=settings'));
+    await expect(page.locator('.ad-log li').nth(1)).toContainText('فرمت‌های پذیرفته: PDF، پاورپوینت و عکس ← PDF، Word، پاورپوینت و عکس');
     expect(ownerProblems).toEqual([]);
   });
 

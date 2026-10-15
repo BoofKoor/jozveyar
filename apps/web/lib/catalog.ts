@@ -10,7 +10,7 @@
  */
 
 import type { BindingType, PaperSize, PaperType, PriceList } from '@jozveyar/contracts';
-import { bindingMisfit, DEFAULT_PAPER_SIZE, sheetsOf, type BindingMisfit } from '@jozveyar/pricing';
+import { bindingMisfit, DEFAULT_PAPER_SIZE, NONE_PAUSED, sheetsOf, type BindingMisfit, type PausedOptions } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 
 import type { OrderConfig } from './orderConfig';
@@ -55,16 +55,20 @@ export function bindingsFor(list: PriceList, size: PaperSize): [string, BindingT
     .sort(([, a], [, b]) => bindingEntryRials(a, size) - bindingEntryRials(b, size));
 }
 
-/** انتخابی که جایش را به پیش‌فرض همان ردیف داد، و چرا. */
+/**
+ * انتخابی که جایش را به پیش‌فرض همان ردیف داد، و چرا. `paused`: گزینه هست ولی همین حالا موقتاً در دسترس نیست (برش ۸٫۴، سؤال
+ * ۱۸۸)؛ با روشن شدن دوباره، انتخاب خود جزوه برمی‌گردد.
+ */
 export type Replacement =
-  | { field: 'paperSize'; from: PaperSize; to: PaperSize }
-  | { field: 'paperTypeId'; from: string; to: string }
-  /** `misfit` null یعنی این صحافی دیگر نیست یا خاموش است؛ وگرنه به این جزوه نمی‌خورد. */
-  | { field: 'bindingTypeId'; from: string; to: string; misfit: BindingMisfit | null };
+  | { field: 'paperSize'; from: PaperSize; to: PaperSize; paused?: true }
+  | { field: 'paperTypeId'; from: string; to: string; paused?: true }
+  /** `misfit` null یعنی این صحافی دیگر نیست، خاموش است یا موقتاً در دسترس نیست؛ وگرنه به این جزوه نمی‌خورد. */
+  | { field: 'bindingTypeId'; from: string; to: string; misfit: BindingMisfit | null; paused?: true };
 
 /**
  * تنظیمی که این جزوه با آن قیمت می‌خورد: اندازه‌ای که تعرفه ندارد A4، کاغذی که این اندازه را ندارد کاغذ پیش‌فرض، و صحافی‌ای
- * که نیست یا به این جزوه نمی‌خورد (`bindingMisfit`) صحافی پیش‌فرض؛ هر کدام با دلیلش در `replaced`. پنل پیش‌فرض‌ها را خاموش
+ * که نیست یا به این جزوه نمی‌خورد (`bindingMisfit`) صحافی پیش‌فرض؛ گزینه‌ای که موقتاً در دسترس نیست (`paused`، برش ۸٫۴) هم
+ * همین‌طور؛ هر کدام با دلیلش در `replaced`. پنل پیش‌فرض‌ها را خاموش
  * نمی‌کند و هر اندازهٔ ارائه‌شده را برایشان می‌خواهد، پس جای هر انتخاب همیشه هست. جزوه‌ای که هنوز صفحه‌ای ندارد صحافی‌اش
  * سنجیده نمی‌شود: قیمتی هم ندارد.
  */
@@ -72,6 +76,7 @@ export function effectiveConfig(
   config: OrderConfig,
   list: PriceList,
   pageCount: number,
+  paused: PausedOptions = NONE_PAUSED,
 ): { config: OrderConfig; replaced: Replacement[] } {
   const replaced: Replacement[] = [];
 
@@ -79,11 +84,17 @@ export function effectiveConfig(
   if (list.printRates[paperSize] === undefined) {
     replaced.push({ field: 'paperSize', from: paperSize, to: DEFAULT_PAPER_SIZE });
     paperSize = DEFAULT_PAPER_SIZE;
+  } else if (paused.sizes.has(paperSize)) {
+    replaced.push({ field: 'paperSize', from: paperSize, to: DEFAULT_PAPER_SIZE, paused: true });
+    paperSize = DEFAULT_PAPER_SIZE;
   }
 
   let paperTypeId = config.paperTypeId;
   if (!paperOffered(own(list.paperTypes, paperTypeId), paperSize)) {
     replaced.push({ field: 'paperTypeId', from: paperTypeId, to: DEFAULT_PAPER_TYPE_ID });
+    paperTypeId = DEFAULT_PAPER_TYPE_ID;
+  } else if (paused.papers.has(paperTypeId)) {
+    replaced.push({ field: 'paperTypeId', from: paperTypeId, to: DEFAULT_PAPER_TYPE_ID, paused: true });
     paperTypeId = DEFAULT_PAPER_TYPE_ID;
   }
 
@@ -91,6 +102,9 @@ export function effectiveConfig(
   const binding = own(list.bindingTypes, bindingTypeId);
   if (!binding?.enabled) {
     replaced.push({ field: 'bindingTypeId', from: bindingTypeId, to: DEFAULT_BINDING_TYPE_ID, misfit: null });
+    bindingTypeId = DEFAULT_BINDING_TYPE_ID;
+  } else if (paused.bindings.has(bindingTypeId)) {
+    replaced.push({ field: 'bindingTypeId', from: bindingTypeId, to: DEFAULT_BINDING_TYPE_ID, misfit: null, paused: true });
     bindingTypeId = DEFAULT_BINDING_TYPE_ID;
   } else {
     const misfit: BindingMisfit | null = !bindingOffered(binding, paperSize)

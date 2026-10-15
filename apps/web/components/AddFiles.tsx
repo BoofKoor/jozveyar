@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import { formatNumber } from '@jozveyar/text';
-import { ACCEPT } from './DropZone';
+import { useDeskFiles } from './DeskFiles';
 
 interface Props {
   onFiles: (files: File[]) => void;
@@ -27,6 +27,7 @@ interface Props {
  * عوض می‌کنی.
  */
 export function AddFiles({ onFiles, room, label, id, variant = 'dashed', className = '' }: Props) {
+  const { accept } = useDeskFiles();
   const [dragging, setDragging] = useState(false);
 
   if (room <= 0) {
@@ -60,7 +61,7 @@ export function AddFiles({ onFiles, room, label, id, variant = 'dashed', classNa
         id={id}
         type="file"
         multiple
-        accept={ACCEPT}
+        accept={accept}
         className="sr-only"
         onChange={(event) => {
           const files = event.target.files ? Array.from(event.target.files) : [];

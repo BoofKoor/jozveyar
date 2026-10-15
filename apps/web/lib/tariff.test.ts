@@ -18,6 +18,7 @@ const DEARER: SiteTariff = {
     printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } },
   } satisfies PriceList,
   slaDays: 3,
+  paused: { sizes: ['a5'], papers: ['glossy'], bindings: ['staple'] },
 };
 
 afterEach(() => {
@@ -45,6 +46,19 @@ describe('JSON تعرفه درون HTML', () => {
     }
     // روز کاری بی عدد هم خراب است
     expect(parseTariff(JSON.stringify({ priceList: DEARER.priceList, slaDays: '3' }))).toBe(SEED_TARIFF);
+  });
+
+  it('گزینه‌های موقتاً خاموش (۸٫۴): HTML پیش از ۸٫۴ بی `paused` یعنی هیچ؛ شکل خراب هم هیچ، و A4 هرگز', () => {
+    const { paused: _, ...old } = DEARER;
+    expect(parseTariff(JSON.stringify(old))).toEqual({ ...DEARER, paused: { sizes: [], papers: [], bindings: [] } });
+    for (const paused of [null, 'glossy', 42, [], { sizes: 'a5' }]) {
+      expect(parseTariff(JSON.stringify({ ...old, paused })).paused, JSON.stringify(paused)).toEqual({ sizes: [], papers: [], bindings: [] });
+    }
+    expect(parseTariff(JSON.stringify({ ...old, paused: { sizes: ['a4', 'a5', 7], papers: ['glossy', null], bindings: [{}] } })).paused).toEqual({
+      sizes: ['a5'],
+      papers: ['glossy'],
+      bindings: [],
+    });
   });
 });
 

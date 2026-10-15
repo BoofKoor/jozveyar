@@ -83,11 +83,33 @@ describe('سرویس آپلود', () => {
     });
   });
 
-  it('سقف حجم از جدول settings خوانده می‌شود', async () => {
-    store.settings.set('file.max_bytes', 5 * MiB);
-    expect(await service.create(ME, { name: 'a.pdf', sizeBytes: 6 * MiB })).toMatchObject({
+  it('سقف حجم مگابایت است و از جدول settings خوانده می‌شود (۸٫۴)', async () => {
+    store.settings.set('file.max_mb', 5);
+    expect((await service.create(ME, { name: 'a.pdf', sizeBytes: 5 * MiB })).ok).toBe(true);
+    expect(await service.create(ME, { name: 'b.pdf', sizeBytes: 5 * MiB + 1 })).toMatchObject({
+      status: 413,
       error: 'too_large',
     });
+  });
+
+  it('سقف حجم خراب: پیش‌فرض ۱٬۵۳۶ مگابایت، با لاگ (۸٫۴)', async () => {
+    store.settings.set('file.max_mb', 0);
+    expect((await service.create(ME, { name: 'a.pdf', sizeBytes: 6 * MiB })).ok).toBe(true);
+    expect(logs.some((m) => m.includes('file.max_mb'))).toBe(true);
+  });
+
+  it('خانوادهٔ خاموش: فایلش با format_off رد می‌شود و PDF و خانواده‌های دیگر نه (۸٫۴)', async () => {
+    store.settings.set('file.formats', { word: false, slides: true, image: false });
+    for (const name of ['a.docx', 'a.doc', 'a.jpg', 'a.heic']) {
+      expect(await service.create(ME, { name, sizeBytes: MiB })).toMatchObject({
+        status: 415,
+        error: 'format_off',
+      });
+    }
+    expect((await service.create(ME, { name: 'a.pdf', sizeBytes: MiB })).ok).toBe(true);
+    expect((await service.create(ME, { name: 'a.pptx', sizeBytes: MiB })).ok).toBe(true);
+    // نوع ناشناخته همان «ناشناخته» می‌ماند، نه «خاموش».
+    expect(await service.create(ME, { name: 'a.exe', sizeBytes: MiB })).toMatchObject({ error: 'unsupported_type' });
   });
 
   it('بودجهٔ دیسک پر: آپلود تازه رد و لاگ می‌شود', async () => {

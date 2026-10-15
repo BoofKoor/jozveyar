@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
-import { DEFAULT_THRESHOLDS } from '@jozveyar/contracts/constants';
+import { DEFAULT_FILE_RULES, DEFAULT_THRESHOLDS, type FileRules } from '@jozveyar/contracts/constants';
 
 import type { WorkerResponse } from './analysis-protocol';
 import { orderGate } from './checkout/gate';
@@ -73,11 +73,15 @@ class FakeFollow {
   }
 }
 
-function harness(outcomes: Record<string, Outcome>, options: { office?: Record<string, number>; noWorker?: boolean } = {}) {
+function harness(
+  outcomes: Record<string, Outcome>,
+  options: { office?: Record<string, number>; noWorker?: boolean; rules?: FileRules } = {},
+) {
   const log: string[] = [];
   const uploads: FakeUpload[] = [];
   const follows: FakeFollow[] = [];
   const sent: string[] = [];
+  const officeAsked: string[] = [];
   const names = new WeakMap<ArrayBuffer, string>();
   let open = 0;
   let maxOpen = 0;
@@ -133,7 +137,10 @@ function harness(outcomes: Record<string, Outcome>, options: { office?: Record<s
       names.set(buffer, file.name);
       return buffer;
     },
-    officePageCount: async (file) => options.office?.[file.name] ?? null,
+    officePageCount: async (file) => {
+      officeAsked.push(file.name);
+      return options.office?.[file.name] ?? null;
+    },
     async startUpload(file, onChange) {
       activeUploads += 1;
       maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
@@ -147,6 +154,7 @@ function harness(outcomes: Record<string, Outcome>, options: { office?: Record<s
     },
     sendBrowserAnalysis: (documentId) => sent.push(documentId),
     now: () => 0,
+    ...(options.rules ? { rules: options.rules } : {}),
   };
 
   const jozve = createJozve(deps);
@@ -163,12 +171,13 @@ function harness(outcomes: Record<string, Outcome>, options: { office?: Record<s
     uploads,
     follows,
     sent,
+    officeAsked,
     upload: (name: string) => uploads.find((u) => u.file.name === name)!,
     follow: (documentId: string) => follows.find((f) => f.documentId === documentId)!,
     get stats() {
       return { maxOpen, alive, maxAlive, workersCreated, maxActiveUploads };
     },
-    view: () => jozveView(jozve.getSnapshot().sections),
+    view: () => jozveView(jozve.getSnapshot().sections, options.rules),
     names: () => jozve.getSnapshot().sections.map((s) => s.file.name),
   };
 }
@@ -433,6 +442,18 @@ describe('جزوهٔ برگشته بعد از رفرش (۳د)', () => {
     expect(h.follow(DOC.b).cancelled).toEqual({ discard: false });
   });
 
+  it('فایل برگشته‌ای که سرور بیش از سقف صفحه شمرد کنار می‌رود و سفارش با آن ساخته نمی‌شود (برش ۸٫۴)', async () => {
+    const h = harness({}, { rules: { ...DEFAULT_FILE_RULES, maxPages: 15 } });
+    h.restore([onServer('a.pdf', DOC.a, 10), onServer('b.pdf', DOC.b, 40)]);
+    await settle();
+    const view = h.view();
+    expect(view.pageCount).toBe(10);
+    expect(view.blocked.map((v) => [v.name, v.blocked?.title, v.blocked?.refused])).toEqual([
+      ['b.pdf', 'هر فایل تا 15 صفحه پذیرفته می‌شود', true],
+    ]);
+    expect(orderGate([{ view, config: INITIAL }]).kind).toBe('blocked');
+  });
+
   it('فایل تازه‌ای که پیش از رسیدن جزوهٔ برگشته انداخته شد می‌ماند', async () => {
     const h = harness({ 'n.pdf': 3 });
     h.jozve.add([disk('n.pdf')]);
@@ -440,5 +461,82 @@ describe('جزوهٔ برگشته بعد از رفرش (۳د)', () => {
     await settle();
     expect(h.names()).toEqual(['n.pdf']);
     expect(h.follows).toEqual([]);
+  });
+});
+
+describe('قاعده‌های فایل (برش ۸٫۴)', () => {
+  const RULES: FileRules = { formats: { word: false, slides: true, image: true }, maxMb: 1, maxPages: 15 };
+
+  it('بیش از سقف صفحه همان لحظهٔ شمردن کنار می‌رود: نه بررسی کامل، نه آپلود، و بقیه ادامه می‌دهند', async () => {
+    const h = harness({ 'a.pdf': 10, 'b.pdf': 20, 'c.pdf': 6 }, { rules: RULES });
+    h.jozve.add(files('a.pdf', 'b.pdf', 'c.pdf'));
+    await settle();
+    expect(h.log.filter((l) => !l.startsWith('upload'))).toEqual([
+      'count a.pdf', 'count b.pdf', 'count c.pdf', 'full a.pdf', 'full c.pdf',
+    ]);
+    // کارگر پس از شمردن بیکار بود: بسته نشد، و همان یکی کل صف را برد.
+    expect(h.stats).toMatchObject({ workersCreated: 1, maxOpen: 1, alive: 0 });
+    const view = h.view();
+    expect(view.pageCount).toBe(16);
+    expect(view.blocked.map((v) => [v.name, v.blocked])).toEqual([
+      [
+        'b.pdf',
+        {
+          title: 'هر فایل تا 15 صفحه پذیرفته می‌شود',
+          hint: 'این فایل 20 صفحه است. دو تکه‌اش کن و هر دو را بینداز؛ با هم یک جزوه می‌شوند.',
+          refused: true,
+        },
+      ],
+    ]);
+    h.upload('a.pdf').finish();
+    await settle();
+    expect(h.log.filter((l) => l.startsWith('upload'))).toEqual(['upload a.pdf', 'upload c.pdf']);
+  });
+
+  it('تک‌فایل بیش از سقف صفحه: کارگر با اولین پیام بررسی بسته می‌شود، بی آپلود و بی فرستادن تحلیل', async () => {
+    const h = harness({ 'a.pdf': 20, 'b.pdf': 6 }, { rules: RULES });
+    h.jozve.add(files('a.pdf'));
+    await settle();
+    expect(h.log).toEqual(['full a.pdf']);
+    expect(h.stats.alive).toBe(0);
+    const [a] = h.view().sections;
+    expect(a!.blocked).toMatchObject({ title: 'هر فایل تا 15 صفحه پذیرفته می‌شود', refused: true });
+    // صف نایستاد: فایل بعدی کارگر تازه می‌گیرد.
+    h.jozve.add(files('b.pdf'));
+    await settle();
+    expect(h.log).toEqual(['full a.pdf', 'full b.pdf', 'upload b.pdf']);
+    expect(h.sent).toEqual([]);
+    expect(h.view()).toMatchObject({ pageCount: 6 });
+  });
+
+  it('خانوادهٔ خاموش و حجم بیش از سقف: همان لحظهٔ انداختن، بی خواندن، بی برآورد Word و بی آپلود', async () => {
+    const h = harness({ 'a.pdf': 10 }, { rules: RULES, office: { 'b.docx': 5 } });
+    h.jozve.add([...files('a.pdf'), new File(['PK'], 'b.docx'), new File([new Uint8Array(1024 * 1024 + 1)], 'c.pdf')]);
+    await settle();
+    expect(h.log).toEqual(['full a.pdf', 'upload a.pdf']);
+    expect(h.officeAsked).toEqual([]);
+    const view = h.view();
+    expect(view.pageCount).toBe(10);
+    expect(view.blocked.map((v) => [v.name, v.blocked])).toEqual([
+      ['b.docx', { title: 'فایل Word فعلاً پذیرفته نمی‌شود', hint: 'از Word خروجی PDF بگیر و همان را جایش بینداز.', refused: true }],
+      [
+        'c.pdf',
+        {
+          title: 'هر فایل تا 1 مگابایت پذیرفته می‌شود',
+          // گرد به بالا: فایلی که از سقف بیشتر است هرگز «همان سقف» دیده نمی‌شود.
+          hint: 'این فایل 2 مگابایت است. با کیفیت کمتر ذخیره‌اش کن، یا دو تکه‌اش کن و هر دو را بینداز؛ با هم یک جزوه می‌شوند.',
+          refused: true,
+        },
+      ],
+    ]);
+  });
+
+  it('درست به اندازهٔ سقف پذیرفته است', async () => {
+    const h = harness({ 'a.pdf': 15 }, { rules: RULES, office: { 'b.pptx': 4 } });
+    h.jozve.add([...files('a.pdf'), new File(['PK'], 'b.pptx'), new File([new Uint8Array(1024 * 1024)], 'c.pdf')]);
+    await settle();
+    expect(h.officeAsked).toEqual(['b.pptx']);
+    // ۱۵ صفحه، پاورپوینت ۴ (برآورد) و فایل درست یک مگابایتی یک صفحه.
+    expect(h.view()).toMatchObject({ blocked: [], pageCount: 20 });
   });
 });

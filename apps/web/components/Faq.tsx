@@ -1,4 +1,6 @@
 import { formatTomans } from '@jozveyar/text';
+import { formatNames } from '../lib/fileRules';
+import type { SiteFiles } from '../lib/server/fileRules';
 import type { SiteTariff } from '../lib/tariff';
 import { Inline } from './Inline';
 
@@ -18,7 +20,17 @@ function rateText(priceList: SiteTariff['priceList'], color: 'bw' | 'color'): st
   return double === single ? formatTomans(double) : `${formatTomans(double)} در دورو و ${formatTomans(single)} در یکرو`;
 }
 
-export function faqItems({ priceList, slaDays }: SiteTariff): FaqItem[] {
+/** «دو روز»، «یک روز» یا «5 روز»: روزهای ماندن فایل آپلود (`file.retention_days`). */
+function daysText(days: number): string {
+  return days === 1 ? 'یک روز' : days === 2 ? 'دو روز' : `${days} روز`;
+}
+
+/**
+ * فرمت‌ها (سؤال سوم) فقط خانواده‌های روشن‌اند (برش ۸٫۴، `file.formats`)، و روزهای ماندن فایل (سؤال چهارم) همان که سرور آپلود و قوانین
+ * می‌گویند.
+ */
+export function faqItems({ priceList, slaDays }: SiteTariff, { rules, uploadDays }: SiteFiles): FaqItem[] {
+  const families = Object.values(rules.formats).filter(Boolean).length;
   return [
     {
       q: 'قیمت چاپ جزوه چطور حساب می‌شود؟',
@@ -30,11 +42,15 @@ export function faqItems({ priceList, slaDays }: SiteTariff): FaqItem[] {
     },
     {
       q: 'چه فایل‌هایی را می‌توانم بفرستم؟',
-      a: 'PDF، Word، پاورپوینت و عکس اسکن‌شده. فایل PDF همان لحظه در مرورگر خوانده می‌شود و بقیه سمت سرور تبدیل می‌شوند. چند فایل را هم می‌شود با هم انداخت: به ترتیبی که می‌خواهید پشت‌سرهم در یک جزوه صحافی می‌شوند و فقط یک بار هزینهٔ صحافی می‌گیرند.',
+      a: `${rules.formats.image ? formatNames(rules.formats).replace(/عکس$/, 'عکس اسکن‌شده') : formatNames(rules.formats)}. ${
+        families > 0
+          ? 'فایل PDF همان لحظه در مرورگر خوانده می‌شود و بقیه سمت سرور تبدیل می‌شوند.'
+          : 'فایل PDF همان لحظه در مرورگر خوانده می‌شود.'
+      } چند فایل را هم می‌شود با هم انداخت: به ترتیبی که می‌خواهید پشت‌سرهم در یک جزوه صحافی می‌شوند و فقط یک بار هزینهٔ صحافی می‌گیرند.`,
     },
     {
       q: 'فایلم کجا می‌رود و چقدر نگه داشته می‌شود؟',
-      a: 'قیمت را خود مرورگرتان حساب می‌کند. بعد از آن، فایل برای چاپ به سرور جزوه‌یار فرستاده می‌شود — اگر اینترنت قطع شد، از همان‌جا ادامه می‌دهد. فایل دو روز بعد خودکار پاک می‌شود و هیچ‌جای دیگری نمی‌رود.',
+      a: `قیمت را خود مرورگرتان حساب می‌کند. بعد از آن، فایل برای چاپ به سرور جزوه‌یار فرستاده می‌شود — اگر اینترنت قطع شد، از همان‌جا ادامه می‌دهد. فایل ${daysText(uploadDays)} بعد خودکار پاک می‌شود و هیچ‌جای دیگری نمی‌رود.`,
     },
     {
       q: 'ارسال چقدر طول می‌کشد؟',

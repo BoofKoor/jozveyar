@@ -11,6 +11,7 @@
 import type {
   BindingType,
   Breakdown,
+  CatalogPaused,
   ColorMode,
   ItemBreakdown,
   ItemSpec,
@@ -21,6 +22,7 @@ import type {
   QuoteWarning,
   SidesMode,
 } from '@jozveyar/contracts';
+import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from './seed.js';
 
 /* ──────────────────────────── اندازهٔ کاغذ ──────────────────────────── */
 
@@ -48,6 +50,31 @@ export function sheetAreaM2(size: PaperSize): number {
 /** اندازه‌هایی که این تعرفه ارائه می‌کند، به ترتیب نمایش: آنها که نرخ چاپ دارند. */
 export function offeredSizes(list: PriceList): PaperSize[] {
   return PAPER_SIZE_ORDER.filter((size) => list.printRates[size] !== undefined);
+}
+
+/* ──────────────────────────── در دسترس بودن زنده ──────────────────────────── */
+
+/** گزینه‌های تعرفهٔ فعال که همین حالا موقتاً در دسترس نیستند (`pausedOf`). */
+export interface PausedOptions {
+  sizes: ReadonlySet<PaperSize>;
+  papers: ReadonlySet<string>;
+  bindings: ReadonlySet<string>;
+}
+
+export const NONE_PAUSED: PausedOptions = { sizes: new Set(), papers: new Set(), bindings: new Set() };
+
+/**
+ * گزینه‌های این تعرفه که موقتاً در دسترس نیستند (برش ۸٫۴، سؤال ۱۸۸)، از تنظیم `catalog.paused`: فقط آنچه همین تعرفه ارائه
+ * می‌کند و روشن است، و هرگز A4، کاغذ پیش‌فرض یا صحافی پیش‌فرض، تا هر جزوه همیشه اندازه، کاغذ و صحافی‌ای داشته باشد (همان
+ * پیش‌فرض‌هایی که جای انتخابِ دیگر نمی‌خورد می‌نشینند). قیمت را دست نمی‌زند. یک جا برای میز، صفحهٔ اصلی، سرور مسیر خرید و پنل.
+ */
+export function pausedOf(list: PriceList, paused: CatalogPaused | null | undefined): PausedOptions {
+  if (!paused) return NONE_PAUSED;
+  return {
+    sizes: new Set(paused.sizes.filter((size) => list.printRates[size] !== undefined)),
+    papers: new Set(paused.papers.filter((id) => id !== DEFAULT_PAPER_TYPE_ID && list.paperTypes[id]?.enabled === true)),
+    bindings: new Set(paused.bindings.filter((id) => id !== DEFAULT_BINDING_TYPE_ID && list.bindingTypes[id]?.enabled === true)),
+  };
 }
 
 /* ──────────────────────────── کمکی‌ها ──────────────────────────── */
@@ -292,6 +319,15 @@ export function shippingFloorRials(list: PriceList, weightGrams: number): number
     if (floor === null || rate.priceRials < floor) floor = rate.priceRials;
   }
   return floor;
+}
+
+/**
+ * چقدر تا حداقل سفارش مانده (برش ۸٫۴، سؤال ۱۹۰)، ریال: همان قاعدهٔ `below_min_order` `quote()`، روی جمع چاپ، کاغذ و صحافی، پیش از
+ * کرایه، تخفیف، مالیات و گرد کردن. صفر یعنی رسیده، یا تعرفه حداقلی ندارد، یا هنوز چیزی قیمت نخورده.
+ */
+export function minOrderGapRials(breakdown: Pick<Breakdown, 'subtotalRials'>, list: PriceList): number {
+  const min = list.settings.minOrderRials;
+  return breakdown.subtotalRials > 0 && breakdown.subtotalRials < min ? min - breakdown.subtotalRials : 0;
 }
 
 /* ───────────────────────────── ورودی اصلی ───────────────────────────── */

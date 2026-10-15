@@ -24,7 +24,15 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import { CHECKOUT_AUDIENCES, SETTING_SCHEMAS, type CheckoutAudience, type Holiday, type SettingKey, type SettingValue } from '@jozveyar/contracts';
+import {
+  CHECKOUT_AUDIENCES,
+  SETTING_SCHEMAS,
+  type CheckoutAudience,
+  type FileRules,
+  type Holiday,
+  type SettingKey,
+  type SettingValue,
+} from '@jozveyar/contracts';
 import {
   CHECKOUT_AUDIENCE_EVENT,
   CHECKOUT_AUDIENCE_SETTING,
@@ -65,6 +73,7 @@ import {
   KEY_TESTS_PER_HOUR,
   TEMPLATE_SAMPLES,
   creditDays,
+  formatsSeen,
   isNumberSetting,
   keyTail,
   maskMobile,
@@ -220,6 +229,8 @@ export interface SettingsView {
     officialThrough: number;
     /** آستانهٔ هشدار اعتبار پیامک، روز مصرف (برش ۷٫۱). */
     creditAlertDays: number;
+    /** فایل‌هایی که سایت می‌پذیرد (برش ۸٫۴، سؤال ۱۹۰): خانواده‌های روشن، سقف حجم و صفحهٔ هر فایل. */
+    files: FileRules;
   } | null;
   /** شمار کد ساعت و ۲۴ ساعت گذشته، کل سایت (برش ۷٫۱)؛ اگر `settings.edit`. */
   otpUsage: { hour: number; day: number } | null;
@@ -507,6 +518,9 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               readSetting(read, 'order.files_retention_days', log),
               readSetting(read, 'otp.site_daily_limit', log),
               readSetting(read, 'sms.credit_alert_days', log),
+              readSetting(read, 'file.formats', log),
+              readSetting(read, 'file.max_mb', log),
+              readSetting(read, 'file.max_pages', log),
             ])
           : null,
         canSecrets ? deps.secrets.list() : [],
@@ -527,6 +541,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               holidays: sortHolidays(values[2]),
               officialThrough: values[3],
               creditAlertDays: values[6],
+              files: { formats: values[7], maxMb: values[8], maxPages: values[9] },
             }
           : null,
         otpUsage: usage ? { hour: usage.hour, day: usage.day } : null,
@@ -566,6 +581,61 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
       if (invalid.length > 0) return fail(400, 'invalid_setting', { keys: invalid });
       const written: NumberSettingKey[] = [];
       for (const entry of entries) {
+        if (text(entry.seen) === String(parseWholeNumber(entry.value))) continue;
+        const saved = await saveNumber(session, entry, ip);
+        if (!saved.ok) return saved;
+        if (saved.value.written) written.push(saved.value.key);
+      }
+      return ok({ written });
+    },
+
+    /**
+     * کارت «فایل‌ها» (برش ۸٫۴، سؤال ۱۹۰) با یک «ذخیره»: خانواده‌های روشن (PDF همیشه)، سقف حجم و سقف صفحهٔ هر فایل. اول هر دو عدد
+     * سنجیده می‌شوند؛ بعد فرمت‌ها و هر عدد که عوض شده، هر کدام جدا زیر قفل خودش و «همان که دیده شد»، با رویداد `settings.update`.
+     * سایت با همین `settings` می‌سنجد: صفحهٔ اصلی تا یک دقیقه (ISR)، و سرور آپلود و مسیر خرید همان لحظه.
+     */
+    async saveFiles(
+      session: AdminSession,
+      input: {
+        formats: FileRules['formats'];
+        seenFormats: unknown;
+        maxMb: unknown;
+        seenMaxMb: unknown;
+        maxPages: unknown;
+        seenMaxPages: unknown;
+      },
+      ip: string,
+    ): Promise<Result<{ written: SettingKey[] }>> {
+      if (!can(session, 'settings.edit')) return fail(403, 'forbidden');
+      const numbers = [
+        { key: 'file.max_mb' as const, value: input.maxMb, seen: input.seenMaxMb },
+        { key: 'file.max_pages' as const, value: input.maxPages, seen: input.seenMaxPages },
+      ];
+      const invalid = numbers.filter((entry) => {
+        const value = parseWholeNumber(entry.value);
+        return value === null || !SETTING_SCHEMAS[entry.key].safeParse(value).success;
+      });
+      if (invalid.length > 0) return fail(400, 'invalid_setting', { keys: invalid.map((entry) => entry.key) });
+      const formats = { word: input.formats.word === true, slides: input.formats.slides === true, image: input.formats.image === true };
+      const seenFormats = text(input.seenFormats);
+      const written: SettingKey[] = [];
+      if (seenFormats !== formatsSeen(formats)) {
+        const result = await deps.settings.change({
+          key: 'file.formats',
+          action: 'settings.update',
+          at: now(),
+          actor: actor(session, ip),
+          decide: (raw) => {
+            const current = effective('file.formats', raw);
+            if (formatsSeen(current) === formatsSeen(formats)) return { kind: 'same' };
+            if (formatsSeen(current) !== seenFormats) return { kind: 'reject', reason: 'changed' };
+            return { kind: 'write', value: formats, detail: { key: 'file.formats', from: current, to: formats } };
+          },
+        });
+        if (!result.ok) return fail(409, 'setting_changed', { key: 'file.formats' });
+        if (result.written) written.push('file.formats');
+      }
+      for (const entry of numbers) {
         if (text(entry.seen) === String(parseWholeNumber(entry.value))) continue;
         const saved = await saveNumber(session, entry, ip);
         if (!saved.ok) return saved;

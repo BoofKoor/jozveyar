@@ -417,7 +417,7 @@ export function SingleFileCard({ section, onAdd, room, onPick, onReset, settings
     const failure = serverFailed
       ? serverFailureMessage(upload?.analysis?.failureReason, kind)
       : uploadRefused
-        ? { hint: uploadRefusalMessage(upload?.reason) }
+        ? { hint: uploadRefusalMessage(upload?.reason, kind) }
         : null;
     return (
       <section data-testid="server-path" className="jy-card" aria-labelledby="jozve-title">
@@ -450,13 +450,15 @@ export function SingleFileCard({ section, onAdd, room, onPick, onReset, settings
     );
   }
 
-  if (state.phase === 'error' && state.error && !serverReady) {
+  // فایلی که خوانده یا پذیرفته نشد، و فایلی که شمارش سرور از سقف صفحه بیشترش دید (برش ۸٫۴): متن از نمای فایل، با عدد خود فایل.
+  if ((state.phase === 'error' && state.error && !serverReady) || (serverReady && section.blocked)) {
+    const failure = section.blocked ?? { title: state.error!.title, hint: state.error!.hint };
     return (
       <section className="jy-card" aria-labelledby="jozve-title">
         <CardHead files={1} pages={0} />
         <FileRow section={section} pages={0} sizes={[]} />
         <div className="mt-4">
-          <Failure title={state.error.title} hint={state.error.hint} testId="file-error" />
+          <Failure title={failure.title} hint={failure.hint} testId="file-error" />
         </div>
         <AnotherFileButton onReset={onReset} />
       </section>

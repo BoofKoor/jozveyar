@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import type { FileRules } from '@jozveyar/contracts/constants';
 import type { WorkerResponse } from './analysis-protocol';
 import { createJozve, type JozveDeps } from './jozveController';
 
@@ -11,8 +12,9 @@ import { createJozve, type JozveDeps } from './jozveController';
  * خوانندهٔ فهرست zip هر سه با import پویا و فقط با اولین فایل می‌آیند، پس به باندل اولیه
  * نمی‌خورند (ADR-014؛ تست باندل در `tests/flow.spec.ts`).
  */
-function browserDeps(): JozveDeps {
+function browserDeps(rules: FileRules): JozveDeps {
   return {
+    rules,
     createWorker(onMessage, onError) {
       try {
         const worker = new Worker(new URL('./analyze.worker.ts', import.meta.url), { type: 'module' });
@@ -45,9 +47,9 @@ function browserDeps(): JozveDeps {
 /** جزوه و کارهای کاربر روی آن، همان که پوستهٔ فلوی سفارش به رابط پس از فایل می‌دهد. */
 export type JozveHandle = ReturnType<typeof useJozve>;
 
-/** جزوهٔ این صفحه: فهرست فایل‌ها و کارهای کاربر روی آن. */
-export function useJozve() {
-  const [jozve] = useState(() => createJozve(browserDeps()));
+/** جزوهٔ این صفحه: فهرست فایل‌ها و کارهای کاربر روی آن، با قاعده‌های فایل همین صفحه (برش ۸٫۴). */
+export function useJozve(rules: FileRules) {
+  const [jozve] = useState(() => createJozve(browserDeps(rules)));
   const snapshot = useSyncExternalStore(jozve.subscribe, jozve.getSnapshot, jozve.getSnapshot);
   useEffect(() => {
     jozve.resume();

@@ -692,12 +692,13 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
                       : [];
                   })}
                   shipping={shippingLine}
+                  rounding={breakdown.roundingRials}
                 />
               </>
             ) : (
               <>
                 <JozveBrief files={files} pageCount={item.pageCount} />
-                <SummaryLines item={lineItem} print={print} bindingName={item.bindingName} shipping={shippingLine} />
+                <SummaryLines item={lineItem} print={print} bindingName={item.bindingName} shipping={shippingLine} rounding={breakdown.roundingRials} />
               </>
             )}
             <div className="home-sum__total">

@@ -10,9 +10,11 @@
  */
 
 import type { ItemSpec, OrderSpec } from '@jozveyar/contracts';
+import { DEFAULT_FILE_RULES, type FileRules } from '@jozveyar/contracts/constants';
 import { itemPageCount, wholeDocumentRule } from '@jozveyar/pricing';
-import type { FileKind } from './analysis-protocol';
+import { ERROR_MESSAGES, type FileKind } from './analysis-protocol';
 import { isFileError, isServerPath, type AnalysisState } from './fileAnalysis';
+import { REFUSED_CODES, isRuleError, ruleErrorText, unsupportedHint } from './fileRules';
 import { summarize, type AnalysisSummaryView } from './fileSummary';
 import type { RestoredFile, Section } from './jozve';
 import type { OrderConfig } from './orderConfig';
@@ -71,8 +73,11 @@ export interface SectionView {
   pageCount: number;
   /** عددی که مرورگر یا خود Word گفته بود و سرور چیز دیگری دید. */
   correctedFrom: number | null;
-  /** فایلی که در قیمت نمی‌آید، با پیام و راه جلو — نه بن‌بست. */
-  blocked: { title: string; hint: string } | null;
+  /**
+   * فایلی که در قیمت نمی‌آید، با پیام و راه جلو — نه بن‌بست. `refused`: قاعده‌های فایل یا نوع فایل نپذیرفتش (خانوادهٔ خاموش، حجم یا
+   * صفحه بیش از سقف، نوع ناشناس؛ برش ۸٫۴)، نه اینکه خوانده نشد.
+   */
+  blocked: { title: string; hint: string; refused: boolean } | null;
   /**
    * جزوه بعد از رفرش برگشت و این فایل روی سرور نرسیده بود (۳د): تا همان فایل دوباره انتخاب نشود، در قیمت و
    * سفارش نیست.
@@ -105,7 +110,7 @@ function serverSummary(server: ServerAnalysisView): AnalysisSummaryView {
  * سرور منبع حقیقت است: وقتی همهٔ صفحه‌ها را دید، عدد او جای عدد مرورگر یا پیش‌فاکتور
  * می‌نشیند. تا آن موقع عدد مرورگر پیش‌فاکتور است.
  */
-export function sectionView(section: Section): SectionView {
+export function sectionView(section: Section, rules: FileRules = DEFAULT_FILE_RULES): SectionView {
   const { analysis, upload } = section;
   const waiting = awaitsFile(section);
   const server = upload?.analysis;
@@ -119,13 +124,27 @@ export function sectionView(section: Section): SectionView {
   let blocked: SectionView['blocked'] = null;
   if (!serverReady) {
     if (isFileError(analysis) && analysis.error) {
-      blocked = { title: analysis.error.title, hint: analysis.error.hint };
+      const { code } = analysis.error;
+      // متن قاعده‌های فایل با عدد خود فایل و سقف همین صفحه (برش ۸٫۴)؛ صف فقط کد گذاشته.
+      const text = isRuleError(code)
+        ? ruleErrorText(code, { kind: section.kind, size: section.file.size, pageCount: analysis.pageCount }, rules)
+        : code === 'unsupported_type'
+          ? { title: ERROR_MESSAGES.unsupported_type.title, hint: unsupportedHint(rules.formats) }
+          : { title: analysis.error.title, hint: analysis.error.hint };
+      blocked = { ...text, refused: REFUSED_CODES.has(code) };
     } else if (serverPath && serverFailed) {
       // پیش‌فاکتوری که سرور نتوانست تأییدش کند دیگر معنا ندارد.
-      blocked = serverFailureMessage(server?.failureReason, section.kind);
-    } else if (serverPath && !estimate && uploadRefused) {
-      blocked = uploadRefusal(upload?.reason);
+      blocked = { ...serverFailureMessage(server?.failureReason, section.kind), refused: false };
+    } else if (serverPath && uploadRefused && (!estimate || upload?.reason === 'format_off')) {
+      // خانواده‌ای که پس از بار صفحه خاموش شد (برش ۸٫۴) پیش‌فاکتور هم داشته باشد پذیرفته نیست.
+      blocked = { ...uploadRefusal(upload?.reason, section.kind), refused: REFUSED_CODES.has(upload?.reason ?? '') };
     }
+  } else if (server!.pageCount! > rules.maxPages) {
+    // سقف صفحهٔ هر فایل با شمارش سرور (Word، PDF بزرگ، جزوهٔ برگشته)؛ سرور مسیر خرید هم دوباره می‌سنجد.
+    blocked = {
+      ...ruleErrorText('too_many_pages', { kind: section.kind, size: section.file.size, pageCount: server!.pageCount! }, rules),
+      refused: true,
+    };
   }
 
   return {
@@ -190,16 +209,19 @@ export interface JozveView {
  * (`jozveController.ts`)، پس با هر صفحه‌ای که کارگر تحلیل می‌رساند فقط نمای همان یک فایل دوباره حساب می‌شود، نه همهٔ
  * فایل‌های سفارش؛ و قیمت چیدمان دیگرِ پرسش (برش ۸٫۲) نماها را از نو نمی‌سازد.
  */
-const sectionViews = new WeakMap<Section, SectionView>();
+const sectionViews = new WeakMap<FileRules, WeakMap<Section, SectionView>>();
 
-function viewOf(section: Section): SectionView {
-  let view = sectionViews.get(section);
-  if (!view) sectionViews.set(section, (view = sectionView(section)));
+function viewOf(section: Section, rules: FileRules): SectionView {
+  let views = sectionViews.get(rules);
+  if (!views) sectionViews.set(rules, (views = new WeakMap()));
+  let view = views.get(section);
+  if (!view) views.set(section, (view = sectionView(section, rules)));
   return view;
 }
 
-export function jozveView(sections: readonly Section[]): JozveView {
-  const views = sections.map(viewOf);
+/** نمای جزوه با قاعده‌های فایل همین صفحه (برش ۸٫۴؛ پیش‌فرض بی آن). */
+export function jozveView(sections: readonly Section[], rules: FileRules = DEFAULT_FILE_RULES): JozveView {
+  const views = sections.map((section) => viewOf(section, rules));
   const included = views.filter((v) => v.blocked === null && v.pageCount > 0);
   const sizes = new Map<string, number>();
   for (const v of included) {

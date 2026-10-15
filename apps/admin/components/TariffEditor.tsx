@@ -32,6 +32,7 @@ import {
   type DraftForm,
   type DraftIssue,
   type PaperInput,
+  type RestInput,
 } from '../lib/tariff';
 import { Segments } from './Segments';
 import { StatusButton } from './StatusButton';
@@ -105,6 +106,7 @@ const GROUP_OF: [RegExp, string][] = [
   [/^(paper|papers)\b/, 'کاغذ'],
   [/^(binding|bindings)\b/, 'صحافی'],
   [/^ship\./, 'کرایه'],
+  [/^rest\./, 'بقیه'],
   [/^label$/, 'نام'],
 ];
 
@@ -124,9 +126,10 @@ const SizeName = ({ size }: { size: PaperSize }) => <bdi>{PAPER_SIZES[size].labe
 /**
  * ویرایشگر پیش‌نویس تعرفه (طرح پنل `m-tariff-draft` و `m-tariff-invalid`؛ کاتالوگ کامل از ۸٫۳، سؤال ۱۸۹): نام؛ نرخ هر رو برای هر
  * اندازه، یکرو و دورو (A5 و A3 با تیک «ارائه می‌شود»)؛ کاغذها با گرماژ و نرخ هر برگ هر اندازه؛ صحافی‌ها با کمینه و سقف برگ
- * هر جلد، «بالای سقف»، وزن، و بازه‌های هر اندازه (افزودن و حذف)؛ کرایهٔ پست پیشتاز؛ و پیش‌نمایش جزوه‌های نمونه با همان
- * `quote()` سایت؛ همه زنده، با همان سنجشی که سرور هنگام ذخیره دوباره می‌کند (`readDraft`). کاغذ و صحافی پیش‌فرض خاموش و حذف
- * نمی‌شوند. تا خطا هست، پیش‌نمایش حساب نمی‌شود و جای «فعال کن…» «اول خطا را درست کن» است.
+ * هر جلد، «بالای سقف»، وزن، و بازه‌های هر اندازه (افزودن و حذف)؛ کرایهٔ پست پیشتاز؛ «بقیه»: مالیات، گرد کردن، حداقل سفارش و وزن
+ * بسته‌بندی (۸٫۴)؛ و پیش‌نمایش جزوه‌های نمونه با همان `quote()` سایت؛ همه زنده، با همان سنجشی که سرور هنگام ذخیره دوباره می‌کند
+ * (`readDraft`). کاغذ و صحافی پیش‌فرض خاموش و حذف نمی‌شوند. تا خطا هست، پیش‌نمایش حساب نمی‌شود و جای «فعال کن…» «اول خطا را درست
+ * کن» است.
  */
 export function TariffEditor({ gate, version, initial, fingerprint, base, active, saved, activateHref }: Props) {
   const [form, setForm] = useState(initial);
@@ -161,6 +164,7 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
       print: { ...current.print, [size]: { ...current.print[size], [sides]: { ...current.print[size][sides], [color]: value } } },
     }));
   const setSize = (size: PaperSize, offered: boolean) => setForm((current) => ({ ...current, sizes: { ...current.sizes, [size]: offered } }));
+  const setRest = (key: keyof RestInput, value: string) => setForm((current) => ({ ...current, rest: { ...current.rest, [key]: value } }));
 
   const setPaper = (index: number, patch: Partial<PaperInput>) =>
     setForm((current) => ({ ...current, papers: current.papers.map((paper, i) => (i === index ? { ...paper, ...patch } : paper)) }));
@@ -273,6 +277,8 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
   /** «نسخهٔ فعال: 1,600»، اگر نسخهٔ فعال این عدد را دارد. */
   const was = (rials: number | undefined): Seg[] | null =>
     rials === undefined ? null : ['نسخهٔ فعال: ', { num: formatNumber(Math.round(rials / 10)) }];
+  /** «نسخهٔ فعال: ندارد»: صفرِ گرد کردن و حداقل سفارش یعنی «ندارد». */
+  const wasOrNone = (rials: number): Seg[] => (rials > 0 ? was(rials)! : ['نسخهٔ فعال: ندارد']);
 
   const shipIssues: { key: string; place: Seg[]; issue: DraftIssue; kind: 'error' | 'warn' }[] = [];
   for (const row of rateRows(base)) {
@@ -721,6 +727,44 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
                 ))}
               </div>
             ) : null}
+          </section>
+
+          <section className="jy-card" aria-labelledby="t-d-rest" data-rest="">
+            <h2 id="t-d-rest" className="jy-card__title">
+              بقیه
+            </h2>
+            <p className="ad-hint ad-gap">
+              صفرِ گرد کردن و حداقل سفارش یعنی «ندارد». حداقل سفارش روی جمع چاپ، کاغذ و صحافی است، پیش از کرایه. مالیات{' '}
+              <span className="num">{base.settings.vatPercent}</span>٪ است و از اینجا عوض نمی‌شود.
+            </p>
+            <div className="ad-rates ad-rates--4">
+              {field({
+                id: 'd-rest-rounding',
+                name: 'rest.rounding',
+                label: 'گرد کردن جمع (تومان)',
+                value: form.rest.rounding ?? '',
+                onChange: (value) => setRest('rounding', value),
+                money: true,
+                hint: wasOrNone(active.settings.roundingStepRials),
+              })}
+              {field({
+                id: 'd-rest-min',
+                name: 'rest.minOrder',
+                label: 'حداقل سفارش (تومان)',
+                value: form.rest.minOrder ?? '',
+                onChange: (value) => setRest('minOrder', value),
+                money: true,
+                hint: wasOrNone(active.settings.minOrderRials),
+              })}
+              {field({
+                id: 'd-rest-packaging',
+                name: 'rest.packaging',
+                label: 'وزن بسته‌بندی (گرم)',
+                value: form.rest.packaging ?? '',
+                onChange: (value) => setRest('packaging', value),
+                hint: ['نسخهٔ فعال: ', { num: formatNumber(active.settings.packagingWeightGrams) }],
+              })}
+            </div>
           </section>
 
           <section className="jy-card" aria-labelledby="t-d-prev">

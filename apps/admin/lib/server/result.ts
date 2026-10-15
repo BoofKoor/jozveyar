@@ -66,6 +66,9 @@ export type AdminErrorCode =
   | 'draft_changed'
   | 'tariff_changed'
   | 'already_active'
+  /** خاموش موقت گزینه‌های تعرفه (۸٫۴): گزینه‌ای که در تعرفهٔ فعال نیست یا خاموش‌کردنی نیست؛ وضعش همین حالا جای دیگری عوض شد. */
+  | 'option_not_found'
+  | 'availability_changed'
   /** تنظیمات و کلیدها (۴٫۶). */
   | 'setting_not_found'
   | 'invalid_setting'

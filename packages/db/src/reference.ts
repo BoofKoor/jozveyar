@@ -19,7 +19,7 @@
 
 import { count, sql } from 'drizzle-orm';
 import { CITIES, PROVINCES, SHIPPING_ZONES, findCity } from '@jozveyar/geo';
-import { SETTING_SCHEMAS, type PriceList, type SettingKey, type SettingValue } from '@jozveyar/contracts';
+import { DEFAULT_FILE_RULES, SETTING_SCHEMAS, type PriceList, type SettingKey, type SettingValue } from '@jozveyar/contracts';
 
 import { seedAdminRoles } from './admin.js';
 import { OFFICIAL_HOLIDAYS } from './holidays.js';
@@ -53,6 +53,14 @@ export const FILES_RETENTION_SETTING = 'order.files_retention_days';
 export const REPORT_BANDS_SETTING = 'report.weight_bands';
 /** مخاطب مسیر خرید در `live` (برش ۷٫۵، ADR-052): `paused`، `preview` یا `everyone`. */
 export const CHECKOUT_AUDIENCE_SETTING = 'checkout.audience';
+/** خانواده‌های فایلی که پذیرفته می‌شوند (برش ۸٫۴، سؤال ۱۹۰)؛ PDF همیشه. */
+export const FILE_FORMATS_SETTING = 'file.formats';
+/** سقف حجم هر فایل، مگابایت (برش ۸٫۴). */
+export const FILE_MAX_MB_SETTING = 'file.max_mb';
+/** سقف صفحهٔ هر فایل (برش ۸٫۴). */
+export const FILE_MAX_PAGES_SETTING = 'file.max_pages';
+/** گزینه‌های تعرفهٔ فعال که موقتاً در دسترس نیستند (برش ۸٫۴، سؤال ۱۸۸). */
+export const CATALOG_PAUSED_SETTING = 'catalog.paused';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -86,6 +94,10 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [FILES_RETENTION_SETTING]: 30,
   [REPORT_BANDS_SETTING]: 'tariff',
   [CHECKOUT_AUDIENCE_SETTING]: 'preview',
+  [FILE_FORMATS_SETTING]: DEFAULT_FILE_RULES.formats,
+  [FILE_MAX_MB_SETTING]: DEFAULT_FILE_RULES.maxMb,
+  [FILE_MAX_PAGES_SETTING]: DEFAULT_FILE_RULES.maxPages,
+  [CATALOG_PAUSED_SETTING]: { sizes: [], papers: [], bindings: [] },
 };
 
 /**

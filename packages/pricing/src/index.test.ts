@@ -5,7 +5,9 @@ import {
   bindingMisfit,
   countPages,
   itemPageCount,
+  minOrderGapRials,
   offeredSizes,
+  pausedOf,
   perPageColorRules,
   quote,
   sheetAreaM2,
@@ -380,6 +382,48 @@ describe('هشدارها', () => {
     };
     const b = quote(spec({ pageCount: 20 }), withMin);
     expect(b.warnings).toContain('below_min_order');
+  });
+
+  it('مانده تا حداقل سفارش (۸٫۴): روی جمع چاپ، کاغذ و صحافی، پیش از مالیات و گرد کردن؛ رسیده و بی حداقل صفر', () => {
+    // ۲۰ صفحهٔ دورو سیاه‌سفید: چاپ ۳۲,۰۰۰ + طلق و سیم ۴۵,۰۰۰ = ۷۷,۰۰۰ تومان؛ مالیات و گرد کردن در مانده نیستند
+    const withMin = { ...L, settings: { ...L.settings, minOrderRials: T(100_000), vatPercent: 10, roundingStepRials: T(1_000) } };
+    const below = quote(spec({ pageCount: 20 }), withMin);
+    expect(below.subtotalRials).toBe(T(77_000));
+    expect(below.warnings).toContain('below_min_order');
+    expect(minOrderGapRials(below, withMin)).toBe(T(23_000));
+    // همان مرز `quote()`: درست روی حداقل، رسیده
+    const exact = { ...withMin, settings: { ...withMin.settings, minOrderRials: T(77_000) } };
+    expect(quote(spec({ pageCount: 20 }), exact).warnings).not.toContain('below_min_order');
+    expect(minOrderGapRials(quote(spec({ pageCount: 20 }), exact), exact)).toBe(0);
+    expect(minOrderGapRials(quote(spec({ pageCount: 20 }), L), L)).toBe(0);
+    expect(minOrderGapRials({ subtotalRials: 0 }, withMin)).toBe(0);
+  });
+});
+
+describe('در دسترس بودن زنده (۸٫۴)', () => {
+  const catalog: PriceList = {
+    ...L,
+    printRates: { ...L.printRates, a5: L.printRates.a4 },
+    paperTypes: { ...L.paperTypes, glossy: { nameFa: 'گلاسه', gsm: 130, enabled: true, sheetRates: { a4: T(1_500) } }, old: { nameFa: 'کهنه', gsm: 70, enabled: false, sheetRates: { a4: 0 } } },
+    bindingTypes: { ...L.bindingTypes, staple: { ...L.bindingTypes[DEFAULT_BINDING_TYPE_ID]!, nameFa: 'منگنه', splitsVolumes: false, maxSheetsPerVolume: 50 } },
+  };
+
+  it('فقط گزینه‌های ارائه‌شده و روشن این تعرفه؛ هرگز کاغذ و صحافی پیش‌فرض (A4 در شکل تنظیم هم نیست)', () => {
+    const paused = pausedOf(catalog, {
+      sizes: ['a5', 'a3'],
+      papers: [DEFAULT_PAPER_TYPE_ID, 'glossy', 'old', 'nope'],
+      bindings: [DEFAULT_BINDING_TYPE_ID, 'staple', 'nope'],
+    });
+    expect([...paused.sizes]).toEqual(['a5']);
+    expect([...paused.papers]).toEqual(['glossy']);
+    expect([...paused.bindings]).toEqual(['staple']);
+  });
+
+  it('بی تنظیم هیچ', () => {
+    for (const none of [null, undefined, { sizes: [], papers: [], bindings: [] }]) {
+      const paused = pausedOf(catalog, none);
+      expect(paused.sizes.size + paused.papers.size + paused.bindings.size).toBe(0);
+    }
   });
 });
 

@@ -1,5 +1,5 @@
-import type { ColorMode, PriceList } from '@jozveyar/contracts';
-import { DEFAULT_PAPER_SIZE, PAPER_SIZES, offeredSizes, quote, wholeDocumentRule } from '@jozveyar/pricing';
+import type { CatalogPaused, ColorMode, PriceList } from '@jozveyar/contracts';
+import { DEFAULT_PAPER_SIZE, PAPER_SIZES, offeredSizes, pausedOf, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import { Inline } from './Inline';
@@ -12,7 +12,8 @@ import { Inline } from './Inline';
  * حساب می‌کند. تعرفه که عوض شد، این بخش هم با همان عوض می‌شود، با بازسازی صفحه (ISR ۶۰ ثانیه).
  *
  * از ۸٫۳ همهٔ گزینه‌های روشن (سؤال ۱۸۹): نرخ هر اندازه، یکرو و دورو جدا وقتی فرق دارند، کاغذهای دیگر و صحافی‌های دیگر. تعرفه‌ای
- * که فقط A4 و یک نرخ برای یکرو و دورو دارد، همان جدول پیش از ۸٫۳ است.
+ * که فقط A4 و یک نرخ برای یکرو و دورو دارد، همان جدول پیش از ۸٫۳ است. گزینه‌ای که همین حالا موقتاً در دسترس نیست (برش ۸٫۴،
+ * سؤال ۱۸۸) اینجا نیست؛ با روشن شدن دوباره، در بازسازی بعد برمی‌گردد.
  */
 
 const COLOR: Record<ColorMode, string> = { bw: 'سیاه‌سفید', color: 'رنگی' };
@@ -73,18 +74,23 @@ function lowest(values: readonly number[]): { rials: number; varies: boolean } {
  * «گلاسه هر برگ 1,500 تومان بیشتر»، «منگنه (تا 50 برگ) از 8,000»: کاغذها و صحافی‌های روشن جز پیش‌فرض؛ ارزان‌تر اول، مثل کاشی‌های
  * میز (`papersFor` و `bindingsFor`).
  */
-function others<T extends { nameFa: string; enabled: boolean }>(table: Readonly<Record<string, T>>, skip: string) {
-  return Object.entries(table).filter(([id, row]) => id !== skip && row.enabled);
+function others<T extends { nameFa: string; enabled: boolean }>(
+  table: Readonly<Record<string, T>>,
+  skip: string,
+  paused: ReadonlySet<string>,
+) {
+  return Object.entries(table).filter(([id, row]) => id !== skip && row.enabled && !paused.has(id));
 }
 
-export function Tariff({ priceList: list }: { priceList: PriceList }) {
+export function Tariff({ priceList: list, paused: pausedSetting }: { priceList: PriceList; paused: CatalogPaused }) {
+  const paused = pausedOf(list, pausedSetting);
   const paper = list.paperTypes[DEFAULT_PAPER_TYPE_ID]!;
   const binding = list.bindingTypes[DEFAULT_BINDING_TYPE_ID]!;
   const shipping = list.shippingMethods[DEFAULT_SHIPPING_METHOD_ID]!;
   const bands = binding.bands[DEFAULT_PAPER_SIZE]!;
   const breakdown = exampleQuote(list);
   const example = breakdown.items[0]!;
-  const sizes = offeredSizes(list);
+  const sizes = offeredSizes(list).filter((size) => !paused.sizes.has(size));
   /** یک ردیف برای هر اندازه × رنگ؛ نام اندازه فقط وقتی بیش از یکی است. */
   const printRows = sizes.flatMap((size) =>
     (['bw', 'color'] as const).map((color) => ({
@@ -95,13 +101,13 @@ export function Tariff({ priceList: list }: { priceList: PriceList }) {
       single: list.printRates[size]!.single[color],
     })),
   );
-  const papers = others(list.paperTypes, DEFAULT_PAPER_TYPE_ID)
+  const papers = others(list.paperTypes, DEFAULT_PAPER_TYPE_ID, paused.papers)
     .flatMap(([id, row]) => {
       const rates = sizes.flatMap((size) => (row.sheetRates[size] === undefined ? [] : [row.sheetRates[size]!]));
       return rates.length > 0 ? [{ id, nameFa: row.nameFa, ...lowest(rates) }] : [];
     })
     .sort((a, b) => a.rials - b.rials);
-  const bindings = others(list.bindingTypes, DEFAULT_BINDING_TYPE_ID)
+  const bindings = others(list.bindingTypes, DEFAULT_BINDING_TYPE_ID, paused.bindings)
     .flatMap(([id, row]) => {
       const prices = sizes.flatMap((size) => (row.bands[size] ?? []).map((band) => band.priceRials));
       return prices.length > 0 ? [{ id, row, ...lowest(prices) }] : [];

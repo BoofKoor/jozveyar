@@ -81,7 +81,7 @@ export type WorkerResponse =
   | { kind: 'done'; job: number; analysis: DocumentAnalysis }
   /** پایان کار «فقط شمارش». */
   | { kind: 'counted'; job: number; pageCount: number }
-  | { kind: 'error'; job: number; code: AnalysisErrorCode; message: string };
+  | { kind: 'error'; job: number; code: WorkerErrorCode; message: string };
 
 export type AnalysisErrorCode =
   | 'password_protected'
@@ -89,7 +89,17 @@ export type AnalysisErrorCode =
   | 'no_pages'
   | 'render_failed'
   | 'unsupported_type'
-  | 'unknown';
+  | 'unknown'
+  | RuleErrorCode;
+
+/**
+ * فایلی که قاعده‌های فایل (`settings`، برش ۸٫۴) نمی‌پذیرند: خانوادهٔ خاموش، حجم یا صفحهٔ بیش از سقف. متنشان با عدد خود فایل و
+ * سقف همین لحظه است و رابط پس از فایل می‌سازدش (`lib/fileRules.ts`)، نه اینجا: این ماژول در باندل اولیه است.
+ */
+export type RuleErrorCode = 'format_off' | 'too_large' | 'too_many_pages';
+
+/** خطاهایی که خود کارگر تحلیل می‌دهد. */
+export type WorkerErrorCode = Exclude<AnalysisErrorCode, RuleErrorCode>;
 
 /**
  * پیام فارسی هر خطا، به‌علاوهٔ راه جلو.
@@ -97,7 +107,7 @@ export type AnalysisErrorCode =
  * قاعدهٔ محصول: هیچ بن‌بستی نداریم. هر خطا باید بگوید کاربر بعد چه کند —
  * «به تلگرام پیام بدهید» جواب نیست.
  */
-export const ERROR_MESSAGES: Record<AnalysisErrorCode, { title: string; hint: string }> = {
+export const ERROR_MESSAGES: Record<WorkerErrorCode, { title: string; hint: string }> = {
   password_protected: {
     title: 'این فایل رمز دارد',
     hint: 'رمز را از فایل بردارید و دوباره بیندازید. اگر رمز را ندارید، فایل بدون رمز را از منبع اصلی بگیرید.',

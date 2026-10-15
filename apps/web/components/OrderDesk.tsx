@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
-import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
-import { DEFAULT_PAPER_SIZE, quote } from '@jozveyar/pricing';
+import { MAX_SECTIONS_PER_ITEM, type FileRules } from '@jozveyar/contracts/constants';
+import { DEFAULT_PAPER_SIZE, minOrderGapRials, pausedOf, quote, type PausedOptions } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import { effectiveConfig, type Replacement } from '../lib/catalog';
-import { formatNumber } from '@jozveyar/text';
+import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { ApiFailure } from '../lib/checkout/api';
 import { orderGate, retryable } from '../lib/checkout/gate';
 import { isStep, type Step } from '../lib/checkout/steps';
@@ -34,14 +34,14 @@ import {
 } from '../lib/layout';
 import type { OrderConfig } from '../lib/orderConfig';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
-import { pageTariff } from '../lib/tariff';
+import { pageTariff, pausedLists } from '../lib/tariff';
 import type { JozveHandle } from '../lib/useJozve';
 import { Names, Note, SingleFileCard, jozveTitleId } from './AnalysisCard';
 import { ConfigPanel, type ConfigQuote } from './ConfigPanel';
 import { AskLater, JozveSettings, NewJozve, OverflowNote, type MenuItem } from './DeskParts';
-import { ACCEPT } from './DropZone';
+import { DeskFilesContext } from './DeskFiles';
 import { JozveFiles } from './JozveFiles';
-import { OrderSummary, PriceDock, type DeskAction } from './OrderSummary';
+import { OrderSummary, PriceDock, roundUpToToman, type DeskAction } from './OrderSummary';
 import { FlowNav, jozveSpecLabel, type JozveLine } from './checkout/parts';
 
 /** انتخاب‌های پیش‌فرض، از تعرفه: سیاه‌سفید، دورو، A4، یک نسخه. */
@@ -163,16 +163,26 @@ export function primeLayout(layout: DraftLayout | null) {
  * همان را با یادداشتش نشان می‌دهد؛ تنظیم خود جزوه می‌ماند. اینجاست، نه در `Restore.tsx`، تا نما و دروازه و موتور قیمت در همین
  * تکه بمانند.
  */
-export function restoredOrder(jozves: readonly { sections: readonly RestoredSection[]; config: OrderConfig | null }[]) {
-  const { priceList } = pageTariff();
+export function restoredOrder(
+  jozves: readonly { sections: readonly RestoredSection[]; config: OrderConfig | null }[],
+  rules: FileRules,
+) {
+  const { priceList, paused } = pageTariff();
+  const live = pausedOf(priceList, paused);
   const configs = jozves.map((jozve) => jozve.config);
   let at = 0;
   const parts = jozves.map((jozve, i) => {
-    const view = jozveView(jozve.sections.map((section) => ({ ...section, key: `r${(at += 1)}` })));
-    return { view, config: effectiveConfig(configs[i] ?? INITIAL_CONFIG, priceList, view.pageCount).config };
+    const view = jozveView(
+      jozve.sections.map((section) => ({ ...section, key: `r${(at += 1)}` })),
+      rules,
+    );
+    return { view, config: effectiveConfig(configs[i] ?? INITIAL_CONFIG, priceList, view.pageCount, live).config };
   });
   const gate = orderGate(parts);
-  return { configs, items: gate.kind === 'ready' ? gate.items : null };
+  // حداقل سفارش (برش ۸٫۴): جزوه‌ای که به آن نمی‌رسد به «جزوه و قیمت» برمی‌گردد، نه به قدم خرید.
+  const order = gate.kind === 'ready' ? orderSpec(parts) : null;
+  const short = order !== null && minOrderGapRials(quote(order.spec, priceList), priceList) > 0;
+  return { configs, items: gate.kind === 'ready' && !short ? gate.items : null };
 }
 
 export { fetchStatus, loadCheckout, markOf, type HistoryMark };
@@ -180,6 +190,8 @@ export { fetchStatus, loadCheckout, markOf, type HistoryMark };
 export interface RestoreProps {
   state: 'restoring' | 'lost';
   jozve: JozveHandle;
+  /** قاعده‌های فایل همین صفحه (برش ۸٫۴). */
+  rules: FileRules;
   onConfig: (next: OrderConfig) => void;
   onDone: (state: 'lost' | null) => void;
 }
@@ -221,6 +233,9 @@ export function Restore(props: RestoreProps) {
 
 interface Props {
   jozve: JozveHandle;
+  /** قاعده‌های فایل همین صفحه (برش ۸٫۴)، و `accept` فایل‌گزین‌ها؛ از پوسته. */
+  rules: FileRules;
+  accept: string;
   /**
    * تنظیم جزوهٔ اول که پوسته نگه می‌دارد، تا با «از اول» نرود؛ null یعنی پیش‌فرض‌ها. جزوه‌های دیگر تنظیمشان را در چیدمان
    * همین‌جا دارند (`lib/layout.ts`).
@@ -239,11 +254,20 @@ interface DeskJozve extends JozvePart {
   replaced: Replacement[];
 }
 
-function jozvesOf(layout: DeskLayout, byKey: ReadonlyMap<string, Section>, priceList: PriceList): DeskJozve[] {
+function jozvesOf(
+  layout: DeskLayout,
+  byKey: ReadonlyMap<string, Section>,
+  priceList: PriceList,
+  rules: FileRules,
+  paused: PausedOptions,
+): DeskJozve[] {
   return layout.jozves.map((slot) => {
-    const view = jozveView(slot.sections.map((key) => byKey.get(key)!));
+    const view = jozveView(
+      slot.sections.map((key) => byKey.get(key)!),
+      rules,
+    );
     const chosen = slot.config ?? INITIAL_CONFIG;
-    const { config, replaced } = effectiveConfig(chosen, priceList, view.pageCount);
+    const { config, replaced } = effectiveConfig(chosen, priceList, view.pageCount, paused);
     return { slot, view, chosen, config, replaced };
   });
 }
@@ -275,8 +299,20 @@ function priceOf(parts: readonly JozvePart[], priceList: PriceList) {
  * تعرفه همان تعرفهٔ فعال پایگاه داده است که سرور با آن قیمت قطعی می‌دهد، از JSON درون HTML صفحه (برش ۴٫۴، `lib/tariff.ts`)؛
  * یک بار در هر بار سوار شدن خوانده می‌شود.
  */
-export function OrderDesk({ jozve, config, onConfig }: Props) {
-  const [{ priceList, slaDays }] = useState(pageTariff);
+export function OrderDesk({ jozve, rules: pageRules, accept, config, onConfig }: Props) {
+  const [{ priceList, slaDays, paused: pagePaused }] = useState(pageTariff);
+  /**
+   * گزینه‌های موقتاً خاموش (برش ۸٫۴، سؤال ۱۸۸): از JSON همین صفحه، و تازه‌تر از پاسخ ۴۰۹ `option_unavailable` سرور، که فهرست همین
+   * لحظه را دارد؛ گزینه‌ای که وسط خرید خاموش شد همین‌جا جایش را به پیش‌فرض می‌دهد، با یادداشت.
+   */
+  const [pausedNow, setPausedNow] = useState(pagePaused);
+  const paused = useMemo(() => pausedOf(priceList, pausedNow), [priceList, pausedNow]);
+  /** سقف صفحه‌ای که سرور با ۴۲۲ `too_many_pages` گفت (تنظیمی که پس از بار صفحه کم شد)؛ فایل همان لحظه «پذیرفته نشد» می‌شود. */
+  const [serverMaxPages, setServerMaxPages] = useState<number | null>(null);
+  const rules = useMemo(
+    () => (serverMaxPages === null ? pageRules : { ...pageRules, maxPages: Math.min(pageRules.maxPages, serverMaxPages) }),
+    [pageRules, serverMaxPages],
+  );
 
   /*
    * ── چیدمان جزوه‌ها (۸٫۲، `lib/layout.ts`) ──
@@ -296,7 +332,8 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     setLayout((current) => change(reconcile(current, keysRef.current)));
   }, []);
   const byKey = useMemo(() => new Map(jozve.sections.map((section) => [section.key, section])), [jozve.sections]);
-  const jozves = useMemo(() => jozvesOf(synced, byKey, priceList), [synced, byKey, priceList]);
+  const jozves = useMemo(() => jozvesOf(synced, byKey, priceList, rules, paused), [synced, byKey, priceList, rules, paused]);
+  const deskFiles = useMemo(() => ({ rules, accept }), [rules, accept]);
   const multi = jozves.length > 1;
   const priced = useMemo(() => priceOf(jozves, priceList), [jozves, priceList]);
   const breakdown = priced?.breakdown ?? null;
@@ -305,6 +342,10 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
   const provisional = jozves.some((j) => j.view.provisional);
   const pending = sections.filter((s) => s.pending && s.serverPath).map((s) => s.name);
   const blocked = sections.filter((s) => s.blocked !== null).map((s) => s.name);
+  /** آنهایی که پذیرفته نشدند (قاعده‌های فایل یا نوع ناشناس، برش ۸٫۴). */
+  const refused = sections.filter((s) => s.blocked?.refused).map((s) => s.name);
+  /** مانده تا حداقل سفارش، ریال (برش ۸٫۴، سؤال ۱۹۰)؛ صفر یعنی رسیده یا حداقلی نیست. */
+  const gapRials = breakdown ? minOrderGapRials(breakdown, priceList) : 0;
   const waiting = sections.filter((s) => s.waiting).map((s) => s.name);
 
   /**
@@ -316,14 +357,14 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     (index: number) =>
       (next: OrderConfig): ConfigQuote | null => {
         const order = orderSpec(
-          jozves.map((j, i) => (i === index ? { ...j, config: effectiveConfig(next, priceList, j.view.pageCount).config } : j)),
+          jozves.map((j, i) => (i === index ? { ...j, config: effectiveConfig(next, priceList, j.view.pageCount, paused).config } : j)),
         );
         if (!order) return null;
         const other = quote(order.spec, priceList);
         const at = order.index[index];
         return { totalRials: other.totalWithoutShippingRials, sheets: at == null ? 0 : other.items[at]!.sheets };
       },
-    [jozves, priceList],
+    [jozves, priceList, paused],
   );
 
   /*
@@ -336,7 +377,10 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     asked && breakdown ? JSON.stringify([asked, jozves.map((j) => [j.chosen, j.view.included.map((s) => [s.key, s.pageCount])])]) : null;
   const askDelta = () => {
     if (!asked || !breakdown) return null;
-    const other = priceOf(jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey, priceList), priceList);
+    const other = priceOf(
+      jozvesOf(arrange(synced, asked === 'together' ? 'apart' : 'together'), byKey, priceList, rules, paused),
+      priceList,
+    );
     return other ? other.breakdown.totalWithoutShippingRials - breakdown.totalWithoutShippingRials : null;
   };
 
@@ -584,6 +628,8 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           ? 'soon'
           : mode === 'paused'
             ? 'paused'
+            : gapRials > 0
+            ? 'short'
             : gate.kind === 'sending'
             ? 'sending'
             : gate.kind === 'stuck'
@@ -592,8 +638,30 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
                 ? 'busy'
                 : 'go';
 
+  /** «ادامه» با عدد یا شمار (برش ۸٫۴): مانده تا حداقل سفارش، و فایل‌هایی که پذیرفته نشدند. */
+  const gap = formatTomans(roundUpToToman(gapRials), false);
+  const blockedLabel =
+    refused.length === blocked.length ? `اول تکلیف ${refused.length > 1 ? 'فایل‌های پذیرفته‌نشده' : 'فایل پذیرفته‌نشده'} را روشن کن` : null;
+  const detail =
+    action === 'short'
+      ? { label: `تا حداقل سفارش ${gap} تومان مانده`, name: `ادامه — تا حداقل سفارش ${gap} تومان مانده` }
+      : action === 'blocked' && blockedLabel
+        ? { label: blockedLabel, name: `ادامه — ${blockedLabel}` }
+        : undefined;
+
+  /**
+   * شکستی که جوابش در «جزوه و قیمت» است (برش ۸٫۴): گزینه‌ای که همین حالا خاموش شد (۴۰۹ `option_unavailable`، با فهرست همین لحظه)
+   * جایش را به پیش‌فرض می‌دهد، و فایلی که از سقف صفحهٔ امروز بیشتر است (۴۲۲ `too_many_pages`) «پذیرفته نشد» می‌شود؛ یادداشتش زیر
+   * خلاصه.
+   */
+  const deskFailure = useCallback((failed: ApiFailure) => {
+    if (failed.error === 'option_unavailable') setPausedNow(pausedLists(failed.body.paused));
+    if (failed.error === 'too_many_pages' && Number.isInteger(failed.body.maxPages)) setServerMaxPages(Number(failed.body.maxPages));
+    setFailure(failed);
+  }, []);
+
   const onContinue = async () => {
-    if (gate.kind !== 'ready' || busy) return;
+    if (gate.kind !== 'ready' || busy || gapRials > 0) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -614,7 +682,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           setStatus((previous) => (previous && previous !== 'error' ? { ...previous, mode: 'paused' } : { mode: 'paused', auth: null }));
           return;
         }
-        setFailure(started);
+        deskFailure(started);
         return;
       }
       go(checkout.checkoutStore().getState().place ? 'address' : 'city');
@@ -650,6 +718,10 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           go('desk', { replace: true });
           reset();
         }}
+        onDeskFailure={(failed) => {
+          deskFailure(failed);
+          go('desk');
+        }}
         // درگاه نمونه فقط در `mock` (ADR-035)؛ هر چه نامعلوم، نام زیبال.
         gateway={mode === 'mock' ? 'mock' : 'zibal'}
       />
@@ -665,7 +737,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           </p>
           <p className="mt-1">
             {gate.sections.length === 1 && !retryable(gate.sections[0]!)
-              ? uploadRefusalMessage(gate.sections[0]!.upload?.reason)
+              ? uploadRefusalMessage(gate.sections[0]!.upload?.reason, gate.sections[0]!.kind)
               : gate.sections.length === 1 && gate.sections[0]!.serverFailed
                 ? serverFailureMessage(gate.sections[0]!.upload?.analysis?.failureReason, gate.sections[0]!.kind).hint
                 : 'سفارش با فایلی ساخته می‌شود که روی سرور است و همان‌جا شمرده شده. چند لحظهٔ دیگر «دوباره بفرست» را بزن.'}
@@ -706,6 +778,12 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
             </>
           ) : failure.error === 'network' ? (
             'ارتباط با سرور برقرار نشد. اینترنت را ببین و دوباره «ادامه» را بزن.'
+          ) : failure.error === 'option_unavailable' ? (
+            'گزینه‌ای از چاپ این سفارش همین حالا موقتاً در دسترس نیست؛ جایش گزینهٔ پیش‌فرض آمد. قیمت تازه را ببین و دوباره «ادامه» را بزن.'
+          ) : failure.error === 'too_many_pages' ? (
+            'فایلی از سقف صفحهٔ هر فایل بیشتر است؛ تکلیفش را روشن کن و دوباره «ادامه» را بزن.'
+          ) : failure.error === 'quote_warnings' ? (
+            'گزینه‌ای از چاپ این سفارش دیگر به جزوه نمی‌خورد. تنظیمات چاپ را ببین و دوباره «ادامه» را بزن.'
           ) : (
             'الان نشد؛ چند لحظهٔ دیگر دوباره «ادامه» را بزن.'
           )}
@@ -733,7 +811,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
     : null;
 
   return (
-    <>
+    <DeskFilesContext.Provider value={deskFiles}>
       <FlowNav current={1} />
 
       <div className="home-desk">
@@ -764,6 +842,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
                 onChange={(next) => configureAt(index, next)}
                 priceList={priceList}
                 quoteFor={quoteFor(index)}
+                paused={paused}
                 // صفحه‌های رنگی جای خودشان را دارند، کنار انتخاب رنگ؛ حکم «تماماً» فقط بعد از بررسی همه.
                 colorHint={colorHint({
                   colorPages: j.view.summary.colorPageCount,
@@ -809,7 +888,7 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
           ref={replaceInput}
           id="jozve-replace"
           type="file"
-          accept={ACCEPT}
+          accept={accept}
           tabIndex={-1}
           aria-hidden="true"
           className="sr-only"
@@ -837,10 +916,12 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
               provisional={provisional}
               pending={pending}
               blocked={blocked}
+              refused={refused}
               waiting={waiting}
               jozves={lines}
               notes={notes}
               action={action}
+              detail={detail}
               onContinue={onContinue}
               onIntent={isOpen ? preloadCheckout : () => undefined}
             />
@@ -849,12 +930,14 @@ export function OrderDesk({ jozve, config, onConfig }: Props) {
             breakdown={breakdown}
             provisional={provisional}
             jozves={multi ? jozves.length : null}
+            gapRials={gapRials}
             action={action}
+            detail={detail}
             onContinue={onContinue}
             onIntent={isOpen ? preloadCheckout : () => undefined}
           />
         </>
       ) : null}
-    </>
+    </DeskFilesContext.Provider>
   );
 }

@@ -15,6 +15,8 @@ import type { Seg } from './orders';
 import type { CreditView } from './server/settings';
 import {
   creditCard,
+  formatsSeen,
+  formatsSegs,
   holidaysView,
   jalaliDate,
   KEY_INFO,
@@ -283,5 +285,20 @@ describe('آزمایش کلیدها، متن قالب و اعتبار (۷٫۱)',
     });
     const hour = otpCapAlert({ kind: 'hour', limit: 300, at: tehran('2026-10-05 09:10'), until: null }, NOW);
     expect({ tone: hour.tone, text: plain(hour.text) }).toEqual({ tone: 'info', text: ' [300] کد در یک ساعت، از [09:10]؛ حالا دوباره کد می‌رود.' });
+  });
+});
+
+describe('فایل‌ها (۸٫۴)', () => {
+  it('«همان که دیده شد» یک رقم برای هر خانواده، به ترتیب Word، پاورپوینت، عکس', () => {
+    expect(formatsSeen({ word: true, slides: true, image: true })).toBe('111');
+    expect(formatsSeen({ word: true, slides: false, image: true })).toBe('101');
+    expect(formatsSeen({ word: false, slides: false, image: false })).toBe('000');
+  });
+
+  it('فرمت‌های پذیرفته با نام لاتین جدا؛ همه خاموش «فقط PDF»', () => {
+    const plain = (segs: ReturnType<typeof formatsSegs>) => segs.map((s) => (typeof s === 'string' ? s : s.ltr)).join('');
+    expect(plain(formatsSegs({ word: true, slides: true, image: true }))).toBe('PDF، Word، پاورپوینت و عکس');
+    expect(plain(formatsSegs({ word: false, slides: false, image: true }))).toBe('PDF و عکس');
+    expect(formatsSegs({ word: false, slides: false, image: false })).toEqual(['فقط ', { ltr: 'PDF' }]);
   });
 });

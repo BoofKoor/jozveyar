@@ -1,3 +1,5 @@
+import type { FileRules } from '@jozveyar/contracts/constants';
+
 /**
  * محتوای ثابت کارت بارگذاری، از طرح ز (docs/UI.md، ۴الف). کامپوننت سرور: جزیرهٔ سفارش آن را
  * داخل برچسب ورودی فایل (`DropZone`) می‌گذارد، پس متنش در HTML و داده‌های RSC هست و در باندل
@@ -6,7 +8,7 @@
  * برچسب فقط محتوای درون‌خطی می‌گیرد، پس همه span است. «انتخاب فایل» دکمه نیست، شکل دکمه است: کلیک
  * هر جای کارت فایل‌گزین را باز می‌کند. تصویر برگه‌ها فایل ایستاست، نه SVG درون JSX.
  */
-export function UploadCard() {
+export function UploadCard({ formats }: { formats: FileRules['formats'] }) {
   return (
     <>
       <span className="jy-drop">
@@ -20,11 +22,14 @@ export function UploadCard() {
           <span className="jy-drop__format">
             <bdi>PDF</bdi>
           </span>
-          <span className="jy-drop__format">
-            <bdi>Word</bdi>
-          </span>
-          <span className="jy-drop__format">پاورپوینت</span>
-          <span className="jy-drop__format">عکس</span>
+          {/* فقط خانواده‌های روشن (برش ۸٫۴، `file.formats`) */}
+          {formats.word ? (
+            <span className="jy-drop__format">
+              <bdi>Word</bdi>
+            </span>
+          ) : null}
+          {formats.slides ? <span className="jy-drop__format">پاورپوینت</span> : null}
+          {formats.image ? <span className="jy-drop__format">عکس</span> : null}
         </span>
       </span>
       <span className="jy-upload__foot">

@@ -8,6 +8,7 @@
  */
 
 import type { DocumentAnalysis, PageAnalysis } from '@jozveyar/contracts';
+import type { FileRules } from '@jozveyar/contracts/constants';
 import {
   ERROR_MESSAGES,
   FIRST_PRICE_AFTER_PAGES,
@@ -78,7 +79,7 @@ export const BROWSER_GAVE_UP: readonly AnalysisErrorCode[] = ['render_failed', '
  * - PDF بزرگ‌تر از توان مرورگر: مسیر سرور.
  * - بقیهٔ PDFها: صف کارگر.
  */
-export function initialAnalysis(file: { name: string; size: number }): AnalysisState {
+export function initialAnalysis(file: { name: string; size: number }, rules?: FileRules): AnalysisState {
   const base: AnalysisState = { ...INITIAL, fileName: file.name, fileSize: file.size };
   const kind = fileKind(file.name);
   if (kind === null) {
@@ -88,6 +89,9 @@ export function initialAnalysis(file: { name: string; size: number }): AnalysisS
       error: { code: 'unsupported_type', ...ERROR_MESSAGES.unsupported_type },
     };
   }
+  // قاعده‌های فایل (برش ۸٫۴): همان لحظهٔ انداختن، پیش از هر خواندن و آپلودی؛ متن را رابط پس از فایل با عدد خود فایل می‌سازد.
+  if (rules && kind !== 'pdf' && !rules.formats[kind]) return { ...base, phase: 'error', error: { code: 'format_off', title: '', hint: '' } };
+  if (rules && file.size > rules.maxMb * 1048576) return { ...base, phase: 'error', error: { code: 'too_large', title: '', hint: '' } };
   if (kind === 'image') return { ...base, phase: 'needs_server', pageCount: 1, estimatedFrom: 'image' };
   if (kind !== 'pdf') return { ...base, phase: 'needs_server' };
   if (file.size > MAX_BROWSER_ANALYSIS_BYTES) return { ...base, phase: 'needs_server' };

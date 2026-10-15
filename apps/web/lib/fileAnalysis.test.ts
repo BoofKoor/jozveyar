@@ -98,6 +98,22 @@ describe('حالت اولیه از نوع و حجم فایل', () => {
     expect(xlsx.error?.code).toBe('unsupported_type');
     expect(isFileError(xlsx)).toBe(true);
   });
+
+  it('قاعده‌های فایل (۸٫۴): خانوادهٔ خاموش و حجم بیش از سقف همان لحظه خطای خود فایل‌اند؛ PDF هرگز خاموش نیست', () => {
+    const rules = { formats: { word: false, slides: true, image: false }, maxMb: 10, maxPages: 1500 };
+    for (const name of ['j.docx', 'j.doc', 'scan.png']) {
+      const state = initialAnalysis({ name, size: 10 }, rules);
+      expect(state).toMatchObject({ phase: 'error', error: { code: 'format_off' } });
+      expect(isFileError(state)).toBe(true);
+    }
+    expect(initialAnalysis({ name: 's.pptx', size: 10 }, rules).phase).toBe('needs_server');
+    expect(initialAnalysis({ name: 'a.pdf', size: 10 * 1024 * 1024 }, rules).phase).toBe('queued');
+    const big = initialAnalysis({ name: 'a.pdf', size: 10 * 1024 * 1024 + 1 }, rules);
+    expect(big).toMatchObject({ phase: 'error', error: { code: 'too_large' } });
+    expect(isFileError(big)).toBe(true);
+    // بی قاعده (پیش از ۸٫۴) هیچ سقفی سنجیده نمی‌شود؛ سرور هنوز می‌سنجد.
+    expect(initialAnalysis({ name: 'j.docx', size: 2 * 1024 ** 3 }).phase).toBe('needs_server');
+  });
 });
 
 describe('پیام‌های کارگر', () => {
