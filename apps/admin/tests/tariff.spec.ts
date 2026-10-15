@@ -785,6 +785,8 @@ test.describe.serial('تعرفه در پنل', () => {
     expect(ownerProblems).toEqual([]);
   });
   test('«بقیه» (۸٫۴): گرد کردن، حداقل سفارش و وزن بسته‌بندی در ویرایشگر با پیش‌نمایش و «چه عوض می‌شود»؛ مالیات فقط‌خواندنی', async () => {
+    // پیش‌نویس تست گوشی پیش از این می‌ماند (یک پیش‌نویس در هر زمان)، پس از پایه: بی پیش‌نویس، نسخهٔ ۱ فعال.
+    await restoreBase();
     await ownerPage.goto(at('/tariff'));
     await ownerPage.getByRole('button', { name: 'نسخهٔ تازه' }).click();
     await expect(ownerPage.locator('.ad-title-row .jy-badge')).toHaveText('پیش‌نویس');
