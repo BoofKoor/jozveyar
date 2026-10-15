@@ -117,6 +117,7 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       ],
     }),
     list: record('list', []),
+    specs: record('specs', new Map()),
     counts: record('counts', { open: 10, handed: 38, cancelled: 1, awaiting: 3, abandoned: 9, all: 120 }),
     stats: record('stats', { printing: 2, handed: 42, onTime: 41 }),
     details: record('details', null),

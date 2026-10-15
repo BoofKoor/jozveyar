@@ -53,6 +53,8 @@ import {
   rebuildable,
   rowState,
   specFacts,
+  specLine,
+  specSum,
   staleSections,
   statsSegs,
   sumLines,
@@ -63,6 +65,9 @@ import {
   volumesSegs,
   withoutMoney,
   withoutPartnerSms,
+  zipFileName,
+  zipNote,
+  zipView,
   type Seg,
 } from './orders';
 
@@ -270,6 +275,7 @@ function line(over: Partial<PanelOrderLine> = {}): PanelOrderLine {
     paperSizes: ['a4'],
     pdfJob: 'done',
     printPartnerId: 'partner-noor',
+    partnerName: 'چاپ نور',
     unreturnedPayments: 0,
     stale: false,
     filesExpireAt: null,
@@ -687,7 +693,7 @@ describe('جزئیات سفارش', () => {
       ...over,
     });
     const view = (rest: Partial<PanelOrderDetails>, order: Partial<OrderRow> = {}) => ticketView(details({ order, rest }));
-    const fresh = { sizeBytes: 38_000, builtAt: NOW, fresh: true };
+    const fresh = { storageKey: 'orders/10027/ticket.pdf', sizeBytes: 38_000, builtAt: NOW, fresh: true };
     expect(view({ ticket: fresh, ticketJob: job('done') })).toEqual({ kind: 'ready', bytes: 38_000, builtAt: NOW });
     // در حال به‌روز شدن، با علت (۵٫۲): تازه‌ترین تغییر پس از ساختن برگه؛ نام تازهٔ خود چاپخانه یا تغییری که رویداد سفارش ندارد، «داده».
     const queued = { ticket: { ...fresh, fresh: false }, ticketJob: job('queued', { attempts: 0 }) };
@@ -1215,5 +1221,119 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
     const all = orderTimeline(d).map((entry) => entry.text.join(''));
     expect(all).toContain('برگرداندن: در حال چاپ ← در صف چاپ؛ اشتباه زد');
     expect(all).toContain('از «چاپ آفتاب» به «چاپ نور» رفت؛ آفتاب کند است');
+  });
+});
+
+describe('فهرست جمع‌وجور و zip (برش ۹٫۱)', () => {
+  const printed = (item = details().items[0]!, volumes: [number, number, number][] = [[1, 1, 120]]): PanelPrintVolume[] =>
+    volumes.map(([volume, firstPage, lastPage]) => ({
+      volume,
+      firstPage,
+      lastPage,
+      storageKey: `orders/10027/print-${item.seq}-${volume}.pdf`,
+      sizeBytes: 38_600_000 + volume,
+      changes: null,
+      createdAt: tehran('2026-10-03 14:06'),
+    }));
+  const ticket = { storageKey: 'orders/10027/ticket.pdf', sizeBytes: 200_000, builtAt: tehran('2026-10-03 14:07'), fresh: true };
+  const doneJob: PanelPdfJob = { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: NOW };
+  const ready = (over: Partial<PanelOrderDetails> = {}) => details({ item: { printFiles: printed() }, rest: { ticket, ticketJob: doneJob, ...over } });
+
+  it('خط مشخصات و خط جمع هر جزوه: کاغذ، صحافی و نسخه؛ «فرد» فقط در دورو؛ چند جلد با برگ هر جلد', () => {
+    const item = details().items[0]!;
+    expect(text(specLine(item))).toBe('سیاه‌سفید، دورو، A4 · تحریر ۸۰ گرم · طلق و سیم · 1 نسخه');
+    expect(text(specLine({ ...item, copies: 2, rules: [{ ...item.rules[0]!, colorMode: 'color' }] }))).toBe('رنگی، دورو، A4 · تحریر ۸۰ گرم · طلق و سیم · 2 نسخه');
+    expect(text(specSum(item, BREAKDOWN.items[0]))).toBe('120 صفحه، 60 برگ، یک جلد');
+    expect(nums(specSum(item, BREAKDOWN.items[0]))).toEqual(['120', '60']);
+    const odd = { ...item, pageCount: 97 };
+    expect(text(specSum(odd, { ...BREAKDOWN.items[0]!, sheets: 49 }))).toBe('97 صفحه (فرد: پشت برگ آخر سفید)، 49 برگ، یک جلد');
+    // یکرو: پشتی نیست، پس «فرد» هم نه.
+    expect(text(specSum({ ...odd, sidesMode: 'single' }, { ...BREAKDOWN.items[0]!, sheets: 97 }))).toBe('97 صفحه، 97 برگ، یک جلد');
+    expect(text(specSum({ ...item, pageCount: 1650 }, { ...BREAKDOWN.items[0]!, sheets: 825, volumes: 2, sheetsPerVolume: [413, 412] }))).toBe(
+      '1,650 صفحه، 825 برگ، دو جلد (413 و 412 برگ)',
+    );
+  });
+
+  it('zip آماده: فایل چاپ همهٔ جلدهای همهٔ جزوه‌ها به ترتیب و برگهٔ سفارش، بی PDF اصلی؛ با شمار و حجم', () => {
+    const one = zipView(ready(), NOW);
+    expect(one).toEqual({
+      kind: 'ready',
+      jozves: 1,
+      bytes: 38_600_001 + 200_000,
+      files: [
+        { name: 'jozve-10027-1.pdf', key: 'orders/10027/print-1-1.pdf', bytes: 38_600_001, builtAt: tehran('2026-10-03 14:06') },
+        { name: 'barge-sefaresh-10027.pdf', key: 'orders/10027/ticket.pdf', bytes: 200_000, builtAt: tehran('2026-10-03 14:07') },
+      ],
+    });
+    expect(text(zipNote(one))).toBe('2 فایل، 37 مگابایت: فایل چاپ و برگهٔ سفارش');
+    expect(zipFileName(10027)).toBe('sefaresh-10027.zip');
+    // دو جزوه، دومی دو جلد: نام‌های تکی، به ترتیب جزوه و جلد.
+    const base = ready();
+    const second = { ...base.items[0]!, id: 'i2', seq: 2, printFiles: printed({ ...base.items[0]!, seq: 2 }, [[1, 1, 826], [2, 827, 1650]]) };
+    const two = zipView({ ...base, items: [base.items[0]!, second] }, NOW);
+    expect(two.kind === 'ready' && two.files.map((f) => f.name)).toEqual([
+      'jozve-10027-1.pdf',
+      'jozve-10027-2-jeld-1.pdf',
+      'jozve-10027-2-jeld-2.pdf',
+      'barge-sefaresh-10027.pdf',
+    ]);
+    expect(text(zipNote(two))).toMatch(/^4 فایل، .* مگابایت: فایل چاپ دو جزوه و برگهٔ سفارش$/);
+  });
+
+  it('zip بسته، با دلیل و راه جلو؛ «ساخته نشد» پیش از «در حال ساختن»، و فایل چاپ پیش از برگه', () => {
+    const building = { status: 'running', attempts: 1, maxAttempts: 3, lastError: null, createdAt: NOW, updatedAt: NOW, finishedAt: null } as PanelPdfJob;
+    const failed = { ...building, status: 'failed', attempts: 3, lastError: 'transient: x', finishedAt: NOW } as PanelPdfJob;
+    const view = (over: Partial<PanelOrderDetails>, item: Partial<PanelOrderItem> = {}) =>
+      zipView(details({ item, rest: { ticket, ticketJob: doneJob, ...over } }), NOW);
+    expect(view({ pdfJob: building })).toEqual({ kind: 'waiting', what: 'print', cause: null });
+    expect(text(zipNote(view({ pdfJob: building })))).toBe('فایل چاپ در حال ساخته شدن است؛ zip پس از آن باز می‌شود.');
+    expect(view({ pdfJob: failed })).toEqual({ kind: 'failed', what: 'print' });
+    expect(text(zipNote(view({ pdfJob: failed })))).toBe('فایل چاپ ساخته نشد؛ در صفحهٔ سفارش «دوباره بساز» را بزن.');
+    // جزوهٔ اول آماده و دومی ساخته نشد: zip نه.
+    const half = ready({ pdfJob: failed });
+    expect(zipView({ ...half, items: [half.items[0]!, { ...half.items[0]!, id: 'i2', seq: 2, printFiles: [] }] }, NOW)).toEqual({ kind: 'failed', what: 'print' });
+    // برگه: کهنه با علتش، در حال ساختن، ساخته نشد.
+    const printedItem = { printFiles: printed() };
+    const stale = { ticket: { ...ticket, fresh: false }, ticketJob: { ...building, attempts: 0 } };
+    const edited = { id: 9, at: tehran('2026-10-04 09:00'), action: 'orders.recipient', adminName: 'سارا', detail: null };
+    expect(view({ ...stale, events: [edited] }, printedItem)).toEqual({ kind: 'waiting', what: 'ticket', cause: 'recipient' });
+    expect(text(zipNote(view({ ...stale, events: [edited] }, printedItem)))).toBe(
+      'برگهٔ سفارش با نام و نشانی تازه دوباره ساخته می‌شود؛ zip پس از آن باز می‌شود.',
+    );
+    expect(view({ ticket: null, ticketJob: building }, printedItem)).toEqual({ kind: 'waiting', what: 'ticket', cause: null });
+    expect(text(zipNote(view({ ticket: null, ticketJob: building }, printedItem)))).toBe('برگهٔ سفارش در حال ساخته شدن است؛ zip پس از آن باز می‌شود.');
+    expect(view({ ticket: null, ticketJob: failed }, printedItem)).toEqual({ kind: 'failed', what: 'ticket' });
+    // هر دو کار دارند: اول فایل چاپ.
+    expect(view({ pdfJob: failed, ticket: null, ticketJob: failed })).toEqual({ kind: 'failed', what: 'print' });
+  });
+
+  it('بی دکمه: پرداخت‌نشده، بسته‌ای که فایل چاپ نساخت، و فایل‌های پاک‌شده؛ هر کدام با یادداشت صفحهٔ سفارش', () => {
+    expect(zipView(details({ order: { status: 'awaiting_payment' } }), NOW)).toEqual({ kind: 'unpaid' });
+    expect(text(zipNote({ kind: 'unpaid' }))).toBe('فایل چاپ و برگهٔ سفارش بعد از پرداخت ساخته می‌شوند.');
+    expect(zipView(ready({}), NOW).kind).toBe('ready');
+    expect(zipView({ ...ready(), order: { ...ready().order, filesDeletedAt: NOW } }, NOW)).toEqual({ kind: 'purged' });
+    expect(text(zipNote({ kind: 'purged' }))).toBe('فایل‌های این سفارش پاک شد؛ مشخصات می‌ماند.');
+    // لغو پیش از ساختن فایل چاپ: دیگر چاپ نمی‌شود. لغوِ آماده هنوز zip دارد، تا فایل‌ها پاک شوند (سؤال ۲۳۲).
+    expect(zipView(details({ order: { status: 'cancelled' }, rest: { ticket, ticketJob: doneJob } }), NOW)).toEqual({ kind: 'closed' });
+    expect(text(zipNote({ kind: 'closed' }))).toBe('فایل چاپ ساخته نشد؛ این سفارش دیگر چاپ نمی‌شود.');
+    expect(zipView({ ...ready(), order: { ...ready().order, status: 'handed_to_post' } }, NOW).kind).toBe('ready');
+  });
+
+  it('برگهٔ فهرست جمع‌وجور با زمان آخرین تخصیص و ویرایش (specs)، همان حکم صفحهٔ سفارش', () => {
+    const base = ready({ ticket: { ...ticket, fresh: false }, ticketJob: { ...doneJob, status: 'queued', attempts: 0, finishedAt: null } });
+    const { assignments: _a, events: _e, ...rest } = base;
+    const spec = { order: rest.order, items: rest.items, pdfJob: rest.pdfJob, ticket: rest.ticket, ticketJob: rest.ticketJob };
+    const moved = tehran('2026-10-04 10:00');
+    expect(ticketView({ ...spec, lastAssignmentAt: moved, lastRecipientEditAt: null })).toEqual({ kind: 'updating', cause: 'partner' });
+    expect(ticketView({ ...spec, lastAssignmentAt: moved, lastRecipientEditAt: tehran('2026-10-04 11:00') })).toEqual({ kind: 'updating', cause: 'recipient' });
+    // تخصیص پیش از ساختن برگه علت نیست.
+    expect(ticketView({ ...spec, lastAssignmentAt: tehran('2026-10-03 14:05'), lastRecipientEditAt: null })).toEqual({ kind: 'updating', cause: 'data' });
+    expect(zipView({ ...spec, lastAssignmentAt: moved, lastRecipientEditAt: null }, NOW)).toEqual({ kind: 'waiting', what: 'ticket', cause: 'partner' });
+  });
+
+  it('رویداد دانلود zip در رویدادهای سفارش، با شمار فایل', () => {
+    const d = details({ rest: { events: [{ id: 3, at: tehran('2026-10-05 11:12'), action: 'orders.zip_download', adminName: 'حسن', detail: { orderNumber: 10027, files: 2 } }] } });
+    const entry = orderTimeline(d).find((e) => e.who === 'حسن');
+    expect(entry && text(entry.text)).toBe('همهٔ فایل‌ها (zip) دانلود شد، 2 فایل');
   });
 });

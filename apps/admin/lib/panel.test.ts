@@ -232,7 +232,7 @@ describe('رویدادها', () => {
     ]);
   });
 
-  it('کار سفارش‌ها (۴٫۲، و از ۵٫۱ فایل چاپ و برگه) با شمارهٔ سفارش، جدا از جملهٔ فارسی؛ جزوهٔ دوم و جلد هم گفته می‌شوند', () => {
+  it('کار سفارش‌ها (۴٫۲، از ۵٫۱ فایل چاپ و برگه، و از ۹٫۱ zip) با شمارهٔ سفارش، جدا از جملهٔ فارسی؛ جزوهٔ دوم و جلد هم گفته می‌شوند', () => {
     const lines = eventLines([
       event('orders.pdf_download', { targetType: 'order', detail: { orderNumber: 10027, item: 1 } }),
       event('orders.pdf_rebuild', { targetType: 'order', detail: { orderNumber: 10031, previous: { attempts: 3, error: 'transient' } } }),
@@ -241,6 +241,7 @@ describe('رویدادها', () => {
       event('orders.print_download', { targetType: 'order', detail: { orderNumber: 10027, item: 1, volume: 1, volumes: 1 } }),
       event('orders.ticket_download', { targetType: 'order', detail: { orderNumber: 10027 } }),
       event('orders.ticket_rebuild', { targetType: 'order', detail: { orderNumber: 10027, previous: null } }),
+      event('orders.zip_download', { targetType: 'order', detail: { orderNumber: 10027, files: 2 } }),
     ]);
     expect(lines.map((l) => [l.who, l.text])).toEqual([
       ['سارا', ['PDF اصلی سفارش ', { ltr: '10027' }, ' دانلود شد']],
@@ -250,6 +251,7 @@ describe('رویدادها', () => {
       ['سارا', ['فایل چاپ سفارش ', { ltr: '10027' }, ' دانلود شد']],
       ['سارا', ['برگهٔ سفارش ', { ltr: '10027' }, ' دانلود شد']],
       ['سارا', ['ساختن دوبارهٔ برگهٔ سفارش ', { ltr: '10027' }]],
+      ['سارا', ['همهٔ فایل‌های سفارش ', { ltr: '10027' }, ' (zip، ', { ltr: '2' }, ' فایل)', ' دانلود شد']],
     ]);
   });
 
