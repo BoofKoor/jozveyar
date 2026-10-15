@@ -87,7 +87,7 @@ export default async function TicketPage({ params }: { params: Promise<{ gate: s
           </p>
           <p className="ad-hint" data-ticket-templates="">
             قالب‌ها: {can(session, 'templates.manage') ? (
-              <Link href={panelPath(gate, '/settings/templates')}>
+              <Link href={panelPath(gate, '/settings/templates')} className="jy-link">
                 <Segments segs={templates} />
               </Link>
             ) : (

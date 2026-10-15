@@ -4312,6 +4312,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         pages: 2,
         pdfKey: `ticket-templates/${one.id}/preview.pdf`,
         pngKey: `ticket-templates/${one.id}/preview.png`,
+        gone: false,
         blocked: ['https://example.com/a.png'],
         error: null,
       });
@@ -4344,6 +4345,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const [{ orderNumber }] = (await conn.db.select({ orderNumber: orders.orderNumber }).from(orders).where(eq(orders.id, orderId))) as [{ orderNumber: number }];
       expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'paid', filesDeleted: false });
       expect(await templates().previewOrder(orderNumber + 1000)).toBeNull();
+      // پیش‌نمایش با همین سفارش: تا فایل‌هایش هست «gone» نه؛ پس از پاک شدن آنها (`retention.py`) آری.
+      await previewed(one.id, { previewOrderNumber: orderNumber });
+      expect((await templates().versions())[0]!.preview).toMatchObject({ orderNumber, gone: false });
+      await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, orderId));
+      await conn.db.update(orders).set({ status: 'handed_to_post', handedToPostAt: NOW }).where(eq(orders.id, orderId));
+      await conn.db.update(orders).set({ filesDeletedAt: NOW }).where(eq(orders.id, orderId));
+      expect((await templates().versions())[0]!.preview).toMatchObject({ orderNumber, gone: true });
+      expect(await templates().previewOrder(orderNumber)).toEqual({ status: 'handed_to_post', filesDeleted: true });
     });
 
     it('فعال کردن: فقط با پیش‌نمایش درست و همان که دیده شد؛ قبلی خاموش؛ برگهٔ «در صف چاپ» از نو؛ رویداد؛ برگشت به پیش‌فرض', async () => {

@@ -59,6 +59,7 @@ function version(over: Partial<TicketTemplateVersion> & { id: number }): TicketT
       pages: 2,
       pdfKey: `ticket-templates/${over.id}/preview.pdf`,
       pngKey: `ticket-templates/${over.id}/preview.png`,
+      gone: false,
       blocked: [],
       error: null,
       ...over.preview,
@@ -293,7 +294,8 @@ describe('قالب برگه‌ها: سرویس پنل', () => {
     storage.putObject('ticket-templates/2/preview.png', bytes('png-1'));
     storage.putObject('ticket-templates/2/preview-2.png', bytes('png-2'));
     const broken = version({ id: 4, preview: { error: 'bijak خط 3: x', pages: null, pdfKey: null, pngKey: null } as never });
-    const { templates, log } = service([V1, V2, broken, version({ id: 6 })], { storage });
+    const gone = version({ id: 7, preview: { orderNumber: 10027, gone: true } as never });
+    const { templates, log } = service([V1, V2, broken, version({ id: 6 }), gone], { storage });
     const read = async (result: Result<{ body: ReadableStream<Uint8Array>; fileName: string }>) =>
       result.ok ? [result.value.fileName, await new Response(result.value.body).text()] : `${result.status} ${result.error}`;
     expect(await read(await templates.previewFile(OWNER, '2', 'pdf'))).toEqual(['pishnamayesh-bijak-2.pdf', '%PDF-1.7']);
@@ -301,6 +303,8 @@ describe('قالب برگه‌ها: سرویس پنل', () => {
     expect(await read(await templates.previewFile(OWNER, '2', { page: 3 }))).toBe('404 template_not_found');
     expect(await read(await templates.previewFile(OWNER, '2', { page: 0 }))).toBe('404 template_not_found');
     expect(await read(await templates.previewFile(OWNER, '4', 'pdf'))).toBe('409 template_no_preview');
+    // پیش‌نمایش با سفارشی که فایل‌هایش پاک شد: فایلش هم رفته، پس «پاک شد»، نه خطای استوریج.
+    expect(await read(await templates.previewFile(OWNER, '7', { page: 1 }))).toBe('410 preview_files_deleted');
     expect(await read(await templates.previewFile(OWNER, 'default-bijak', 'pdf'))).toBe('404 template_not_found');
     expect(await read(await templates.previewFile(OWNER, '6', 'pdf'))).toBe('503 storage_unavailable');
     expect(log).toHaveBeenCalledTimes(1);

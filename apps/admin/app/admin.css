@@ -2131,6 +2131,7 @@
     max-width: 200px;
   }
   .ad-vars > summary {
+    list-style: none;
     cursor: pointer;
   }
   .ad-vars > summary::-webkit-details-marker {

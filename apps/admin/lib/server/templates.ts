@@ -293,6 +293,7 @@ export function createPanelTemplates(deps: PanelTemplatesDeps) {
       const { version } = found;
       const { preview } = version;
       if (!preview.pdfKey || !preview.pngKey || !preview.pages) return fail(409, 'template_no_preview');
+      if (preview.gone) return fail(410, 'preview_files_deleted');
       const label = `پیش‌نمایش نسخهٔ ${version.version} قالب ${version.kind}`;
       if (what === 'pdf') return stored(preview.pdfKey, previewFileName(version.kind, version.version), label);
       if (!Number.isInteger(what.page) || what.page < 1 || what.page > preview.pages) return fail(404, 'template_not_found');

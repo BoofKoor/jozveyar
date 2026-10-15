@@ -161,7 +161,15 @@ export default async function TemplateVersionPage({ params, searchParams }: { pa
               </span>
             </div>
           ) : null}
-          {ready ? (
+          {ready && preview.gone ? (
+            <p className="jy-note jy-note--info" data-preview-gone="">
+              <span className="jy-icon jy-icon-info" aria-hidden="true" />
+              <span>
+                فایل‌های این پیش‌نمایش با فایل‌های سفارش <span className="num">{preview.orderNumber}</span> پس از روزهای نگهداری پاک شد؛ برای دیدن
+                دوباره، پیش‌نمایش را با دادهٔ نمونه یا سفارش دیگری بساز.
+              </span>
+            </p>
+          ) : ready ? (
             <>
               <div className="ad-sheet-wrap">
                 {pages.map((page) => (

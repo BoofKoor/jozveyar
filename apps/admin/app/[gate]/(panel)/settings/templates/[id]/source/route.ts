@@ -4,7 +4,7 @@ import { requirePanel, requireSession } from '../../../../../../../lib/server/co
 
 /**
  * دانلود متن یک نسخهٔ قالب، یا قالب پیش‌فرض (`default-<نوع>`)، برای ویرایش (برش ۹٫۲). قالب HTML ناشناس است، پس هرگز به شکل صفحه در
- * مبدأ پنل باز نمی‌شود: پیوست، نوع بایت خام، `nosniff` و CSP `sandbox`.
+ * مبدأ پنل باز نمی‌شود: پیوست، نوع بایت خام و `nosniff`؛ و CSP همهٔ پاسخ‌های پنل (`middleware.ts`) اسکریپت بی nonce را هم نمی‌گذارد.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ gate: string; id: string }> }) {
   const { gate, id } = await params;
@@ -22,7 +22,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ gat
       'Content-Disposition': `attachment; filename="${fileName}"`,
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; sandbox",
     },
   });
 }

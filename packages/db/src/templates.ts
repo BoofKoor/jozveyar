@@ -59,6 +59,8 @@ export interface TemplatePreview {
   /** PDF پیش‌نمایش و PNG صفحهٔ اولش؛ صفحهٔ n ام کنارش (`-n.png`). */
   pdfKey: string | null;
   pngKey: string | null;
+  /** پیش‌نمایش با دادهٔ سفارشی که فایل‌هایش پاک شده: فایل‌های پیش‌نمایش هم با آنها رفته‌اند (`retention.py`). */
+  gone: boolean;
   blocked: string[];
   error: string | null;
 }
@@ -122,6 +124,7 @@ export function createTicketTemplateStore({ db }: Database): TicketTemplateStore
     previewPages: ticketTemplates.previewPages,
     previewPdfKey: ticketTemplates.previewPdfKey,
     previewPngKey: ticketTemplates.previewPngKey,
+    previewGone: sql<boolean>`EXISTS (SELECT 1 FROM ${orders} WHERE ${orders.orderNumber} = ${ticketTemplates.previewOrderNumber} AND ${orders.filesDeletedAt} IS NOT NULL)`,
     previewBlocked: ticketTemplates.previewBlocked,
     previewError: ticketTemplates.previewError,
     jobStatus: jobs.status,
@@ -147,6 +150,7 @@ export function createTicketTemplateStore({ db }: Database): TicketTemplateStore
       pages: row.previewPages,
       pdfKey: row.previewPdfKey,
       pngKey: row.previewPngKey,
+      gone: row.previewGone,
       blocked: row.previewBlocked,
       error: row.previewError,
     },
