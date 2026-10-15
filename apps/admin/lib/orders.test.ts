@@ -424,6 +424,7 @@ function details(over: { order?: Partial<OrderRow>; item?: Partial<PanelOrderIte
     items: [item],
     payments: [],
     refunds: [],
+    notes: [],
     statusEvents: [],
     pdfJob: { status: 'done', attempts: 1, maxAttempts: 3, lastError: null, createdAt: order.paidAt!, updatedAt: order.paidAt!, finishedAt: order.paidAt! },
     ticketJob: null,
@@ -1203,6 +1204,8 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
         events: [
           { id: 7, at: tehran('2026-10-04 09:00'), action: 'orders.assign', detail: { reason: 'آفتاب کند است' }, adminName: 'سارا' },
           { id: 8, at: tehran('2026-10-04 10:00'), action: 'orders.pdf_download', detail: { orderNumber: 10027, item: 1 }, adminName: 'حسن' },
+          // یادداشت (۹٫۳): کارت «یادداشت‌ها» خودش را دارد، پس سطر رویداد نه، و از چشم چاپخانه حتی رویدادش هم نه.
+          { id: 9, at: tehran('2026-10-04 10:30'), action: 'orders.note', detail: { orderNumber: 10027, partnerVisible: false, note: 3 }, adminName: 'سارا' },
         ],
       },
     });
@@ -1216,9 +1219,11 @@ describe('بی مبلغ، و از چشم چاپخانه (۵٫۳)', () => {
       'برگرداندن: در حال چاپ ← در صف چاپ · سارا',
       'لغو شد · سارا',
     ]);
-    for (const hidden of ['اشتباه زد', 'مشتری خواست', 'آفتاب']) expect(JSON.stringify(seen)).not.toContain(hidden);
-    // شاهد: مالک و متصدی همه را دارند.
+    for (const hidden of ['اشتباه زد', 'مشتری خواست', 'آفتاب', 'orders.note']) expect(JSON.stringify(seen)).not.toContain(hidden);
+    // شاهد: مالک و متصدی همه را دارند، جز سطر یادداشت.
+    expect(d.events.map((event) => event.action)).toContain('orders.note');
     const all = orderTimeline(d).map((entry) => entry.text.join(''));
+    expect(all.filter((line) => line.includes('یادداشت') || line.includes('orders.note'))).toEqual([]);
     expect(all).toContain('برگرداندن: در حال چاپ ← در صف چاپ؛ اشتباه زد');
     expect(all).toContain('از «چاپ آفتاب» به «چاپ نور» رفت؛ آفتاب کند است');
   });

@@ -17,6 +17,7 @@ import {
   type OrderStatus,
   type PanelDueSummary,
   type PanelJozveFile,
+  type PanelNoteInput,
   type PanelOrderDetails,
   type PanelOrderLine,
   type PanelOrderSpec,
@@ -146,6 +147,11 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       calls.push({ method: 'editRecipient', args: [input], scope });
       events.push(input.event);
       return { ok: true, order: {} as never, changed: ['addressText'] };
+    },
+    addNote: async (scope, input) => {
+      calls.push({ method: 'addNote', args: [input], scope });
+      events.push(input.event);
+      return { ok: true, noteId: 7, duplicate: false };
     },
     // تنظیم سفارش نمی‌خواند، پس محدوده ندارد.
     setting: async (...args) => {
@@ -825,6 +831,86 @@ describe('ویرایش گیرنده', () => {
       const view = await service({ details: async () => orderDetails(status) }).orders.details(session(OPERATOR), '10027');
       expect(view.ok && view.value.canEditRecipient, status).toBe(can);
     }
+  });
+});
+
+describe('یادداشت داخلی (۹٫۳)', () => {
+  const notes = (calls: Call[]) => calls.filter((c) => c.method === 'addNote').map((c) => c.args[0] as PanelNoteInput);
+  /** شناسهٔ فرم، همان شکل `randomUUID` صفحه. */
+  const REQUEST = '3f2c8a1e-5b7d-4c9a-8e21-0d6b4f7a9c13';
+  const NOTER = [...OPERATOR, 'orders.notes'];
+  const form = (body: string, partnerVisible = '', request: unknown = REQUEST) => ({ body, partnerVisible, request });
+
+  it('مجوز در سرور پیش از هر خواندن: بی `orders.notes` (چاپخانه هم) نه؛ جزئیات فرم را فقط با همان نشان می‌دهد', async () => {
+    const { orders, calls } = service({ details: async () => orderDetails('paid') });
+    expect(await orders.addNote(session(OPERATOR), '10027', form('اسم استاد روی جلد نیاید'), 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+    const partner = session(['orders.read', 'orders.status', 'files.download'], { id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار' });
+    expect(await orders.addNote(partner, '10027', form('اسم استاد روی جلد نیاید', '1'), 'ip')).toMatchObject({ status: 403, error: 'forbidden' });
+    expect(calls).toEqual([]);
+    for (const [permissions, canNote] of [[NOTER, true], [OPERATOR, false]] as const) {
+      const view = await orders.details(session([...permissions]), '10027');
+      expect(view.ok && view.value.canNote).toBe(canNote);
+    }
+  });
+
+  it('هر خط فارسی‌نرمال و خط خالی نه، در هر وضعیت؛ «چاپخانه هم ببیند» فقط با تیک؛ رویداد بی متن با هش IP', async () => {
+    const { orders, calls } = service({ details: async () => orderDetails('handed_to_post') });
+    const result = await orders.addNote(session(NOTER), '10027', form(' اسم استاد روي جلد نيايد \r\n\n  جلد ۲ را جدا ببند ', '1'), '1.2.3.4');
+    expect(result).toEqual({ ok: true, value: { noteId: 7, duplicate: false } });
+    expect(notes(calls)).toEqual([
+      {
+        orderId: 'order-1',
+        adminUserId: 'admin-1',
+        body: 'اسم استاد روی جلد نیاید\nجلد 2 را جدا ببند',
+        partnerVisible: true,
+        requestId: REQUEST,
+        at: NOW,
+        event: {
+          adminUserId: 'admin-1',
+          action: 'orders.note',
+          targetType: 'order',
+          targetId: 'order-1',
+          ipHash,
+          detail: { orderNumber: 10027, partnerVisible: true },
+          at: NOW,
+        },
+      },
+    ]);
+    // بی تیک: فقط مالک و متصدی.
+    const internal = service({ details: async () => orderDetails('cancelled') });
+    await internal.orders.addNote(session(NOTER), '10027', form('مشتری زنگ زد'), 'ip');
+    expect(notes(internal.calls)[0]).toMatchObject({ body: 'مشتری زنگ زد', partnerVisible: false, event: { detail: { partnerVisible: false } } });
+  });
+
+  it('متن خالی یا بیش از ۱٬۰۰۰ نویسه و فرم کهنه: بی نوشتن؛ سفارشی که نیست ۴۰۴؛ دو کلیک همان یادداشت', async () => {
+    const { orders, calls } = service({ details: async () => orderDetails('paid') });
+    expect(await orders.addNote(session(NOTER), '10027', form(' \n\u200B\n\t '), 'ip')).toMatchObject({ status: 400, error: 'note_required' });
+    expect(await orders.addNote(session(NOTER), '10027', form('ی'.repeat(1001)), 'ip')).toMatchObject({ status: 400, error: 'note_too_long' });
+    for (const request of ['', 'x', REQUEST.toUpperCase(), `${REQUEST}0`, null, 7]) {
+      expect(await orders.addNote(session(NOTER), '10027', form('اسم استاد روی جلد نیاید', '', request), 'ip')).toMatchObject({
+        status: 400,
+        error: 'note_form_stale',
+      });
+    }
+    expect(calls.filter((c) => c.method === 'addNote')).toEqual([]);
+    // ۱٬۰۰۰ نویسه پس از نرمال‌سازی، با فاصلهٔ لبه، پذیرفته است.
+    expect(await orders.addNote(session(NOTER), '10027', form(`  ${'ی'.repeat(1000)}  `), 'ip')).toMatchObject({ ok: true });
+
+    const twice = service({ details: async () => orderDetails('paid'), addNote: async () => ({ ok: true, noteId: 7, duplicate: true }) });
+    expect(await twice.orders.addNote(session(NOTER), '10027', form('اسم استاد روی جلد نیاید'), 'ip')).toEqual({
+      ok: true,
+      value: { noteId: 7, duplicate: true },
+    });
+    const reused = service({ details: async () => orderDetails('paid'), addNote: async () => ({ ok: false, reason: 'conflict' }) });
+    expect(await reused.orders.addNote(session(NOTER), '10027', form('متن دیگر'), 'ip')).toMatchObject({ status: 409, error: 'note_form_stale' });
+    const moved = service({ details: async () => orderDetails('paid'), addNote: async () => ({ ok: false, reason: 'not_found' }) });
+    expect(await moved.orders.addNote(session(NOTER), '10027', form('اسم استاد روی جلد نیاید'), 'ip')).toMatchObject({
+      status: 404,
+      error: 'order_not_found',
+    });
+    const missing = service({ details: async () => null });
+    expect(await missing.orders.addNote(session(NOTER), '10027', form('اسم استاد روی جلد نیاید'), 'ip')).toMatchObject({ error: 'order_not_found' });
+    expect(missing.calls.filter((c) => c.method === 'addNote')).toEqual([]);
   });
 });
 

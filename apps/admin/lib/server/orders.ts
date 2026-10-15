@@ -64,9 +64,10 @@ import { gatewayName, isRefundedStatus, paymentErrorTag, type PaymentGateway } f
 import { deliverQueued, resendable, smsState, type SmsErrorCode, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import type { StorageDriver } from '@jozveyar/storage';
 import { postHandoffDue, tehranDayStart } from '@jozveyar/text';
-import { checkRecipient, tidyInputFa, type RecipientField } from '@jozveyar/text/input';
+import { checkRecipient, tidyInputFa, tidyInputLinesFa, type RecipientField } from '@jozveyar/text/input';
 
 import {
+  NOTE_MAX,
   REASON_MAX,
   RECIPIENT_EDITABLE,
   bucketOf,
@@ -75,6 +76,7 @@ import {
   dueTiles,
   inquirable,
   isOpen,
+  isNoteRequest,
   isStatusAction,
   linesWithoutMoney,
   orderNumberOf,
@@ -198,6 +200,8 @@ export interface OrdersListView {
   specs: Map<string, PanelOrderSpec>;
   /** «همهٔ فایل‌ها (zip)» برای این نشست (`files.download`). */
   canZip: boolean;
+  /** نشان «چاپخانه هم می‌بیند» یادداشت‌های مشخصات (۹٫۳، `orders.notes`)؛ چاپخانه فقط همان یادداشت‌ها را دارد. */
+  canNote: boolean;
 }
 
 export interface OrderDetailsView {
@@ -218,6 +222,11 @@ export interface OrderDetailsView {
   revertBlockedBy: { importId: string; filename: string } | null;
   /** ویرایش گیرنده: مجوزش، و فقط تا پیش از پست. */
   canEditRecipient: boolean;
+  /**
+   * یادداشت داخلی (برش ۹٫۳، `orders.notes`): نوشتن، و دیدن همه با «چاپخانه هم ببیند» یا بی آن. بی آن (چاپخانه) `details.notes` فقط
+   * «چاپخانه هم ببیند» است، از خود کوئری.
+   */
+  canNote: boolean;
   /** جابه‌جایی چاپخانه (۵٫۲): مجوزش، فقط «در صف چاپ»، و فقط وقتی چاپخانهٔ فعال دیگری هست. */
   canAssign: boolean;
   /** چاپخانه‌های فعالی که سفارش به آن‌ها می‌رود (جز چاپخانهٔ امروزش)؛ فقط با `canAssign`. */
@@ -300,6 +309,13 @@ export interface RecipientForm {
   name: unknown;
   addressText: unknown;
   postalCode: unknown;
+}
+
+/** فرم یادداشت داخلی (برش ۹٫۳): متن، تیک «چاپخانه هم ببیند» (هر مقدار جز خالی)، و شناسهٔ فرم (`isNoteRequest`). */
+export interface NoteForm {
+  body: unknown;
+  partnerVisible: unknown;
+  request: unknown;
 }
 
 const STATUSES: readonly OrderStatus[] = ['awaiting_payment', 'paid', 'expired', 'printing', 'handed_to_post', 'cancelled'];
@@ -431,6 +447,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         rows: money ? rows : linesWithoutMoney(rows),
         specs: money ? specs : new Map([...specs].map(([id, spec]) => [id, specWithoutMoney(spec)])),
         canZip: can(session, 'files.download'),
+        canNote: can(session, 'orders.notes'),
       });
     },
 
@@ -466,6 +483,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         revertTo,
         revertBlockedBy: can(session, 'orders.revert') && live && revertTo !== null ? { importId: live.importId, filename: live.filename } : null,
         canEditRecipient: can(session, 'orders.address') && (RECIPIENT_EDITABLE as readonly OrderStatus[]).includes(status),
+        canNote: can(session, 'orders.notes'),
         canAssign: partnerOptions.length > 0,
         partnerOptions,
         canPartnerSms: can(session, 'orders.assign'),
@@ -639,6 +657,44 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       });
       if (!written.ok) return written.current === null ? fail(404, 'order_not_found') : fail(409, 'recipient_locked', { current: written.current });
       return ok({ changed: written.changed ?? [] });
+    },
+
+    /**
+     * یادداشت داخلی تازه (برش ۹٫۳، ADR-058؛ سؤال ۱۹۵): مالک و متصدی (`orders.notes`)، روی هر سفارشی در محدوده و در هر وضعیت، ۱ تا
+     * ۱٬۰۰۰ نویسه پس از نرمال‌سازی هر خط، بی کد تازه: چیزی را عوض نمی‌کند و پاک نمی‌شود. «چاپخانه هم ببیند» فقط با تیک. شناسهٔ فرم
+     * دو کلیک را یک یادداشت می‌کند (`duplicate`)؛ رویداد `orders.note` بی متن.
+     */
+    async addNote(session: AdminSession, numberParam: string, form: NoteForm, ip: string): Promise<Result<{ noteId: number; duplicate: boolean }>> {
+      if (!can(session, 'orders.notes')) return fail(403, 'forbidden');
+      const scope = scopeOf(session);
+      const orderNumber = orderNumberOf(numberParam);
+      const details = orderNumber === null ? null : await store.details(scope, orderNumber);
+      if (!details) return fail(404, 'order_not_found');
+      const body = tidyInputLinesFa(text(form.body));
+      if (!body) return fail(400, 'note_required');
+      if (body.length > NOTE_MAX) return fail(400, 'note_too_long');
+      if (!isNoteRequest(form.request)) return fail(400, 'note_form_stale');
+      const partnerVisible = text(form.partnerVisible) !== '';
+      const at = now();
+      const written = await store.addNote(scope, {
+        orderId: details.order.id,
+        adminUserId: session.userId,
+        body,
+        partnerVisible,
+        requestId: form.request,
+        at,
+        event: {
+          adminUserId: session.userId,
+          action: 'orders.note',
+          targetType: 'order',
+          targetId: details.order.id,
+          ipHash: ipHashOf(deps.secret, ip),
+          detail: { orderNumber: details.order.orderNumber, partnerVisible },
+          at,
+        },
+      });
+      if (written.ok) return ok({ noteId: written.noteId, duplicate: written.duplicate });
+      return written.reason === 'not_found' ? fail(404, 'order_not_found') : fail(409, 'note_form_stale');
     },
 
     /**

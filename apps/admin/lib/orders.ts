@@ -372,6 +372,13 @@ export function transitionOf(action: StatusAction, from: OrderStatus, events: re
 /** بیشترین طول دلیل لغو یا برگرداندن، بعد از نرمال‌سازی. */
 export const REASON_MAX = 500;
 
+/** بیشترین طول یادداشت داخلی سفارش (برش ۹٫۳، سؤال ۱۹۵)، بعد از نرمال‌سازی؛ پایگاه داده هم (`order_notes_body`). */
+export const NOTE_MAX = 1000;
+
+/** شناسهٔ فرم یادداشت (`order_notes.request_id`): UUID تصادفی که صفحه با هر بار ساختن فرم می‌گذارد. */
+export const isNoteRequest = (value: unknown): value is string =>
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+
 /** گیرنده تا وقتی به پست نرسیده ویرایش‌شدنی است: در صف چاپ و در حال چاپ. */
 export const RECIPIENT_EDITABLE = OPEN_STATUSES;
 
@@ -1328,8 +1335,17 @@ export function orderTimeline(details: PanelOrderDetails): TimelineEntry[] {
     const seq = typeof detail.item === 'number' ? detail.item : 1;
     const volume = typeof detail.volume === 'number' && typeof detail.volumes === 'number' && detail.volumes > 1 ? detail.volume : null;
     const who = event.adminName ?? 'ادمین';
-    // همان رویداد وضعیت و تخصیص بالا؛ و کارهای صف تأیید و کنار گذاشتن یک کد، که سطر کد رهگیری بالا می‌گویدشان (۶٫۲).
-    if (event.action === 'orders.status' || event.action === 'orders.assign' || event.action === 'orders.refund' || SHIPMENT_EVENTS.has(event.action)) continue;
+    // همان رویداد وضعیت و تخصیص بالا؛ کارهای صف تأیید و کنار گذاشتن یک کد، که سطر کد رهگیری بالا می‌گویدشان (۶٫۲)؛ و یادداشت (۹٫۳)،
+    // که کارت «یادداشت‌ها» خودش را با نویسنده و زمان دارد.
+    if (
+      event.action === 'orders.status' ||
+      event.action === 'orders.assign' ||
+      event.action === 'orders.refund' ||
+      event.action === 'orders.note' ||
+      SHIPMENT_EVENTS.has(event.action)
+    ) {
+      continue;
+    }
     if (event.action === 'orders.pdf_download') entries.push({ at: event.at, text: ['PDF اصلی ', ...jozve(seq), ' دانلود شد'], who });
     else if (event.action === 'orders.print_download') {
       entries.push({ at: event.at, text: ['فایل چاپ', ...ofJozve(seq), ...(volume ? [' جلد ', num(volume)] : []), ' دانلود شد'], who });
@@ -1445,8 +1461,9 @@ export function partnerView(details: PanelOrderDetails, partnerId: string): Pane
     assignments: details.assignments
       .filter((assignment) => assignment.toPartnerId === partnerId)
       .map((assignment) => ({ ...assignment, fromName: null, reason: null })),
+    // رویداد یادداشت (۹٫۳) هم نه: یادداشتی که برای چاپخانه نیست، حتی بودنش.
     events: details.events
-      .filter((event) => event.action !== 'orders.assign')
+      .filter((event) => event.action !== 'orders.assign' && event.action !== 'orders.note')
       .map((event) => {
         const detail = (event.detail ?? {}) as Record<string, unknown>;
         return { ...event, detail: Object.fromEntries(EVENT_DETAIL_KEYS.filter((key) => key in detail).map((key) => [key, detail[key]])) };

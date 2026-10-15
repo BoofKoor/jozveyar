@@ -335,6 +335,39 @@
     color: var(--color-muted);
   }
 
+  /* ===== یادداشت‌های داخلی سفارش (۹٫۳): ستون کنار صفحهٔ سفارش و مشخصات فهرست جمع‌وجور ===== */
+  .ad-notes {
+    margin-block-start: 4px;
+  }
+  .ad-notes > li {
+    padding-block: 10px;
+  }
+  .ad-notes > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-note__body {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .ad-note__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin-block-start: 2px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-note-form {
+    margin-block-start: 8px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .ad-note-form > .ad-actions {
+    margin-block-start: 8px;
+  }
+
   /* ===== پیشخوان: چهار کاشی مهلت تحویل به پست، هشدارها (۴٫۲) ===== */
   .ad-h2 {
     font-size: var(--text-h4);

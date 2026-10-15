@@ -44,6 +44,10 @@ export function RecipientForm({ gate, orderNumber, initial, place, phone, back }
         ویرایش نشانی
       </h2>
       <p className="ad-lead">اشتباه تایپی را درست کن. قیمت و کرایه عوض نمی‌شوند.</p>
+      <p className="ad-hint">
+        نسخه، صحافی، اندازه، فایل و شهر قیمت را عوض می‌کنند، پس اینجا نیستند: سفارش را لغو کن، پولش را برگردان و مشتری سفارش تازه بدهد.
+        دستور چاپ را در «یادداشت‌ها» بنویس.
+      </p>
       {state.error && !state.fields?.length ? <p className="jy-error">{messageOf(state.error)}</p> : null}
       <form action={action}>
         <input type="hidden" name="gate" value={gate} />

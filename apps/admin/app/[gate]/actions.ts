@@ -237,6 +237,33 @@ export async function editRecipientAction(_state: RecipientState, form: FormData
   redirect(`${back}?e=${result.error}`);
 }
 
+export interface NoteState {
+  error?: AdminErrorCode;
+  /** متن و تیکی که نوشته شد، تا پس از خطا بمانند. */
+  body?: string;
+  partnerVisible?: boolean;
+}
+
+/**
+ * یادداشت داخلی تازه (۹٫۳). خطای متن همین‌جا می‌ماند، با متن و تیک؛ بقیه (فرم کهنه، بی مجوز، سفارشی که نیست) به صفحهٔ سفارش با پیامش.
+ * پس از نوشتن همان صفحه، با یادداشت در فهرست و فرم تازه (شناسهٔ فرم تازه).
+ */
+export async function orderNoteAction(_state: NoteState, form: FormData): Promise<NoteState> {
+  const gate = field(form, 'gate');
+  const { orders } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = field(form, 'number');
+  const body = field(form, 'body');
+  const partnerVisible = field(form, 'partnerVisible');
+  const result = await orders.addNote(session, number, { body, partnerVisible, request: field(form, 'request') }, await requestIp());
+  const back = panelPath(gate, `/orders/${encodeURIComponent(number)}`);
+  if (result.ok) redirect(back);
+  if (result.error === 'note_required' || result.error === 'note_too_long') {
+    return { error: result.error, body: body.slice(0, 5000), partnerVisible: partnerVisible !== '' };
+  }
+  redirect(`${back}?e=${result.error}`);
+}
+
 /**
  * «نسخهٔ تازه»ی تعرفه (۴٫۵): پیش‌نویسی که هست، یا تازه از روی نسخهٔ فعال؛ بعد ویرایشگرش. کد تازه نمی‌خواهد: پیش‌نویس
  * روی سایت اثری ندارد. مجوز و رویدادش در سرویس.

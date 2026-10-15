@@ -128,6 +128,7 @@ export function OrderFolds({
   money,
   partner,
   canZip,
+  canNote,
 }: {
   gate: string;
   rows: readonly PanelOrderLine[];
@@ -139,6 +140,8 @@ export function OrderFolds({
   partner: boolean;
   /** «همهٔ فایل‌ها (zip)» (`files.download`). */
   canZip: boolean;
+  /** نشان «چاپخانه هم می‌بیند» یادداشت‌ها (۹٫۳، `orders.notes`). */
+  canNote: boolean;
 }) {
   return (
     <ul className="ad-rows">
@@ -151,7 +154,7 @@ export function OrderFolds({
                 <RowCells row={row} bounds={bounds} dates={dates} money={money} fold partner={partner} />
               </summary>
               {spec ? (
-                <OrderSpec gate={gate} spec={spec} at={bounds.at} canZip={canZip} />
+                <OrderSpec gate={gate} spec={spec} at={bounds.at} canZip={canZip} canNote={canNote} />
               ) : (
                 <div className="ad-fold__body">
                   <div className="ad-zip">

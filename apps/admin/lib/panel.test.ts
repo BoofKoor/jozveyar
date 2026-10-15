@@ -274,6 +274,17 @@ describe('رویدادها', () => {
     expect(JSON.stringify(lines)).not.toContain('پلاک 12');
   });
 
+  it('یادداشت داخلی (۹٫۳) زیر «سفارش»: شمارهٔ سفارش و اینکه چاپخانه هم می‌بیند؛ متن یادداشت در رویداد نیست', () => {
+    const lines = eventLines([
+      event('orders.note', { targetType: 'order', detail: { orderNumber: 10027, partnerVisible: true, note: 3 } }),
+      event('orders.note', { targetType: 'order', detail: { orderNumber: 10031, partnerVisible: false, note: 4 } }),
+    ]);
+    expect(lines.map((l) => [l.who, l.text])).toEqual([
+      ['سارا', ['یادداشت تازه روی سفارش ', { ltr: '10027' }, '، چاپخانه هم می‌بیند']],
+      ['سارا', ['یادداشت تازه روی سفارش ', { ltr: '10031' }]],
+    ]);
+  });
+
   it('تعرفه (۴٫۵): پیش‌نویس ساخته، ذخیره و پاک شد؛ فعال شدن و برگشت، با شمارهٔ نسخه جدا از جملهٔ فارسی', () => {
     const tariff = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'price_list', detail });
     const lines = eventLines([

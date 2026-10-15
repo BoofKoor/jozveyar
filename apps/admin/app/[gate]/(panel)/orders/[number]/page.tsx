@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { randomUUID } from 'node:crypto';
+
 import { Fragment } from 'react';
 
 import { FILE_MARGIN_MS, IRAN_POST, isChecking, isPaidStatus, voidKept, type PanelOrderDetails, type PanelOrderItem, type VoidKept } from '@jozveyar/db';
@@ -13,8 +15,10 @@ import { AssignForm } from '../../../../../components/AssignForm';
 import { Barcode } from '../../../../../components/Barcode';
 import { NoAccess } from '../../../../../components/NoAccess';
 import { InquiryForm } from '../../../../../components/InquiryForm';
+import { NoteForm } from '../../../../../components/NoteForm';
 import { DueBadge, PaymentBadge, StateBadge } from '../../../../../components/OrderBadges';
 import { FileWarnings } from '../../../../../components/FileWarnings';
+import { OrderNotes } from '../../../../../components/OrderNotes';
 import { ReasonForm } from '../../../../../components/ReasonForm';
 import { RefundGatewayForm, RefundManualForm } from '../../../../../components/RefundForms';
 import { RefundInquiryForm } from '../../../../../components/RefundInquiryForm';
@@ -34,6 +38,7 @@ import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
 import { REFUND_NOTE_MAX, rejectionNow, rejectionResult, viaGateway } from '../../../../../lib/refunds';
 import { partnerSmsView, paymentSmsView, smsView } from '../../../../../lib/sms';
 import {
+  NOTE_MAX,
   REASON_MAX,
   STATUS_LABELS,
   addressText,
@@ -114,6 +119,7 @@ const PAGE_ERRORS = new Set([
   'refund_already_at_gateway',
   'refund_not_found',
   'refund_not_inquirable',
+  'note_form_stale',
 ]);
 
 /**
@@ -656,6 +662,29 @@ function StatusCard({ gate, view, stale, mode }: { gate: string; view: OrderDeta
  * «جابه‌جایی» فقط در «در صف چاپ» و وقتی چاپخانهٔ فعال دیگری هست. سفارش «در صف چاپ» بی چاپخانه هشدار دارد و «انتخاب»؛ پرداخت‌نشده
  * کارت ندارد.
  */
+/**
+ * یادداشت‌های داخلی (برش ۹٫۳، ADR-058؛ سؤال ۱۹۵) در ستون کنار، زیر وضعیت و کار بعدی، تا پیش از «شروع چاپ» دیده شوند: مالک و متصدی همه را
+ * با نشان «چاپخانه هم می‌بیند» و فرم یادداشت تازه؛ چاپخانه فقط یادداشت‌هایی را که برایش است، و اگر نیست کارت هم نه. شناسهٔ فرم با هر بار
+ * ساختن صفحه تازه است.
+ */
+function NotesCard({ gate, view, now }: { gate: string; view: OrderDetailsView; now: Date }) {
+  const { notes, order } = view.details;
+  if (!view.canNote && notes.length === 0) return null;
+  return (
+    <section className="jy-card" aria-labelledby="t-notes" data-notes={notes.length}>
+      <h2 id="t-notes" className="jy-card__title">
+        یادداشت‌ها
+      </h2>
+      {notes.length > 0 ? (
+        <OrderNotes notes={notes} now={now} visibility={view.canNote} />
+      ) : (
+        <p className="ad-hint ad-gap">هنوز یادداشتی نیست. دستور چاپ («اسم استاد روی جلد نیاید») یا هر چه بقیه باید بدانند را اینجا بنویس.</p>
+      )}
+      {view.canNote ? <NoteForm gate={gate} orderNumber={order.orderNumber} request={randomUUID()} maxLength={NOTE_MAX} /> : null}
+    </section>
+  );
+}
+
 function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
   const { details, canAssign } = view;
   const card = partnerCard(details);
@@ -1372,6 +1401,7 @@ export default async function OrderPage({
         <aside className="ad-side" aria-label="وضعیت و کار بعدی">
           <StatusCard gate={gate} view={view} stale={stale} mode={mode} />
           <RefundCard gate={gate} view={view} mode={mode} />
+          <NotesCard gate={gate} view={view} now={now} />
           {mode === 'assign' && view.canAssign ? (
             <AssignForm
               gate={gate}

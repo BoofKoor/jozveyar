@@ -31,6 +31,18 @@ export function tidyInputFa(input: string): string {
 }
 
 /**
+ * متن چندخطی که کاربر تایپ کرده — یادداشت داخلی سفارش در پنل (برش ۹٫۳): هر خط با `tidyInputFa`، خط تازه همان یک `\n` (`\r\n`
+ * مرورگر هم)، و خط خالی، در لبه یا پشت‌سرهم، نه.
+ */
+export function tidyInputLinesFa(input: string): string {
+  return input
+    .split(/\r\n|[\n\r\u2028\u2029\u0085]/)
+    .map(tidyInputFa)
+    .filter((line) => line !== '')
+    .join('\n');
+}
+
+/**
  * شمارهٔ موبایل ایران به یک شکل واحد: `09123456789`.
  *
  * `+98`، `0098`، `98`، با فاصله و خط تیره، و ارقام فارسی همه پذیرفته می‌شوند.

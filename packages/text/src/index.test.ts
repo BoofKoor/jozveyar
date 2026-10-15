@@ -26,7 +26,7 @@ import {
   unifyLetters,
   weightParts,
 } from './index.js';
-import { checkRecipient, normalizeIranMobile, tidyInputFa } from './input.js';
+import { checkRecipient, normalizeIranMobile, tidyInputFa, tidyInputLinesFa } from './input.js';
 
 describe('toLatinDigits', () => {
   it('ارقام فارسی را تبدیل می‌کند', () => {
@@ -95,6 +95,21 @@ describe('tidyInputFa — نشانی و نام گیرنده، برای چاپ ر
     expect(tidyInputFa('می\u200C\u200Cروم')).toBe('می\u200Cروم');
     expect(tidyInputFa('وکیل\u200C آباد')).toBe('وکیل آباد');
     expect(tidyInputFa('\u200Cسارا\u200C')).toBe('سارا');
+  });
+});
+
+describe('tidyInputLinesFa — یادداشت داخلی سفارش در پنل (۹٫۳)', () => {
+  it('هر خط مثل tidyInputFa، و خط تازه می‌ماند', () => {
+    expect(tidyInputLinesFa('اسم استاد روي جلد نيايد\n  جلد ۲ جدا  ')).toBe('اسم استاد روی جلد نیاید\nجلد 2 جدا');
+  });
+
+  it('خط تازهٔ ویندوز و مک و جداکنندهٔ خط یونیکد یک \\n می‌شوند', () => {
+    expect(tidyInputLinesFa('یک\r\nدو\rسه\u2028چهار\u2029پنج\u0085شش')).toBe('یک\nدو\nسه\nچهار\nپنج\nشش');
+  });
+
+  it('خط خالی در لبه یا پشت‌سرهم نه، و متن فقط‌فاصله خالی', () => {
+    expect(tidyInputLinesFa('\n\n  یک \n \t \n\nدو\n\n')).toBe('یک\nدو');
+    expect(tidyInputLinesFa(' \n\u200B\n\t')).toBe('');
   });
 });
 
