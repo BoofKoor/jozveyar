@@ -26,7 +26,7 @@ import {
   unifyLetters,
   weightParts,
 } from './index.js';
-import { checkRecipient, normalizeIranMobile, tidyInputFa, tidyInputLinesFa } from './input.js';
+import { checkRecipient, normalizeDiscountCode, normalizeIranMobile, tidyInputFa, tidyInputLinesFa } from './input.js';
 
 describe('toLatinDigits', () => {
   it('ارقام فارسی را تبدیل می‌کند', () => {
@@ -463,5 +463,26 @@ describe('checkRecipient — گیرندهٔ سفارش، یک قاعده برا�
       'recipient.addressText',
       'recipient.postalCode',
     ]);
+  });
+});
+
+describe('normalizeDiscountCode (۱۱٫۴)', () => {
+  it.each([
+    ['WELCOME', 'WELCOME'],
+    ['welcome', 'WELCOME'],
+    [' Wel come ', 'WELCOME'],
+    ['MEHR-1405', 'MEHR1405'],
+    ['mehr۱۴۰۵', 'MEHR1405'],
+    // همان کلیدها با صفحه‌کلید فارسی: «پ» یا «ئ» جای M
+    ['صثمزخپث', 'WELCOME'],
+    ['صثمزخئث', 'WELCOME'],
+    ['ثمزخئث', 'ELCOME'],
+    ['mehr ۱۴۰۵ صثمزخپث', 'MEHR1405WELCOME'],
+  ])('«%s» → %s', (input, expected) => {
+    expect(normalizeDiscountCode(input)).toBe(expected);
+  });
+
+  it('شکلی که کد نیست null است: کوتاه، بلند، و نویسهٔ دیگر', () => {
+    for (const input of ['', 'AB', 'A'.repeat(21), 'WEL!COME', 'کد', 'تخفیف٪']) expect(normalizeDiscountCode(input)).toBeNull();
   });
 });

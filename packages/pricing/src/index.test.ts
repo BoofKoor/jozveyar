@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { BindingType, OrderSpec, PriceList } from '@jozveyar/contracts';
+import type { BindingType, DiscountCodeTerms, OrderSpec, PriceList } from '@jozveyar/contracts';
 import {
   bandPriceRials,
   bindingMisfit,
+  codeDiscountRials,
   countPages,
+  freeShippingOf,
   itemPageCount,
   minOrderGapRials,
+  nextTierOf,
   offeredSizes,
   pausedOf,
   perPageColorRules,
@@ -14,6 +17,7 @@ import {
   sheetsOf,
   shippingFloorRials,
   splitSheets,
+  tierOf,
   toRanges,
   volumesOf,
   wholeDocumentRule,
@@ -654,5 +658,117 @@ describe('صحافی‌ها: کمینه، سقف، چند جلد یا «نمی�
         expect(sheetsOf(pageCount, sidesMode)).toBe(quote(spec({ pageCount, sidesMode }), L).items[0]!.sheets);
       }
     }
+  });
+});
+
+describe('تخفیف سفارش بزرگ و کد تخفیف (۱۱٫۴)', () => {
+  // همان جزوهٔ مرجع: ۱۴۷ صفحهٔ دورو سیاه‌سفید = ۲۸۰,۲۰۰ تومان چاپ و صحافی؛ کرایهٔ غیرتهران ۱۳۷,۷۵۰.
+  const base = spec({ pageCount: 147, sidesMode: 'double' });
+  const other = { ...base, shipping: { methodId: 'post', zoneId: 'other' } };
+  const TIERS = {
+    ...L,
+    discountTiers: [
+      { fromRials: T(250_000), percent: 5, freeShipping: false },
+      { fromRials: T(1_000_000), percent: 10, freeShipping: true },
+    ],
+  };
+  const FREE = { ...L, discountTiers: [{ fromRials: T(250_000), percent: 0, freeShipping: true }] };
+  type CodeInput =
+    | { kind: 'percent'; percent: number; maxRials?: number | null; minOrderRials?: number }
+    | { kind: 'fixed'; amountRials: number; minOrderRials?: number };
+  const code = (terms: CodeInput): DiscountCodeTerms =>
+    terms.kind === 'percent'
+      ? { id: 'c1', code: 'WELCOME', minOrderRials: terms.minOrderRials ?? 0, kind: 'percent', percent: terms.percent, maxRials: terms.maxRials ?? null }
+      : { id: 'c1', code: 'WELCOME', minOrderRials: terms.minOrderRials ?? 0, kind: 'fixed', amountRials: terms.amountRials };
+
+  it('بالاترین پله‌ای که جمع چاپ، کاغذ و صحافی به آن رسیده؛ زیر اولین پله هیچ، و پلهٔ بعد با مانده', () => {
+    const b = quote(base, TIERS);
+    expect(b.discount).toEqual({ source: 'tier', fromRials: T(250_000), percent: 5, freeShipping: false, waivedShippingRials: null });
+    // ۵٪ از ۲۸۰,۲۰۰ = ۱۴,۰۱۰
+    expect(b.discountRials).toBe(T(14_010));
+    expect(b.totalWithoutShippingRials).toBe(T(280_200 - 14_010));
+    expect(nextTierOf(b, TIERS)).toEqual({ tier: TIERS.discountTiers[1], gapRials: T(1_000_000 - 280_200) });
+
+    const small = quote(spec({ pageCount: 20 }), TIERS);
+    expect([small.discount, small.discountRials]).toEqual([null, 0]);
+    expect(nextTierOf(small, TIERS)?.tier).toEqual(TIERS.discountTiers[0]);
+    expect(tierOf(0, TIERS)).toBeNull();
+    expect(nextTierOf({ subtotalRials: 0 }, TIERS)).toBeNull();
+  });
+
+  it('پله‌ها روی هم جمع نمی‌شوند: بالای هر دو فقط پلهٔ بالاتر، با ارسال رایگانش؛ بالای آخرین، پلهٔ بعدی نیست', () => {
+    const big = quote({ ...spec({ pageCount: 147, copies: 4 }), shipping: { methodId: 'post', zoneId: 'other' } }, TIERS);
+    expect(big.subtotalRials).toBe(T(4 * 280_200));
+    expect(big.discount).toMatchObject({ source: 'tier', fromRials: T(1_000_000), percent: 10, freeShipping: true });
+    expect(big.discountRials).toBe(T(112_080));
+    expect(big.shippingRials).toBe(0);
+    expect(nextTierOf(big, TIERS)).toBeNull();
+  });
+
+  it('ارسال رایگان: کرایه صفر و کرایهٔ بخشیده کنارش؛ بی شهر کرایه null و «ارسال رایگان» از همان اول', () => {
+    const b = quote(other, FREE);
+    expect(b.shippingRials).toBe(0);
+    expect(b.discount).toEqual({ source: 'tier', fromRials: T(250_000), percent: 0, freeShipping: true, waivedShippingRials: T(137_750) });
+    expect([b.discountRials, b.totalRials]).toEqual([0, T(280_200)]);
+    expect(freeShippingOf(b)).toBe(true);
+
+    const noCity = quote(base, FREE);
+    expect([noCity.shippingRials, noCity.discount?.source, freeShippingOf(noCity)]).toEqual([null, 'tier', true]);
+    expect(noCity.discount).toMatchObject({ waivedShippingRials: null });
+    expect(freeShippingOf(quote(base, TIERS))).toBe(false);
+    expect(freeShippingOf({})).toBe(false);
+  });
+
+  it('کد درصدی بزرگ‌تر از پله می‌ماند و پله کنار می‌رود؛ کوچک‌تر یا برابر، پله می‌ماند و کد به کار نمی‌رود', () => {
+    const won = quote(other, TIERS, { code: code({ kind: 'percent', percent: 10 }) });
+    expect(won.discount).toEqual({ source: 'code', codeId: 'c1', code: 'WELCOME', percent: 10 });
+    expect(won.discountRials).toBe(T(28_020));
+    expect(won.code).toEqual({ code: 'WELCOME', status: 'applied' });
+    expect(won.shippingRials).toBe(T(137_750));
+
+    const lost = quote(other, TIERS, { code: code({ kind: 'percent', percent: 4 }) });
+    expect(lost.discount?.source).toBe('tier');
+    expect(lost.code).toEqual({ code: 'WELCOME', status: 'smaller' });
+
+    // ۵٪ کد = ۵٪ پله: برابر، پله.
+    const tie = quote(other, TIERS, { code: code({ kind: 'percent', percent: 5 }) });
+    expect([tie.discount?.source, tie.code?.status]).toEqual(['tier', 'smaller']);
+  });
+
+  it('ارزش ارسال رایگان هم شمرده می‌شود: کد ۴۰,۰۰۰ تومانی از ارسال رایگان ۱۳۷,۷۵۰ کمتر است', () => {
+    const b = quote(other, FREE, { code: code({ kind: 'fixed', amountRials: T(40_000) }) });
+    expect([b.discount?.source, b.code?.status, b.shippingRials]).toEqual(['tier', 'smaller', 0]);
+    const bigger = quote(other, FREE, { code: code({ kind: 'fixed', amountRials: T(150_000) }) });
+    expect([bigger.discount?.source, bigger.discountRials, bigger.shippingRials]).toEqual(['code', T(150_000), T(137_750)]);
+  });
+
+  it('سقف کد درصدی، مبلغ ثابت تا خود جمع، و زیر حداقل کد صفر با مانده', () => {
+    expect(codeDiscountRials(code({ kind: 'percent', percent: 50, maxRials: T(50_000) }), T(280_200))).toBe(T(50_000));
+    expect(codeDiscountRials(code({ kind: 'percent', percent: 100, maxRials: null }), T(280_200))).toBe(T(280_200));
+    expect(codeDiscountRials(code({ kind: 'fixed', amountRials: T(500_000) }), T(280_200))).toBe(T(280_200));
+    expect(codeDiscountRials(code({ kind: 'fixed', amountRials: T(20_000), minOrderRials: T(300_000) }), T(280_200))).toBe(0);
+    expect(codeDiscountRials(code({ kind: 'fixed', amountRials: T(20_000) }), 0)).toBe(0);
+
+    const below = quote(base, L, { code: code({ kind: 'fixed', amountRials: T(20_000), minOrderRials: T(300_000) }) });
+    expect([below.discount, below.discountRials]).toEqual([null, 0]);
+    expect(below.code).toEqual({ code: 'WELCOME', status: 'below_minimum', minOrderRials: T(300_000), gapRials: T(19_800) });
+  });
+
+  it('بی پله و بی کد همان قیمت پیش از ۱۱٫۴؛ و تعرفهٔ بی کلید پله‌ها (HTML زبانهٔ قدیمی) بی پله', () => {
+    const b = quote(other, L);
+    expect([b.discount, b.discountRials, b.totalRials]).toEqual([null, 0, T(417_950)]);
+    expect('code' in b).toBe(false);
+    const { discountTiers: _, ...old } = TIERS;
+    expect(quote(other, old as PriceList).discount).toBeNull();
+    expect(nextTierOf(b, old as PriceList)).toBeNull();
+  });
+
+  it('مالیات روی جمع پس از تخفیف، و ریز قیمت با گرد کردن همچنان جمع می‌شود', () => {
+    const list = { ...TIERS, settings: { ...TIERS.settings, vatPercent: 10, roundingStepRials: T(1_000) } };
+    const b = quote(other, list, { code: code({ kind: 'percent', percent: 12 }) });
+    expect(b.vatRials).toBe(Math.round((T(280_200) - b.discountRials + T(137_750)) * 0.1));
+    expect(b.subtotalRials - b.discountRials + b.shippingRials! + b.vatRials + b.roundingRials).toBe(b.totalRials);
+    expect(b.totalRials % T(1_000)).toBe(0);
+    for (const value of [b.discountRials, b.vatRials, b.totalRials]) expect(Number.isInteger(value)).toBe(true);
   });
 });

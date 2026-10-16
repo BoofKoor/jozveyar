@@ -11,8 +11,12 @@
 import type {
   BindingType,
   Breakdown,
+  BreakdownDiscount,
   CatalogPaused,
+  CodeOutcome,
   ColorMode,
+  DiscountCodeTerms,
+  DiscountTier,
   ItemBreakdown,
   ItemSpec,
   OrderSpec,
@@ -330,14 +334,74 @@ export function minOrderGapRials(breakdown: Pick<Breakdown, 'subtotalRials'>, li
   return breakdown.subtotalRials > 0 && breakdown.subtotalRials < min ? min - breakdown.subtotalRials : 0;
 }
 
+/* ──────────────────────────── تخفیف ──────────────────────────── */
+
+/**
+ * پله‌های تخفیف سفارش بزرگ این تعرفه (برش ۱۱٫۴). نبودن کلید یعنی هیچ: تعرفهٔ درون HTML زبانه‌ای که پیش از استقرار ۱۱٫۴ باز بود
+ * با zod خوانده نمی‌شود و این کلید را ندارد.
+ */
+function tiersOf(list: PriceList): readonly DiscountTier[] {
+  return list.discountTiers ?? [];
+}
+
+/**
+ * بالاترین پله‌ای که این جمع چاپ، کاغذ و صحافی به آن رسیده (برش ۱۱٫۴، سؤال ۲۹۵)؛ null یعنی هیچ، یا هنوز چیزی قیمت نخورده. فقط
+ * همین یک پله می‌نشیند: پله‌ها روی هم جمع نمی‌شوند.
+ */
+export function tierOf(subtotalRials: number, list: PriceList): DiscountTier | null {
+  if (subtotalRials <= 0) return null;
+  let reached: DiscountTier | null = null;
+  for (const tier of tiersOf(list)) if (subtotalRials >= tier.fromRials && (!reached || tier.fromRials > reached.fromRials)) reached = tier;
+  return reached;
+}
+
+/**
+ * پلهٔ بعدی تخفیف سفارش بزرگ و مانده تا آن، ریال (برش ۱۱٫۴، سؤال ۲۹۷)، روی همان جمع چاپ، کاغذ و صحافی؛ null یعنی پلهٔ بالاتری
+ * نیست یا هنوز چیزی قیمت نخورده. یادداشت میز («X تومان دیگر تا ۵٪ تخفیف») همین است.
+ */
+export function nextTierOf(
+  breakdown: Pick<Breakdown, 'subtotalRials'>,
+  list: PriceList,
+): { tier: DiscountTier; gapRials: number } | null {
+  const subtotal = breakdown.subtotalRials;
+  if (subtotal <= 0) return null;
+  let next: DiscountTier | null = null;
+  for (const tier of tiersOf(list)) if (tier.fromRials > subtotal && (!next || tier.fromRials < next.fromRials)) next = tier;
+  return next ? { tier: next, gapRials: next.fromRials - subtotal } : null;
+}
+
+/** ارسال این قیمت رایگان است (پلهٔ سفارش بزرگ، سؤال ۲۹۶): جای «+ ارسال از X» و کرایه، «ارسال رایگان». */
+export function freeShippingOf(breakdown: Pick<Breakdown, 'discount'>): boolean {
+  return breakdown.discount?.source === 'tier' && breakdown.discount.freeShipping;
+}
+
+/**
+ * مبلغ تخفیف یک کد روی این جمع چاپ، کاغذ و صحافی، ریال (برش ۱۱٫۴، سؤال ۲۹۸): درصد با سقف هر سفارش، یا مبلغ ثابت تا خود جمع؛ زیر
+ * حداقل کد صفر. گرد کردن مثل بقیهٔ موتور (`Math.round`)، و جمع سفارش بعد با گام تعرفه گرد می‌شود.
+ */
+export function codeDiscountRials(terms: DiscountCodeTerms, subtotalRials: number): number {
+  if (subtotalRials <= 0 || subtotalRials < terms.minOrderRials) return 0;
+  if (terms.kind === 'fixed') return Math.min(terms.amountRials, subtotalRials);
+  const rials = Math.min(Math.round((subtotalRials * terms.percent) / 100), subtotalRials);
+  return terms.maxRials === null ? rials : Math.min(rials, terms.maxRials);
+}
+
+/** گزینه‌های `quote()` جز مشخصات و تعرفه. */
+export interface QuoteOptions {
+  /**
+   * کد تخفیفی که سرور پیدا و سنجیده (برش ۱۱٫۴): روشن، در روز اعتبار و با ظرفیت. مرورگر هرگز شرط‌های کد را ندارد؛ میز بی کد
+   * قیمت می‌دهد و مرور قیمت سرور را نشان می‌دهد.
+   */
+  code?: DiscountCodeTerms | null;
+}
+
 /* ───────────────────────────── ورودی اصلی ───────────────────────────── */
 
-export function quote(spec: OrderSpec, list: PriceList): Breakdown {
+export function quote(spec: OrderSpec, list: PriceList, options: QuoteOptions = {}): Breakdown {
   const warnings = new Set<QuoteWarning>();
   const items = spec.items.map((item) => quoteItem(item, list, warnings));
 
   const subtotalRials = items.reduce((sum, i) => sum + i.totalRials, 0);
-  const discountRials = 0; // تخفیف پلکانی فعلاً غیرفعال — زیرساخت در جدول discount_tiers
 
   const estWeightGrams =
     items.reduce((sum, i) => sum + i.weightGrams, 0) +
@@ -345,19 +409,49 @@ export function quote(spec: OrderSpec, list: PriceList): Breakdown {
 
   const shippingFromRials = shippingFloorRials(list, estWeightGrams);
 
-  let shippingRials: number | null = null;
+  let tariffShippingRials: number | null = null;
   if (spec.shipping) {
-    shippingRials = shippingRialsFor(
+    tariffShippingRials = shippingRialsFor(
       list,
       spec.shipping.methodId,
       spec.shipping.zoneId,
       estWeightGrams,
     );
-    if (shippingRials === null) warnings.add('shipping_rate_missing');
+    if (tariffShippingRials === null) warnings.add('shipping_rate_missing');
   }
 
   if (subtotalRials > 0 && subtotalRials < list.settings.minOrderRials) {
     warnings.add('below_min_order');
+  }
+
+  // تخفیف (برش ۱۱٫۴، سؤال‌های ۲۱۰ و ۳۰۰): پلهٔ سفارش بزرگ یا کد، هر کدام بزرگ‌تر به ریال؛ برابر، پله (کد مصرف نمی‌شود). ارزش ارسال
+  // رایگان همان کرایهٔ این جاست؛ پیش از انتخاب شهر کدی در کار نیست، چون کد فقط در مرور، پس از شهر، وارد می‌شود.
+  const tier = tierOf(subtotalRials, list);
+  const tierPercentRials = tier ? Math.round((subtotalRials * tier.percent) / 100) : 0;
+  const tierRials = tierPercentRials + (tier?.freeShipping ? (tariffShippingRials ?? 0) : 0);
+  const code = options.code ?? null;
+  const codeRials = code ? codeDiscountRials(code, subtotalRials) : 0;
+  const byCode = code !== null && codeRials > 0 && codeRials > tierRials;
+
+  let discount: BreakdownDiscount | null = null;
+  let discountRials = 0;
+  let shippingRials = tariffShippingRials;
+  if (byCode) {
+    discount = { source: 'code', codeId: code.id, code: code.code, percent: code.kind === 'percent' ? code.percent : null };
+    discountRials = codeRials;
+  } else if (tier) {
+    const waived = tier.freeShipping ? tariffShippingRials : null;
+    discount = { source: 'tier', fromRials: tier.fromRials, percent: tier.percent, freeShipping: tier.freeShipping, waivedShippingRials: waived };
+    discountRials = tierPercentRials;
+    if (waived !== null) shippingRials = 0;
+  }
+
+  let codeOutcome: CodeOutcome | null = null;
+  if (code) {
+    codeOutcome =
+      subtotalRials < code.minOrderRials
+        ? { code: code.code, status: 'below_minimum', minOrderRials: code.minOrderRials, gapRials: code.minOrderRials - subtotalRials }
+        : { code: code.code, status: byCode ? 'applied' : 'smaller' };
   }
 
   const taxable = subtotalRials - discountRials + (shippingRials ?? 0);
@@ -374,6 +468,8 @@ export function quote(spec: OrderSpec, list: PriceList): Breakdown {
     items,
     subtotalRials,
     discountRials,
+    discount,
+    ...(code ? { code: codeOutcome } : {}),
     shippingRials,
     shippingFromRials,
     estWeightGrams,

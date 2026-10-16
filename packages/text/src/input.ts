@@ -59,6 +59,32 @@ export function normalizeIranMobile(input: string): string | null {
   return `0${rest}`;
 }
 
+/* ───────────────────────── کد تخفیف ───────────────────────── */
+
+/** شکل کد تخفیف (برش ۱۱٫۴): ۳ تا ۲۰ حرف بزرگ و رقم لاتین؛ همان CHECK `discount_codes_code`. */
+export const DISCOUNT_CODE_PATTERN = /^[A-Z0-9]{3,20}$/;
+
+/**
+ * حرف فارسی هر کلید صفحه‌کلید فارسی و حرف لاتین همان کلید: کسی که کد را با صفحه‌کلید فارسی تایپ کند («ثمزخئث»)، همان WELCOME را زده.
+ * «پ» و «ئ» هر دو جای m نشسته‌اند (صفحه‌کلید استاندارد و قدیمی ویندوز).
+ */
+const PERSIAN_KEYS: Readonly<Record<string, string>> = {
+  ض: 'Q', ص: 'W', ث: 'E', ق: 'R', ف: 'T', غ: 'Y', ع: 'U', ه: 'I', خ: 'O', ح: 'P',
+  ش: 'A', س: 'S', ی: 'D', ي: 'D', ب: 'F', ل: 'G', ا: 'H', ت: 'J', ن: 'K', م: 'L',
+  ظ: 'Z', ط: 'X', ز: 'C', ر: 'V', ذ: 'B', د: 'N', پ: 'M', ئ: 'M',
+};
+
+/**
+ * کد تخفیفی که مشتری یا مالک تایپ کرده، به یک شکل (برش ۱۱٫۴، سؤال ۲۹۸): ارقام لاتین، حرف بزرگ، بی فاصله و خط تیره و نویسهٔ نامرئی، و
+ * حرف فارسیِ صفحه‌کلید فارسی به حرف لاتین همان کلید. null یعنی شکل کد نیست؛ پیدا کردنش کار سرور است.
+ */
+export function normalizeDiscountCode(input: string): string | null {
+  const code = [...toLatinDigits(input.normalize('NFC')).replace(INVISIBLE, '').replace(/[\s\-_‌]+/g, '')]
+    .map((char) => PERSIAN_KEYS[char] ?? char.toUpperCase())
+    .join('');
+  return DISCOUNT_CODE_PATTERN.test(code) ? code : null;
+}
+
 /* ───────────────────────── گیرندهٔ سفارش ───────────────────────── */
 
 export interface RecipientInput {

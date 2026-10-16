@@ -4,7 +4,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { MAX_SECTIONS_PER_ITEM, itemSpecSchema, priceListSchema, type ItemSpec } from './index.js';
+import {
+  DISCOUNT_TIERS_MAX,
+  MAX_SECTIONS_PER_ITEM,
+  TIER_PERCENT_MAX,
+  itemSpecSchema,
+  priceListSchema,
+  type ItemSpec,
+} from './index.js';
 
 function jozve(sectionCount: number): ItemSpec {
   const sections = Array.from({ length: sectionCount }, (_, i) => ({ documentId: `d${i + 1}`, pageCount: 10 }));
@@ -87,5 +94,18 @@ describe('اندازهٔ کاغذ و تعرفهٔ کاتالوگ (۸٫۳)', () =
   it('مساحت برگ نسخه‌های پیش از ۸٫۳ در تنظیم‌ها با خواندن کنار می‌رود', () => {
     const old = { ...list, settings: { ...list.settings, sheetAreaM2: 0.06237 } };
     expect(priceListSchema.parse(old).settings).not.toHaveProperty('sheetAreaM2');
+  });
+  it('پله‌های تخفیف سفارش بزرگ (۱۱٫۴): نبودنش هیچ؛ به ترتیب آستانه و بی تکرار، تا سقف، و هر پله تخفیفی دارد', () => {
+    expect(priceListSchema.parse(list).discountTiers).toEqual([]);
+    const tier = (fromRials: number, percent: number, freeShipping = false) => ({ fromRials, percent, freeShipping });
+    const ok = (discountTiers: unknown[]) => priceListSchema.safeParse({ ...list, discountTiers }).success;
+    expect(ok([tier(1_000, 5), tier(2_000, 0, true), tier(3_000, 10, true)])).toBe(true);
+    expect(ok([tier(2_000, 5), tier(1_000, 10)])).toBe(false);
+    expect(ok([tier(1_000, 5), tier(1_000, 10)])).toBe(false);
+    expect(ok([tier(1_000, 0)])).toBe(false);
+    expect(ok([tier(1_000, TIER_PERCENT_MAX)])).toBe(true);
+    expect(ok([tier(1_000, TIER_PERCENT_MAX + 1)])).toBe(false);
+    expect(ok([tier(0, 5)])).toBe(false);
+    expect(ok(Array.from({ length: DISCOUNT_TIERS_MAX + 1 }, (_, i) => tier((i + 1) * 1_000, 5)))).toBe(false);
   });
 });

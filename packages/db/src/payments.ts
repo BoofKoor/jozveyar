@@ -56,7 +56,7 @@ export async function settleWith(input: SettleWithInput): Promise<SettledPayment
   for (const day of closedDays(allClosedWindow(await store.partnerHours()))) holidays.add(day);
   return store.settle(
     input.lookup,
-    async ({ payment, order }): Promise<Settlement> => {
+    async ({ payment, order, discountRoom }): Promise<Settlement> => {
       const gateway = gateways[payment.provider];
       if (!gateway) return { kind: 'pending', check: { status: payment.gatewayStatus, error: 'unconfigured', at: now() } };
       const verdict = await judge({
@@ -69,7 +69,8 @@ export async function settleWith(input: SettleWithInput): Promise<SettledPayment
           createdAt: payment.createdAt,
           gatewayStatus: payment.gatewayStatus,
         },
-        payable: order.status === 'awaiting_payment',
+        // کد تخفیفی که دیگر جا ندارد (برش ۱۱٫۴): همان «پرداختنی نیست»، پس `verify` نمی‌خورد و پول خودکار برمی‌گردد.
+        payable: order.status === 'awaiting_payment' && discountRoom,
         ttlMs: PAYMENT_ATTEMPT_TTL_MS,
         now,
       });

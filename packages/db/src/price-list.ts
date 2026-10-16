@@ -33,6 +33,7 @@ import {
 import {
   bindingRateBands,
   bindingTypes,
+  discountTiers,
   paperRates,
   paperTypes,
   priceLists,
@@ -62,6 +63,7 @@ export interface PriceListRows {
   bindingRateBands: Insert<typeof bindingRateBands>[];
   shippingMethods: Insert<typeof shippingMethods>[];
   shippingRates: Insert<typeof shippingRates>[];
+  discountTiers: Insert<typeof discountTiers>[];
 }
 
 /** `PriceList` → ردیف‌های آمادهٔ درج. ترتیب درج: همین ترتیب فیلدها. */
@@ -144,6 +146,13 @@ export function priceListToRows(list: PriceList, isActive = false): PriceListRow
       maxWeightGrams: r.maxWeightGrams,
       priceRials: r.priceRials,
     })),
+
+    discountTiers: (list.discountTiers ?? []).map((tier) => ({
+      priceListVersion: version,
+      fromRials: tier.fromRials,
+      percent: tier.percent,
+      freeShipping: tier.freeShipping,
+    })),
   };
 }
 
@@ -157,6 +166,8 @@ export function rowsToPriceList(rows: {
   bindingRateBands: (typeof bindingRateBands.$inferSelect)[];
   shippingMethods: (typeof shippingMethods.$inferSelect)[];
   shippingRates: (typeof shippingRates.$inferSelect)[];
+  /** پله‌های تخفیف سفارش بزرگ (۱۱٫۴)؛ نبودنش هیچ. */
+  discountTiers?: (typeof discountTiers.$inferSelect)[];
 }): PriceList {
   // نرخ هر رو: اندازه ← یکرو یا دورو ← رنگ. اندازه‌ای که ردیف ندارد کلید هم ندارد؛ اندازهٔ نیمه‌کاره را zod پایین رد می‌کند
   // (و پایگاه داده پیش از آن، `print_rates_complete`).
@@ -250,6 +261,12 @@ export function rowsToPriceList(rows: {
       ),
 
     settings: rows.priceList.settings as PricingSettings,
+
+    // به ترتیب آستانه، همان ترتیبی که قرارداد می‌خواهد.
+    discountTiers: (rows.discountTiers ?? [])
+      .slice()
+      .sort((a, b) => a.fromRials - b.fromRials)
+      .map((tier) => ({ fromRials: tier.fromRials, percent: tier.percent, freeShipping: tier.freeShipping })),
   };
 
   // اعتبارسنجی عمدی است و حذف نمی‌شود: ستون‌های jsonb هر چیزی را قبول می‌کنند،

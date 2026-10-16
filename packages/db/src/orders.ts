@@ -20,6 +20,7 @@ import { formatDeadlineDay } from '@jozveyar/text';
 
 import { adminEventRow } from './admin.js';
 import { assignAtPayment, partnerCandidateOf, type PartnerHours } from './assignment.js';
+import { discountForCheckout, discountRefusalOf, discountRoomForOrder, type DiscountRefusal } from './discounts.js';
 import type { DocumentRow } from './documents.js';
 import type { Database } from './index.js';
 import {
@@ -142,6 +143,13 @@ export interface NewOrder {
   userId: string;
   /** ریز قیمت سرور، با کرایه؛ ستون‌های پول سفارش تکه‌های همین‌اند. */
   breakdown: Breakdown;
+  /**
+   * کد تخفیفی که روی همین قیمت نشست (برش ۱۱٫۴)؛ همان `breakdown.discount.codeId` (`orders_discount_code`). محافظ ساختن سفارش روشن بودن، روز و
+   * ظرفیتش را زیر قفل ردیف کد می‌سنجد.
+   */
+  discountCodeId?: string | null;
+  /** زمان ساختن؛ فقط تست‌ها (رزرو کد تخفیفی که مهلتش گذشته). بی آن `now()` پایگاه داده. */
+  createdAt?: Date;
   quoteSnapshot: unknown;
   slaDays: number;
   shippingMethodId: string;
@@ -229,6 +237,16 @@ export interface SettleOptions {
   skipLocked?: boolean;
 }
 
+/**
+ * آنچه سنجش درگاه زیر قفل تلاش و سفارش می‌بیند. `discountRoom` (برش ۱۱٫۴): کد تخفیف سفارش هنوز جا دارد (پرداخت‌شده‌ها و رزروهای زندهٔ
+ * سفارش‌های دیگر، `discount_code_taken`)؛ بی جا `verify` نمی‌خورد و پول خودکار برمی‌گردد. سفارش بی کد همیشه true.
+ */
+export interface SettleCurrent {
+  payment: PaymentRow;
+  order: OrderRow;
+  discountRoom: boolean;
+}
+
 export interface SettledPayment {
   payment: PaymentRow;
   order: OrderRow;
@@ -259,7 +277,17 @@ export interface OrderStore {
    * سفارش کامل در یک تراکنش. اگر سفارشی با همین `checkoutKey` هست (دو کلیک، تلاش دوبارهٔ شبکه)، همان
    * برمی‌گردد با `created: false`؛ سرویس صاحبش را می‌سنجد.
    */
+  /** کد تخفیفی که همین حالا جا نداشت یا دیگر به کار نمی‌رفت (برش ۱۱٫۴) `DiscountRefusedError` است. */
   createOrder(order: NewOrder): Promise<{ order: OrderRow; created: boolean }>;
+  /**
+   * کد تخفیف مسیر خرید برای این مشتری، همین لحظه (برش ۱۱٫۴): متن یکدست، روشن، در روز اعتبار، و با جا؛ بی قفل، برای پیام روشن. حکم آخر با
+   * محافظ ساختن سفارش.
+   */
+  discountForCheckout(input: { code: string; userId: string; at: Date }): Promise<
+    { ok: true; terms: import('@jozveyar/contracts').DiscountCodeTerms } | { ok: false; reason: DiscountRefusal }
+  >;
+  /** جا برای یک تلاش پرداخت تازهٔ این سفارش (برش ۱۱٫۴)، بی قفل؛ null یعنی هست، یا سفارش کدی ندارد. */
+  discountRoom(orderId: string): Promise<DiscountRefusal | null>;
   details(publicToken: string): Promise<OrderDetails | null>;
   insertPayment(payment: {
     /** شناسهٔ تلاش، اگر پیش از درگاه ساخته شد (پسوند `gateway_order_id`). */
@@ -290,7 +318,7 @@ export interface OrderStore {
   settlePayment(
     provider: string,
     authority: string,
-    decide: (current: { payment: PaymentRow; order: OrderRow }) => Promise<Settlement>,
+    decide: (current: SettleCurrent) => Promise<Settlement>,
   ): Promise<SettledPayment | null>;
   /**
    * همان `settlePayment` با هر شکل پیدا کردن تلاش (برش ۷٫۲). «در انتظار» (`pending`) فقط آنچه از درگاه دانستیم را می‌نویسد؛ `busy` فقط
@@ -298,7 +326,7 @@ export interface OrderStore {
    */
   settle(
     lookup: PaymentLookup,
-    decide: (current: { payment: PaymentRow; order: OrderRow }) => Promise<Settlement>,
+    decide: (current: SettleCurrent) => Promise<Settlement>,
     options?: SettleOptions,
   ): Promise<SettledPayment | 'busy' | null>;
   /**
@@ -324,8 +352,20 @@ export interface OrderStore {
 
 type PgError = { code?: string; constraint_name?: string; cause?: PgError };
 
+/**
+ * محافظ کد تخفیف سفارش تازه یا تلاش پرداخت تازه را رد کرد (برش ۱۱٫۴، `orders_discount_code_room` و `payments_discount_code_room`): همین حالا
+ * جای کد پر شد، یا کد دیگر به کار نمی‌رود. سرویس مسیر خرید پیش از هر دو همین را بی قفل می‌سنجد (`discountForCheckout`، `discountRoom`)؛ این فقط
+ * وقتی است که درخواست هم‌زمانی پیش افتاد.
+ */
+export class DiscountRefusedError extends Error {
+  constructor(readonly reason: DiscountRefusal) {
+    super(`discount_refused:${reason}`);
+    this.name = 'DiscountRefusedError';
+  }
+}
+
 /** نام محدودیتی که پستگرس رد کرد؛ drizzle خطای درایور را در `cause` می‌پیچد. */
-function constraintOf(error: unknown): string | undefined {
+export function constraintOf(error: unknown): string | undefined {
   const pg = error as PgError;
   return pg?.cause?.constraint_name ?? pg?.constraint_name;
 }
@@ -355,7 +395,19 @@ export function createOrderStore({ db }: Database): OrderStore {
       const [order] = await tx.select().from(orders).where(eq(orders.id, payment.orderId)).limit(1).for('update');
       if (payment.status !== 'pending') return { payment, order: order!, settled: false, smsId: null, partnerSmsId: null };
 
-      const outcome = await decide({ payment, order: order! });
+      // جای کد تخفیف (برش ۱۱٫۴): رزرو این سفارش هنوز زنده است، پس جز دیوار کمیاب ساعت، همیشه هست؛ بی قفل ردیف کد، چون سنجش درگاه درخواست
+      // شبکه است و قفل کد سفارش‌های دیگر همان کد را پشتش نگه می‌داشت. دیوار پرداخت شدن (`orders_discount_code_room`) قفل‌دار است.
+      let discountRoom = true;
+      if (order!.discountCodeId) {
+        const rows = await tx.execute<{ refused: string | null }>(
+          sql`SELECT CASE WHEN c.total_limit IS NOT NULL AND t.taken >= c.total_limit THEN 'used_up'
+                          WHEN t.taken_by_user >= c.per_customer_limit THEN 'used_by_you' END AS refused
+              FROM discount_codes c, discount_code_taken(c.id, ${order!.userId}::uuid, ${order!.id}::uuid, true) t
+              WHERE c.id = ${order!.discountCodeId}::uuid`,
+        );
+        discountRoom = !rows[0]?.refused;
+      }
+      const outcome = await decide({ payment, order: order!, discountRoom });
       const returned = options.returned && !payment.returnedAt ? { returnedAt: options.returned } : {};
       const gateway = (check: GatewayCheckInput | undefined) =>
         check ? { gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at } : {};
@@ -496,6 +548,8 @@ export function createOrderStore({ db }: Database): OrderStore {
               quoteSnapshot: input.quoteSnapshot ?? null,
               subtotalRials: b.subtotalRials,
               discountRials: b.discountRials,
+              discountCodeId: input.discountCodeId ?? null,
+              ...(input.createdAt ? { createdAt: input.createdAt } : {}),
               shippingRials: b.shippingRials!,
               vatRials: b.vatRials,
               roundingRials: b.roundingRials,
@@ -554,6 +608,9 @@ export function createOrderStore({ db }: Database): OrderStore {
           const existing = await findByCheckoutKey(input.checkoutKey);
           if (existing) return { order: existing, created: false };
         }
+        // کد تخفیف همین حالا جا نداشت یا دیگر به کار نمی‌رفت (برش ۱۱٫۴): محافظ زیر قفل ردیف کد.
+        const refused = discountRefusalOf(constraintOf(error));
+        if (refused) throw new DiscountRefusedError(refused);
         throw error;
       }
     },
@@ -611,6 +668,10 @@ export function createOrderStore({ db }: Database): OrderStore {
       };
     },
 
+    discountForCheckout: (input) => discountForCheckout(db, input),
+
+    discountRoom: (orderId) => discountRoomForOrder(db, orderId),
+
     async insertPayment(payment) {
       const [row] = await db
         .insert(payments)
@@ -624,7 +685,11 @@ export function createOrderStore({ db }: Database): OrderStore {
           ...(payment.returnKey ? { returnKey: payment.returnKey } : {}),
           raw: payment.raw ?? null,
         })
-        .returning();
+        .returning()
+        .catch((error: unknown) => {
+          const refused = discountRefusalOf(constraintOf(error));
+          throw refused ? new DiscountRefusedError(refused) : error;
+        });
       return row!;
     },
 

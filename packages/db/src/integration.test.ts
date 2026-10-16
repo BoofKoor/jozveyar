@@ -19,6 +19,10 @@ import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { createDb, type Database } from './index.js';
+import { createDiscountStore, termsOf } from './discounts.js';
+import { DiscountRefusedError } from './orders.js';
+import { discountCodes, discountTiers } from './schema.js';
+import { DISCOUNT_TIERS_MAX, TIER_PERCENT_MAX } from '@jozveyar/contracts';
 import { runMigrations } from './migrate.js';
 import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
 import {
@@ -1922,6 +1926,311 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         });
       });
     });
+
+    describe('تخفیف روی پستگرس (برش ۱۱٫۴)', () => {
+      const T = (tomans: number) => tomans * 10;
+      let ownerId: string;
+
+      beforeAll(async () => {
+        const [owner] = await conn.db
+          .insert(adminUsers)
+          .values({ username: `disc-${randomUUID().slice(0, 8)}`, displayName: 'سارا' })
+          .returning();
+        ownerId = owner!.id;
+      });
+
+      afterAll(async () => {
+        // کد پاک‌نشدنی است (`discount_codes_append_only`)؛ TRUNCATE تریگر ردیفی ندارد. سفارش‌ها پیش از آن.
+        await clearOrders(conn);
+        await conn.db.execute(sql`TRUNCATE discount_codes CASCADE`);
+      });
+
+      async function newCode(over: Partial<typeof discountCodes.$inferInsert> = {}) {
+        const [row] = await conn.db
+          .insert(discountCodes)
+          .values({ code: `C${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`, kind: 'percent', percent: 10, createdBy: ownerId, ...over })
+          .returning();
+        return row!;
+      }
+
+      async function userOf(mobile: string) {
+        const [user] = await conn.db
+          .insert(users)
+          .values({ mobile })
+          .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+          .returning();
+        return user!.id;
+      }
+
+      /** سفارش با این کد، همان‌طور که سرویس می‌سازد: قیمت با کد، و شناسهٔ کد روی سفارش. */
+      async function withCode(code: typeof discountCodes.$inferSelect, over: { mobile?: string; createdAt?: Date } = {}): Promise<NewOrder> {
+        const base = await newOrder();
+        const breakdown = quote(
+          {
+            items: [{ sections: base.items[0]!.sections, rules: base.items[0]!.rules, copies: 1, sidesMode: 'double', paperSize: 'a4', bindingTypeId: 'spiral_clear' }],
+            shipping: { methodId: 'post', zoneId: 'tehran' },
+          },
+          SEED_PRICE_LIST,
+          { code: termsOf(code) },
+        );
+        expect(breakdown.discount).toMatchObject({ source: 'code', codeId: code.id });
+        return {
+          ...base,
+          userId: await userOf(over.mobile ?? MOBILE),
+          breakdown,
+          discountCodeId: code.id,
+          ...(over.createdAt ? { createdAt: over.createdAt } : {}),
+        };
+      }
+
+      const refusal = async (promise: Promise<unknown>) => {
+        try {
+          await promise;
+          return null;
+        } catch (error) {
+          if (error instanceof DiscountRefusedError) return error.reason;
+          throw error;
+        }
+      };
+      const pay = (orderId: string, totalRials: number) =>
+        createOrderStore(conn).insertPayment({ orderId, provider: 'mock', amountRials: totalRials, authority: `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`, raw: null });
+      const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+
+      it('مهلت رزرو همان مهلت هر تلاش پرداخت است (`payment_attempt_ttl` = `PAYMENT_ATTEMPT_TTL_MS`)', async () => {
+        const [row] = await conn.db.execute<{ ms: string }>(sql`SELECT extract(epoch FROM payment_attempt_ttl()) * 1000 AS ms`);
+        expect(Number(row!.ms)).toBe(PAYMENT_ATTEMPT_TTL_MS);
+      });
+
+      it('سفارش با کد شناسهٔ کد را منجمد با قیمت دارد؛ کد سفارش همان کد ریز قیمت (`orders_discount_code`)، و عوض نمی‌شود', async () => {
+        const store = createOrderStore(conn);
+        // سقف هر مشتری بالا، تا شاهدها به CHECK برسند، نه به محافظ ظرفیت که پیش از CHECK است.
+        const code = await newCode({ perCustomerLimit: 10 });
+        const input = await withCode(code);
+        const { order } = await store.createOrder(input);
+        expect(order).toMatchObject({ discountCodeId: code.id, discountRials: input.breakdown.discountRials });
+        expect(order.discountRials).toBeGreaterThan(0);
+        expect(order.totalRials).toBe(order.subtotalRials - order.discountRials + order.shippingRials);
+        expect(await rejectedConstraint(conn.db.update(orders).set({ discountCodeId: null }).where(eq(orders.id, order.id)))).toBe('orders_price_frozen');
+        // شاهد: کد روی سفارش بی تخفیف کد در ریز قیمت، و ریز قیمت کد بی شناسه.
+        const plain = await newOrder();
+        expect(await rejectedConstraint(store.createOrder({ ...plain, discountCodeId: code.id }))).toBe('orders_discount_code');
+        expect(await rejectedConstraint(store.createOrder({ ...input, checkoutKey: randomUUID(), discountCodeId: null }))).toBe('orders_discount_code');
+        const other = await newCode({ perCustomerLimit: 10 });
+        expect(await rejectedConstraint(store.createOrder({ ...input, checkoutKey: randomUUID(), discountCodeId: other.id }))).toBe('orders_discount_code');
+      });
+
+      it('سقف کل و سقف هر مشتری زیر قفل: پنج درخواست هم‌زمان برای آخرین جا، فقط یکی', async () => {
+        const store = createOrderStore(conn);
+        const one = await newCode({ totalLimit: 1, perCustomerLimit: 5 });
+        const inputs = await Promise.all(['09121110001', '09121110002', '09121110003', '09121110004', '09121110005'].map((mobile) => withCode(one, { mobile })));
+        const results = await Promise.all(inputs.map((input) => refusal(store.createOrder(input))));
+        expect(results.filter((r) => r === null)).toHaveLength(1);
+        expect(results.filter((r) => r === 'used_up')).toHaveLength(4);
+
+        const mine = await newCode({ perCustomerLimit: 1 });
+        await store.createOrder(await withCode(mine));
+        expect(await refusal(store.createOrder(await withCode(mine)))).toBe('used_by_you');
+        // مشتری دیگر همان کد را می‌گیرد.
+        expect(await refusal(store.createOrder(await withCode(mine, { mobile: '09121110009' })))).toBeNull();
+      });
+
+      it('رزرو تا مهلت تلاش: سفارشی که مهلتش گذشت جا را پس می‌دهد، و تلاش تازهٔ آن فقط اگر جا هست', async () => {
+        const store = createOrderStore(conn);
+        const code = await newCode({ totalLimit: 1, perCustomerLimit: 5 });
+        const { order: late } = await store.createOrder(await withCode(code, { createdAt: ago(11) }));
+        // تلاش تازه رزرو را زنده می‌کند؛ پس سفارش دیگر نه.
+        await pay(late.id, late.totalRials);
+        expect(await refusal(store.createOrder(await withCode(code, { mobile: '09121110021' })))).toBe('used_up');
+
+        const second = await newCode({ totalLimit: 1, perCustomerLimit: 5 });
+        const { order: stale } = await store.createOrder(await withCode(second, { createdAt: ago(11) }));
+        const { order: fresh } = await store.createOrder(await withCode(second, { mobile: '09121110022' }));
+        expect(fresh.discountCodeId).toBe(second.id);
+        // جا را سفارش تازه گرفت: تلاش سفارش قدیمی پیش از درگاه و در خود درج رد می‌شود.
+        expect(await store.discountRoom(stale.id)).toBe('used_up');
+        expect(await store.discountRoom(fresh.id)).toBeNull();
+        expect(await refusal(pay(stale.id, stale.totalRials))).toBe('used_up');
+        expect(await store.discountRoom((await store.createOrder(await newOrder())).order.id)).toBeNull();
+      });
+
+      it('پرداخت‌شده همیشه می‌شمارد، لغوشده هم؛ دیوار پرداخت شدن فقط پرداخت‌شده‌ها را می‌شمارد', async () => {
+        const store = createOrderStore(conn);
+        const code = await newCode({ totalLimit: 2, perCustomerLimit: 5 });
+        const a = await store.createOrder(await withCode(code, { mobile: '09121110031' }));
+        const b = await store.createOrder(await withCode(code, { mobile: '09121110032' }));
+        const payA = await pay(a.order.id, a.order.totalRials);
+        const payB = await pay(b.order.id, b.order.totalRials);
+        await conn.db.update(discountCodes).set({ totalLimit: 1 }).where(eq(discountCodes.id, code.id));
+        const paidAt = new Date();
+        const succeeded = async ({ payment }: { payment: { amountRials: number } }) => ({
+          kind: 'succeeded' as const,
+          verifiedAmountRials: payment.amountRials,
+          refId: 'r1',
+          cardMask: null,
+          raw: null,
+          paidAt,
+          postHandoffDueAt: new Date(paidAt.getTime() + 2 * 86_400_000),
+        });
+        // جای کد هر دو را برای سنجش درگاه می‌بیند: الف تنها پرداخت‌شده نیست ولی ب رزرو زنده دارد.
+        let seen: boolean | undefined;
+        await store.settle({ paymentId: payA.id, providers: ['mock'] }, async (current) => {
+          seen = current.discountRoom;
+          return { kind: 'pending', check: { status: null, error: null, at: new Date() } };
+        });
+        expect(seen).toBe(false);
+        await conn.db.update(discountCodes).set({ totalLimit: 2 }).where(eq(discountCodes.id, code.id));
+        expect(await store.settle({ paymentId: payA.id, providers: ['mock'] }, succeeded)).toMatchObject({ order: { status: 'paid' } });
+        await conn.db.update(discountCodes).set({ totalLimit: 1 }).where(eq(discountCodes.id, code.id));
+        // دیوار دوم: ب پرداخت شود با الف پرداخت‌شده و سقف ۱.
+        expect(await rejectedConstraint(store.settle({ paymentId: payB.id, providers: ['mock'] }, succeeded))).toBe('discount_codes_total_limit');
+        // لغوِ الف جا را پس نمی‌دهد.
+        await conn.db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, a.order.id));
+        await conn.db.update(discountCodes).set({ totalLimit: 2 }).where(eq(discountCodes.id, code.id));
+        expect(await refusal(store.createOrder(await withCode(code, { mobile: '09121110033' })))).toBe('used_up');
+      });
+
+      it('کد خاموش، پیش از روز اول و پس از روز آخر به سفارش نمی‌نشیند (`orders_discount_code_valid`)', async () => {
+        const store = createOrderStore(conn);
+        const day = 86_400_000;
+        for (const over of [
+          { enabled: false },
+          { validFrom: new Date(Date.now() + day) },
+          { validFrom: new Date(Date.now() - 2 * day), validUntil: new Date(Date.now() - day) },
+        ]) {
+          const code = await newCode(over);
+          expect(await refusal(store.createOrder(await withCode(code)))).toBe('disabled');
+        }
+        const open = await newCode({ validFrom: new Date(Date.now() - day), validUntil: new Date(Date.now() + day) });
+        expect(await refusal(store.createOrder(await withCode(open)))).toBeNull();
+      });
+
+      it('شکل کد: متن، شرط هر نوع، روز، سقف‌ها، یادداشت و یکتایی', async () => {
+        const insert = (over: Partial<typeof discountCodes.$inferInsert>) =>
+          conn.db.insert(discountCodes).values({ code: 'SHAPE1', kind: 'percent', percent: 10, createdBy: ownerId, ...over });
+        expect(await rejectedConstraint(insert({ code: 'shape1' }))).toBe('discount_codes_code');
+        expect(await rejectedConstraint(insert({ code: 'AB' }))).toBe('discount_codes_code');
+        expect(await rejectedConstraint(insert({ percent: 0 }))).toBe('discount_codes_terms');
+        expect(await rejectedConstraint(insert({ percent: 101 }))).toBe('discount_codes_terms');
+        expect(await rejectedConstraint(insert({ amountRials: 1_000 }))).toBe('discount_codes_terms');
+        expect(await rejectedConstraint(insert({ maxDiscountRials: 0 }))).toBe('discount_codes_terms');
+        expect(await rejectedConstraint(insert({ kind: 'fixed', percent: null }))).toBe('discount_codes_terms');
+        expect(await rejectedConstraint(insert({ kind: 'fixed', percent: 10, amountRials: 1_000 }))).toBe('discount_codes_terms');
+        expect(await rejectedConstraint(insert({ minOrderRials: -1 }))).toBe('discount_codes_min_order');
+        const at = new Date();
+        expect(await rejectedConstraint(insert({ validFrom: at, validUntil: at }))).toBe('discount_codes_window');
+        expect(await rejectedConstraint(insert({ totalLimit: 0 }))).toBe('discount_codes_limits');
+        expect(await rejectedConstraint(insert({ perCustomerLimit: 0 }))).toBe('discount_codes_limits');
+        expect(await rejectedConstraint(insert({ note: '  ' }))).toBe('discount_codes_note');
+        await insert({ kind: 'fixed', percent: null, amountRials: 1_000, maxDiscountRials: null });
+        expect(await rejectedConstraint(insert({}))).toBe('discount_codes_code_unique');
+      });
+
+      it('شرط‌ها تا اولین سفارش عوض می‌شوند و بعد نه؛ متن هرگز؛ روز، سقف، روشن و یادداشت همیشه؛ پاک نمی‌شود', async () => {
+        const code = await newCode({ percent: 10 });
+        const set = (patch: Partial<typeof discountCodes.$inferInsert>) => conn.db.update(discountCodes).set(patch).where(eq(discountCodes.id, code.id));
+        await set({ percent: 12 });
+        expect(await rejectedConstraint(set({ code: 'RENAMED1' }))).toBe('discount_codes_frozen');
+        const [fresh] = await conn.db.select().from(discountCodes).where(eq(discountCodes.id, code.id));
+        await createOrderStore(conn).createOrder(await withCode(fresh!));
+        for (const patch of [{ percent: 15 }, { maxDiscountRials: T(10_000) }, { minOrderRials: T(1_000) }, { kind: 'fixed' as const, percent: null, amountRials: T(5_000) }]) {
+          expect(await rejectedConstraint(set(patch))).toBe('discount_codes_frozen');
+        }
+        await set({ enabled: false, totalLimit: 50, perCustomerLimit: 2, note: 'کمپین مهر', validUntil: new Date(Date.now() + 86_400_000) });
+        expect(await rejectedConstraint(conn.db.delete(discountCodes).where(eq(discountCodes.id, code.id)))).toBe('discount_codes_append_only');
+      });
+
+      it('کد مسیر خرید برای یک مشتری: ناشناس، خاموش، پیش و پس از روز، پر، سهم برده، و شرط‌ها', async () => {
+        const store = createOrderStore(conn);
+        const at = new Date();
+        const day = 86_400_000;
+        expect(await store.discountForCheckout({ code: 'NOPE404', userId: await userOf(MOBILE), at })).toEqual({ ok: false, reason: 'unknown' });
+        const off = await newCode({ enabled: false });
+        const soon = await newCode({ validFrom: new Date(at.getTime() + day) });
+        const gone = await newCode({ validUntil: new Date(at.getTime() - 1) , validFrom: new Date(at.getTime() - day) });
+        const full = await newCode({ totalLimit: 1, perCustomerLimit: 5 });
+        await store.createOrder(await withCode(full, { mobile: '09121110041' }));
+        const mine = await newCode({ perCustomerLimit: 1, kind: 'fixed', percent: null, amountRials: T(20_000), minOrderRials: T(100_000) });
+        await store.createOrder(await withCode(mine));
+        const reasons = await Promise.all(
+          [off, soon, gone, full, mine].map(async (code) => (await store.discountForCheckout({ code: code.code, userId: await userOf(MOBILE), at })) as { reason?: string }),
+        );
+        expect(reasons.map((r) => r.reason)).toEqual(['disabled', 'not_started', 'ended', 'used_up', 'used_by_you']);
+        expect(await store.discountForCheckout({ code: mine.code, userId: await userOf('09121110042'), at })).toEqual({
+          ok: true,
+          terms: { id: mine.id, code: mine.code, minOrderRials: T(100_000), kind: 'fixed', amountRials: T(20_000) },
+        });
+      });
+
+      it('پله‌های تخفیف در پیش‌نویس ذخیره و به ترتیب آستانه خوانده می‌شوند؛ تا ۵، درصد تا سقف قرارداد، و نسخهٔ فعال‌شده نه', async () => {
+        const DRAFT = 77;
+        const tiers = [
+          { fromRials: T(3_000_000), percent: 10, freeShipping: true },
+          { fromRials: T(1_000_000), percent: 0, freeShipping: true },
+        ];
+        await seedPriceList(conn, { ...SEED_PRICE_LIST, version: DRAFT, label: 'پیش‌نویس پله‌ها', discountTiers: tiers }, { activate: false });
+        expect((await loadPriceList(conn, DRAFT)).discountTiers).toEqual([tiers[1], tiers[0]]);
+        const tier = (fromRials: number, percent = 5, freeShipping = false) =>
+          conn.db.insert(discountTiers).values({ priceListVersion: DRAFT, fromRials, percent, freeShipping });
+        expect(await rejectedConstraint(tier(T(5_000_000), TIER_PERCENT_MAX + 1))).toBe('discount_tiers_percent');
+        await tier(T(5_000_000), TIER_PERCENT_MAX);
+        expect(await rejectedConstraint(tier(T(6_000_000), 0))).toBe('discount_tiers_reward');
+        expect(await rejectedConstraint(tier(0))).toBe('discount_tiers_from');
+        await tier(T(6_000_000));
+        await tier(T(7_000_000));
+        expect(await rejectedConstraint(tier(T(8_000_000)))).toBe('discount_tiers_max');
+        expect(DISCOUNT_TIERS_MAX).toBe(5);
+        await conn.db.delete(priceLists).where(eq(priceLists.version, DRAFT));
+        expect(await conn.db.select().from(discountTiers).where(eq(discountTiers.priceListVersion, DRAFT))).toEqual([]);
+        // نسخهٔ فعال‌شده: هیچ پله‌ای به آن نمی‌رسد.
+        expect(await rejectedConstraint(conn.db.insert(discountTiers).values({ priceListVersion: 1, fromRials: T(1_000_000), percent: 5, freeShipping: false }))).toBe(
+          'price_list_rows_frozen',
+        );
+      });
+
+      it('ذخیره‌گاه پنل: کد تازه با رویداد، متن تکراری، «همان که دیده شد»، شرط منجمد، و شمار استفاده و رزرو', async () => {
+        const discounts = createDiscountStore(conn);
+        const at = new Date();
+        const terms = {
+          kind: 'percent' as const,
+          percent: 20,
+          maxDiscountRials: T(50_000),
+          amountRials: null,
+          minOrderRials: 0,
+          validFrom: null,
+          validUntil: null,
+          totalLimit: 10,
+          perCustomerLimit: 1,
+          enabled: true,
+          note: 'کمپین مهر',
+        };
+        const event = { adminUserId: ownerId, action: 'discounts.create', targetType: 'discount', at, detail: {} };
+        const created = await discounts.create({ code: 'MEHR1405', terms, createdBy: ownerId, event });
+        expect(created).toMatchObject({ ok: true, code: { code: 'MEHR1405', percent: 20, createdBy: ownerId } });
+        if (!created.ok) throw new Error('ساخته نشد');
+        expect(await discounts.create({ code: 'MEHR1405', terms, createdBy: ownerId, event })).toEqual({ ok: false, reason: 'code_taken' });
+        expect([await discounts.codeTaken('MEHR1405'), await discounts.codeTaken('MEHR1406')]).toEqual([true, false]);
+        const [logged] = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'discounts.create'), eq(adminEvents.targetId, created.code.id)));
+        expect(logged).toMatchObject({ adminUserId: ownerId, targetType: 'discount' });
+
+        const update = (seenUpdatedAt: Date, patch: Partial<typeof terms>) =>
+          discounts.update({ id: created.code.id, seenUpdatedAt, terms: { ...terms, ...patch }, event: { ...event, action: 'discounts.update' } });
+        expect(await update(new Date(0), { percent: 25 })).toEqual({ ok: false, reason: 'changed' });
+        const raised = await update(created.code.updatedAt, { percent: 25 });
+        expect(raised).toMatchObject({ ok: true, code: { percent: 25 } });
+        if (!raised.ok) throw new Error('عوض نشد');
+
+        const code = (await conn.db.select().from(discountCodes).where(eq(discountCodes.id, created.code.id)))[0]!;
+        const store = createOrderStore(conn);
+        const paid = await store.createOrder(await withCode(code, { mobile: '09121110051' }));
+        await store.createOrder(await withCode(code, { mobile: '09121110052' }));
+        await conn.db.update(orders).set({ status: 'paid', paidAt: at, postHandoffDueAt: at }).where(eq(orders.id, paid.order.id));
+        expect(await update(raised.code.updatedAt, { percent: 30 })).toEqual({ ok: false, reason: 'terms_frozen' });
+        expect(await update(raised.code.updatedAt, { percent: 25, enabled: false })).toMatchObject({ ok: true, code: { enabled: false } });
+        expect(await discounts.find(created.code.id)).toMatchObject({ used: 1, reserved: 1, createdByName: 'سارا' });
+        expect((await discounts.ordersOf(created.code.id)).map((o) => o.status).sort()).toEqual(['awaiting_payment', 'paid']);
+        expect((await discounts.list()).map((c) => c.code)).toContain('MEHR1405');
+      });
+    });
   });
   describe('پنل ادمین روی پستگرس (برش ۴٫۱)', () => {
     const at = new Date('2026-10-05T07:50:00Z');
@@ -2019,8 +2328,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'shipments.import',
       ]);
       expect([...ADMIN_ROLES.print_partner.permissions].sort()).toEqual(await read('print_partner'));
-      // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، و از ۱۰٫۲ گزارش تولید؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
-      expect(await read('accountant')).toEqual(['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read']);
+      // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، از ۱۰٫۲ گزارش تولید، و از ۱۱٫۴ دیدن کدهای تخفیف؛ بی
+      // وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
+      expect(await read('accountant')).toEqual([
+        'discounts.read',
+        'orders.money',
+        'orders.notes',
+        'orders.read',
+        'orders.refund',
+        'reports.production',
+        'reports.read',
+      ]);
       expect([...ADMIN_ROLES.accountant.permissions].sort()).toEqual(await read('accountant'));
       await conn.db.insert(rolePermissions).values({ roleId: 'operator', permissionId: 'secrets.edit' });
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -2225,7 +2543,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await store.findSession(ali.sessionHash)).toMatchObject({
         revokedAt: null,
         roles: ['accountant'],
-        permissions: ['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read'],
+        permissions: ['discounts.read', 'orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read'],
       });
       expect((await roleEvents()).map((e) => [e.adminUserId, e.targetType, e.targetId, e.ipHash, e.detail])).toEqual([
         [sara.userId, 'admin', ali.userId, 'ip', { username: 'ali', from: ['operator'], to: 'accountant' }],

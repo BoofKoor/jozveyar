@@ -25,6 +25,7 @@ import {
   adminUsers,
   bindingRateBands,
   bindingTypes,
+  discountTiers,
   orders,
   paperRates,
   paperTypes,
@@ -220,6 +221,7 @@ export function createTariffStore({ db }: Database): TariffStore {
           .set({ label: rows.priceList.label, settings: rows.priceList.settings })
           .where(eq(priceLists.version, version));
         // ردیف‌های پیش‌نویس از نو: فرزند پیش از پدر، همان ترتیب کلیدهای خارجی.
+        await tx.delete(discountTiers).where(eq(discountTiers.priceListVersion, version));
         await tx.delete(shippingRates).where(eq(shippingRates.priceListVersion, version));
         await tx.delete(shippingMethods).where(eq(shippingMethods.priceListVersion, version));
         await tx.delete(bindingRateBands).where(eq(bindingRateBands.priceListVersion, version));

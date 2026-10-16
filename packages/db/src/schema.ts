@@ -278,6 +278,32 @@ export const shippingRates = pgTable(
   ],
 );
 
+/**
+ * پله‌های تخفیف سفارش بزرگ هر نسخهٔ تعرفه (برش ۱۱٫۴، ADR-062، سؤال‌های ۲۱۰ و ۲۹۵): از `from_rials` جمع چاپ، کاغذ و صحافی (پیش از
+ * کرایه)، `percent` درصد تخفیف روی همان جمع و/یا ارسال رایگان؛ فقط بالاترین پله‌ای که جمع به آن رسیده می‌نشیند (`quote()`). مثل
+ * بقیهٔ ردیف‌های نسخه فقط در پیش‌نویس عوض می‌شود (`price_list_rows_frozen`، 0048)، و هر نسخه تا ۵ پله (`discount_tiers_max`،
+ * همان `DISCOUNT_TIERS_MAX` قرارداد). سقف درصد همان `TIER_PERCENT_MAX` قرارداد است؛ تست یکپارچگی برابرشان را می‌سنجد.
+ */
+export const discountTiers = pgTable(
+  'discount_tiers',
+  {
+    priceListVersion: integer('price_list_version')
+      .notNull()
+      .references(() => priceLists.version, { onDelete: 'cascade' }),
+    /** آستانه، ریال، روی جمع چاپ، کاغذ و صحافی. */
+    fromRials: bigint('from_rials', { mode: 'number' }).notNull(),
+    /** درصد تخفیف روی همان جمع؛ ۰ یعنی فقط ارسال رایگان. */
+    percent: smallint('percent').notNull(),
+    freeShipping: boolean('free_shipping').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.priceListVersion, t.fromRials] }),
+    check('discount_tiers_from', sql`${t.fromRials} > 0`),
+    check('discount_tiers_percent', sql`${t.percent} BETWEEN 0 AND 50`),
+    check('discount_tiers_reward', sql`${t.percent} > 0 OR ${t.freeShipping}`),
+  ],
+);
+
 /* ──────────────────────────── تنظیمات ──────────────────────────── */
 
 /**
@@ -709,6 +735,66 @@ export const orderStatus = pgEnum('order_status', [
   'cancelled',
 ]);
 
+/** نوع کد تخفیف (برش ۱۱٫۴): درصد روی جمع چاپ، کاغذ و صحافی با سقف اختیاری هر سفارش، یا مبلغ ثابت. */
+export const discountKind = pgEnum('discount_kind', ['percent', 'fixed']);
+
+/**
+ * کد تخفیف (برش ۱۱٫۴، ADR-062، سؤال‌های ۲۰۹ و ۲۹۸ تا ۳۰۲). مالک از پنل می‌سازد؛ مشتری در «مرور و پرداخت»، پس از هویت، وارد می‌کند، و
+ * مبلغش را موتور قیمت حساب می‌کند (`DiscountCodeTerms`، با پلهٔ سفارش بزرگ جمع نمی‌شود). سفارشی که کد رویش نشست
+ * `orders.discount_code_id` را دارد، منجمد با قیمتش.
+ *
+ * - متن ۳ تا ۲۰ حرف بزرگ و رقم لاتین (`normalizeDiscountCode`)، یکتا.
+ * - درصد ۱ تا ۱۰۰ با سقف اختیاری هر سفارش، یا مبلغ ثابت؛ حداقل سفارش روی همان جمع چاپ، کاغذ و صحافی.
+ * - روز اعتبار: `valid_from` نیمه‌شب تهرانِ روز اول (شامل) و `valid_until` نیمه‌شب پس از روز آخر (انحصاری)، مثل تعطیلی چاپخانه؛ null
+ *   یعنی بی مرز.
+ * - سقف کل (null یعنی بی سقف) و سقف هر مشتری (موبایل تأییدشده، `orders.user_id`)، روی سفارش‌های پرداخت‌شده و رزروهای زنده
+ *   (`discount_code_room`، 0048).
+ * - متن، سازنده و زمان ساختن هرگز عوض نمی‌شوند، و شرط‌ها (نوع، درصد، سقف، مبلغ و حداقل) از اولین سفارشی که کد را گرفت؛ پاک نمی‌شود،
+ *   خاموش می‌شود (`discount_codes_guard`، 0048).
+ */
+export const discountCodes = pgTable(
+  'discount_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: text('code').notNull(),
+    kind: discountKind('kind').notNull(),
+    /** فقط `percent`: ۱ تا ۱۰۰. */
+    percent: smallint('percent'),
+    /** فقط `percent`: سقف تخفیف یک سفارش، ریال؛ null یعنی بی سقف. */
+    maxDiscountRials: bigint('max_discount_rials', { mode: 'number' }),
+    /** فقط `fixed`: مبلغ، ریال؛ تا خود جمع چاپ، کاغذ و صحافی. */
+    amountRials: bigint('amount_rials', { mode: 'number' }),
+    minOrderRials: bigint('min_order_rials', { mode: 'number' }).notNull().default(0),
+    validFrom: timestamp('valid_from', { withTimezone: true }),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    totalLimit: integer('total_limit'),
+    perCustomerLimit: integer('per_customer_limit').notNull().default(1),
+    enabled: boolean('enabled').notNull().default(true),
+    /** یادداشت داخلی مالک («کمپین مهر»)؛ مشتری نمی‌بیند. */
+    note: text('note'),
+    /** بی کلید خارجی، مثل `price_lists.created_by`: ادمین پاک‌نشدنی است (`admin_users_no_delete`). */
+    createdBy: uuid('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('discount_codes_code_unique').on(t.code),
+    check('discount_codes_code', sql`${t.code} ~ '^[A-Z0-9]{3,20}$'`),
+    check(
+      'discount_codes_terms',
+      // هر شرط با IS NOT NULL صریح: مقایسه با null «نامعلوم» است و CHECK نامعلوم را می‌پذیرد.
+      sql`(${t.kind} = 'percent' AND ${t.percent} IS NOT NULL AND ${t.percent} BETWEEN 1 AND 100 AND ${t.amountRials} IS NULL
+             AND (${t.maxDiscountRials} IS NULL OR ${t.maxDiscountRials} > 0))
+          OR (${t.kind} = 'fixed' AND ${t.amountRials} IS NOT NULL AND ${t.amountRials} > 0 AND ${t.percent} IS NULL
+             AND ${t.maxDiscountRials} IS NULL)`,
+    ),
+    check('discount_codes_min_order', sql`${t.minOrderRials} >= 0`),
+    check('discount_codes_window', sql`${t.validFrom} IS NULL OR ${t.validUntil} IS NULL OR ${t.validFrom} < ${t.validUntil}`),
+    check('discount_codes_limits', sql`(${t.totalLimit} IS NULL OR ${t.totalLimit} >= 1) AND ${t.perCustomerLimit} >= 1`),
+    check('discount_codes_note', sql`${t.note} IS NULL OR length(btrim(${t.note})) BETWEEN 1 AND 200`),
+  ],
+);
+
 /**
  * شمارهٔ انسانی سفارش: در پیامک، درگاه و فایل پست («نام گ»، ADR-010). از 10001، دور از کدهای دستی
  * 6004 تا 6098 فایل‌های پست فعلی (تصمیم ۱۴۰۵/۰۷/۰۴). جای خالی در دنباله مهم نیست.
@@ -775,6 +861,11 @@ export const orders = pgTable(
      * نمی‌شود (تریگر `orders_print_partner`، 0018).
      */
     printPartnerId: uuid('print_partner_id').references(() => printPartners.id),
+    /**
+     * کد تخفیفی که روی این قیمت نشست (برش ۱۱٫۴، ADR-062)؛ null یعنی هیچ، یا پلهٔ سفارش بزرگ. منجمد با قیمت (`orders_price_frozen`)،
+     * همان `price_breakdown.discount.codeId` (`orders_discount_code`)، و از ظرفیت کد می‌گیرد (`orders_discount_code_room`، 0048).
+     */
+    discountCodeId: uuid('discount_code_id').references(() => discountCodes.id),
 
     shippingMethodId: text('shipping_method_id').notNull(),
     /** منطقهٔ کرایه در لحظهٔ سفارش؛ کرایه با همین منجمد شده. */
@@ -806,6 +897,8 @@ export const orders = pgTable(
      * همهٔ سفارش‌ها را می‌خواندند.
      */
     index('orders_price_list').on(t.priceListVersion),
+    /** سفارش‌های پرداخت‌شده و رزروشدهٔ هر کد تخفیف (۱۱٫۴): ظرفیت کد زیر قفل، و فهرست «تخفیف‌ها». */
+    index('orders_discount_code').on(t.discountCodeId, t.status).where(sql`${t.discountCodeId} IS NOT NULL`),
     /** سفارش‌های باز هر چاپخانه: فهرست «چاپخانه‌ها»، غیرفعال کردن، و از ۵٫۳ محدودهٔ هر کوئری پنل. */
     index('orders_print_partner').on(t.printPartnerId, t.status),
     foreignKey({
@@ -824,6 +917,16 @@ export const orders = pgTable(
       sql`${t.totalRials} = ${t.subtotalRials} - ${t.discountRials} + ${t.shippingRials} + ${t.vatRials} + ${t.roundingRials}`,
     ),
     check('orders_total_positive', sql`${t.totalRials} > 0`),
+    // تخفیف (۱۱٫۴) فقط روی جمع چاپ، کاغذ و صحافی است.
+    check('orders_discount_rials', sql`${t.discountRials} BETWEEN 0 AND ${t.subtotalRials}`),
+    // کد سفارش همان کد ریز قیمت منجمد است، و فقط وقتی تخفیفی داد (۱۱٫۴). سفارش‌های پیش از ۱۱٫۴ `discount` ندارند. IS NOT NULL صریح، چون
+    // مقایسه با null «نامعلوم» است و CHECK نامعلوم را می‌پذیرد.
+    check(
+      'orders_discount_code',
+      sql`(${t.discountCodeId} IS NULL AND ${t.priceBreakdown}->'discount'->>'source' IS DISTINCT FROM 'code')
+          OR (${t.discountCodeId} IS NOT NULL AND ${t.discountCodeId}::text IS NOT DISTINCT FROM ${t.priceBreakdown}->'discount'->>'codeId'
+              AND ${t.priceBreakdown}->'discount'->>'source' = 'code' AND ${t.discountRials} > 0)`,
+    ),
     // هر وضعیت پس از پرداخت (در صف چاپ، در حال چاپ، تحویل پست شد، لغو شد) تاریخ پرداخت و مهلت دارد. با دو
     // مقدار پیش از پرداخت نوشته شده، نه با مقدارهای تازه: مقداری که `ALTER TYPE … ADD VALUE` در همان تراکنش
     // افزوده، در محدودیت به کار نمی‌رود («unsafe use of new value»)، و مهاجرت‌های یک اجرا یک تراکنش‌اند.

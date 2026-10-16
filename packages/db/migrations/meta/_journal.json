@@ -330,6 +330,20 @@
       "when": 1792128870550,
       "tag": "0046_report_exports_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792150793538,
+      "tag": "0047_discounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792150794745,
+      "tag": "0048_discounts_guards",
+      "breakpoints": true
     }
   ]
 }
