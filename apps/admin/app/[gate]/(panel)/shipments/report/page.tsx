@@ -6,6 +6,7 @@ import { formatNumber } from '@jozveyar/text';
 import { Alert } from '../../../../../components/Alert';
 import { BandsForm } from '../../../../../components/BandsForm';
 import { NoAccess } from '../../../../../components/NoAccess';
+import { ReportsNav } from '../../../../../components/ReportsNav';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
 import { panelPath } from '../../../../../lib/gate';
@@ -30,7 +31,7 @@ import {
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
 import type { ReportBandsView } from '../../../../../lib/server/report';
-import { resetBandsAction } from '../../../actions';
+import { requestReportPdfAction, resetBandsAction } from '../../../actions';
 
 export const metadata: Metadata = { title: 'گزارش ارسال' };
 
@@ -182,7 +183,8 @@ function BandsSource({ bands }: { bands: ReportBandsView }) {
  * گزارش ارسال (۶٫۴، طرح پنل `m-ship-report`، ADR-048): کرایه‌ای که مشتری داد در برابر کرایه و مالیاتی که پست گرفت، ماه‌به‌ماه به
  * روز «تحویل پست شد»؛ کل، به تفکیک منطقه و چاپخانه، و وزن واقعی در برابر برآورد با بازه‌هایی که مالک همین‌جا عوض می‌کند. مالک و از
  * ۹٫۴ حسابدار (`reports.read`)، پیش از هر خواندن (تصمیم ۱۰۶)؛ بازه‌ها فقط مالک (`settings.edit`)، و حسابدار گزارش را از زبانهٔ خودش
- * می‌بیند، بی «ارسال». ماه در نشانی (`?month=1405-07`)، فرم بازه‌ها با `?bands=edit`، بی JS.
+ * می‌بیند، بی «ارسال». ماه در نشانی (`?month=1405-07`)، فرم بازه‌ها با `?bands=edit`، بی JS. از ۱۰٫۲ چیپ «گزارش تولید» بالای صفحه و
+ * «خروجی اکسل» و «خروجی PDF» همان ماه (سؤال ۲۸۰).
  */
 export default async function ReportPage({ params, searchParams }: { params: Promise<{ gate: string }>; searchParams: Promise<Query> }) {
   const { gate } = await params;
@@ -211,6 +213,7 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
           ارسال
         </Link>
       ) : null}
+      <ReportsNav gate={gate} session={session} current="shipping" />
       <div className="ad-pagehead">
         <div>
           <h1 className="ad-title">گزارش ارسال</h1>
@@ -220,7 +223,7 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
           </p>
         </div>
       </div>
-      {error === 'setting_changed' || error === 'forbidden' ? <Alert tone="error">{messageOf(error)}</Alert> : null}
+      {error === 'setting_changed' || error === 'forbidden' || error === 'report_empty' ? <Alert tone="error">{messageOf(error)}</Alert> : null}
       {saved ? (
         <Alert tone="success">
           {bands.source === 'tariff' ? (
@@ -357,6 +360,23 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
               )}
             </section>
           </div>
+          <section className="jy-card ad-gap" aria-labelledby="t-export" data-report="export">
+            <h2 id="t-export" className="jy-card__title">
+              خروجی
+            </h2>
+            <p className="ad-lead">همین گزارش، با فهرست سفارش‌های تحویل پست‌شدهٔ ماه: اکسل همین حالا، و PDF چاپی چند ثانیه بعد.</p>
+            <div className="ad-actions">
+              <a className="jy-btn jy-btn--secondary" href={`${panelPath(gate, '/shipments/report/xlsx')}?month=${key}`} download data-export="xlsx">
+                خروجی اکسل
+              </a>
+              <form action={requestReportPdfAction} data-export="pdf">
+                <input type="hidden" name="gate" value={gate} />
+                <input type="hidden" name="report" value="shipping" />
+                <input type="hidden" name="month" value={key} />
+                <StatusButton className="jy-btn jy-btn--secondary">خروجی PDF</StatusButton>
+              </form>
+            </div>
+          </section>
           <p className="ad-hint ad-gap">فقط خواندن: قیمت و کرایهٔ سفارش‌ها منجمد است و این گزارش چیزی را عوض نمی‌کند.</p>
         </>
       )}

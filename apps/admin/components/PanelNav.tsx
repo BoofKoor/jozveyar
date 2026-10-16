@@ -7,6 +7,8 @@ export interface Tab {
   /** نشانی کامل، با مسیر محرمانه. */
   href: string;
   label: string;
+  /** نشانی‌های دیگری که این زبانه رویشان هم جاری است (گزارش ارسال زیر «گزارش‌ها»ی حسابدار، ۱۰٫۲). */
+  also?: string[];
 }
 
 /**
@@ -16,19 +18,20 @@ export interface Tab {
  */
 export function PanelNav({ home, primary, owner }: { home: string; primary: Tab[]; owner: Tab[] }) {
   const pathname = usePathname();
-  const isCurrent = (href: string) => (href === home ? pathname === home : pathname === href || pathname.startsWith(`${href}/`));
-  const current = (href: string) => (isCurrent(href) ? ('page' as const) : undefined);
-  const ownerCurrent = owner.some((tab) => isCurrent(tab.href));
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isCurrent = (tab: Tab) => (tab.href === home ? pathname === home : under(tab.href) || (tab.also ?? []).some(under));
+  const current = (tab: Tab) => (isCurrent(tab) ? ('page' as const) : undefined);
+  const ownerCurrent = owner.some(isCurrent);
 
   return (
     <nav className="ad-wrap ad-nav" aria-label="بخش‌های پنل">
       {primary.map((tab) => (
-        <Link key={tab.href} href={tab.href} aria-current={current(tab.href)}>
+        <Link key={tab.href} href={tab.href} aria-current={current(tab)}>
           {tab.label}
         </Link>
       ))}
       {owner.map((tab) => (
-        <Link key={tab.href} href={tab.href} className="ad-nav__wide" aria-current={current(tab.href)}>
+        <Link key={tab.href} href={tab.href} className="ad-nav__wide" aria-current={current(tab)}>
           {tab.label}
         </Link>
       ))}
@@ -40,7 +43,7 @@ export function PanelNav({ home, primary, owner }: { home: string; primary: Tab[
           </summary>
           <div className="ad-more__list">
             {owner.map((tab) => (
-              <Link key={tab.href} href={tab.href} aria-current={current(tab.href)}>
+              <Link key={tab.href} href={tab.href} aria-current={current(tab)}>
                 {tab.label}
               </Link>
             ))}

@@ -1,12 +1,15 @@
 /**
  * ابزارهای مشترک تست‌های سرتاسری پنل (`admin.spec.ts`، `orders.spec.ts`، `status.spec.ts`، …): دستور سرور، کد برنامهٔ تأیید مثل
  * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، تخصیص چاپخانه در پرداخت (۵٫۲)، فایل پست و
- * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`)، و فرمان سرور ساختگی sms.ir (۷٫۱). طرز اجرا بالای `admin.spec.ts`.
+ * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`)، فرمان سرور ساختگی sms.ir (۷٫۱)، و از ۱۰٫۲ دانلود و خوانندهٔ کتاب اکسل خروجی
+ * گزارش‌ها. طرز اجرا بالای `admin.spec.ts`.
  */
 
 import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type postgres from 'postgres';
@@ -278,3 +281,29 @@ export const zibalMock = {
     return String(body.trackId);
   },
 };
+
+/** دانلود یک فایل با کلیک، با نام پیشنهادی و بایت‌هایش (خروجی گزارش‌ها، ۱۰٫۲). */
+export async function download(page: Page, click: () => Promise<void>): Promise<{ name: string; bytes: Buffer }> {
+  const [file] = await Promise.all([page.waitForEvent('download'), click()]);
+  return { name: file.suggestedFilename(), bytes: readFileSync((await file.path())!) };
+}
+
+/** بخش‌های کتاب اکسل خروجی گزارش‌ها (zip با DEFLATE، `lib/server/xlsx.ts`)، به نام و متن XML. */
+export function xlsxParts(bytes: Buffer): Map<string, string> {
+  const end = bytes.length - 22;
+  expect(bytes.readUInt32LE(end)).toBe(0x06054b50);
+  const parts = new Map<string, string>();
+  let entry = bytes.readUInt32LE(end + 16);
+  for (let i = 0; i < bytes.readUInt16LE(end + 10); i += 1) {
+    const method = bytes.readUInt16LE(entry + 10);
+    const packed = bytes.readUInt32LE(entry + 20);
+    const nameLength = bytes.readUInt16LE(entry + 28);
+    const offset = bytes.readUInt32LE(entry + 42);
+    const name = bytes.subarray(entry + 46, entry + 46 + nameLength).toString('ascii');
+    const data = offset + 30 + bytes.readUInt16LE(offset + 26) + bytes.readUInt16LE(offset + 28);
+    const raw = bytes.subarray(data, data + packed);
+    parts.set(name, (method === 8 ? inflateRawSync(raw) : raw).toString('utf8'));
+    entry += 46 + nameLength;
+  }
+  return parts;
+}

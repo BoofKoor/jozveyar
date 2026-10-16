@@ -11,7 +11,7 @@ import { assignAtPayment, at, BASE, codeFor, enroll, GATE, layoutProblems, newCo
 
 /**
  * حسابدار و عوض کردن نقش، سرتاسری (برش ۹٫۴؛ ADR-059، سؤال ۱۹۷): مالک حسابدار را از «افزودن ادمین» با کد تازه می‌سازد؛ حسابدار پیشخوان،
- * سفارش‌ها با مبلغ و پرداخت‌ها، بازپرداخت دستی با کد تازه، یادداشت و گزارش ارسال را دارد، و هر بخش دیگر «برای حسابدار باز نیست». مالک
+ * سفارش‌ها با مبلغ و پرداخت‌ها، بازپرداخت دستی با کد تازه، یادداشت و گزارش‌ها (ارسال، و از ۱۰٫۲ تولید) را دارد، و هر بخش دیگر «برای حسابدار باز نیست». مالک
  * نقش ادمین موجود را از «ادمین‌ها» با کد تازه عوض می‌کند: نشست باز می‌ماند و کار بعدی همان ادمین نقش تازه را دارد؛ نقش یکسان و فرم
  * کهنه پیش از کد.
  *
@@ -158,7 +158,7 @@ test.describe.serial('حسابدار و عوض کردن نقش (۹٫۴)', () => 
     await sql?.end();
   });
 
-  test('حسابدار از «افزودن ادمین» با کد تازه: پیشخوان، سفارش‌ها و گزارش ارسال؛ هر بخش دیگر «برای حسابدار باز نیست»', async ({ browser }) => {
+  test('حسابدار از «افزودن ادمین» با کد تازه: پیشخوان، سفارش‌ها و گزارش‌ها؛ هر بخش دیگر «برای حسابدار باز نیست»', async ({ browser }) => {
     const ownerPage = who.owner.page;
     await ownerPage.goto(at('/admins/new'));
     // چهار نقش، به ترتیب: متصدی، حسابدار، چاپخانه و مالک.
@@ -182,7 +182,7 @@ test.describe.serial('حسابدار و عوض کردن نقش (۹٫۴)', () => 
     who.accountant = { context, page, problems };
     accountantId = (await sql<{ id: string }[]>`SELECT id FROM admin_users WHERE username = ${accountant}`)[0]!.id;
     await expect(page.locator('.ad-user')).toContainText(`${ACCOUNTANT} · حسابدار`);
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'گزارش ارسال']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'گزارش‌ها']);
     await expect(page.locator('.ad-more')).toHaveCount(0);
 
     // پیشخوان: پول سفارش لغوشده (کار حسابدار)، و صف تحویل با مبلغ.
@@ -194,10 +194,13 @@ test.describe.serial('حسابدار و عوض کردن نقش (۹٫۴)', () => 
       await expect(page.locator('[data-noaccess="accountant"]').getByRole('link', { name: 'سفارش‌ها' }), path).toBeVisible();
     }
 
-    // گزارش ارسال از زبانهٔ خودش: بی پیوند «ارسال» و بی «بازه‌ها را عوض کن» (تنظیم است، با مالک).
-    await nav(page).filter({ hasText: 'گزارش ارسال' }).click();
+    // گزارش ارسال از زبانهٔ «گزارش‌ها» (از ۱۰٫۲ گزارش تولید، و گزارش ارسال با چیپ): بی پیوند «ارسال» و بی «بازه‌ها را عوض کن» (تنظیم است،
+    // با مالک)؛ زبانه روی گزارش ارسال هم جاری است.
+    await nav(page).filter({ hasText: 'گزارش‌ها' }).click();
+    await expect(page.getByRole('heading', { name: 'گزارش تولید', level: 1 })).toBeVisible();
+    await page.getByRole('navigation', { name: 'گزارش‌ها' }).getByRole('link', { name: 'گزارش ارسال' }).click();
     await expect(page.getByRole('heading', { name: 'گزارش ارسال', level: 1 })).toBeVisible();
-    await expect(nav(page).filter({ hasText: 'گزارش ارسال' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav(page).filter({ hasText: 'گزارش‌ها' })).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('.ad-back')).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'بازه‌ها را عوض کن' })).toHaveCount(0);
     expect(problems).toEqual([]);

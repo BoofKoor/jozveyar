@@ -429,8 +429,9 @@ describe('رویدادها', () => {
       'تنظیمات و کلیدها',
       'چاپخانه‌ها',
       'ادمین‌ها',
+      'گزارش‌ها',
     ]);
-    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'payments', 'shipments', 'tariff', 'settings', 'partners', 'admins']);
+    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'payments', 'shipments', 'tariff', 'settings', 'partners', 'admins', 'reports']);
   });
 
   it('ارسال (۶٫۱): بارگذاری، ثبت با شمارها و سفارش‌هایی که تحویل پست شدند، دور انداختن، و برگرداندن با دلیل', () => {
@@ -587,6 +588,24 @@ describe('رویدادها', () => {
     ]);
     // جابه‌جایی چاپخانه و «دوباره بفرست» پیامکش کار روی همان سفارش است: چیپ «سفارش»، نه «پرداخت و بازپرداخت».
     expect([inEventKind('orders.partner_sms_resend', 'orders'), inEventKind('orders.partner_sms_resend', 'payments')]).toEqual([true, false]);
+  });
+
+  it('خروجی گزارش‌ها (۱۰٫۲، سؤال ۲۷۹): اکسل دانلود شد، PDF خواسته شد، با بازه و چاپخانهٔ زیرعنوان؛ چیپ «گزارش‌ها»', () => {
+    const exported = (detail: Record<string, unknown>) => event('reports.export', { targetType: detail.format === 'pdf' ? 'report_export' : null, detail });
+    expect(
+      eventLines([
+        exported({ report: 'production', format: 'xlsx', range: 'پرداخت سه‌شنبه 22 مهر · همهٔ چاپخانه‌ها' }),
+        exported({ report: 'production', format: 'pdf', range: 'سفارش‌های 10027 تا 10056 · چاپ نور · مشهد' }),
+        exported({ report: 'shipping', format: 'xlsx', range: 'مهر 1405، تا امروز · به روز «تحویل پست شد» · مبلغ‌ها تومان' }),
+        exported({ report: 'shipping', format: 'pdf' }),
+      ]).map((line) => line.text),
+    ).toEqual([
+      ['خروجی اکسل گزارش تولید دانلود شد: پرداخت سه‌شنبه 22 مهر · همهٔ چاپخانه‌ها'],
+      ['خروجی PDF گزارش تولید خواسته شد: سفارش‌های 10027 تا 10056 · چاپ نور · مشهد'],
+      ['خروجی اکسل گزارش ارسال دانلود شد: مهر 1405، تا امروز · به روز «تحویل پست شد» · مبلغ‌ها تومان'],
+      ['خروجی PDF گزارش ارسال خواسته شد'],
+    ]);
+    expect([inEventKind('reports.export', 'reports'), inEventKind('reports.export', 'orders')]).toEqual([true, false]);
   });
 });
 

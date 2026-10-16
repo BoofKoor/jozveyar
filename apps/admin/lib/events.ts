@@ -579,6 +579,13 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };
     }
+    case 'reports.export': {
+      // خروجی گزارش (۱۰٫۲، سؤال ۲۷۹): اکسل همان لحظه دانلود می‌شود، و PDF را کارگر می‌سازد؛ بازه و چاپخانه همان زیرعنوان گزارش.
+      const report = detail.report === 'shipping' ? 'گزارش ارسال' : 'گزارش تولید';
+      const range = str(detail.range);
+      const done = detail.format === 'pdf' ? `خروجی PDF ${report} خواسته شد` : `خروجی اکسل ${report} دانلود شد`;
+      return { badge: null, text: [range ? `${done}: ${range}` : done] };
+    }
     default:
       return { badge: null, text: [event.action] };
   }
@@ -627,7 +634,8 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * چیپ‌های صفحه: پیشوند کار. هر قدم پنل چیپ خودش را می‌آورد (سفارش از ۴٫۲، تعرفه ۴٫۵، تنظیمات و کلیدها ۴٫۶، چاپخانه‌ها ۵٫۲،
  * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش و از ۷٫۶ «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه کار روی
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
- * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها».
+ * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
+ * سؤال ۲۷۹) زیر «گزارش‌ها»، آخر.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
@@ -639,4 +647,5 @@ export const EVENT_KINDS = [
   { kind: 'settings', label: 'تنظیمات و کلیدها' },
   { kind: 'partners', label: 'چاپخانه‌ها' },
   { kind: 'admins', label: 'ادمین‌ها' },
+  { kind: 'reports', label: 'گزارش‌ها' },
 ] as const;

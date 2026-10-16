@@ -11,14 +11,24 @@ import { logoutAction } from '../actions';
  * پوستهٔ پنل (طرح پنل، تصمیم ۲۴): سربرگ سفید با لوگو، «پنل مدیریت»، نام و نقش ادمین و «خروج»، و زبانه‌ها. کاربر چاپخانه (برش
  * ۵٫۳) به جای نقش نام چاپخانه‌اش را دارد («حسن · چاپ نور») و فقط «پیشخوان» و «سفارش‌ها». از ۶٫۱ «ارسال» کنار «سفارش‌ها»؛ و تا
  * زبانه‌ها در گوشی ۳۲۰ پیکسلی جا شوند، «تعرفه»ی مالک با بخش‌های مالک (در دسکتاپ کنارشان، در گوشی زیر «بیشتر»)، و متصدی همان
- * ردیف (طرح برش ۶). حسابدار (۹٫۴) «پیشخوان»، «سفارش‌ها» و «گزارش ارسال». هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با رفتن از
- * صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
+ * ردیف (طرح برش ۶). حسابدار (۹٫۴) «پیشخوان»، «سفارش‌ها» و «گزارش‌ها». «گزارش‌ها» (۱۰٫۲، سؤال ۲۷۶) به گزارش تولید می‌رود: مالک در
+ * بخش‌های مالک، و حسابدار و کاربر چاپخانه در ردیف؛ گزارش ارسال با چیپ همان صفحه، و برای حسابدار، که «ارسال» ندارد، زبانهٔ «گزارش‌ها»
+ * روی گزارش ارسال هم جاری است. هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
  */
 export default async function PanelLayout({ children, params }: { children: React.ReactNode; params: Promise<{ gate: string }> }) {
   const { gate } = await params;
   const session = await requireSession(gate);
   const home = panelPath(gate);
   const tariff = can(session, 'tariff.read') ? [{ href: panelPath(gate, '/tariff'), label: 'تعرفه' }] : [];
+  const reports = can(session, 'reports.production')
+    ? [
+        {
+          href: panelPath(gate, '/reports'),
+          label: 'گزارش‌ها',
+          ...(can(session, 'reports.read') && !can(session, 'shipments.import') ? { also: [panelPath(gate, '/shipments/report')] } : {}),
+        },
+      ]
+    : [];
   const ownerOnly = [
     ...(can(session, 'settings.edit') || can(session, 'secrets.edit') ? [{ href: panelPath(gate, '/settings'), label: 'تنظیمات' }] : []),
     ...(can(session, 'partners.manage') ? [{ href: panelPath(gate, '/partners'), label: 'چاپخانه‌ها' }] : []),
@@ -29,13 +39,9 @@ export default async function PanelLayout({ children, params }: { children: Reac
     { href: home, label: 'پیشخوان' },
     ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
     ...(can(session, 'shipments.import') ? [{ href: panelPath(gate, '/shipments'), label: 'ارسال' }] : []),
-    // حسابدار (۹٫۴) گزارش ارسال را دارد ولی «ارسال» را نه؛ مالک از «ارسال» و «تعرفه» به گزارش می‌رسد.
-    ...(can(session, 'reports.read') && !can(session, 'shipments.import')
-      ? [{ href: panelPath(gate, '/shipments/report'), label: 'گزارش ارسال' }]
-      : []),
-    ...(ownerOnly.length > 0 ? [] : tariff),
+    ...(ownerOnly.length > 0 ? [] : [...reports, ...tariff]),
   ];
-  const owner = ownerOnly.length > 0 ? [...tariff, ...ownerOnly] : [];
+  const owner = ownerOnly.length > 0 ? [...tariff, ...reports, ...ownerOnly] : [];
 
   return (
     <>

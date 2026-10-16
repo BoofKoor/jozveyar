@@ -268,10 +268,10 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
       await page.goto(links[who]);
       await expect(page.getByText(`سارا رضایی تو را کاربر ${partnerName} در پنل جزوه‌یار کرده است.`)).toBeVisible();
       await enroll(page, links[who]);
-      // سربرگ، همان طرح: «حسن · چاپ نور»؛ و فقط پیشخوان، سفارش‌ها و از ۶٫۲ ارسال (فایل پست خودش).
+      // سربرگ، همان طرح: «حسن · چاپ نور»؛ و فقط پیشخوان، سفارش‌ها، از ۶٫۲ ارسال (فایل پست خودش) و از ۱۰٫۲ گزارش‌ها (گزارش تولید خودش).
       await expect(page.locator('.ad-user')).toContainText(`${name} · ${partnerName}`);
       const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
-      await expect(nav.getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال']);
+      await expect(nav.getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'گزارش‌ها']);
       await expect(nav.locator('.ad-more')).toHaveCount(0);
       partner[who] = { context, page, problems };
     }
@@ -401,7 +401,7 @@ test.describe.serial('نقش چاپخانه و محدوده در پنل', () => 
       await page.goto(at(`/orders/${o.C.number}?do=${mode}`));
       await expect(heading(page, NO_ACCESS), mode).toBeVisible();
       await expect(page.locator('.ad-noaccess .ad-lead')).toHaveText(
-        `سفارش‌هایی که به ${NOOR} سپرده شده‌اند در «سفارش‌ها»ست. لغو، ویرایش نشانی، تعرفه و بقیه با جزوه‌یار است.`,
+        `سفارش‌هایی که به ${NOOR} سپرده شده‌اند در «سفارش‌ها»ست، و گزارش تولیدشان در «گزارش‌ها». لغو، ویرایش نشانی، تعرفه و بقیه با جزوه‌یار است.`,
       );
     }
 

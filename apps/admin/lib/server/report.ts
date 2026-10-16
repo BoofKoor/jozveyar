@@ -29,8 +29,10 @@ import {
   type JalaliMonth,
   type ShippingReport,
 } from '../report';
+import { shippingDocument } from '../shippingDocument';
 import { ZONES } from '../tariff';
 import { can, scopeOf, type AdminSession } from './auth';
+import type { ExportDocument } from './production';
 import { fail, ok, type Result } from './result';
 
 export interface PanelReportDeps {
@@ -77,41 +79,63 @@ export function createPanelReport(deps: PanelReportDeps) {
   const log = deps.log ?? ((message: string, error?: unknown) => console.error(message, error ?? ''));
   const { store } = deps;
 
+  /** ماه‌ها، ماه انتخاب‌شده، بازه‌ها و سفارش‌های همان ماه؛ مجوز را صدازننده سنجیده است. */
+  async function load(session: AdminSession, params: { month?: string }) {
+    const scope = scopeOf(session);
+    const at = now();
+    const [span, setting, tariff] = await Promise.all([
+      store.handedSpan(scope),
+      readSetting((key) => store.setting(key), REPORT_BANDS_SETTING, log),
+      store.tariffBounds(DEFAULT_SHIPPING_METHOD_ID),
+    ]);
+    const months = span ? monthsBetween(span.first, span.last) : [];
+    const counts = months.length > 0 ? await store.handedPerMonth(scope, months.map(monthStart)) : [];
+    const withData = months.filter((_, i) => (counts[i] ?? 0) > 0).reverse();
+    const asked = parseMonthKey(params.month);
+    const month = (asked && withData.find((m) => sameMonth(m, asked))) ?? withData[0] ?? null;
+    const today = monthOf(at);
+    const bands: ReportBandsView =
+      setting === 'tariff'
+        ? { source: 'tariff', bounds: tariff?.bounds ?? [], seen: bandsSeen(setting), tariff }
+        : { source: 'custom', bounds: setting, seen: bandsSeen(setting), tariff };
+    const rows = month ? await store.handedOrders(scope, monthRange(month)) : [];
+    const report = month
+      ? aggregateReport(
+          rows,
+          bands.bounds,
+          ZONES.map((zone) => zone.id),
+        )
+      : null;
+    return { at, today, withData, month, bands, rows, report, current: month !== null && sameMonth(month, today) };
+  }
+
   return {
     async view(session: AdminSession, params: { month?: string }): Promise<Result<ReportView>> {
       if (!can(session, 'reports.read')) return fail(403, 'forbidden');
-      const scope = scopeOf(session);
-      const at = now();
-      const [span, setting, tariff] = await Promise.all([
-        store.handedSpan(scope),
-        readSetting((key) => store.setting(key), REPORT_BANDS_SETTING, log),
-        store.tariffBounds(DEFAULT_SHIPPING_METHOD_ID),
-      ]);
-      const months = span ? monthsBetween(span.first, span.last) : [];
-      const counts = months.length > 0 ? await store.handedPerMonth(scope, months.map(monthStart)) : [];
-      const withData = months.filter((_, i) => (counts[i] ?? 0) > 0).reverse();
-      const asked = parseMonthKey(params.month);
-      const month = (asked && withData.find((m) => sameMonth(m, asked))) ?? withData[0] ?? null;
-      const today = monthOf(at);
-      const bands: ReportBandsView =
-        setting === 'tariff'
-          ? { source: 'tariff', bounds: tariff?.bounds ?? [], seen: bandsSeen(setting), tariff }
-          : { source: 'custom', bounds: setting, seen: bandsSeen(setting), tariff };
-      const rows = month ? await store.handedOrders(scope, monthRange(month)) : [];
+      const { at, today, withData, month, bands, report, current } = await load(session, params);
       return ok({
         now: at,
         months: withData.map((m) => ({ key: monthKey(m), label: monthLabel(m, sameMonth(m, today)), selected: month !== null && sameMonth(m, month) })),
         month,
-        current: month !== null && sameMonth(month, today),
-        report: month
-          ? aggregateReport(
-              rows,
-              bands.bounds,
-              ZONES.map((zone) => zone.id),
-            )
-          : null,
+        current,
+        report,
         bands,
         canEditBands: can(session, 'settings.edit'),
+      });
+    },
+
+    /**
+     * سند خروجی گزارش همان ماهی که صفحه با همین نشانی نشان می‌دهد (۱۰٫۲، سؤال ۲۸۰): همان کاشی‌ها و جدول‌ها، و فهرست سفارش‌های ماه.
+     * گزارش ارسال سراسر مبلغ است، پس سند همیشه مبلغ دارد؛ بی ماه داده‌دار ۴۰۴.
+     */
+    async document(session: AdminSession, params: { month?: string }): Promise<Result<ExportDocument>> {
+      if (!can(session, 'reports.read')) return fail(403, 'forbidden');
+      const { at, month, bands, rows, report, current } = await load(session, params);
+      if (!month || !report) return fail(404, 'report_empty');
+      return ok({
+        document: shippingDocument({ report, rows, month, current, bounds: bands.bounds, made: { at, by: session.displayName } }),
+        money: true,
+        printPartnerId: session.partner?.id ?? null,
       });
     },
   };
