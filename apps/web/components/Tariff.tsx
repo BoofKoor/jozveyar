@@ -3,6 +3,7 @@ import { DEFAULT_PAPER_SIZE, PAPER_SIZES, offeredSizes, pausedOf, quote, wholeDo
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import { Inline } from './Inline';
+import { tierReward } from './checkout/parts';
 
 /*
  * «تعرفه، بی هزینهٔ پنهان»، مقصد «تعرفه» در سربرگ؛ از طرح ز (docs/UI.md، ۴الف). کامپوننت سرور.
@@ -51,7 +52,8 @@ function exampleQuote(list: PriceList) {
       ],
       shipping: null,
     },
-    list,
+    // مثال چاپ و صحافی است، بی تخفیف سفارش بزرگ (۱۱٫۴)، تا «روی هم» همان جمع دو عدد باشد؛ پله‌ها خطِ خودشان را دارند.
+    { ...list, discountTiers: [] },
   );
 }
 
@@ -246,6 +248,23 @@ export function Tariff({ priceList: list, paused: pausedSetting }: { priceList: 
           <p className="home-price__note">شهر را در قدم آدرس انتخاب می‌کنی؛ کرایه تقریباً همین است.</p>
         </article>
       </div>
+
+      {(list.discountTiers ?? []).length > 0 ? (
+        // تخفیف سفارش بزرگ (۱۱٫۴، سؤال ۳۰۳): پله‌های همین تعرفه، از همان عددی که موتور قیمت با آن می‌سنجد.
+        <p className="home-example" data-testid="tariff-tiers">
+          <span className="jy-icon jy-icon-tag" aria-hidden="true" />
+          <span>
+            تخفیف سفارش بزرگ، روی چاپ، کاغذ و صحافی:{' '}
+            {(list.discountTiers ?? []).map((tier, i) => (
+              <span key={tier.fromRials}>
+                {i > 0 ? '؛ ' : null}از <span className="num">{formatTomans(tier.fromRials, false)}</span> تومان،{' '}
+                {tierReward(tier.percent, tier.freeShipping)}
+              </span>
+            ))}
+            .
+          </span>
+        </p>
+      ) : null}
 
       <p className="home-example" data-testid="tariff-example">
         <span className="jy-icon jy-icon-info" aria-hidden="true" />

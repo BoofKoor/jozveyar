@@ -21,7 +21,7 @@ import { MOCK_AUTHORITY, PaymentError, mockGateway, type PaymentGateway } from '
 
 import type { AuthUser } from './auth';
 import { PAYMENT_ATTEMPT_TTL_MS, RETURN_KEY, createCheckoutService } from './checkout';
-import { memoryOrderStore } from './testing';
+import { memoryDiscountCode, memoryOrderStore } from './testing';
 
 const ME = 'a'.repeat(64);
 const OTHER = 'b'.repeat(64);
@@ -1338,6 +1338,154 @@ describe('مسیر خرید روی سرور', () => {
         expect(again).toMatchObject({ payment: null, order: { number: order.number, status } });
       }
       expect(orders.payments).toHaveLength(1);
+    });
+  });
+
+  describe('کد تخفیف و تخفیف سفارش بزرگ (۱۱٫۴)', () => {
+    const T = (tomans: number) => tomans * 10;
+    // ۱۴۷ صفحه: ۲۸۰,۲۰۰ تومان چاپ و صحافی؛ کرایهٔ استان تهران ۱۲۹,۵۰۰.
+    const body = (documentIds: string[], discountCode: string | null = null, place = TEHRAN) => ({ items: [item(documentIds)], place, discountCode });
+
+    async function placeWith(user: AuthUser, documentIds: string[], discountCode: string | null) {
+      const priced = await service.quote(ME, body(documentIds, discountCode), user);
+      if (!priced.ok) throw new Error(priced.error);
+      return service.placeOrder(ME, user, {
+        items: [item(documentIds)],
+        place: TEHRAN,
+        recipient,
+        checkoutKey: randomUUID(),
+        expectedTotalRials: priced.value.breakdown.totalRials,
+        discountCode,
+      });
+    }
+
+    it('کد فقط برای نشست تأییدشده؛ یکدست می‌شود (صفحه‌کلید فارسی هم)؛ و ریز قیمت می‌گوید نشست', async () => {
+      orders.discountCodes.push(memoryDiscountCode({ code: 'WELCOME', percent: 10 }));
+      const scan = doc(147);
+      expect(await service.quote(ME, body([scan], 'WELCOME'))).toMatchObject({ ok: false, status: 401, error: 'auth_required' });
+      for (const typed of ['welcome', ' WEL-COME ', 'صثمزخپث']) {
+        const priced = await service.quote(ME, body([scan], typed), SARA);
+        expect(priced.ok).toBe(true);
+        if (!priced.ok) return;
+        expect(priced.value.breakdown.discount).toMatchObject({ source: 'code', code: 'WELCOME', percent: 10 });
+        expect(priced.value.breakdown.code).toEqual({ code: 'WELCOME', status: 'applied' });
+        expect(priced.value.breakdown.totalRials).toBe(T(280_200 - 28_020 + 129_500));
+      }
+      // بی کد همان قیمت پیش از ۱۱٫۴، با نشست یا بی نشست.
+      const plain = await service.quote(ME, body([scan]), SARA);
+      expect(plain.ok && [plain.value.breakdown.discount, plain.value.breakdown.totalRials]).toEqual([null, T(280_200 + 129_500)]);
+    });
+
+    it('کدی که نمی‌خورد با دلیل: ناشناس، شکل کد نیست، خاموش، پیش و پس از روز، پر، و سهم برده', async () => {
+      const scan = doc(147);
+      orders.discountCodes.push(
+        memoryDiscountCode({ code: 'OFFCODE', enabled: false }),
+        memoryDiscountCode({ code: 'SOONCODE', validFrom: new Date(clock.getTime() + DAY) }),
+        memoryDiscountCode({ code: 'GONECODE', validFrom: new Date(clock.getTime() - 2 * DAY), validUntil: clock }),
+      );
+      const reason = async (code: string, user = SARA) => {
+        const result = await service.quote(ME, body([scan], code), user);
+        return result.ok ? null : [result.status, result.error, result.reason];
+      };
+      expect(await reason('NOPE404')).toEqual([422, 'discount_code_invalid', 'unknown']);
+      expect(await reason('!!')).toEqual([422, 'discount_code_invalid', 'unknown']);
+      expect(await reason('OFFCODE')).toEqual([422, 'discount_code_invalid', 'disabled']);
+      expect(await reason('SOONCODE')).toEqual([422, 'discount_code_invalid', 'not_started']);
+      expect(await reason('GONECODE')).toEqual([422, 'discount_code_invalid', 'ended']);
+
+      orders.discountCodes.push(memoryDiscountCode({ code: 'ONCE', perCustomerLimit: 1 }), memoryDiscountCode({ code: 'ONLYONE', totalLimit: 1, perCustomerLimit: 5 }));
+      expect((await placeWith(SARA, [scan], 'ONCE')).ok).toBe(true);
+      expect(await reason('ONCE')).toEqual([422, 'discount_code_invalid', 'used_by_you']);
+      expect(await reason('ONCE', REZA)).toBeNull();
+      expect((await placeWith(REZA, [doc(147)], 'ONLYONE')).ok).toBe(true);
+      expect(await reason('ONLYONE')).toEqual([422, 'discount_code_invalid', 'used_up']);
+    });
+
+    it('«پرداخت» با کد: شناسهٔ کد روی سفارش و قیمت منجمد؛ کدی که میان مرور و پرداخت پر شد ۴۰۹ با دلیل، بی سفارش', async () => {
+      orders.discountCodes.push(memoryDiscountCode({ code: 'MEHR', percent: 20, totalLimit: 1, perCustomerLimit: 5 }));
+      const scan = doc(147);
+      const priced = await service.quote(ME, body([scan], 'mehr'), SARA);
+      if (!priced.ok) throw new Error(priced.error);
+      const placedOrder = await service.placeOrder(ME, SARA, {
+        items: [item([scan])],
+        place: TEHRAN,
+        recipient,
+        checkoutKey: randomUUID(),
+        expectedTotalRials: priced.value.breakdown.totalRials,
+        discountCode: 'mehr',
+      });
+      expect(placedOrder.ok).toBe(true);
+      const order = orders.orders.at(-1)!;
+      expect(order).toMatchObject({ discountCodeId: orders.discountCodes[0]!.id, discountRials: T(56_040), totalRials: T(280_200 - 56_040 + 129_500) });
+      expect(orders.payments).toHaveLength(1);
+
+      // REZA مرور را با کد دید، و پیش از «پرداخت» جای کد رفت.
+      const rezaScan = doc(147);
+      const count = orders.orders.length;
+      const late = await service.placeOrder(ME, REZA, {
+        items: [item([rezaScan])],
+        place: TEHRAN,
+        recipient,
+        checkoutKey: randomUUID(),
+        expectedTotalRials: priced.value.breakdown.totalRials,
+        discountCode: 'MEHR',
+      });
+      expect(late).toMatchObject({ ok: false, status: 422, error: 'discount_code_invalid', reason: 'used_up' });
+      expect(orders.orders).toHaveLength(count);
+    });
+
+    it('کد کوچک‌تر از پلهٔ سفارش بزرگ به کار نمی‌رود و روی سفارش نمی‌نشیند (مصرف نمی‌شود)', async () => {
+      orders.activate({ ...SEED_PRICE_LIST, version: 2, discountTiers: [{ fromRials: T(200_000), percent: 15, freeShipping: false }] });
+      orders.discountCodes.push(memoryDiscountCode({ code: 'SMALL', percent: 5 }));
+      const scan = doc(147);
+      const priced = await service.quote(ME, body([scan], 'SMALL'), SARA);
+      expect(priced.ok && priced.value.breakdown.code).toEqual({ code: 'SMALL', status: 'smaller' });
+      expect(priced.ok && priced.value.breakdown.discount).toMatchObject({ source: 'tier', percent: 15 });
+      const placedOrder = await placeWith(SARA, [scan], 'SMALL');
+      expect(placedOrder.ok).toBe(true);
+      expect(orders.orders.at(-1)).toMatchObject({ discountCodeId: null, discountRials: T(42_030) });
+      // سهم SARA مصرف نشد.
+      const again = await service.quote(ME, body([doc(147)], 'SMALL'), SARA);
+      expect(again.ok).toBe(true);
+    });
+
+    it('ارسال رایگان پله: کارت شهر و مرور کرایهٔ صفر می‌گیرند و کرایهٔ بخشیده در ریز قیمت می‌ماند', async () => {
+      orders.activate({ ...SEED_PRICE_LIST, version: 3, discountTiers: [{ fromRials: T(200_000), percent: 0, freeShipping: true }] });
+      const scan = doc(147);
+      const city = await service.quote(ME, body([scan], null, null as unknown as typeof TEHRAN));
+      expect(city.ok && city.value.shippingByZone.map((zone) => zone.shippingRials)).toEqual([0, 0]);
+      const review = await service.quote(ME, body([scan]), SARA);
+      expect(review.ok && review.value.breakdown).toMatchObject({
+        shippingRials: 0,
+        totalRials: T(280_200),
+        discount: { source: 'tier', freeShipping: true, waivedShippingRials: T(129_500) },
+      });
+    });
+
+    it('«دوباره پرداخت کن» با کدی که جایش را دیگری گرفت ۴۰۹ با دلیل؛ و سنجش درگاه پس از رفتن جا `verify` نمی‌زند', async () => {
+      orders.discountCodes.push(memoryDiscountCode({ code: 'LAST', totalLimit: 1, perCustomerLimit: 5 }));
+      const first = await placeWith(SARA, [doc(147)], 'LAST');
+      if (!first.ok) throw new Error(first.error);
+      const saraOrder = orders.orders.at(-1)!;
+      // رزرو SARA پس از مهلت تلاش می‌رود؛ REZA جا را می‌گیرد.
+      later(PAYMENT_ATTEMPT_TTL_MS + MINUTE);
+      const reza = await placeWith(REZA, [doc(147)], 'LAST');
+      expect(reza.ok).toBe(true);
+      // تلاش قدیمی SARA همین حالا از درگاه برگشت: پرداختنی نیست، پس بی `verify` بسته می‌شود.
+      const settled = await pay(first.value.payment!.redirectUrl, 'success');
+      expect(settled).toMatchObject({ ok: true, value: { payment: 'failed' } });
+      expect(orders.payments.find((p) => p.orderId === saraOrder.id)).toMatchObject({ status: 'failed', failureCode: 'order_not_payable' });
+      expect(orders.orders.find((o) => o.id === saraOrder.id)!.status).toBe('awaiting_payment');
+      // و «دوباره پرداخت کن» هم نه، با دلیل و سفارش؛ پیش از درگاه، پس تلاشی ساخته نمی‌شود که محافظ درج ردش کند.
+      const insert = orders.insertPayment.bind(orders);
+      let inserted = 0;
+      orders.insertPayment = async (payment) => {
+        inserted += 1;
+        return insert(payment);
+      };
+      const again = await service.payAgain(SARA, saraOrder.publicToken);
+      expect(again).toMatchObject({ ok: false, status: 409, error: 'discount_unavailable', reason: 'used_up', order: { number: saraOrder.orderNumber } });
+      expect(inserted).toBe(0);
     });
   });
 });

@@ -210,6 +210,39 @@
     }
   }
 
+  /* ===== کد تخفیف در مرور (برش ۱۱٫۴) ===== */
+  .ck-discount {
+    margin-block-start: 16px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .ck-discount > * + * {
+    margin-block-start: 12px;
+  }
+  /* برچسب، بعد فیلد و «اعمال» در یک ردیف، بعد خطا زیر هر دو */
+  .ck-discount__form {
+    display: grid;
+    gap: 6px;
+  }
+  .ck-discount__row {
+    display: flex;
+    gap: 8px;
+  }
+  .ck-discount__row > .jy-input {
+    flex: 1;
+    min-width: 0;
+    max-width: 260px;
+  }
+  .ck-discount__applied {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+  }
+  .ck-discount__applied > .jy-icon {
+    color: var(--color-success-text);
+  }
+
   /* ردیف فایل و فهرست فایل‌های جزوه */
   .ck-file {
     display: flex;

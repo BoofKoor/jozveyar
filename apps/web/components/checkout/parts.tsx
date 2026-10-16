@@ -1,5 +1,5 @@
-import type { MouseEvent } from 'react';
-import type { ItemBreakdown } from '@jozveyar/contracts';
+import type { MouseEvent, ReactNode } from 'react';
+import type { Breakdown, ItemBreakdown } from '@jozveyar/contracts';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
 /*
@@ -104,14 +104,96 @@ function RoundingLine({ rials }: { rials: number | null | undefined }) {
   );
 }
 
+/** ردیف ارسال خلاصه: «ارسال پست پیشتاز به مشهد» و کرایه‌اش؛ با ارسال رایگان (۱۱٫۴) کرایه صفر و کرایهٔ بخشیده خط‌خورده. */
+export interface ShippingLine {
+  label: string;
+  rials: number;
+  /** کرایه‌ای که ارسال رایگان بخشید؛ null یعنی ارسال رایگان نیست. */
+  waivedRials?: number | null;
+}
+
+/** ردیف تخفیف خلاصه (برش ۱۱٫۴): نامش و مبلغش. */
+export interface DiscountLine {
+  label: ReactNode;
+  rials: number;
+}
+
 /**
- * ریز قیمت خلاصه: چاپ، کاغذ (اگر جدا حساب شده)، صحافی، تعداد، بعد از شهر ردیف ارسال، و گرد کردن اگر هست. همان ریز قیمت
- * سرور، بی حساب تازه (قاعدهٔ ۱).
+ * ردیف تخفیف از ریز قیمت (برش ۱۱٫۴، سؤال ۳۰۳): پلهٔ سفارش بزرگ با درصدش، یا کد؛ ارسال رایگانِ بی درصد ردیف خودش را ندارد، چون ردیف
+ * ارسال «رایگان» است. همان مبلغ سرور، بی حساب تازه (قاعدهٔ ۱).
+ */
+export function discountLineOf(breakdown: Pick<Breakdown, 'discount' | 'discountRials'>): DiscountLine | null {
+  const discount = breakdown.discount;
+  if (!discount || breakdown.discountRials <= 0) return null;
+  return {
+    label:
+      discount.source === 'tier' ? (
+        <>
+          تخفیف سفارش بزرگ (<span className="num">{formatNumber(discount.percent)}</span>٪)
+        </>
+      ) : (
+        <>
+          تخفیف کد <bdi dir="ltr">{discount.code}</bdi>
+        </>
+      ),
+    rials: breakdown.discountRials,
+  };
+}
+
+/** «۵٪ تخفیف»، «ارسال رایگان»، یا «۵٪ تخفیف و ارسال رایگان»: پاداش یک پلهٔ تخفیف سفارش بزرگ (۱۱٫۴)؛ میز و جدول تعرفهٔ صفحهٔ اصلی. */
+export function tierReward(percent: number, freeShipping: boolean): ReactNode {
+  const off =
+    percent > 0 ? (
+      <>
+        <span className="num">{formatNumber(percent)}</span>٪ تخفیف
+      </>
+    ) : null;
+  if (off && freeShipping) return <>{off} و ارسال رایگان</>;
+  return off ?? 'ارسال رایگان';
+}
+
+/** ردیف ارسال از ریز قیمت و نام روش و جا؛ null تا کرایه معلوم نیست. */
+export function shippingLineOf(breakdown: Pick<Breakdown, 'discount' | 'shippingRials'>, label: string): ShippingLine | null {
+  if (breakdown.shippingRials === null) return null;
+  const waived = breakdown.discount?.source === 'tier' && breakdown.discount.freeShipping ? breakdown.discount.waivedShippingRials : null;
+  return { label, rials: breakdown.shippingRials, waivedRials: waived };
+}
+
+function DiscountRow({ line }: { line: DiscountLine | null | undefined }) {
+  if (!line) return null;
+  return (
+    <div data-testid="summary-discount">
+      <dt>{line.label}</dt>
+      <dd className="num">−{formatTomans(line.rials, false)}</dd>
+    </div>
+  );
+}
+
+function ShippingRow({ line }: { line: ShippingLine | null | undefined }) {
+  if (!line) return null;
+  return (
+    <div data-testid="summary-shipping">
+      <dt>{line.label}</dt>
+      {line.waivedRials != null ? (
+        <dd>
+          <s className="num">{formatTomans(line.waivedRials, false)}</s> رایگان
+        </dd>
+      ) : (
+        <dd className="num">{formatTomans(line.rials, false)}</dd>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ریز قیمت خلاصه: چاپ، کاغذ (اگر جدا حساب شده)، صحافی، تعداد، تخفیف (۱۱٫۴)، بعد از شهر ردیف ارسال، و گرد کردن اگر هست. همان ریز
+ * قیمت سرور، بی حساب تازه (قاعدهٔ ۱).
  */
 export function SummaryLines({
   item,
   print,
   bindingName,
+  discount,
   shipping,
   rounding,
 }: {
@@ -119,8 +201,10 @@ export function SummaryLines({
   /** «سیاه‌سفید، دورو». */
   print: string;
   bindingName: string;
+  /** تخفیف همان ریز قیمت (۱۱٫۴، `discountLineOf`). */
+  discount?: DiscountLine | null;
   /** «ارسال پست پیشتاز به مشهد» و کرایه‌اش؛ null تا شهر معلوم نیست. */
-  shipping?: { label: string; rials: number } | null;
+  shipping?: ShippingLine | null;
   /** `roundingRials` همان ریز قیمتی که جمعش زیر این ردیف‌هاست (۸٫۴)؛ null یعنی نه. */
   rounding?: number | null;
 }) {
@@ -159,12 +243,8 @@ export function SummaryLines({
           <span className="num">{formatNumber(item.copies)}</span> نسخه
         </dd>
       </div>
-      {shipping ? (
-        <div data-testid="summary-shipping">
-          <dt>{shipping.label}</dt>
-          <dd className="num">{formatTomans(shipping.rials, false)}</dd>
-        </div>
-      ) : null}
+      <DiscountRow line={discount} />
+      <ShippingRow line={shipping} />
       <RoundingLine rials={rounding} />
     </dl>
   );
@@ -199,11 +279,14 @@ export interface JozveLine {
  */
 export function JozveLines({
   jozves,
+  discount,
   shipping,
   rounding,
 }: {
   jozves: readonly JozveLine[];
-  shipping?: { label: string; rials: number } | null;
+  /** همان `discount` ‏`SummaryLines` (۱۱٫۴). */
+  discount?: DiscountLine | null;
+  shipping?: ShippingLine | null;
   /** همان `rounding` ‏`SummaryLines` (۸٫۴). */
   rounding?: number | null;
 }) {
@@ -228,12 +311,8 @@ export function JozveLines({
           <dd className="num">{formatTomans(jozve.totalRials, false)}</dd>
         </div>
       ))}
-      {shipping ? (
-        <div data-testid="summary-shipping">
-          <dt>{shipping.label}</dt>
-          <dd className="num">{formatTomans(shipping.rials, false)}</dd>
-        </div>
-      ) : null}
+      <DiscountRow line={discount} />
+      <ShippingRow line={shipping} />
       <RoundingLine rials={rounding} />
     </dl>
   );

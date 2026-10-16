@@ -14,7 +14,7 @@
  */
 
 import type { Breakdown } from '@jozveyar/contracts';
-import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/checkout';
+import type { CheckoutItem, CheckoutQuote, DiscountCodeReason, Place } from '@jozveyar/contracts/checkout';
 import { toLatinDigits } from '@jozveyar/text';
 import { checkRecipient, normalizeIranMobile, type RecipientField, type RecipientInput } from '@jozveyar/text/input';
 
@@ -41,7 +41,7 @@ export type PayNotice =
   | { kind: 'price_changed'; change: PriceChange; totalRials: number }
   | { kind: 'failure'; failure: ApiFailure };
 
-export type Busy = 'start' | 'place' | 'quote' | 'code' | 'verify' | 'logout' | 'pay' | null;
+export type Busy = 'start' | 'place' | 'quote' | 'code' | 'verify' | 'logout' | 'pay' | 'discount' | null;
 
 export interface CheckoutState {
   items: CheckoutItem[] | null;
@@ -49,6 +49,8 @@ export interface CheckoutState {
   quote: CheckoutQuote | null;
   quoteItems: string | null;
   quotePlace: Place | null;
+  /** کد تخفیفی که قیمت مرور با آن گرفته شد (برش ۱۱٫۴)؛ null یعنی بی کد. */
+  quoteCode: string | null;
   place: Place | null;
   /** جایی که کاربر زد و قیمتش در راه است (دکمهٔ همان شهر در حال کار). */
   pendingPlace: Place | null;
@@ -67,6 +69,14 @@ export interface CheckoutState {
   resendError: ApiFailure | null;
   quoteError: ApiFailure | null;
   payNotice: PayNotice | null;
+  /**
+   * کد تخفیف مرور (برش ۱۱٫۴، سؤال ۲۹۹): فیلد باز است، متنی که تایپ شده، کدی که سرور روی قیمت پذیرفت (یکدست، `WELCOME`)، و چرا کدی که زده
+   * شد نخورد. کدِ پذیرفته در قیمت مرور و «پرداخت» می‌رود، و در پیش‌نویس همین زبانه می‌ماند.
+   */
+  discountOpen: boolean;
+  discountInput: string;
+  discount: string | null;
+  discountError: DiscountCodeReason | null;
   busy: Busy;
 }
 
@@ -83,6 +93,8 @@ export interface CheckoutDraft {
   pay: { payload: string; key: string } | null;
   /** توکن سفارشی که آخرین «پرداخت» ساخت؛ صفحهٔ همان سفارش، وقتی پرداخت شد، پیش‌نویس را پاک می‌کند. */
   order: string | null;
+  /** کد تخفیفی که سرور روی قیمت مرور پذیرفت (برش ۱۱٫۴)؛ با رفرش دوباره سنجیده می‌شود. پیش‌نویس پیش از ۱۱٫۴ ندارد. */
+  discount: string | null;
 }
 
 export interface CheckoutStoreDeps {
@@ -114,6 +126,7 @@ export function initialCheckout(): CheckoutState {
     quote: null,
     quoteItems: null,
     quotePlace: null,
+    quoteCode: null,
     place: null,
     pendingPlace: null,
     placeError: null,
@@ -130,6 +143,10 @@ export function initialCheckout(): CheckoutState {
     resendError: null,
     quoteError: null,
     payNotice: null,
+    discountOpen: false,
+    discountInput: '',
+    discount: null,
+    discountError: null,
     busy: null,
   };
 }
@@ -141,7 +158,20 @@ export function initialCheckout(): CheckoutState {
 export function quoteOf(state: CheckoutState, withPlace: boolean): CheckoutQuote | null {
   if (!state.quote || state.items === null || state.quoteItems !== itemsKey(state.items)) return null;
   if (withPlace && (state.place === null || !samePlace(state.quotePlace, state.place))) return null;
+  // مرور با همان کد تخفیفی که پذیرفته شد (برش ۱۱٫۴)؛ قیمت بی کد پس از اعمال کد کهنه است، و برعکس.
+  if (withPlace && state.quoteCode !== codeOf(state)) return null;
   return state.quote;
+}
+
+/** کد تخفیفی که قیمت مرور با آن خواسته می‌شود (برش ۱۱٫۴): فقط با نشست، چون سرور بی نشست کد را نمی‌سنجد. */
+function codeOf(state: CheckoutState): string | null {
+  return state.auth ? state.discount : null;
+}
+
+/** دلیل شکست کد تخفیف از بدنهٔ سرور (`discount_code_invalid`، `discount_unavailable`)؛ ناشناس یعنی «نیست». */
+const DISCOUNT_REASONS: readonly DiscountCodeReason[] = ['unknown', 'disabled', 'not_started', 'ended', 'used_up', 'used_by_you'];
+function discountReasonOf(body: Record<string, unknown>): DiscountCodeReason {
+  return DISCOUNT_REASONS.includes(body.reason as DiscountCodeReason) ? (body.reason as DiscountCodeReason) : 'unknown';
 }
 
 export function createCheckoutStore(deps: CheckoutStoreDeps) {
@@ -160,14 +190,22 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
     for (const listener of listeners) listener();
   }
 
-  /** قیمت سرور برای جزوهٔ کنونی و این جا؛ فقط پاسخ آخرین درخواست حساب است (بقیه null). */
+  /**
+   * قیمت سرور برای جزوهٔ کنونی و این جا؛ فقط پاسخ آخرین درخواست حساب است (بقیه null). با جا، کد تخفیف پذیرفته هم (برش ۱۱٫۴)؛ کدی که دیگر
+   * نمی‌خورد (پر شد، روزش گذشت) کنار می‌رود و دلیلش زیر فیلد می‌آید، و قیمت بی کد دوباره خواسته می‌شود.
+   */
   async function fetchQuote(place: Place | null): Promise<ApiResult<CheckoutQuote> | null> {
     const items = state.items;
     if (!items) return null;
+    const code = place ? codeOf(state) : null;
     const seq = ++quoteSeq;
-    const result = await deps.api.quote(items, place);
+    const result = await deps.api.quote(items, place, code);
     if (seq !== quoteSeq) return null;
-    if (result.ok) set({ quote: result.value, quoteItems: itemsKey(items), quotePlace: place });
+    if (result.ok) set({ quote: result.value, quoteItems: itemsKey(items), quotePlace: place, quoteCode: code });
+    if (!result.ok && result.error === 'discount_code_invalid' && code !== null) {
+      set({ discount: null, discountError: discountReasonOf(result.body), discountOpen: true });
+      return fetchQuote(place);
+    }
     return result;
   }
 
@@ -246,8 +284,8 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
 
     /** پیش‌نویس همین مسیر خرید، برای برگشت بعد از رفرش (`lib/draft.ts`). */
     draft(): CheckoutDraft {
-      const { place, recipient, mobile, otp } = state;
-      return { place, recipient, mobile, otp, pay: lastPay, order: placedOrder };
+      const { place, recipient, mobile, otp, discount } = state;
+      return { place, recipient, mobile, otp, pay: lastPay, order: placedOrder, discount };
     },
 
     /**
@@ -257,7 +295,15 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
     hydrate(draft: CheckoutDraft) {
       lastPay = draft.pay;
       placedOrder = draft.order;
-      set({ place: draft.place, recipient: draft.recipient, mobile: draft.mobile, otp: draft.otp });
+      set({
+        place: draft.place,
+        recipient: draft.recipient,
+        mobile: draft.mobile,
+        otp: draft.otp,
+        discount: draft.discount,
+        discountInput: draft.discount ?? '',
+        discountOpen: draft.discount !== null,
+      });
     },
 
     /** موبایلی که همین مرورگر پیش‌تر تأیید کرده (`GET /api/checkout`). */
@@ -333,6 +379,53 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
 
     editMobile(mobile: string) {
       set({ mobile, mobileError: null });
+    },
+
+    /** «کد تخفیف داری؟»: فیلد کد در مرور (برش ۱۱٫۴). */
+    openDiscount() {
+      set({ discountOpen: true });
+    },
+
+    editDiscount(discountInput: string) {
+      set({ discountInput, discountError: null });
+    },
+
+    /**
+     * «اعمال» کد تخفیف (برش ۱۱٫۴): قیمت مرور با همین کد از سرور. پذیرفته، کد یکدستِ سرور جای کد قبلی؛ نپذیرفته، دلیلش زیر فیلد و کد قبلی
+     * (اگر بود) با قیمتش می‌ماند.
+     */
+    async applyDiscount() {
+      const { items, place } = state;
+      const input = state.discountInput.trim();
+      if (!items || !place || !state.auth || state.busy) return;
+      if (input === '') {
+        set({ discountError: 'unknown' });
+        return;
+      }
+      set({ busy: 'discount', discountError: null, payNotice: null });
+      const seq = ++quoteSeq;
+      const result = await deps.api.quote(items, place, input);
+      if (seq !== quoteSeq) return;
+      if (result.ok) {
+        const code = result.value.breakdown.code?.code ?? null;
+        set({ busy: null, quote: result.value, quoteItems: itemsKey(items), quotePlace: place, quoteCode: code, discount: code, discountInput: code ?? input });
+        return;
+      }
+      if (result.error === 'discount_code_invalid') {
+        set({ busy: null, discountError: discountReasonOf(result.body) });
+        return;
+      }
+      if (result.error === 'auth_required') {
+        set({ busy: null, auth: null, stage: 'mobile', mobile: state.auth?.mobile ?? state.mobile, mobileError: { kind: 'signed_out' } });
+        return;
+      }
+      set({ busy: null, quoteError: result });
+    },
+
+    /** «حذف کد»: قیمت مرور بی کد. */
+    removeDiscount() {
+      set({ discount: null, discountInput: '', discountError: null, payNotice: null });
+      refreshQuote();
     },
 
     /** «ارسال کد». */
@@ -431,7 +524,8 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
         return 'address';
       }
       const expectedTotalRials = quote.breakdown.totalRials;
-      const payload = JSON.stringify([items, place, recipient, expectedTotalRials]);
+      const discountCode = codeOf(state);
+      const payload = JSON.stringify([items, place, recipient, expectedTotalRials, discountCode]);
       if (lastPay?.payload !== payload) lastPay = { payload, key: newKey() };
       set({ busy: 'pay', payNotice: null });
       const result = await deps.api.placeOrder({
@@ -441,6 +535,7 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
         checkoutKey: lastPay.key,
         expectedTotalRials,
         quoteSnapshot: quote.breakdown,
+        discountCode,
       });
       if (result.ok) {
         const { order, payment } = result.value;
@@ -477,6 +572,11 @@ export function createCheckoutStore(deps: CheckoutStoreDeps) {
         case 'auth_required':
           // نشست این گوشی تمام شده یا جای دیگری باطل شد: یک بار دیگر کد.
           set({ auth: null, stage: 'mobile', mobile: state.auth?.mobile ?? state.mobile, mobileError: { kind: 'signed_out' } });
+          return null;
+        case 'discount_code_invalid':
+          // کد میان مرور و «پرداخت» پر شد یا روزش گذشت (برش ۱۱٫۴): کنار می‌رود، دلیلش زیر فیلد، و قیمت تازهٔ بی کد؛ «پرداخت» دوباره زده می‌شود.
+          set({ discount: null, discountError: discountReasonOf(result.body), discountOpen: true });
+          refreshQuote();
           return null;
         case 'payment_checking': {
           // پرداختی از همین سفارش در حال بررسی است (برش ۷٫۲): صفحهٔ سفارش «در حال بررسی» را نشان می‌دهد، نه تلاش تازه.

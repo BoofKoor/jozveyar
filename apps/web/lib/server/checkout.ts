@@ -28,8 +28,9 @@ import {
   type PlacedOrder,
   type Recipient,
 } from '@jozveyar/contracts/checkout';
-import type { Breakdown, OrderSpec, PriceList } from '@jozveyar/contracts';
+import type { Breakdown, DiscountCodeTerms, OrderSpec, PriceList } from '@jozveyar/contracts';
 import {
+  DiscountRefusedError,
   FILE_MARGIN_MS,
   GATEWAY_NOT_READY_RESULTS,
   HELD_WATCH_MS,
@@ -60,7 +61,7 @@ import { itemPageCount, pausedOf, quote, wholeDocumentRule, type PausedOptions }
 import { DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { deliverQueued, smsState, type SmsOutbox, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay, formatJalaliWeekday, formatTehranTime } from '@jozveyar/text';
-import { checkRecipient } from '@jozveyar/text/input';
+import { checkRecipient, normalizeDiscountCode } from '@jozveyar/text/input';
 
 import { randomBytes, randomUUID } from 'node:crypto';
 
@@ -355,11 +356,26 @@ export function createCheckoutService(deps: CheckoutDeps) {
     );
   }
 
-  /** قیمت سرور؛ بی جای ارسال، کرایه null. */
+  /**
+   * کد تخفیف مرور (برش ۱۱٫۴، سؤال ۲۹۹): فقط برای نشست تأییدشده (سقف هر مشتری موبایل می‌خواهد)، یکدست (`normalizeDiscountCode`)، و سنجیده
+   * برای همین مشتری همین لحظه؛ کد خالی یعنی بی کد. حکم آخر با محافظ ساختن سفارش است.
+   */
+  async function discountOf(input: string | null, user: AuthUser | null): Promise<Result<DiscountCodeTerms | null>> {
+    if (input === null || input.trim() === '') return ok(null);
+    if (!user) return fail(401, 'auth_required');
+    const code = normalizeDiscountCode(input);
+    if (!code) return fail(422, 'discount_code_invalid', { reason: 'unknown' });
+    const found = await deps.orders.discountForCheckout({ code, userId: user.userId, at: now() });
+    if (!found.ok) return fail(422, 'discount_code_invalid', { reason: found.reason, code });
+    return ok(found.terms);
+  }
+
+  /** قیمت سرور؛ بی جای ارسال، کرایه null. کد تخفیف فقط از `discountOf`. */
   async function priced(
     sessionHash: string,
     items: readonly CheckoutItem[],
     place: Place | null,
+    code: DiscountCodeTerms | null = null,
   ): Promise<Result<{ breakdown: Breakdown; list: PriceList; docs: Map<string, CheckoutDocument>; zoneId: string | null }>> {
     const zoneId = place ? zoneOf(place) : null;
     if (place && !zoneId) return fail(400, 'invalid_place');
@@ -378,7 +394,7 @@ export function createCheckoutService(deps: CheckoutDeps) {
         paused: { sizes: [...paused.sizes], papers: [...paused.papers], bindings: [...paused.bindings] },
       });
     }
-    const breakdown = quote(specOf(items, docs.value, zoneId), list);
+    const breakdown = quote(specOf(items, docs.value, zoneId), list, { code });
     return ok({ breakdown, list, docs: docs.value, zoneId });
   }
 
@@ -392,6 +408,12 @@ export function createCheckoutService(deps: CheckoutDeps) {
    * نمی‌پذیرد (۱۱۳، سؤال ۱۴۸)، و IP ثبت‌نشده (۱۱۵) یا کد پذیرندهٔ خالی یعنی درگاه آماده نیست (سؤال ۱۳۹).
    */
   async function startPayment(order: OrderRow): Promise<Result<{ redirectUrl: string }>> {
+    // کد تخفیف سفارش (برش ۱۱٫۴، سؤال ۳۰۱): هر تلاش رزرو را تازه می‌کند، پس فقط اگر جا هست؛ پیش از درگاه، تا تلاشی که محافظ درج ردش می‌کند
+    // اصلاً شروع نشود.
+    if (order.discountCodeId) {
+      const refused = await deps.orders.discountRoom(order.id);
+      if (refused) return fail(409, 'discount_unavailable', { reason: refused, order: summary(order) });
+    }
     const id = randomUUID();
     const returnKey = randomBytes(16).toString('hex');
     const gatewayOrderId = `${order.orderNumber}-${id.slice(0, 8)}`;
@@ -419,16 +441,22 @@ export function createCheckoutService(deps: CheckoutDeps) {
       if (code === 'unconfigured') return fail(503, 'gateway_not_ready', { order: summary(order) });
       return fail(503, 'gateway_unavailable', { order: summary(order) });
     }
-    await deps.orders.insertPayment({
-      id,
-      orderId: order.id,
-      provider: deps.gateway.name,
-      amountRials: order.totalRials,
-      authority: started.authority,
-      gatewayOrderId,
-      returnKey,
-      raw: started.raw ?? null,
-    });
+    try {
+      await deps.orders.insertPayment({
+        id,
+        orderId: order.id,
+        provider: deps.gateway.name,
+        amountRials: order.totalRials,
+        authority: started.authority,
+        gatewayOrderId,
+        returnKey,
+        raw: started.raw ?? null,
+      });
+    } catch (error) {
+      // درخواست هم‌زمانی آخرین جای کد را میان سنجش بالا و درج گرفت؛ تلاش درگاه بی ردیف رها می‌شود و خودش منقضی می‌شود.
+      if (error instanceof DiscountRefusedError) return fail(409, 'discount_unavailable', { reason: error.reason, order: summary(order) });
+      throw error;
+    }
     return ok({ redirectUrl: started.redirectUrl });
   }
 
@@ -456,12 +484,17 @@ export function createCheckoutService(deps: CheckoutDeps) {
   }
 
   return {
-    /** قیمت سرور برای قدم شهر و مرور، با کرایهٔ هر منطقه برای کارت شهر. */
-    async quote(sessionHash: string, body: unknown): Promise<Result<CheckoutQuote>> {
+    /**
+     * قیمت سرور برای قدم شهر و مرور، با کرایهٔ هر منطقه برای کارت شهر. کد تخفیف فقط در مرور و فقط با نشست تأییدشده (برش ۱۱٫۴): ریز قیمت
+     * می‌گوید نشست، کوچک‌تر از پلهٔ سفارش بزرگ بود، یا جمع به حداقلش نرسید (`code`).
+     */
+    async quote(sessionHash: string, body: unknown, user: AuthUser | null = null): Promise<Result<CheckoutQuote>> {
       const parsed = checkoutQuoteRequestSchema.safeParse(body);
       if (!parsed.success) return fail(400, 'invalid_request', { fields: issuePaths(parsed.error.issues) });
       const { items, place } = parsed.data;
-      const result = await priced(sessionHash, items, place);
+      const code = await discountOf(parsed.data.discountCode, user);
+      if (!code.ok) return code;
+      const result = await priced(sessionHash, items, place, code.value);
       if (!result.ok) return result;
       const { breakdown, list, docs } = result.value;
       const stale = expiringIds(docs, now());
@@ -502,7 +535,9 @@ export function createCheckoutService(deps: CheckoutDeps) {
         return payExisting(existing.publicToken, user);
       }
 
-      const result = await priced(sessionHash, input.items, input.place);
+      const code = await discountOf(input.discountCode, user);
+      if (!code.ok) return code;
+      const result = await priced(sessionHash, input.items, input.place, code.value);
       if (!result.ok) return result;
       const { breakdown, docs, zoneId } = result.value;
       const at = now();
@@ -514,34 +549,45 @@ export function createCheckoutService(deps: CheckoutDeps) {
       }
 
       const spec = specOf(input.items, docs, zoneId);
-      const { order, created } = await deps.orders.createOrder({
-        checkoutKey: input.checkoutKey,
-        userId: user.userId,
-        breakdown,
-        quoteSnapshot: snapshot,
-        slaDays: await readSetting(setting, 'order.sla_days', log),
-        shippingMethodId: DEFAULT_SHIPPING_METHOD_ID,
-        shippingZoneId: zoneId!,
-        provinceId: input.place.provinceId,
-        cityId: input.place.cityId,
-        recipientName: recipient.value.name,
-        recipientPhone: user.mobile,
-        addressText: recipient.value.addressText,
-        postalCode: recipient.value.postalCode,
-        items: spec.items.map((item) => ({
-          pageCount: itemPageCount(item.sections),
-          copies: item.copies,
-          sidesMode: item.sidesMode,
-          paperSize: item.paperSize,
-          bindingTypeId: item.bindingTypeId,
-          sections: item.sections,
-          rules: item.rules.map((rule) => ({
-            pageRanges: rule.pageRanges.map(([from, to]) => [from, to] as [number, number]),
-            colorMode: rule.colorMode,
-            paperTypeId: rule.paperTypeId,
+      // کد فقط وقتی روی سفارش می‌نشیند که روی همین قیمت نشست؛ کوچک‌تر از پله یا زیر حداقلش، سفارش بی کد است و کد مصرف نمی‌شود (سؤال ۳۰۰).
+      const discountCodeId = breakdown.discount?.source === 'code' ? breakdown.discount.codeId : null;
+      let placed: Awaited<ReturnType<OrderStore['createOrder']>>;
+      try {
+        placed = await deps.orders.createOrder({
+          checkoutKey: input.checkoutKey,
+          userId: user.userId,
+          breakdown,
+          discountCodeId,
+          quoteSnapshot: snapshot,
+          slaDays: await readSetting(setting, 'order.sla_days', log),
+          shippingMethodId: DEFAULT_SHIPPING_METHOD_ID,
+          shippingZoneId: zoneId!,
+          provinceId: input.place.provinceId,
+          cityId: input.place.cityId,
+          recipientName: recipient.value.name,
+          recipientPhone: user.mobile,
+          addressText: recipient.value.addressText,
+          postalCode: recipient.value.postalCode,
+          items: spec.items.map((item) => ({
+            pageCount: itemPageCount(item.sections),
+            copies: item.copies,
+            sidesMode: item.sidesMode,
+            paperSize: item.paperSize,
+            bindingTypeId: item.bindingTypeId,
+            sections: item.sections,
+            rules: item.rules.map((rule) => ({
+              pageRanges: rule.pageRanges.map(([from, to]) => [from, to] as [number, number]),
+              colorMode: rule.colorMode,
+              paperTypeId: rule.paperTypeId,
+            })),
           })),
-        })),
-      });
+        });
+      } catch (error) {
+        // کد همین حالا، میان سنجش و ساختن، جا نداشت یا خاموش شد (محافظ زیر قفل ردیف کد).
+        if (error instanceof DiscountRefusedError) return fail(409, 'discount_code_invalid', { reason: error.reason });
+        throw error;
+      }
+      const { order, created } = placed;
       if (!created) {
         // درخواست هم‌زمانِ همین کلید زودتر ساخت.
         if (order.userId !== user.userId) return fail(409, 'checkout_key_conflict');

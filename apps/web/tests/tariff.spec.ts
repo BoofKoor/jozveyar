@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
 import { randomInt } from 'node:crypto';
 import { join } from 'node:path';
 import postgres from 'postgres';
-import type { PriceList } from '@jozveyar/contracts';
+import type { DiscountCodeTerms, PriceList } from '@jozveyar/contracts';
 import { quote, wholeDocumentRule } from '@jozveyar/pricing';
 import {
   DEFAULT_BINDING_TYPE_ID,
@@ -87,6 +87,19 @@ const RULES84: PriceList = {
   version: version + 3,
   label: 'تست ۸٫۴ — حداقل سفارش',
   settings: { ...CATALOG.settings, minOrderRials: 300_000, roundingStepRials: 10_000 },
+};
+/**
+ * ۱۱٫۴: تعرفهٔ پایه با دو پلهٔ تخفیف سفارش بزرگ، روی جمع چاپ، کاغذ و صحافی پیش از کرایه. ده صفحه 61,000 تومان است: یک نسخه زیر هر دو
+ * (نیمهٔ پلهٔ اول را دارد، پس «تا پلهٔ بعد»)، دو نسخه 122,000 با ۵٪، و سه نسخه 183,000 با ۱۰٪ و ارسال رایگان.
+ */
+const TIERS: PriceList = {
+  ...SEED_PRICE_LIST,
+  version: version + 4,
+  label: 'تست ۱۱٫۴ — تخفیف سفارش بزرگ',
+  discountTiers: [
+    { fromRials: 1_000_000, percent: 5, freeShipping: false },
+    { fromRials: 1_800_000, percent: 10, freeShipping: true },
+  ],
 };
 /** نرخ A4 دوروی یک تعرفه (یکرو همان). */
 const rateOf = (list: PriceList, color: 'bw' | 'color') => list.printRates.a4!.double[color];
@@ -173,6 +186,15 @@ async function insertTariff(list: PriceList) {
   });
 }
 
+/** پله‌های تخفیف یک نسخه (۱۱٫۴)؛ مثل بقیهٔ ردیف‌ها فقط پیش از فعال شدن (`discount_tiers_frozen`). */
+async function insertTiers(list: PriceList) {
+  for (const tier of list.discountTiers ?? []) {
+    await sql()`
+      insert into discount_tiers (price_list_version, from_rials, percent, free_shipping)
+      values (${list.version}, ${tier.fromRials}, ${tier.percent}, ${tier.freeShipping})`;
+  }
+}
+
 /** فقط یک تعرفه فعال است (ایندکس یکتای جزئی)، پس اول همه خاموش، بعد یکی روشن؛ مثل `activatePriceList`. */
 async function activate(versionToActivate: number) {
   await sql().begin(async (tx) => {
@@ -228,6 +250,40 @@ function tenPages(list: PriceList, zoneId: 'other' | null) {
   );
 }
 const toman = (rials: number) => formatTomans(rials, false);
+
+/** قیمت `plain-bw-10.pdf` با چند نسخه و تعرفهٔ پله‌دار، و کد تخفیف اگر هست (۱۱٫۴). */
+function tiered(copies: number, zoneId: 'other' | null, code?: DiscountCodeTerms) {
+  return quote(
+    {
+      items: [
+        {
+          sections: [{ documentId: 'test', pageCount: 10 }],
+          rules: wholeDocumentRule(10, 'bw', DEFAULT_PAPER_TYPE_ID),
+          copies,
+          sidesMode: 'double',
+          paperSize: 'a4',
+          bindingTypeId: DEFAULT_BINDING_TYPE_ID,
+        },
+      ],
+      shipping: zoneId ? { methodId: DEFAULT_SHIPPING_METHOD_ID, zoneId } : null,
+    },
+    TIERS,
+    code ? { code } : {},
+  );
+}
+
+/** کد تخفیف تست، با متن تصادفی تا اجرای دوباره روی همان پایگاه داده گیر نکند؛ سازنده بی کلید خارجی است. */
+async function insertCode(terms: { kind: 'percent'; percent: number } | { kind: 'fixed'; amountRials: number }): Promise<DiscountCodeTerms> {
+  const code = `E2E${randomInt(36 ** 6).toString(36).toUpperCase().padStart(6, '0')}`;
+  const [row] = await sql()`
+    insert into discount_codes (code, kind, percent, amount_rials, created_by)
+    values (${code}, ${terms.kind}, ${terms.kind === 'percent' ? terms.percent : null}, ${terms.kind === 'fixed' ? terms.amountRials : null},
+            gen_random_uuid())
+    returning id`;
+  return terms.kind === 'percent'
+    ? { id: row!.id as string, code, minOrderRials: 0, kind: 'percent', percent: terms.percent, maxRials: null }
+    : { id: row!.id as string, code, minOrderRials: 0, kind: 'fixed', amountRials: terms.amountRials };
+}
 
 /** قیمت یک جزوهٔ سیاه‌سفید دورو، یک نسخه، با `quote()` و کاتالوگ. */
 function catalogQuote(
@@ -646,5 +702,124 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
     expect(back.status()).toBe(200);
     await rulesContext.close();
     await resetRules84();
+  });
+
+  test('۱۱٫۴: تخفیف سفارش بزرگ در صفحهٔ اصلی و میز، «تا پلهٔ بعد»، ارسال رایگان، کد کوچک‌تر و بزرگ‌تر از پله، و سفارش منجمد با پله', async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(300_000);
+    await copyTariff(TIERS);
+    await insertTiers(TIERS);
+    await activate(TIERS.version);
+    await untilHomeHas(request, TIERS.version);
+    expect((await homeTariff(request)).tariff!.priceList.discountTiers).toEqual(TIERS.discountTiers);
+    // ۱۰٪ و ارسال رایگان (183,000 + 137,750 تومان) از کد 5٪ بیشتر است و از کد ثابت 160,000 تومانی کمتر.
+    const smaller = await insertCode({ kind: 'percent', percent: 5 });
+    const bigger = await insertCode({ kind: 'fixed', amountRials: 1_600_000 });
+
+    const tiersContext = await newContext(browser);
+    const shop = await tiersContext.newPage();
+    const total = shop.getByTestId('summary-total');
+    const nudge = shop.getByTestId('tier-nudge').filter({ visible: true });
+    const discountLine = shop.getByTestId('summary-discount').filter({ visible: true });
+    await shop.goto('/');
+    await expect(shop.getByTestId('tariff-tiers')).toHaveText(
+      'تخفیف سفارش بزرگ، روی چاپ، کاغذ و صحافی: از 100,000 تومان، 5٪ تخفیف؛ از 180,000 تومان، 10٪ تخفیف و ارسال رایگان.',
+    );
+
+    // یک نسخه: زیر هر دو پله، و نیمهٔ پلهٔ اول را دارد.
+    await shop.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
+    await expect(total).toHaveText(toman(tiered(1, null).totalWithoutShippingRials), { timeout: 20_000 });
+    await expect(nudge).toHaveText('39,000 تومان دیگر، پیش از ارسال، تا 5٪ تخفیف.');
+    await expect(discountLine).toHaveCount(0);
+
+    // دو نسخه: ۵٪، و پلهٔ بعد ارسال رایگان هم دارد.
+    const more = shop.getByRole('button', { name: 'یکی بیشتر' });
+    await more.click();
+    const two = tiered(2, null);
+    expect(two.discountRials).toBe(61_000);
+    await expect(total).toHaveText(toman(two.totalWithoutShippingRials));
+    await expect(discountLine).toHaveText('تخفیف سفارش بزرگ (5٪)−6,100');
+    await expect(nudge).toHaveText('58,000 تومان دیگر، پیش از ارسال، تا 10٪ تخفیف و ارسال رایگان.');
+    await expect(shop.getByTestId('shipping-from').filter({ visible: true })).toBeVisible();
+
+    // سه نسخه: ۱۰٪ و ارسال رایگان؛ «پلهٔ بعد» دیگر نیست.
+    await more.click();
+    const three = tiered(3, 'other');
+    expect([three.discountRials, three.shippingRials, three.discount]).toEqual([
+      183_000,
+      0,
+      { source: 'tier', fromRials: 1_800_000, percent: 10, freeShipping: true, waivedShippingRials: 1_377_500 },
+    ]);
+    await expect(total).toHaveText(toman(tiered(3, null).totalWithoutShippingRials));
+    await expect(discountLine).toHaveText('تخفیف سفارش بزرگ (10٪)−18,300');
+    await expect(nudge).toHaveCount(0);
+    await expect(shop.getByTestId('shipping-free').filter({ visible: true })).toHaveText(
+      'ارسال رایگان، به هر شهری. شهر را در قدم بعد انتخاب می‌کنی.',
+    );
+
+    // قدم شهر و نشانی: کرایه خط‌خورده و «رایگان»، و جمع بی کرایه.
+    await expect(visibleButton(shop, 'ادامه — آدرس و تحویل')).toBeEnabled({ timeout: 90_000 });
+    await visibleButton(shop, 'ادامه — آدرس و تحویل').click();
+    await expect(shop.getByTestId('zone-rates')).toHaveText('ارسال این سفارش به همهٔ شهرها رایگان است.');
+    await shop.getByRole('button', { name: 'مشهد' }).click();
+    await expect(heading(shop, 'نشانی در مشهد')).toBeVisible();
+    await expect(shop.getByTestId('summary-shipping').filter({ visible: true })).toHaveText('ارسال پست پیشتاز به مشهد137,750 رایگان');
+    await expect(total).toHaveText(toman(three.totalRials));
+    await shop.getByLabel('نشانی', { exact: true }).fill('بلوار وکیل‌آباد، وکیل‌آباد ۱۲، پلاک ۲۴');
+    await shop.getByLabel('نام گیرنده').fill('سارا احمدی');
+    await shop.getByLabel('نام گیرنده').press('Enter');
+    const mobile = `0912${String(randomInt(10_000_000)).padStart(7, '0')}`;
+    await shop.getByLabel('شمارهٔ موبایل').fill(mobile);
+    await shop.getByLabel('شمارهٔ موبایل').press('Enter');
+    await shop.getByLabel('کد پیامک').fill(await codeOf(mobile));
+    await shop.getByLabel('کد پیامک').press('Enter');
+    await expect(heading(shop, 'مرور و پرداخت')).toBeVisible();
+
+    // کد کوچک‌تر از پله: «به کار نرفت» و پله می‌ماند (سؤال ۳۰۰).
+    await shop.getByTestId('discount-open').click();
+    await shop.getByLabel('کد تخفیف').fill(smaller.code.toLowerCase());
+    await shop.getByRole('button', { name: 'اعمال' }).click();
+    await expect(shop.getByTestId('discount-applied')).toContainText(`کد ${smaller.code} به کار نرفت.`);
+    await expect(shop.getByTestId('discount-smaller')).toContainText(`تخفیف سفارش بزرگ این سفارش بیشتر است، پس همان می‌ماند و کد ${smaller.code} مصرف نمی‌شود.`);
+    await expect(total).toHaveText(toman(three.totalRials));
+
+    // کد بزرگ‌تر: کد می‌نشیند، و ارسال رایگان پله هم با آن می‌رود؛ هر سفارش فقط یکی.
+    await shop.getByRole('button', { name: 'حذف کد' }).click();
+    await shop.getByLabel('کد تخفیف').fill(bigger.code);
+    await shop.getByRole('button', { name: 'اعمال' }).click();
+    const byCode = tiered(3, 'other', bigger);
+    expect([byCode.discountRials, byCode.shippingRials, byCode.discount?.source]).toEqual([1_600_000, 1_377_500, 'code']);
+    await expect(shop.getByTestId('discount-applied')).toContainText(`کد ${bigger.code} اعمال شد.`);
+    await expect(discountLine).toHaveText(`تخفیف کد ${bigger.code}−160,000`);
+    await expect(total).toHaveText(toman(byCode.totalRials));
+
+    // بی کد، با پله، پرداخت؛ کد کوچک‌تر و بزرگ‌تر هیچ‌کدام مصرف نشدند.
+    await shop.getByRole('button', { name: 'حذف کد' }).click();
+    await expect(total).toHaveText(toman(three.totalRials));
+    await visibleButton(shop, `پرداخت ${toman(three.totalRials)} تومان`).click();
+    await shop.waitForURL(/\/pay\/mock\/MOCK[0-9A-F]{32}$/);
+    const number = Number(await shop.locator('.ck-gate__lines dd.num').textContent());
+    await shop.getByRole('button', { name: 'پرداخت موفق' }).click();
+    await shop.waitForURL(/\/order\/[0-9a-f-]{36}$/);
+    await expect(heading(shop, 'سفارش ثبت شد')).toBeVisible();
+    await expect(discountLine).toHaveText('تخفیف سفارش بزرگ (10٪)−18,300');
+    await expect(shop.getByTestId('summary-shipping').filter({ visible: true })).toContainText('137,750 رایگان');
+    const [order] = await sql()`
+      select price_list_version, discount_code_id, discount_rials::text as discount, shipping_rials::text as shipping,
+             total_rials::text as total, price_breakdown->'discount' as tier
+        from orders where order_number = ${number}`;
+    expect(order).toEqual({
+      price_list_version: TIERS.version,
+      discount_code_id: null,
+      discount: '183000',
+      shipping: '0',
+      total: String(three.totalRials),
+      tier: three.discount,
+    });
+    const used = await sql()`select count(*)::int as n from orders where discount_code_id in (${smaller.id}, ${bigger.id})`;
+    expect(used[0]!.n).toBe(0);
+    await tiersContext.close();
   });
 });

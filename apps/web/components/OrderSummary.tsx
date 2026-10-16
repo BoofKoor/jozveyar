@@ -3,12 +3,12 @@
 import type { ReactNode } from 'react';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { Breakdown, PriceList } from '@jozveyar/contracts';
-import { minOrderGapRials } from '@jozveyar/pricing';
+import { freeShippingOf, minOrderGapRials, nextTierOf } from '@jozveyar/pricing';
 import { DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import { publishDockHeight } from '../lib/dock';
 import type { OrderConfig } from '../lib/orderConfig';
 import { Names, Note } from './AnalysisCard';
-import { JozveLines, SummaryLines, printLabel, type JozveLine } from './checkout/parts';
+import { JozveLines, SummaryLines, discountLineOf, printLabel, tierReward, type JozveLine } from './checkout/parts';
 import { SumValue } from './checkout/sum';
 
 /**
@@ -167,6 +167,11 @@ export function OrderSummary({
 }: Props & ActionProps & { config: OrderConfig; priceList: PriceList; notes?: ReactNode }) {
   const unread = blocked.filter((name) => !refused.includes(name));
   const gapRials = minOrderGapRials(breakdown, priceList);
+  // تخفیف سفارش بزرگ (۱۱٫۴، سؤال ۲۹۷): پلهٔ بعد فقط وقتی جمع دست‌کم نصف آستانه‌اش است، و نه زیر حداقل سفارش.
+  const next = gapRials > 0 ? null : nextTierOf(breakdown, priceList);
+  const nudge = next && breakdown.subtotalRials * 2 >= next.tier.fromRials ? next : null;
+  const discount = discountLineOf(breakdown);
+  const free = freeShippingOf(breakdown);
   const item = breakdown.items[0];
   const binding = priceList.bindingTypes[config.bindingTypeId]?.nameFa ?? '';
   const paper = config.paperTypeId === DEFAULT_PAPER_TYPE_ID ? null : (priceList.paperTypes[config.paperTypeId]?.nameFa ?? null);
@@ -178,12 +183,13 @@ export function OrderSummary({
       </h2>
       {/* ریز قیمت میز بی ارسال است، پس گرد کردنش همان گرد کردن «جمع» زیرش است (۸٫۴). */}
       {jozves ? (
-        <JozveLines jozves={jozves} rounding={breakdown.roundingRials} />
+        <JozveLines jozves={jozves} discount={discount} rounding={breakdown.roundingRials} />
       ) : item ? (
         <SummaryLines
           item={item}
           print={printLabel(config.colorMode, config.sidesMode, config.paperSize, paper)}
           bindingName={binding}
+          discount={discount}
           rounding={breakdown.roundingRials}
         />
       ) : null}
@@ -195,7 +201,13 @@ export function OrderSummary({
         <SumValue rials={breakdown.totalWithoutShippingRials} testId="summary-total" />
       </div>
 
-      {breakdown.shippingFromRials !== null ? (
+      {free ? (
+        // ارسال رایگان پلهٔ سفارش بزرگ (۱۱٫۴، سؤال ۲۹۶)
+        <p data-testid="shipping-free" className="home-sum__ship">
+          <span className="jy-icon jy-icon-truck" aria-hidden="true" />
+          <span>ارسال رایگان، به هر شهری. شهر را در قدم بعد انتخاب می‌کنی.</span>
+        </p>
+      ) : breakdown.shippingFromRials !== null ? (
         <p data-testid="shipping-from" className="home-sum__ship">
           <span className="jy-icon jy-icon-truck" aria-hidden="true" />
           <span>
@@ -246,6 +258,12 @@ export function OrderSummary({
             <p className="mt-1">نسخهٔ بیشتر بگیر، یا جزوهٔ دیگری اضافه کن.</p>
           </Note>
         ) : null}
+        {nudge ? (
+          <Note tone="info" testId="tier-nudge">
+            <span className="num">{formatTomans(roundUpToToman(nudge.gapRials), false)}</span> تومان دیگر، پیش از ارسال، تا{' '}
+            {tierReward(nudge.tier.percent, nudge.tier.freeShipping)}.
+          </Note>
+        ) : null}
         {notes}
       </div>
 
@@ -286,6 +304,8 @@ export function PriceDock({
             <span className="home-dock__ship" data-testid="dock-min-order">
               تا حداقل سفارش <span className="num">{formatTomans(roundUpToToman(gapRials), false)}</span> تومان مانده
             </span>
+          ) : freeShippingOf(breakdown) ? (
+            <span className="home-dock__ship">ارسال رایگان</span>
           ) : breakdown.shippingFromRials !== null ? (
             <span className="home-dock__ship">
               + ارسال از <span className="num">{formatTomans(breakdown.shippingFromRials, false)}</span> تومان
