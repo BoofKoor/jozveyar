@@ -8,12 +8,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { inEventKind, type AdminEventView } from '@jozveyar/db';
+import { ADMIN_ROLES, inEventKind, type AdminEventView } from '@jozveyar/db';
 
 import { byDay, EVENT_KINDS, eventLines } from './events';
 import { dayHeading, dayText, whenText } from './format';
 import { gateOf, panelPath } from './gate';
-import { roleLabel } from './messages';
+import { ROLE_NAMES, roleLabel } from './messages';
+import { ROLE_TILES } from './roles';
 import { contentSecurityPolicy, originOf, sameOrigin } from './security';
 import { adminConfig, configProblems, describeConfig, describePayments, panelMockGateway } from './server/config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './server/cookie';
@@ -213,6 +214,23 @@ describe('رویدادها', () => {
       ['سارا', ['دعوت ', { ltr: 'reza' }, ' لغو شد']],
       ['سارا', ['کد نادرست در کار حساس', '؛ حساب قفل و نشست‌ها بسته شد']],
     ]);
+  });
+
+  it('عوض کردن نقش (۹٫۴): «نقش ali از متصدی به حسابدار عوض شد»، کاربر چاپخانه با نام چاپخانه‌اش؛ زیر چیپ «ادمین‌ها»', () => {
+    const noor = { id: 'p2', name: 'چاپ نور' };
+    const lines = eventLines([
+      event('admins.role', { detail: { username: 'ali', from: ['operator'], to: 'accountant' } }),
+      event('admins.role', { detail: { username: 'hasan', from: ['operator'], to: 'print_partner', partner: noor } }),
+      event('admins.role', { detail: { username: 'hasan', from: ['print_partner'], to: 'owner', fromPartner: noor } }),
+      event('admins.role', { detail: { username: 'reza', from: [], to: 'operator' } }),
+    ]);
+    expect(lines.map((l) => [l.who, l.text])).toEqual([
+      ['سارا', ['نقش ', { ltr: 'ali' }, ' از متصدی به حسابدار عوض شد']],
+      ['سارا', ['نقش ', { ltr: 'hasan' }, ' از متصدی به چاپخانه (چاپ نور) عوض شد']],
+      ['سارا', ['نقش ', { ltr: 'hasan' }, ' از چاپخانه (چاپ نور) به مالک عوض شد']],
+      ['سارا', ['نقش ', { ltr: 'reza' }, ' متصدی شد']],
+    ]);
+    expect([inEventKind('admins.role', 'admins'), inEventKind('admins.role', 'orders')]).toEqual([true, false]);
   });
 
   it('پیوند ثبت کاربر چاپخانه (۵٫۳) با نام چاپخانه، همان طرح: «(چاپخانه، چاپ نور)»؛ کار خودش با نام خودش', () => {
@@ -555,6 +573,12 @@ describe('نقش در سربرگ و فهرست ادمین‌ها', () => {
     expect(roleLabel(['print_partner'], noor, { withRole: true })).toBe('چاپخانه · چاپ نور');
     expect(roleLabel(['owner'], null)).toBe('مالک');
     expect(roleLabel(['operator'], null, { withRole: true })).toBe('متصدی');
+    expect(roleLabel(['accountant'], null, { withRole: true })).toBe('حسابدار');
+  });
+
+  it('هر نقش کد (`ADMIN_ROLES`) نام و کاشی خودش را دارد (۹٫۴): نقش پنجم بی متن انتخاب و بی نام در فهرست نمی‌آید', () => {
+    expect(ROLE_NAMES).toEqual(Object.fromEntries(Object.entries(ADMIN_ROLES).map(([id, role]) => [id, role.nameFa])));
+    expect(ROLE_TILES.map((tile) => tile.role).sort()).toEqual(Object.keys(ADMIN_ROLES).sort());
   });
 });
 

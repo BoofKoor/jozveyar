@@ -26,7 +26,7 @@ export default async function RevertImportPage({ params }: { params: Promise<{ g
   const { gate, id } = await params;
   const { shipments } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'shipments.revert')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'shipments.revert')) return <NoAccess gate={gate} session={session} />;
   const result = await shipments.page(session, id);
   if (!result.ok) notFound();
   const view = result.value;

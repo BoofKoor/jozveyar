@@ -127,7 +127,7 @@ test.describe.serial('پنل ادمین', () => {
 
   test('افزودن متصدی با کد تازه؛ متصدی پیشخوان، سفارش‌ها و تعرفه را دارد، نه بخش‌های مالک', async ({ browser }) => {
     await ownerPage.goto(at('/admins'));
-    // از ۵٫۳ «افزودن ادمین» با سه نقش (طرح `m-admin-invite`)؛ پیش‌فرض همان متصدی.
+    // از ۵٫۳ «افزودن ادمین» با سه نقش (طرح `m-admin-invite`) و از ۹٫۴ چهار؛ پیش‌فرض همان متصدی.
     await ownerPage.getByRole('link', { name: 'افزودن ادمین' }).click();
     await expect(ownerPage.getByRole('radio', { name: /^متصدی/ })).toBeChecked();
     await ownerPage.getByLabel('نام', { exact: true }).fill('علی محمدی');

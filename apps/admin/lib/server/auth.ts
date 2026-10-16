@@ -9,7 +9,7 @@
  *   می‌گوید چنین حسابی هست؛ پذیرفته، چون سقف IP شمردن نام‌ها را کند می‌کند و بی آن ادمین نمی‌داند چرا
  *   وارد نمی‌شود.
  * - **نشست:** توکن ۲۵۶ بیتی در کوکی، فقط هشش در پایگاه داده؛ ۱۲ ساعت، یا ۱ ساعت بی‌کاری.
- * - **کار حساس** (ساختن و بستن ادمین؛ از ۴٫۵ و ۴٫۶ تعرفه و کلیدها) کد تازهٔ برنامهٔ تأیید می‌خواهد؛ همان
+ * - **کار حساس** (ساختن و بستن ادمین و از ۹٫۴ عوض کردن نقشش؛ از ۴٫۵ و ۴٫۶ تعرفه و کلیدها) کد تازهٔ برنامهٔ تأیید می‌خواهد؛ همان
  *   سقف ۵ اشتباه، و قفلش نشست‌های باز را هم می‌بندد: کوکی دزدیده‌شده بی گوشی کار حساسی نمی‌کند.
  * - **پیوند ثبت:** ۱۵ دقیقه، یک بار. رمز برنامهٔ تأیید از ساختن پیوند ثابت است (QR با بار دوبارهٔ صفحه
  *   همان می‌ماند) و با ثبت به ردیف ادمین می‌رود. «کد ورود تازه» (گوشی گم شد) همین پیوند است برای ادمین موجود.
@@ -25,6 +25,7 @@ import {
   ALL_ORDERS,
   PARTNER_ROLE,
   isAdminRole,
+  roleSeen,
   seal,
   unseal,
   type AdminEventView,
@@ -130,6 +131,14 @@ export interface IssuedInvite {
   displayName: string;
   /** ادمین موجود بود (کد ورود تازه). */
   reset: boolean;
+}
+
+/** نقشی که «عوض کردن نقش» نشاند (برش ۹٫۴): صفحهٔ «ادمین‌ها» با آن می‌گوید چه شد. */
+export interface RoleChanged {
+  userId: string;
+  displayName: string;
+  role: AdminRole;
+  partner: AdminPartnerRef | null;
 }
 
 export interface InviteInfo {
@@ -248,6 +257,8 @@ export function createAdminAuth(deps: AdminAuthDeps) {
           return fail(409, 'partner_inactive');
         case 'role_required':
           return fail(409, 'invalid_role');
+        case 'last_owner':
+          return fail(409, 'role_last_owner');
       }
     }
     return ok({
@@ -473,6 +484,61 @@ export function createAdminAuth(deps: AdminAuthDeps) {
       return ok(true);
     },
 
+    /**
+     * «عوض کردن نقش» ادمین دیگر از «ادمین‌ها» (برش ۹٫۴، سؤال ۱۹۷): یکی از چهار نقش، برای «چاپخانه» یکی از چاپخانه‌های فعال، با کد تازه.
+     * فرم کهنه (`seen`، نقش امروز در فهرست) و نقش یکسان پیش از کد، تا کد هدر نرود؛ همان‌ها و آخرین مالک فعال دوباره زیر قفل
+     * (`changeRole`). نقش خود نه، مثل «غیرفعال کن»: مالکی که نقش خودش را کم کند، شاید مالکی نماند که برش گرداند.
+     */
+    async changeRole(
+      session: AdminSession,
+      form: { userId: unknown; role: unknown; partner?: unknown; seen: unknown; code: unknown },
+      ip: string,
+    ): Promise<Result<RoleChanged>> {
+      const denied = requirePermission(session, 'admins.manage');
+      if (denied) return denied;
+      const target = await findListed(form.userId);
+      if (!target) return fail(404, 'not_found');
+      if (target.user.id === session.userId) return fail(400, 'self');
+      if (!isAdminRole(form.role)) return fail(400, 'invalid_role');
+      let partnerId: string | null = null;
+      if (form.role === PARTNER_ROLE) {
+        const chosen = typeof form.partner === 'string' ? form.partner : '';
+        if (!chosen) return fail(400, 'partner_required');
+        if (!(await store.partnerChoices()).some((partner) => partner.id === chosen)) return fail(409, 'partner_inactive');
+        partnerId = chosen;
+      }
+      const seen = roleSeen(target.roles, target.partner?.id ?? null);
+      if (form.seen !== seen) return fail(409, 'role_stale');
+      if (roleSeen([form.role], partnerId) === seen) return fail(400, 'role_same');
+      const stepped = await stepUp(session, form.code, ip);
+      if (!stepped.ok) return stepped;
+      const changed = await store.changeRole({
+        userId: target.user.id,
+        role: form.role,
+        partnerId,
+        seen,
+        at: now(),
+        event: { adminUserId: session.userId, action: 'admins.role', ipHash: ipHash(ip) },
+      });
+      if (!changed.ok) {
+        switch (changed.reason) {
+          case 'not_found':
+            return fail(404, 'not_found');
+          case 'role_stale':
+            return fail(409, 'role_stale');
+          case 'role_same':
+            return fail(400, 'role_same');
+          case 'last_owner':
+            return fail(409, 'role_last_owner');
+          case 'partner_required':
+            return fail(400, 'partner_required');
+          case 'partner_inactive':
+            return fail(409, 'partner_inactive');
+        }
+      }
+      return ok({ userId: target.user.id, displayName: target.user.displayName, role: form.role, partner: changed.partner });
+    },
+
     /** «لغو دعوت»: فقط دسترسی کم می‌کند، پس کد نمی‌خواهد. */
     async revokeInvite(session: AdminSession, form: { userId: unknown }, ip: string): Promise<Result<true>> {
       const denied = requirePermission(session, 'admins.manage');
@@ -582,6 +648,12 @@ export function createAdminAuth(deps: AdminAuthDeps) {
   async function findTarget(userId: unknown): Promise<AdminUserRow | null> {
     if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/.test(userId)) return null;
     return store.findUser(userId);
+  }
+
+  /** ادمین هدف با نقش و چاپخانه‌اش، همان که «ادمین‌ها» نشان می‌دهد و فرم «عوض کردن نقش» از آن ساخته شد. */
+  async function findListed(userId: unknown): Promise<AdminListItem | null> {
+    if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/.test(userId)) return null;
+    return (await store.listAdmins(now())).find((item) => item.user.id === userId) ?? null;
   }
 }
 

@@ -61,7 +61,7 @@ import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder,
 import { createSmsLog, createSmsOutbox, createSmsStats, liveSms } from './sms.js';
 import { consoleTransport, deliverQueued, orderPaidText, partnerOrderText, SMS_STUCK_MS, trackingText, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay } from '@jozveyar/text';
-import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type NewInvite } from './admin.js';
+import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type AdminRole, type NewInvite } from './admin.js';
 import {
   ALL_ORDERS,
   createPanelOrderStore,
@@ -2006,6 +2006,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
       expect(await read('print_partner')).toEqual(['files.download', 'orders.read', 'orders.status', 'shipments.import']);
       expect([...ADMIN_ROLES.print_partner.permissions].sort()).toEqual(await read('print_partner'));
+      // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
+      expect(await read('accountant')).toEqual(['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.read']);
+      expect([...ADMIN_ROLES.accountant.permissions].sort()).toEqual(await read('accountant'));
       await conn.db.insert(rolePermissions).values({ roleId: 'operator', permissionId: 'secrets.edit' });
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       expect(await read('operator')).not.toContain('secrets.edit');
@@ -2194,6 +2197,80 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect((await store.findSession(sara.sessionHash))!.revokedAt).not.toBeNull();
       expect(await store.disableUser(mina.userId, at, event('admins.disable'))).toBe('last_owner');
       expect(await store.disableUser(sara.userId, at, event('admins.disable'))).toBe('not_found');
+    });
+
+    it('عوض کردن نقش (۹٫۴): فقط از نقشی که دیده شد، با چاپخانهٔ فعال؛ آخرین مالک فعال نه؛ نشست باز و رویداد در همان تراکنش', async () => {
+      const store = createAdminStore(conn);
+      const sara = await enrolled('sara', 'owner');
+      const ali = await enrolled('ali');
+      const roleEvents = () => conn.db.select().from(adminEvents).where(eq(adminEvents.action, 'admins.role')).orderBy(asc(adminEvents.id));
+      const change = (userId: string, role: AdminRole, seen: string, partnerId: string | null = null) =>
+        store.changeRole({ userId, role, partnerId, seen, at, event: { adminUserId: sara.userId, action: 'admins.role', ipHash: 'ip' } });
+      expect(await change(ali.userId, 'accountant', 'operator|')).toEqual({ ok: true, username: 'ali', partner: null });
+      expect(await store.rolesOf(ali.userId)).toEqual(['accountant']);
+      expect(await store.findSession(ali.sessionHash)).toMatchObject({
+        revokedAt: null,
+        roles: ['accountant'],
+        permissions: ['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.read'],
+      });
+      expect((await roleEvents()).map((e) => [e.adminUserId, e.targetType, e.targetId, e.ipHash, e.detail])).toEqual([
+        [sara.userId, 'admin', ali.userId, 'ip', { username: 'ali', from: ['operator'], to: 'accountant' }],
+      ]);
+      // فرم کهنه، نقش یکسان و ادمینی که نیست: هیچ چیز عوض نمی‌شود، رویداد هم نه.
+      expect(await change(ali.userId, 'operator', 'operator|')).toEqual({ ok: false, reason: 'role_stale' });
+      expect(await change(ali.userId, 'accountant', 'accountant|')).toEqual({ ok: false, reason: 'role_same' });
+      expect(await change(randomUUID(), 'operator', '|')).toEqual({ ok: false, reason: 'not_found' });
+      // نقش «چاپخانه»: چاپخانهٔ فعال؛ غیرفعال نه. ستون نوع‌دار و EXCLUDE همان (۵٫۳): نقش قبلی می‌رود و یک ردیف تازه.
+      const [first] = await conn.db
+        .select({ id: printPartners.id, name: printPartners.name })
+        .from(printPartners)
+        .where(eq(printPartners.isDefault, true));
+      const [closed] = await conn.db
+        .insert(printPartners)
+        .values({ name: `چاپ بسته ${randomUUID().slice(0, 8)}`, provinceId: 11, cityId: 1326, deactivatedAt: at })
+        .returning({ id: printPartners.id });
+      expect(await change(ali.userId, 'print_partner', 'accountant|')).toEqual({ ok: false, reason: 'partner_required' });
+      expect(await change(ali.userId, 'print_partner', 'accountant|', closed!.id)).toEqual({ ok: false, reason: 'partner_inactive' });
+      expect(await change(ali.userId, 'print_partner', 'accountant|', first!.id)).toEqual({ ok: true, username: 'ali', partner: first });
+      expect(await conn.db.select().from(adminUserRoles).where(eq(adminUserRoles.adminUserId, ali.userId))).toEqual([
+        { adminUserId: ali.userId, roleId: 'print_partner', printPartnerId: first!.id },
+      ]);
+      expect((await store.findSession(ali.sessionHash))!.partner).toEqual(first);
+      expect(await change(ali.userId, 'print_partner', `print_partner|${first!.id}`, first!.id)).toEqual({ ok: false, reason: 'role_same' });
+      expect(await change(ali.userId, 'operator', `print_partner|${first!.id}`)).toMatchObject({ ok: true });
+      expect(await store.findSession(ali.sessionHash)).toMatchObject({ roles: ['operator'], partner: null });
+      expect((await roleEvents()).at(-1)!.detail).toEqual({ username: 'ali', from: ['print_partner'], to: 'operator', fromPartner: first });
+      // آخرین مالک فعال؛ با مالک دوم، می‌شود.
+      expect(await change(sara.userId, 'operator', 'owner|')).toEqual({ ok: false, reason: 'last_owner' });
+      expect(await store.rolesOf(sara.userId)).toEqual(['owner']);
+      expect(await roleEvents()).toHaveLength(3);
+      await enrolled('mina', 'owner');
+      expect(await change(sara.userId, 'operator', 'owner|')).toMatchObject({ ok: true });
+    });
+
+    it('دو مالک که هم‌زمان هم را پایین می‌آورند (۹٫۴): قفل یکی را مالک نگه می‌دارد', async () => {
+      const store = createAdminStore(conn);
+      const sara = await enrolled('sara', 'owner');
+      const mina = await enrolled('mina', 'owner');
+      const demote = (userId: string, by: string) =>
+        store.changeRole({ userId, role: 'operator', partnerId: null, seen: 'owner|', at, event: { adminUserId: by, action: 'admins.role' } });
+      const results = await Promise.all([demote(sara.userId, mina.userId), demote(mina.userId, sara.userId)]);
+      expect(results.map((r) => r.ok).sort()).toEqual([false, true]);
+      expect(results.find((r) => !r.ok)).toEqual({ ok: false, reason: 'last_owner' });
+      expect((await store.listAdmins(at)).filter((a) => a.roles.includes('owner'))).toHaveLength(1);
+    });
+
+    it('دستور سرور با نقش صریح برای آخرین مالک فعال (۹٫۴): پیش از هر نوشتن رد می‌شود؛ با مالک دوم، می‌شود', async () => {
+      const store = createAdminStore(conn);
+      const sara = await enrolled('sara', 'owner');
+      expect(await store.createInvite(invite('sara', { allowExisting: true, role: 'operator' }))).toEqual({ ok: false, reason: 'last_owner' });
+      expect(await store.rolesOf(sara.userId)).toEqual(['owner']);
+      expect(await store.findUser(sara.userId)).toMatchObject({ passwordHash: expect.any(String), totpSealed: 'v1.sealed-user', disabledAt: null });
+      expect((await store.findSession(sara.sessionHash))!.revokedAt).toBeNull();
+      expect(await conn.db.select().from(adminInvites).where(eq(adminInvites.adminUserId, sara.userId))).toHaveLength(1);
+      await enrolled('mina', 'owner');
+      expect(await store.createInvite(invite('sara', { allowExisting: true, role: 'accountant' }))).toMatchObject({ ok: true, reset: true });
+      expect(await store.rolesOf(sara.userId)).toEqual(['accountant']);
     });
 
     it('لغو دعوت: ادمینی که هرگز ثبت نکرد غیرفعال می‌شود، ثبت‌شده نه', async () => {

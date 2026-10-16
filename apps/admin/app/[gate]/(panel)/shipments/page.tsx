@@ -30,9 +30,9 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
   const query = await searchParams;
   const { shipments } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'shipments.import')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'shipments.import')) return <NoAccess gate={gate} session={session} />;
   const result = await shipments.list(session, { page: one(query, 'page') });
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const { lines, now, page, more, queued } = result.value;
   const partner = session.partner;
   const error = one(query, 'e');
@@ -50,7 +50,8 @@ export default async function ShipmentsPage({ params, searchParams }: { params: 
           </p>
         </div>
         {can(session, 'reports.read') ? (
-          // گزارش حاشیهٔ ارسال (۶٫۴، تصمیم ۱۰۶): فقط مالک؛ متصدی و چاپخانه نه دکمه دارند و نه صفحه.
+          // گزارش حاشیهٔ ارسال (۶٫۴، تصمیم ۱۰۶): مالک (و حسابدار، که «ارسال» ندارد و گزارش زبانهٔ خودش است)؛ متصدی و چاپخانه نه دکمه
+          // دارند و نه صفحه.
           <Link href={panelPath(gate, '/shipments/report')} className="jy-btn jy-btn--secondary">
             گزارش ارسال
           </Link>

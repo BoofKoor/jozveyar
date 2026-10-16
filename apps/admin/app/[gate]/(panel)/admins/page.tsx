@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import { formatTehranTime } from '@jozveyar/text';
 
+import { Alert } from '../../../../components/Alert';
 import { NoAccess } from '../../../../components/NoAccess';
 import { whenText } from '../../../../lib/format';
 import { panelPath } from '../../../../lib/gate';
@@ -16,17 +17,26 @@ export const metadata: Metadata = { title: 'ادمین‌ها' };
 /**
  * ادمین‌ها (طرح پنل): هر نفر با نقش و وضعیت؛ «کد ورود تازه» و «غیرفعال کن» به صفحهٔ کد تازه می‌روند،
  * «لغو دعوت» فقط دسترسی کم می‌کند و کد نمی‌خواهد. کد ورود خود مالک فقط با دستور روی سرور. کاربر چاپخانه (۵٫۳) با نام
- * چاپخانه‌اش («چاپخانه · چاپ نور») و «فقط سفارش‌های چاپ نور».
+ * چاپخانه‌اش («چاپخانه · چاپ نور») و «فقط سفارش‌های چاپ نور». از ۹٫۴ «عوض کردن نقش» برای هر ادمین جز خود، با کد تازه، و پس از آن
+ * «نقش … شد» بالای فهرست (`?done=role`).
  */
-export default async function AdminsPage({ params }: { params: Promise<{ gate: string }> }) {
+export default async function AdminsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ gate: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { gate } = await params;
+  const query = await searchParams;
   const { auth } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'admins.manage')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'admins.manage')) return <NoAccess gate={gate} session={session} />;
   const result = await auth.listAdmins(session);
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const now = new Date();
   const admins = result.value;
+  const changed = query.done === 'role' ? admins.find((item) => item.user.id === query.id) : undefined;
 
   return (
     <>
@@ -37,6 +47,11 @@ export default async function AdminsPage({ params }: { params: Promise<{ gate: s
           افزودن ادمین
         </Link>
       </div>
+      {changed ? (
+        <Alert tone="success">
+          نقش {changed.user.displayName} حالا {roleLabel(changed.roles, changed.partner, { withRole: true })} است؛ از کار بعدی‌اش در پنل.
+        </Alert>
+      ) : null}
       <section className="jy-card" aria-labelledby="t-people">
         <h2 id="t-people" className="jy-card__title">
           <span className="num">{admins.length}</span> نفر
@@ -66,6 +81,9 @@ export default async function AdminsPage({ params }: { params: Promise<{ gate: s
                 </div>
                 {self ? null : (
                   <div className="ad-people__btns">
+                    <Link href={`${base}/role`} className="jy-btn jy-btn--text">
+                      عوض کردن نقش
+                    </Link>
                     {user.disabledAt ? (
                       <Link href={`${base}/reset`} className="jy-btn jy-btn--text">
                         فعال کن با پیوند تازه
@@ -95,7 +113,8 @@ export default async function AdminsPage({ params }: { params: Promise<{ gate: s
           })}
         </ul>
         <p className="ad-hint ad-gap">
-          «کد ورود تازه» پیوند ثبت تازه می‌سازد، برای وقتی که گوشی کسی گم شد. کد ورود خود مالک با دستور روی سرور.
+          «کد ورود تازه» پیوند ثبت تازه می‌سازد، برای وقتی که گوشی کسی گم شد. کد ورود خود مالک با دستور روی سرور. نقش خودت را مالک دیگری
+          عوض می‌کند، و آخرین مالک فعال نقش دیگری نمی‌گیرد.
         </p>
       </section>
     </>

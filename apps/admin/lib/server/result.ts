@@ -24,6 +24,10 @@ export type AdminErrorCode =
   | 'not_found'
   | 'self'
   | 'last_owner'
+  /** عوض کردن نقش ادمین (۹٫۴). */
+  | 'role_same'
+  | 'role_stale'
+  | 'role_last_owner'
   /** سفارش‌ها (۴٫۲). */
   | 'order_not_found'
   | 'pdf_not_ready'

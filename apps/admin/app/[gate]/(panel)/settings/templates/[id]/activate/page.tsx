@@ -36,7 +36,7 @@ export default async function ActivateTemplatePage({
   const home = panelPath(gate, '/settings/templates');
   const result = await templates.activation(session, id);
   if (!result.ok) {
-    if (result.error === 'forbidden') return <NoAccess gate={gate} partner={session.partner} />;
+    if (result.error === 'forbidden') return <NoAccess gate={gate} session={session} />;
     // همین حالا فعال است (دو کلیک، یا برگشت مرورگر پس از فعال شدن): فهرست همان را نشان می‌دهد.
     if (result.error === 'already_active') redirect(home);
     return (

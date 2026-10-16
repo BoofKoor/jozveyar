@@ -399,7 +399,7 @@ test.describe.serial('گزارش ارسال', () => {
     await expect(operator.getByRole('link', { name: 'کرایه‌ای که پست واقعاً گرفت' })).toHaveCount(0);
     await operator.goto(at('/shipments/report'));
     await expect(operator.getByRole('heading', { name: OWNER_ONLY })).toBeVisible();
-    await expect(operator.locator('main')).toContainText('برگرداندن ورود فایل پست و گزارش ارسال با مالک پنل است');
+    await expect(operator.locator('main')).toContainText('برگرداندن ورود فایل پست با مالک پنل است، و گزارش ارسال با مالک و حسابدار');
     await expect(operator.locator('[data-report]')).toHaveCount(0);
     await operator.goto(at(`/shipments/report?month=${THIS_KEY}&bands=edit`));
     await expect(operator.getByRole('heading', { name: OWNER_ONLY })).toBeVisible();

@@ -33,7 +33,7 @@ export default async function TicketPage({ params }: { params: Promise<{ gate: s
   const { gate, number } = await params;
   const { orders } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'orders.read') || !can(session, 'files.download')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'orders.read') || !can(session, 'files.download')) return <NoAccess gate={gate} session={session} />;
   const result = await orders.details(session, number);
   // سفارشی که نیست یا بیرون از محدوده است (۵٫۳): همان ۴۰۴ صفحهٔ سفارش.
   if (!result.ok) notFound();

@@ -72,7 +72,7 @@ export default async function TemplatesPage({ params, searchParams }: { params: 
   const { templates } = requirePanel(gate);
   const session = await requireSession(gate);
   const result = await templates.overview(session);
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const { now, kinds } = result.value;
 
   // پیام فقط وقتی با وضع امروز می‌خواند (مثل «تنظیمات»)، تا نشانی ساختگی متن دلخواه نشاند.

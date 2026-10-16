@@ -148,9 +148,9 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   const query = await searchParams;
   const { settings, templates } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'settings.edit') && !can(session, 'secrets.edit')) return <NoAccess gate={gate} session={session} />;
   const result = await settings.overview(session);
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const { now, values, keys, otpUsage, credit, checkout } = result.value;
   // قالب برگه‌ها (۹٫۲): فقط مالک (`templates.manage`)؛ کارت کوتاه با قالب فعال هر نوع، و پیوند صفحهٔ خودش.
   const tickets = can(session, 'templates.manage') ? await templates.overview(session) : null;

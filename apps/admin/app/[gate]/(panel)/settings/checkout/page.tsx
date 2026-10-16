@@ -47,9 +47,9 @@ export default async function CheckoutAudiencePage({ params, searchParams }: { p
   const query = await searchParams;
   const { settings } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'settings.edit')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'settings.edit')) return <NoAccess gate={gate} session={session} />;
   const result = await settings.checkoutCard(session);
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const view = result.value;
   const home = panelPath(gate, '/settings');
   const back = `${home}#checkout`;

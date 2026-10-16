@@ -5,9 +5,11 @@ import { useActionState } from 'react';
 
 import { inviteAdminAction, type LinkState } from '../app/[gate]/actions';
 import { messageOf } from '../lib/messages';
+import { isRoleTile } from '../lib/roles';
 import { Alert } from './Alert';
 import { CodeField } from './CodeField';
 import { LinkReady } from './LinkReady';
+import { ROLE_MESSAGES, RoleFields, type PartnerChoice } from './RoleFields';
 
 const FIELD_ERRORS: Record<string, 'displayName' | 'username' | 'role' | 'partner' | 'code'> = {
   invalid_display_name: 'displayName',
@@ -20,20 +22,9 @@ const FIELD_ERRORS: Record<string, 'displayName' | 'username' | 'role' | 'partne
   code_used: 'code',
 };
 
-/** همان کد خطای جابه‌جایی (`partner_required`)، ولی اینجا چاپخانهٔ خود کاربر است، نه «چاپخانهٔ تازه». */
-const MESSAGES: Record<string, string> = { partner_required: 'چاپخانهٔ این کاربر را انتخاب کن.' };
-
-/** چاپخانهٔ فعالی که کاربر چاپخانهٔ تازه به آن سپرده می‌شود. */
-export interface PartnerChoice {
-  id: string;
-  name: string;
-  cityName: string;
-  isDefault: boolean;
-}
-
 /**
- * «افزودن ادمین» (طرح پنل `m-admin-invite`): نام، نام کاربری، نقش (متصدی، چاپخانه یا مالک) و کد تازه؛ بعد پیوند یک‌باره، همین‌جا.
- * «کدام چاپخانه» فقط با نقش «چاپخانه» دیده می‌شود (`:has()`، بی JS)؛ سرور هم فقط برای همان نقش می‌خواندش (برش ۵٫۳).
+ * «افزودن ادمین» (طرح پنل `m-admin-invite`): نام، نام کاربری، نقش (متصدی، از ۹٫۴ حسابدار، چاپخانه یا مالک) و کد تازه؛ بعد پیوند
+ * یک‌باره، همین‌جا. «کدام چاپخانه» فقط با نقش «چاپخانه» (برش ۵٫۳، `RoleFields`).
  */
 export function InviteAdminForm({
   gate,
@@ -51,10 +42,10 @@ export function InviteAdminForm({
   if (state.link) return <LinkReady link={state.link} back={back} />;
 
   const at = state.error ? FIELD_ERRORS[state.error] : undefined;
-  const errorOf = (field: string) => (at === field ? (MESSAGES[state.error!] ?? messageOf(state.error)) : null);
-  const role = state.values?.role === 'owner' || state.values?.role === 'print_partner' ? state.values.role : 'operator';
+  const errorOf = (field: string) => (at === field ? (ROLE_MESSAGES[state.error!] ?? messageOf(state.error)) : null);
+  const picked = state.values?.role;
+  const role = isRoleTile(picked) ? picked : 'operator';
   const partner = partners.find((p) => p.id === state.values?.partner)?.id ?? partners[0]?.id;
-  const partnerError = errorOf('partner');
 
   return (
     <section className="jy-card ad-narrow" aria-labelledby="t-inv">
@@ -92,60 +83,14 @@ export function InviteAdminForm({
               defaultValue: state.values?.username,
             }}
           />
-          <fieldset className="jy-field">
-            <legend className="jy-label">نقش</legend>
-            <div className="jy-tiles ad-roles">
-              <label className="jy-tile">
-                <input className="jy-radio" type="radio" name="role" value="operator" defaultChecked={role === 'operator'} />
-                <span className="jy-tile__title">متصدی</span>
-                <span className="jy-tile__note">همهٔ سفارش‌ها، وضعیت، لغو، نشانی، جابه‌جایی چاپخانه و دانلود</span>
-              </label>
-              <label className="jy-tile">
-                <input
-                  className="jy-radio ad-role-partner"
-                  type="radio"
-                  name="role"
-                  value="print_partner"
-                  defaultChecked={role === 'print_partner'}
-                />
-                <span className="jy-tile__title">چاپخانه</span>
-                <span className="jy-tile__note">فقط سفارش‌های یک چاپخانه: دانلود، شروع چاپ و تحویل پست؛ بی مبلغ</span>
-              </label>
-              <label className="jy-tile">
-                <input className="jy-radio" type="radio" name="role" value="owner" defaultChecked={role === 'owner'} />
-                <span className="jy-tile__title">مالک</span>
-                <span className="jy-tile__note">همه‌چیز، با تعرفه، کلیدها، چاپخانه‌ها و ادمین‌ها</span>
-              </label>
-            </div>
-          </fieldset>
-          <fieldset className="jy-field ad-if-partner" aria-describedby={partnerError ? 'v-partner-error' : undefined}>
-            <legend className="jy-label">کدام چاپخانه</legend>
-            {partners.length > 0 ? (
-              <div className="jy-tiles ad-roles">
-                {partners.map((p) => (
-                  <label key={p.id} className="jy-tile">
-                    <input className="jy-radio" type="radio" name="partner" value={p.id} defaultChecked={p.id === partner} />
-                    <span className="jy-tile__title">{p.name}</span>
-                    <span className="jy-tile__note">{p.isDefault ? `${p.cityName} · پیش‌فرض` : p.cityName}</span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="jy-note">
-                هیچ چاپخانهٔ فعالی نیست؛ اول از{' '}
-                <Link className="jy-link" href={partnersHref}>
-                  «چاپخانه‌ها»
-                </Link>{' '}
-                یکی بیفزا یا فعال کن.
-              </p>
-            )}
-            {partnerError ? (
-              <p id="v-partner-error" className="jy-error">
-                <span className="jy-icon jy-icon-error" aria-hidden="true" />
-                {partnerError}
-              </p>
-            ) : null}
-          </fieldset>
+          <RoleFields
+            role={role}
+            partners={partners}
+            partner={partner}
+            roleError={errorOf('role')}
+            partnerError={errorOf('partner')}
+            partnersHref={partnersHref}
+          />
           <CodeField error={errorOf('code')} />
         </div>
         <div className="ad-actions">

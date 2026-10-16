@@ -45,12 +45,12 @@ export default async function EventsPage({
   const query = await searchParams;
   const { auth } = requirePanel(gate);
   const session = await requireSession(gate);
-  if (!can(session, 'events.read')) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!can(session, 'events.read')) return <NoAccess gate={gate} session={session} />;
 
   const kind = typeof query.kind === 'string' && EVENT_KINDS.some((k) => k.kind === query.kind) ? query.kind : '';
   const before = typeof query.before === 'string' && /^\d{1,15}$/.test(query.before) ? Number(query.before) : undefined;
   const result = await auth.listEvents(session, { ...(kind ? { kind } : {}), ...(before ? { beforeId: before } : {}) });
-  if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
+  if (!result.ok) return <NoAccess gate={gate} session={session} />;
   const events = result.value;
   const days = byDay(eventLines(events));
   const now = new Date();

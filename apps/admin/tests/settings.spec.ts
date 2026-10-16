@@ -154,7 +154,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await operatorPage.goto(at('/settings'));
     await expect(operatorPage.getByRole('heading', { name: NO_ACCESS })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
-      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، برگرداندن ورود فایل پست و گزارش ارسال با مالک پنل است.',
+      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها و برگرداندن ورود فایل پست با مالک پنل است، و گزارش ارسال با مالک و حسابدار.',
     );
     expect((await html(operatorPage)).includes('کلیدهای سرویس‌ها')).toBe(false);
 

@@ -46,7 +46,7 @@ export default async function TemplateVersionPage({ params, searchParams }: { pa
     </Link>
   );
   if (!result.ok) {
-    if (result.error === 'forbidden') return <NoAccess gate={gate} partner={session.partner} />;
+    if (result.error === 'forbidden') return <NoAccess gate={gate} session={session} />;
     return (
       <>
         {back}
