@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>محتوای سایت و نوار اعلان — جزوه‌یار</title>
+<link rel="icon" href="../../brand/jozveyar-favicon.svg">
+<!--
+  طرح نمونهٔ برش ۱۱ در سایت (docs/UI.md، قدم ۱۱، «پیش از ۱۱٫۱»؛ سؤال‌های ۲۰۵ و ۲۰۸، ADR-053): نوار اعلان بالای سربرگ همهٔ صفحه‌ها
+  (۱۱٫۳)، و صفحه‌هایی که متنشان از پنل می‌آید (۱۱٫۱). ویرایشگر متن و نوار در پنل است: admin.html، گروه «محتوای سایت (برش ۱۱)».
+  حالت‌ها (فهرست «طرح نمونه» گوشهٔ صفحه):
+  - نوار اعلان — صفحهٔ اصلی پیش از فایل: نوار green-700 بالای سربرگ. کل نوار پیوند تعرفه است، و عددها از جای‌نگهدارهای تعرفهٔ فعال.
+  - بی پیوند — متن بی پیوند، که در گوشی دو خط می‌شود.
+  - تعطیلی جای نوار — همهٔ چاپخانه‌ها تعطیل‌اند (۱۰٫۱). پیام تعطیلی با ظاهر هشدار جای نوار مالک می‌نشیند، و نوار امروز درون
+    صفحهٔ اصلی کنار می‌رود.
+  - پس از فایل — حالت سفارش: سربرگ فقط لوگو دارد و نوار اعلان نیست (میز سفارش همان desk.html است و اینجا خلاصه آمده).
+  - قوانین — صفحهٔ ثابت با نوار. متن از Markdown محدود پنل است، با همان ظاهر امروز.
+  - تماس — همهٔ راه‌ها، با تلفن، تلگرام و اینستاگرام تازه، و پاورقی ویرایش‌شده. نوار در این حالت خاموش است.
+  عددها از تعرفهٔ پایه‌اند. شماره‌ها و شناسه‌ها نمونه‌اند؛ ایمیل، ساعت و نشانی همان سایت امروز است.
+  پیاده‌سازی به زبان سایت و با خود کیت است: packages/ui/src (base و components)، apps/web/app/home.css و pages.css مستقیم بار
+  می‌شوند، و توکن‌ها از docs/brand/jozveyar-colors.css می‌آیند؛ اینجا هیچ کد رنگی نیست. پوستهٔ سایت از apps/web/app/globals.css
+  رونویسی شده، چون آن فایل Tailwind را وارد می‌کند و مرورگر نمی‌خواندش. تنها جزء تازه خود نوار است (site-bar، با پیشوند پوستهٔ سایت).
+  دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/content.html
+-->
+<style>@layer base, components;</style>
+<link rel="stylesheet" href="../../brand/jozveyar-colors.css">
+<style>
+/*
+ * توکن‌های کیت (packages/ui/src/theme.css) از روی فایل برند، چون @theme مال Tailwind است و مرورگر
+ * نمی‌خواندش؛ همان بلوک checkout.html. رنگ فقط var(--jy-…)؛ سایه با color-mix از جوهر.
+ */
+@layer base {
+  :root {
+    --color-paper: var(--jy-paper);
+    --color-ink: var(--jy-ink);
+    --color-green-50: var(--jy-green-50);
+    --color-green-100: var(--jy-green-100);
+    --color-green-200: var(--jy-green-200);
+    --color-green-300: var(--jy-green-300);
+    --color-green-400: var(--jy-green-400);
+    --color-green-500: var(--jy-green-500);
+    --color-green-600: var(--jy-green-600);
+    --color-green-700: var(--jy-green-700);
+    --color-green-800: var(--jy-green-800);
+    --color-success-text: var(--jy-success-text);
+    --color-success-bg: var(--jy-success-bg);
+    --color-warning-text: var(--jy-warning-text);
+    --color-warning-bg: var(--jy-warning-bg);
+    --color-warning-border: var(--jy-warning-border);
+    --color-error-text: var(--jy-error-text);
+    --color-error-bg: var(--jy-error-bg);
+    --color-info-text: var(--jy-info-text);
+    --color-info-bg: var(--jy-info-bg);
+    --color-page: var(--color-paper);
+    --color-band: var(--color-green-50);
+    --color-card: var(--color-paper);
+    --color-line: var(--color-green-200);
+    --color-control: var(--color-green-500);
+    --color-accent: var(--color-green-600);
+    --color-muted: var(--color-green-700);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 2px color-mix(in srgb, var(--jy-ink) 6%, transparent), 0 1px 1px color-mix(in srgb, var(--jy-ink) 4%, transparent);
+    --shadow-md: 0 8px 24px color-mix(in srgb, var(--jy-ink) 10%, transparent), 0 2px 6px color-mix(in srgb, var(--jy-ink) 6%, transparent);
+    --font-sans: 'Vazirmatn', system-ui, 'Segoe UI', Tahoma, sans-serif;
+    --text-base: 16px;
+    --text-small: 13px;
+    --text-h4: 20px;
+    --text-h3: 25px;
+    --text-h2: 31px;
+    --text-h1: 39px;
+    --text-display: 49px;
+  }
+
+  /* کمینهٔ preflight Tailwind، که سایت دارد */
+  *, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
+  html { line-height: 1.5; }
+  h1, h2, h3 { font-size: inherit; font-weight: inherit; }
+  a { color: inherit; text-decoration: inherit; }
+  ol, ul { list-style: none; }
+  img, svg { display: block; vertical-align: middle; }
+  img { max-width: 100%; height: auto; }
+  button, input, textarea { font: inherit; color: inherit; border-radius: 0; background-color: transparent; }
+  ::placeholder { opacity: 1; }
+  b { font-weight: 600; }
+  hr { border: 0; }
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+}
+</style>
+<link rel="stylesheet" href="../../../packages/ui/src/base.css">
+<link rel="stylesheet" href="../../../packages/ui/src/components.css">
+<link rel="stylesheet" href="../../../apps/web/app/home.css">
+<link rel="stylesheet" href="../../../apps/web/app/pages.css">
+<style>
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../../../apps/web/public/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../../../apps/web/public/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+
+@layer components {
+  /* ===== آیکون‌ها: فایل‌های برند (کیت با @utility می‌سازدشان که مرورگر نمی‌خواند) ===== */
+  .jy-icon-arrow { mask-image: url('../../brand/icons/arrow.svg'); }
+  .jy-icon-chevron { mask-image: url('../../brand/icons/chevron.svg'); }
+  .jy-icon-file { mask-image: url('../../brand/icons/file.svg'); }
+  .jy-icon-info { mask-image: url('../../brand/icons/info.svg'); }
+  .jy-icon-lock { mask-image: url('../../brand/icons/lock.svg'); }
+  .jy-icon-tag { mask-image: url('../../brand/icons/tag.svg'); }
+  .jy-icon-truck { mask-image: url('../../brand/icons/truck.svg'); }
+  .jy-icon-upload { mask-image: url('../../brand/icons/upload.svg'); }
+  .jy-icon-warning { mask-image: url('../../brand/icons/warning.svg'); }
+
+  /* Tailwindی که همین طرح به کار می‌برد */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* ===== پوستهٔ سایت: رونویس apps/web/app/globals.css (سربرگ، پاورقی، حالت سفارش) ===== */
+  .site { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+  .site-grow { flex: 1 0 auto; }
+  .site-wrap { max-width: calc(var(--jy-container) + 2 * var(--jy-gutter)); margin-inline: auto; padding-inline: var(--jy-gutter); }
+  .site-top { background: var(--color-band); }
+  .site-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px; }
+  .site-logo { display: block; padding: 6px; margin-inline-start: -6px; border-radius: var(--radius-md); }
+  .site-logo img { height: 64px; width: auto; }
+  .site-nav { display: flex; gap: 4px; }
+  .site-nav a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 14px; border-radius: var(--radius-md); color: var(--color-ink); text-decoration: none; }
+  .site-nav a:hover { background: var(--color-green-100); }
+  .site-ordering { display: none; }
+  .site-foot { margin-block-start: 32px; padding-block: 48px 24px; background: var(--color-band); border-block-start: 1px solid var(--color-line); }
+  .site-foot__brand img { height: 64px; width: auto; }
+  .site-foot__brand p { max-width: 24em; margin-block-start: 12px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .site-foot__top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 24px; }
+  .site-foot__nav { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 4px 48px; }
+  .site-foot__nav h2 { font-size: var(--text-small); font-weight: 600; line-height: 1.8; }
+  .site-foot__nav a { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; color: var(--color-muted); text-decoration: none; }
+  .site-foot__nav a:hover { color: var(--color-ink); text-decoration: underline; }
+  /* جای نشان اینماد، همان جعبهٔ ۹۶×۱۰۴ سایت؛ طرح نمونه منبع بیرونی بار نمی‌کند (مثل checkout.html) */
+  .site-foot__seal {
+    display: grid; place-items: center; width: 96px; height: 104px; padding: 8px;
+    border: 1px dashed var(--color-green-300); border-radius: var(--radius-md);
+    font-size: var(--text-small); line-height: 1.6; text-align: center; color: var(--color-muted);
+  }
+  .site-foot__legal {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 24px;
+    margin-block-start: 32px; padding-block-start: 16px; border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-small); color: var(--color-muted);
+  }
+  @media (max-width: 520px) {
+    .site-head { padding-block: 12px; }
+    .site-logo img { height: 56px; }
+    .site-nav .site-nav__how { display: none; }
+    .site-nav a { padding-inline: 10px; }
+    .site-foot { margin-block-start: 0; }
+    .site-foot__nav { column-gap: 32px; }
+  }
+
+  /* حالت سفارش: سایت با نشانهٔ [data-jozve] جزیرهٔ سفارش عوضش می‌کند (globals.css)؛ طرح با رادیوی همین حالت */
+  body:has(#m-ordering:checked) { background: var(--color-band); }
+  body:has(#m-ordering:checked) .site-idle { display: none; }
+  body:has(#m-ordering:checked) .site-ordering { display: block; }
+  body:has(#m-ordering:checked) .site-foot { margin-block-start: 0; }
+
+  /*
+   * ===== تازه: نوار اعلان (۱۱٫۳، سؤال ۲۰۸) =====
+   * بالای سربرگ همهٔ صفحه‌ها و بیرون از site-top. زمینهٔ green-700 («زمینهٔ تیره» README برند)، متن سفید با تضاد ۷٫۰۳ به ۱. وسط‌چین است و
+   * کمینهٔ ارتفاعش ۴۴. اگر پیوند دارد، کل نوار پیوند است (هدف لمسی). کامپوننت سرور است و JS ندارد؛ بستنی هم نیست.
+   */
+  .site-bar { display: block; background: var(--color-green-700); color: var(--color-paper); text-decoration: none; }
+  .site-bar__in {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 44px; padding-block: 8px; font-size: var(--text-small); line-height: 1.7; text-align: center;
+  }
+  .site-bar b { font-weight: 600; }
+  /* «دیدن تعرفه» ته همان جمله، نه ردیف جدا: در ۳۲۰ پیکسل نوار دو خط می‌ماند */
+  .site-bar__go { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: 8px; font-weight: 600; white-space: nowrap; text-decoration: underline; text-underline-offset: 3px; vertical-align: bottom; }
+  .site-bar__go .jy-icon { width: 16px; height: 16px; }
+  a.site-bar:hover { background: var(--color-green-800); }
+  /* فوکوس روی زمینهٔ تیره: لایهٔ سفید درون نوار (لایهٔ green-700 کیت روی همین رنگ دیده نمی‌شود) */
+  a.site-bar:focus-visible { outline: 2px solid var(--color-paper); outline-offset: -4px; box-shadow: none; }
+  /* پیام تعطیلی همهٔ چاپخانه‌ها (۱۰٫۱) در جای همین نوار: ظاهر هشدار با آیکون، و متن جوهر */
+  .site-bar--warn { background: var(--color-warning-bg); color: var(--color-ink); border-block-end: 1px solid var(--color-warning-border); }
+  .site-bar--warn .site-bar__in { flex-wrap: nowrap; align-items: flex-start; gap: 8px; text-align: start; }
+  .site-bar--warn .jy-icon { flex: none; width: 20px; height: 20px; margin-block-start: 2px; color: var(--color-warning-text); }
+  @media (min-width: 861px) { .site-bar--warn .site-bar__in { justify-content: center; } }
+
+  /* ===== فقط طرح نمونه: خلاصهٔ میز سفارش در حالت «پس از فایل» (میز کامل desk.html است) ===== */
+  .cx-desk { padding-block: 8px 64px; }
+  .cx-desk__grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+  .cx-file { display: flex; gap: 12px; align-items: flex-start; margin-block-start: 12px; }
+  .cx-file .jy-icon { flex: none; margin-block-start: 2px; color: var(--color-muted); }
+  .cx-file b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+  .cx-meta { display: block; font-size: var(--text-small); color: var(--color-muted); }
+  .cx-note { margin-block-start: 16px; padding-block-start: 12px; border-block-start: 1px solid var(--color-green-100); font-size: var(--text-small); color: var(--color-muted); }
+  .cx-sum { display: flex; flex-direction: column; gap: 8px; }
+  .cx-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-small); }
+  .cx-row--total { padding-block-start: 8px; border-block-start: 1px solid var(--color-line); font-size: var(--text-base); font-weight: 600; }
+  .cx-sum .jy-btn { margin-block-start: 8px; }
+  @media (width <= 860px) { .cx-desk__grid { grid-template-columns: minmax(0, 1fr); } }
+}
+
+/* ===== فقط طرح نمونه: حالت‌ها بی JS، با رادیوهای پنهان و :has() (همان desk.html) ===== */
+.mock-radios { position: fixed; inset-block-start: 0; inset-inline-start: 0; opacity: 0; pointer-events: none; }
+/* پایین صفحه، نه بالا: بالای صفحه جای خود نوار است */
+.mock {
+  position: fixed; inset-block-end: 8px; inset-inline-end: 8px; z-index: 50; max-width: calc(100vw - 16px);
+  font-size: 13px; line-height: 1.6; color: var(--jy-paper);
+}
+.mock[open] .mock__list { position: absolute; inset-block-end: 100%; inset-inline-end: 0; margin-block: 0 4px; width: max-content; max-width: calc(100vw - 16px); }
+.mock summary { display: inline-block; padding: 4px 14px; border-radius: 999px; background: var(--jy-ink); cursor: pointer; list-style: none; }
+.mock summary::-webkit-details-marker { display: none; }
+.mock__list {
+  display: grid; grid-template-columns: repeat(2, auto); gap: 2px 4px; max-height: calc(100vh - 56px); margin-block-start: 4px; padding: 6px;
+  overflow-y: auto; border-radius: 12px; background: var(--jy-ink);
+}
+.mock__list label { padding: 2px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.mock__list p { grid-column: 1 / -1; padding-inline: 10px; color: var(--jy-green-300); }
+
+.st { display: none; }
+body:has(#m-bar:checked) :is(.st-annbar, .st-home),
+body:has(#m-plain:checked) :is(.st-plainbar, .st-home),
+body:has(#m-closure:checked) :is(.st-closebar, .st-home),
+body:has(#m-ordering:checked) .st-desk,
+body:has(#m-terms:checked) :is(.st-annbar, .st-terms),
+body:has(#m-contact:checked) .st-contact { display: contents; }
+/* پاورقی: معرفی ویرایش‌شده فقط در حالت «تماس» */
+.st-footer-default { display: block; }
+body:has(#m-contact:checked) .st-footer-default { display: none; }
+body:has(#m-contact:checked) .st-footer-edited { display: block; }
+
+body:has(#m-bar:checked) .mock [for='m-bar'],
+body:has(#m-plain:checked) .mock [for='m-plain'],
+body:has(#m-closure:checked) .mock [for='m-closure'],
+body:has(#m-ordering:checked) .mock [for='m-ordering'],
+body:has(#m-terms:checked) .mock [for='m-terms'],
+body:has(#m-contact:checked) .mock [for='m-contact'] { background: var(--jy-green-700); }
+</style>
+</head>
+<body class="site">
+<div class="mock-radios" aria-hidden="true"><input type="radio" name="m" id="m-bar" checked tabindex="-1"><input type="radio" name="m" id="m-plain" tabindex="-1"><input type="radio" name="m" id="m-closure" tabindex="-1"><input type="radio" name="m" id="m-ordering" tabindex="-1"><input type="radio" name="m" id="m-terms" tabindex="-1"><input type="radio" name="m" id="m-contact" tabindex="-1"></div>
+<details class="mock">
+  <summary>طرح نمونه · حالت‌ها</summary>
+  <div class="mock__list"><label for="m-bar">نوار اعلان</label><label for="m-plain">بی پیوند</label><label for="m-closure">تعطیلی جای نوار</label><label for="m-ordering">پس از فایل</label><label for="m-terms">قوانین</label><label for="m-contact">تماس</label><p>ویرایش در پنل: admin.html، «محتوای سایت (برش ۱۱)».</p></div>
+</details>
+
+<!-- ===================== جای نوار: پیش از سربرگ، در همهٔ صفحه‌ها جز حالت سفارش ===================== -->
+<div class="st st-annbar">
+  <a class="site-bar" href="#tariff">
+    <span class="site-wrap site-bar__in">
+      <span>هر صفحهٔ سیاه‌سفید فقط <b><span class="num">1,600</span> تومان</b>، صحافی از <span class="num">45,000</span> تومان <span class="site-bar__go">دیدن تعرفه<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></span></span>
+    </span>
+  </a>
+</div>
+<div class="st st-plainbar">
+  <aside class="site-bar" aria-label="اعلان">
+    <p class="site-wrap site-bar__in">سفارش‌های پنجشنبه و جمعه از شنبه چاپ می‌شوند؛ تحویل پست تا <span class="num">2</span> روز کاری پس از پرداخت.</p>
+  </aside>
+</div>
+<div class="st st-closebar">
+  <aside class="site-bar site-bar--warn" aria-label="اعلان">
+    <p class="site-wrap site-bar__in"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>چاپخانه‌ها تا چهارشنبه <span class="num">22</span> مهر تعطیل‌اند. سفارش‌های این روزها از شنبه <span class="num">25</span> مهر چاپ می‌شوند، و روز کاری تحویل به پست از همان روز شمرده می‌شود.</span></p>
+  </aside>
+</div>
+
+<div class="site-top">
+  <header class="site-wrap site-head">
+    <a class="site-logo site-idle" href="#" aria-label="جزوه‌یار، صفحهٔ اصلی"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></a>
+    <span class="site-logo site-ordering"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></span>
+    <nav class="site-nav site-idle" aria-label="پیوندهای صفحه"><a class="site-nav__how" href="#how">چطور کار می‌کند</a><a href="#tariff">تعرفه</a><a href="#faq">سؤال‌ها</a></nav>
+  </header>
+</div>
+
+<div class="site-grow">
+  <!-- ===================== صفحهٔ اصلی، پیش از فایل (همان HTML سایت؛ متن قهرمان و سه قدم از پنل) ===================== -->
+  <div class="st st-home">
+    <main class="home">
+      <div class="home-top">
+        <section class="home-hero" aria-labelledby="hero-title">
+          <div class="site-wrap home-hero__grid">
+            <div class="home-hero__text">
+              <p class="home-eyebrow">چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران</p>
+              <h1 id="hero-title" class="home-title"><span class="home-clause">جزوه‌ات را بینداز،</span> <span class="home-clause">قیمت را <mark>همین حالا</mark> ببین</span></h1>
+              <p class="home-lead">صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم؛ بی‌ثبت‌نام و بی فرم.</p>
+            </div>
+            <div class="home-hero__order">
+              <label class="jy-upload">
+                <input id="jozve-file" type="file" multiple accept=".pdf,.docx,.doc,.pptx,.ppt,.jpg,.jpeg,.png,.webp,.heic" aria-labelledby="upload-title upload-action" aria-describedby="upload-formats upload-hint" class="sr-only">
+                <span class="jy-drop">
+                  <img src="../../../apps/web/public/img/pages.svg" alt="" width="160" height="112" class="home-art">
+                  <span id="upload-title" class="jy-drop__title">جزوه‌ات را همین‌جا بینداز</span>
+                  <span class="jy-drop__sub">فایل را بکش و روی همین کادر رها کن.</span>
+                  <span id="upload-formats" class="jy-drop__formats home-formats"><span class="jy-drop__format"><bdi>PDF</bdi></span><span class="jy-drop__format"><bdi>Word</bdi></span><span class="jy-drop__format">پاورپوینت</span><span class="jy-drop__format">عکس</span></span>
+                </span>
+                <span class="jy-upload__foot">
+                  <span id="upload-action" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block"><span class="jy-icon jy-icon-upload" aria-hidden="true"></span>انتخاب فایل</span>
+                  <span id="upload-hint" class="jy-upload__hint home-upload-hint">چند فایل هم می‌شود؛ پشت‌سرهم در یک جزوه صحافی می‌شوند.</span>
+                </span>
+              </label>
+            </div>
+            <ul class="home-trust">
+              <li><span class="home-trust__ic"><span class="jy-icon jy-icon-tag" aria-hidden="true"></span></span><span class="home-trust__t"><b>قیمت دقیق، پیش از ثبت‌نام</b><span>شمارهٔ موبایل فقط موقع پرداخت</span></span></li>
+              <li><span class="home-trust__ic"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span></span><span class="home-trust__t"><b>تحویل پست تا <span class="num">2</span> روز کاری</b><span>با کد رهگیری، به سراسر ایران</span></span></li>
+              <li><span class="home-trust__ic"><span class="jy-icon jy-icon-lock" aria-hidden="true"></span></span><span class="home-trust__t"><b>فایلت پیش ما نمی‌ماند</b><span><span class="num">2</span> روز بعد خودکار پاک می‌شود</span></span></li>
+            </ul>
+          </div>
+        </section>
+      </div>
+      <div class="site-wrap home-more">
+        <section id="how" class="home-sec" aria-labelledby="how-title">
+          <h2 id="how-title" class="home-sec__title">سه قدم تا جزوهٔ چاپ‌شده</h2>
+          <ol class="home-how">
+            <li><span class="home-how__n num">1</span><div><h3>فایل را بینداز</h3><p><bdi>PDF</bdi>، <bdi>Word</bdi>، پاورپوینت یا عکس؛ چند فایل هم در یک جزوه، به همان ترتیبی که می‌خواهی.</p></div></li>
+            <li><span class="home-how__n num">2</span><div><h3>قیمت را همان لحظه ببین</h3><p>صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم. رنگ، دورو و تعداد را خودت انتخاب می‌کنی.</p></div></li>
+            <li><span class="home-how__n num">3</span><div><h3>آدرس بده و پرداخت کن</h3><p>شمارهٔ موبایل فقط همین‌جا لازم است. تا <span class="num">2</span> روز کاری بعد، جزوه تحویل پست می‌شود.</p></div></li>
+          </ol>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== پس از فایل: حالت سفارش، بی نوار اعلان ===================== -->
+  <div class="st st-desk">
+    <main class="site-wrap cx-desk">
+      <nav class="home-flow" aria-label="قدم‌های سفارش"><ol class="jy-flow"><li aria-current="step"><span class="jy-flow__n num">1</span>جزوه و قیمت</li><li><span class="jy-flow__n num">2</span>آدرس</li><li><span class="jy-flow__n num">3</span>پرداخت</li></ol></nav>
+      <div class="cx-desk__grid">
+        <section class="jy-card" aria-labelledby="dk-title">
+          <div class="jy-card__head"><h2 id="dk-title" class="jy-card__title">جزوهٔ تو</h2><p class="jy-card__meta"><span class="num">1</span> فایل · <span class="num">120</span> صفحه</p></div>
+          <p class="cx-file"><span class="jy-icon jy-icon-file" aria-hidden="true"></span><span><b dir="auto">ریاضی ۲ - جلسه ۱.pdf</b><span class="cx-meta"><span class="num">120</span> صفحه · <bdi>A4</bdi> · سیاه‌سفید</span></span></p>
+          <p class="cx-note">«تنظیمات چاپ»، کاغذ و صحافی همان میز امروز است (desk.html). در این حالت سربرگ فقط لوگوست و نوار اعلان نیست؛ پیام تعطیلی همهٔ چاپخانه‌ها می‌ماند.</p>
+        </section>
+        <aside class="jy-card cx-sum" aria-label="خلاصهٔ سفارش">
+          <h2 class="jy-card__title">خلاصهٔ سفارش</h2>
+          <div class="cx-row"><span>چاپ <span class="num">120</span> رو، سیاه‌سفید</span><span><span class="num">192,000</span> تومان</span></div>
+          <div class="cx-row"><span>صحافی طلق و سیم</span><span><span class="num">45,000</span> تومان</span></div>
+          <div class="cx-row cx-row--total"><span>جمع</span><span><span class="num">237,000</span> تومان</span></div>
+          <span class="cx-meta">به‌علاوهٔ ارسال، از <span class="num">129,500</span> تومان</span>
+          <button type="button" class="jy-btn jy-btn--primary jy-btn--lg jy-btn--block">ادامه<span class="jy-icon jy-icon-arrow" aria-hidden="true"></span></button>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== قوانین: متن از Markdown محدود پنل، همان ظاهر امروز ===================== -->
+  <div class="st st-terms">
+    <main class="site-wrap pg">
+      <article class="pg-body" aria-labelledby="terms-title">
+        <h1 id="terms-title" class="pg-title">قوانین جزوه‌یار</h1>
+        <p class="pg-meta">به‌روز شده در <span class="num">1405/07/13</span></p>
+        <p class="pg-lead">جزوه‌یار فایل جزوه‌ات را چاپ و صحافی می‌کند و با پست می‌فرستد. با پرداخت، این قوانین را می‌پذیری.</p>
+        <h2>قیمت و سفارش</h2>
+        <p>قیمت پیش از پرداخت روی صفحه است، با کرایهٔ پست؛ همان مبلغ را می‌پردازی. با ثبت سفارش قیمت ثابت می‌شود: اگر تعرفه بعداً عوض شود، قیمت سفارش ثبت‌شده عوض نمی‌شود.</p>
+        <h2>پرداخت</h2>
+        <ul>
+          <li>پرداخت با درگاه زیبال و کارت‌های بانکی است.</li>
+          <li>پرداختی که تأیید نشود، خودکار به همان کارت برمی‌گردد؛ بعضی بانک‌ها برگشت را تا <span class="num">72</span> ساعت دیرتر نشان می‌دهند. اگر سفارشی را دو بار پرداختی، پرداخت دوم هم همین‌طور برمی‌گردد.</li>
+        </ul>
+        <h2>چاپ و تحویل به پست</h2>
+        <ul>
+          <li>جزوه تا <span class="num">2</span> روز کاری بعد از پرداخت به پست تحویل می‌شود. روز کاری شنبه تا چهارشنبه است، بی تعطیلی رسمی، و روز پرداخت شمرده نمی‌شود.</li>
+          <li>کد رهگیری پست به موبایلی که با آن پرداختی پیامک می‌شود؛ از آن به بعد زمان رسیدن بسته دست پست است.</li>
+        </ul>
+        <h2>فایل و محتوا</h2>
+        <ul>
+          <li>مسئولیت محتوای فایل با سفارش‌دهنده است.</li>
+          <li>محتوای فایل همان‌طور که فرستاده شده چاپ می‌شود؛ کیفیت اسکن یا حاشیهٔ صفحه را درست نمی‌کنیم.</li>
+          <li>فایلی که می‌اندازی <span class="num">2</span> روز بعد خودکار از سرور پاک می‌شود، و فایل‌های سفارش پرداخت‌شده <span class="num">30</span> روز پس از تحویل به پست یا لغو سفارش.</li>
+        </ul>
+        <h2>لغو و بازپرداخت</h2>
+        <p>اگر سفارشی پیش از تحویل به پست لغو شود، مبلغ کاملش برمی‌گردد، و وضعیت برگشت در صفحهٔ سفارش دیده می‌شود. سؤالی بود؟ از <a class="jy-link" href="#contact">تماس</a> بپرس.</p>
+      </article>
+    </main>
+  </div>
+
+  <!-- ===================== تماس: همهٔ راه‌ها از پنل (فیلدهای جدا) ===================== -->
+  <div class="st st-contact">
+    <main class="site-wrap pg">
+      <article class="pg-body" aria-labelledby="contact-title">
+        <h1 id="contact-title" class="pg-title">تماس با جزوه‌یار</h1>
+        <p class="pg-lead">شمارهٔ سفارشت را آماده داشته باش؛ در صفحهٔ سفارش و پیامک پرداخت هست.</p>
+        <dl class="pg-contact">
+          <div><dt>پیامک و تماس</dt><dd><a class="jy-link" href="tel:+989123456789"><span class="num">0912 345 6789</span></a></dd></div>
+          <div><dt>تلفن</dt><dd><a class="jy-link" href="tel:+982166491234"><span class="num">021 6649 1234</span></a></dd></div>
+          <div><dt>ایمیل</dt><dd><a class="jy-link" href="mailto:jozveyar.com@gmail.com"><bdi>jozveyar.com@gmail.com</bdi></a></dd></div>
+          <div><dt>تلگرام</dt><dd><a class="jy-link" href="#telegram" rel="noopener noreferrer"><bdi>@jozveyar</bdi></a></dd></div>
+          <div><dt>اینستاگرام</dt><dd><a class="jy-link" href="#instagram" rel="noopener noreferrer"><bdi>@jozveyar</bdi></a></dd></div>
+          <div><dt>ساعت پاسخ‌گویی</dt><dd>شنبه تا چهارشنبه، ساعت <span class="num">9</span> تا <span class="num">18</span>، جز تعطیلی‌های رسمی</dd></div>
+          <div><dt>نشانی</dt><dd>تهران، میدان انقلاب، خیابان انقلاب، روبه‌روی سینما بهمن، بین خیابان منیری جاوید و خیابان <span class="num">12</span> فروردین، پلاک <span class="num">1354</span>، پاساژ اندیشه، طبقهٔ منفی <span class="num">2</span>، انتهای راهرو، واحد <bdi>D18</bdi></dd></div>
+        </dl>
+      </article>
+    </main>
+  </div>
+</div>
+
+<footer class="site-foot">
+  <div class="site-wrap">
+    <div class="site-foot__top">
+      <div class="site-foot__brand">
+        <img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435" loading="lazy">
+        <p class="st st-footer-default">چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
+        <p class="st st-footer-edited">چاپ و صحافی آنلاین جزوه و پایان‌نامه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
+      </div>
+      <nav class="site-foot__nav" aria-label="پیوندهای پاورقی">
+        <div><h2>جزوه‌یار</h2><ul><li class="site-idle"><a href="#about">دربارهٔ ما</a></li><li class="site-ordering"><a href="#about" target="_blank" rel="noopener">دربارهٔ ما</a></li><li class="site-idle"><a href="#contact">تماس</a></li><li class="site-ordering"><a href="#contact" target="_blank" rel="noopener">تماس</a></li></ul></div>
+        <div><h2>قوانین</h2><ul><li class="site-idle"><a href="#terms">قوانین و مقررات</a></li><li class="site-ordering"><a href="#terms" target="_blank" rel="noopener">قوانین و مقررات</a></li><li class="site-idle"><a href="#privacy">حریم خصوصی</a></li><li class="site-ordering"><a href="#privacy" target="_blank" rel="noopener">حریم خصوصی</a></li></ul></div>
+      </nav>
+      <div class="site-foot__seal">جای نشان اینماد</div>
+    </div>
+    <div class="site-foot__legal"><p>مسئولیت محتوای فایل ارسالی بر عهدهٔ سفارش‌دهنده است.</p><p>© <span class="num">1405</span> جزوه‌یار</p></div>
+  </div>
+</footer>
+</body>
+</html>
