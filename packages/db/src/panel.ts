@@ -37,7 +37,14 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'driz
 import { alias } from 'drizzle-orm/pg-core';
 
 import { adminEventRow, type AdminEventInput } from './admin.js';
-import { partnerSmsOf, type AssignmentRule } from './assignment.js';
+import {
+  partnerCandidateColumns,
+  partnerCandidateOf,
+  partnerSmsOf,
+  type AssignmentRule,
+  type PartnerCandidate,
+  type PartnerHours,
+} from './assignment.js';
 import { gatewayRejection, type GatewayRejection } from './checkout.js';
 import type { Database } from './index.js';
 import {
@@ -448,13 +455,29 @@ export interface PanelAssignment {
   sms: ShipmentSms | null;
 }
 
-/** چاپخانهٔ فعالی که سفارش به آن جابه‌جا می‌شود: شهر و سفارش‌های بازش، مثل کاشی طرح. */
-export interface PanelPartnerOption {
+/**
+ * چاپخانهٔ فعالی که سفارش به آن جابه‌جا یا سپرده می‌شود: شهر و سفارش‌های بازش، مثل کاشی طرح، و از ۱۰٫۱ آنچه `rankPartners` برای
+ * فهرست پیشنهادی می‌خواهد (جا، و در دسترس بودن).
+ */
+export interface PanelPartnerOption extends PartnerCandidate {
+  name: string;
+  cityName: string;
+  openOrders: number;
+  availabilityNote: string | null;
+}
+
+/**
+ * یک چاپخانهٔ فعال در کارت «چاپخانه‌ها»ی پیشخوان (برش ۱۰٫۱، سؤال‌های ۲۶۷ و ۲۶۸): در دسترس بودن، سفارش‌های باز، و شمارهٔ سفارش‌های «در
+ * صف چاپ»ش (به ترتیب مهلت)، که هشدار «تعطیل است» می‌گویدشان تا پیش از مهلت جابه‌جا شوند.
+ */
+export interface PanelPartnerBoardRow extends PartnerHours {
   id: string;
   name: string;
   cityName: string;
   isDefault: boolean;
+  availabilityNote: string | null;
   openOrders: number;
+  queued: number[];
 }
 
 /**
@@ -621,14 +644,17 @@ export type PanelWrite =
   | { ok: true; order: OrderRow }
   | { ok: false; current: OrderStatus | null; filesDeleted?: boolean; partnerChanged?: boolean; hasShipment?: boolean; refunded?: boolean };
 
-/** جابه‌جایی چاپخانهٔ سفارش (برش ۵٫۲): از چاپخانه‌ای که ادمین دید (`from`؛ null یعنی سفارش بی چاپخانه بود)، با دلیل. */
+/**
+ * جابه‌جایی چاپخانهٔ سفارش (برش ۵٫۲): از چاپخانه‌ای که ادمین دید (`from`؛ null یعنی سفارش بی چاپخانه بود)، با دلیل. از ۱۰٫۱ (سؤال ۱۹۹)
+ * سپردن سفارش بی چاپخانه دلیل نمی‌خواهد (`reason` null؛ `order_assignments_actor` فقط همین را می‌پذیرد).
+ */
 export interface PanelAssign {
   orderId: string;
   from: string | null;
   to: string;
   at: Date;
   adminUserId: string;
-  reason: string;
+  reason: string | null;
   event: AdminEventInput;
 }
 
@@ -720,6 +746,8 @@ export interface PanelOrderStore {
    * (چاپخانه‌های دیگر و سفارش‌هایشان بیرون از محدوده‌اند).
    */
   partnerOptions(scope: PanelScope): Promise<PanelPartnerOption[]>;
+  /** چاپخانه‌های فعال برای کارت «چاپخانه‌ها»ی پیشخوان (برش ۱۰٫۱)؛ در محدودهٔ یک چاپخانه فقط همان. پیش‌فرض اول، بعد قدیمی‌ترین. */
+  partnerBoard(scope: PanelScope): Promise<PanelPartnerBoardRow[]>;
   /**
    * یادداشت داخلی تازه (برش ۹٫۳، ADR-058): فقط روی سفارشی در محدوده، با رویداد ادمین در همان تراکنش (بی متن یادداشت، با شناسه‌اش).
    * فرمی که یک بار فرستاده شد (`requestId`، شاخص یکتای `order_notes_request`) یادداشت دوم نمی‌سازد: دو فرستادن هم‌زمان پشت همان شاخص
@@ -1811,12 +1839,12 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
     },
 
     async partnerOptions(scope) {
-      return db
+      const rows = await db
         .select({
-          id: printPartners.id,
+          ...partnerCandidateColumns,
           name: printPartners.name,
           cityName: cities.nameFa,
-          isDefault: printPartners.isDefault,
+          availabilityNote: printPartners.availabilityNote,
           openOrders: sql<number>`(SELECT count(*)::int FROM orders o
             WHERE o.print_partner_id = ${printPartners.id} AND o.status IN ('paid', 'printing'))`,
         })
@@ -1824,6 +1852,30 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         .innerJoin(cities, eq(cities.id, printPartners.cityId))
         .where(and(isNull(printPartners.deactivatedAt), scope.kind === 'partner' ? eq(printPartners.id, scope.partnerId) : undefined))
         .orderBy(desc(printPartners.isDefault), asc(printPartners.createdAt), asc(printPartners.id));
+      return rows.map(partnerCandidateOf);
+    },
+
+    async partnerBoard(scope) {
+      const rows = await db
+        .select({
+          id: printPartners.id,
+          name: printPartners.name,
+          cityName: cities.nameFa,
+          isDefault: printPartners.isDefault,
+          availability: printPartners.availability,
+          closedFrom: printPartners.closedFrom,
+          closedUntil: printPartners.closedUntil,
+          availabilityNote: printPartners.availabilityNote,
+          openOrders: sql<number>`(SELECT count(*)::int FROM orders o
+            WHERE o.print_partner_id = ${printPartners.id} AND o.status IN ('paid', 'printing'))`,
+          queued: sql<number[]>`(SELECT coalesce(array_agg(o.order_number ORDER BY o.post_handoff_due_at, o.order_number), '{}'::int[])
+            FROM orders o WHERE o.print_partner_id = ${printPartners.id} AND o.status = 'paid')`,
+        })
+        .from(printPartners)
+        .innerJoin(cities, eq(cities.id, printPartners.cityId))
+        .where(and(isNull(printPartners.deactivatedAt), scope.kind === 'partner' ? eq(printPartners.id, scope.partnerId) : undefined))
+        .orderBy(desc(printPartners.isDefault), asc(printPartners.createdAt), asc(printPartners.id));
+      return rows.map(partnerCandidateOf);
     },
 
     async assignPartner(scope, input) {

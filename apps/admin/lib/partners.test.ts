@@ -5,11 +5,27 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { PanelAssignment, PanelOrderDetails, PartnerView } from '@jozveyar/db';
+import { rankPartners, type PanelAssignment, type PanelOrderDetails, type PanelPartnerOption, type PartnerView } from '@jozveyar/db';
 import { findCity } from '@jozveyar/geo';
 
 import type { Seg } from './orders';
-import { assignmentNote, assignmentText, cityLabel, partnerCard, partnerCityLabel, partnerMeta, partnerMobileOf, partnerNameOf, pickCity } from './partners';
+import {
+  assignmentNote,
+  assignmentText,
+  availabilityOf,
+  availabilitySeen,
+  availabilityView,
+  cityLabel,
+  closedLastDay,
+  optionNote,
+  partnerCard,
+  partnerCityLabel,
+  partnerMeta,
+  partnerMobileOf,
+  partnerNameOf,
+  pickCity,
+  RULE_TEXT,
+} from './partners';
 
 const tehran = (local: string) => new Date(`${local.replace(' ', 'T')}:00+03:30`);
 const text = (segs: readonly Seg[]) => segs.map((s) => (typeof s === 'string' ? s : 'num' in s ? s.num : 'ltr' in s ? s.ltr : 'name' in s ? s.name : s.barcode)).join('');
@@ -82,6 +98,10 @@ describe('فهرست «چاپخانه‌ها»', () => {
     openOrders: 8,
     users: [],
     notifyMobile: null,
+    availability: 'open',
+    closedFrom: null,
+    closedUntil: null,
+    availabilityNote: null,
     ...over,
   });
 
@@ -139,6 +159,11 @@ describe('چاپخانهٔ سفارش', () => {
       'دستی سپرده شد، علی: تازه آمد',
     );
     expect(assignmentNote(undefined)).toBeNull();
+    // ۱۰٫۱: نزدیک‌ترین، اولی که باز می‌شود، و سپردن بی دلیل.
+    expect(assignmentNote(assignment({ rule: 'nearest' }))).toBe('خودکار، هنگام پرداخت: نزدیک‌ترین چاپخانه به شهر مشتری.');
+    expect(assignmentNote(assignment({ rule: 'reopening' }))).toBe('خودکار، هنگام پرداخت: همه تعطیل بودند؛ اولین چاپخانه‌ای که باز می‌شود.');
+    expect(assignmentNote(assignment({ fromName: null, actor: 'admin', adminName: 'علی', rule: null, reason: null }))).toBe('دستی سپرده شد، علی.');
+    expect(text(assignmentText(assignment({ actor: 'admin', adminName: 'علی', rule: null, reason: null })))).toBe('به چاپ نور سپرده شد');
   });
 
   it('سطر رویدادهای سفارش، همان طرح: «به چاپ نور سپرده شد، هم‌شهر مشتری» و «از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ …»', () => {
@@ -159,5 +184,102 @@ describe('چاپخانهٔ سفارش', () => {
     for (const status of ['printing', 'handed_to_post', 'cancelled'] as const) {
       expect(partnerCard(details(status, [assignment()]))).toEqual({ note: 'خودکار، هنگام پرداخت: هم‌شهر مشتری.' });
     }
+  });
+});
+
+describe('در دسترس بودن (۱۰٫۱)', () => {
+  const now = tehran('2026-10-05 11:20');
+  const day = (local: string) => tehran(`${local} 00:00`);
+  const hours = (over: Partial<Pick<PartnerView, 'availability' | 'closedFrom' | 'closedUntil'>> = {}) => ({
+    availability: 'open' as const,
+    closedFrom: null,
+    closedUntil: null,
+    ...over,
+  });
+
+  it('چیپ: باز، شلوغ، «تعطیل تا …» با روز آخر، و تعطیلی آینده؛ تعطیلی گذشته همان باز', () => {
+    expect(availabilityView(hours(), now)).toEqual({ tone: 'open', text: 'باز' });
+    expect(availabilityView(hours({ availability: 'busy' }), now)).toEqual({ tone: 'busy', text: 'شلوغ' });
+    const closed = hours({ availability: 'closed', closedFrom: day('2026-10-05'), closedUntil: day('2026-10-08') });
+    expect(availabilityView(closed, now)).toEqual({ tone: 'closed', text: 'تعطیل تا چهارشنبه 15 مهر' });
+    const ahead = hours({ availability: 'closed', closedFrom: day('2026-10-10'), closedUntil: day('2026-10-13') });
+    expect(availabilityView(ahead, now)).toEqual({ tone: 'scheduled', text: 'از شنبه 18 مهر تا دوشنبه 20 مهر تعطیل' });
+    const past = hours({ availability: 'closed', closedFrom: day('2026-09-28'), closedUntil: day('2026-10-01') });
+    expect(availabilityView(past, now)).toEqual({ tone: 'open', text: 'باز' });
+    expect(closedLastDay(day('2026-10-08'))).toBe('1405/07/15');
+  });
+
+  it('«همان که دیده شد» هر جزء را دارد', () => {
+    const base = { availability: 'closed' as const, closedFrom: day('2026-10-05'), closedUntil: day('2026-10-08'), note: 'تعمیر' };
+    const seen = availabilitySeen(base);
+    for (const other of [
+      { ...base, availability: 'busy' as const },
+      { ...base, closedFrom: day('2026-10-06') },
+      { ...base, closedUntil: day('2026-10-09') },
+      { ...base, note: null },
+    ]) {
+      expect(availabilitySeen(other)).not.toBe(seen);
+    }
+  });
+
+  it('فرم: یادداشت «باز» نادیده، روزها شمسی با ارقام فارسی هم', () => {
+    expect(availabilityOf({ availability: 'open', from: '', until: '', note: 'x' }, now)).toEqual({
+      ok: true,
+      state: { availability: 'open', closedFrom: null, closedUntil: null, note: null },
+    });
+    expect(availabilityOf({ availability: 'closed', from: '۱۴۰۵/۰۷/۱۳', until: '۱۴۰۵/۰۷/۱۵', note: '' }, now)).toEqual({
+      ok: true,
+      state: { availability: 'closed', closedFrom: day('2026-10-05'), closedUntil: day('2026-10-08'), note: null },
+    });
+  });
+
+  it('فرم: روز اول گذشته فقط همان تعطیلی‌ای که همین حالا برقرار است، تا روز آخرش بی جابه‌جا شدن آغاز عوض شود', () => {
+    const ongoing = hours({ availability: 'closed', closedFrom: day('2026-10-03'), closedUntil: day('2026-10-07') });
+    const form = { availability: 'closed', from: '1405/07/11', until: '1405/07/16', note: 'تعمیر' };
+    expect(availabilityOf(form, now, ongoing)).toEqual({
+      ok: true,
+      state: { availability: 'closed', closedFrom: day('2026-10-03'), closedUntil: day('2026-10-09'), note: 'تعمیر' },
+    });
+    // روز گذشتهٔ دیگر، تعطیلی‌ای که دیگر برقرار نیست، یا بی حال امروز: همان «از امروز».
+    expect(availabilityOf({ ...form, from: '1405/07/12' }, now, ongoing)).toEqual({ ok: false, field: 'from', error: 'day_past' });
+    const ended = hours({ availability: 'closed', closedFrom: day('2026-10-03'), closedUntil: day('2026-10-05') });
+    expect(availabilityOf(form, now, ended)).toEqual({ ok: false, field: 'from', error: 'day_past' });
+    expect(availabilityOf(form, now)).toEqual({ ok: false, field: 'from', error: 'day_past' });
+  });
+
+  it('کاشی فهرست سپردن: چرا اینجای فهرست است، با شلوغ و تعطیل', () => {
+    const option = (over: Partial<PanelPartnerOption>): PanelPartnerOption => ({
+      id: 'p',
+      name: 'چاپ',
+      cityName: 'مشهد',
+      cityId: 1326,
+      provinceId: 11,
+      isDefault: false,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      openOrders: 2,
+      availability: 'open',
+      closedFrom: null,
+      closedUntil: null,
+      availabilityNote: null,
+      ...over,
+    });
+    const ranked = rankPartners(
+      [
+        option({ id: 'noor' }),
+        option({ id: 'sahar', cityName: 'سبزوار', cityId: 754, availability: 'busy' }),
+        option({ id: 'jozveyar', cityName: 'تهران', cityId: 394, provinceId: 8, isDefault: true, openOrders: 8 }),
+        option({ id: 'qom', cityName: 'قم', cityId: 1052, provinceId: 19, availability: 'closed', closedFrom: day('2026-10-05'), closedUntil: day('2026-10-08') }),
+      ],
+      { provinceId: 11, cityId: 1447 },
+      now,
+    );
+    // نیشابور: مشهد هم‌استان و باز؛ سبزوار هم‌استان ولی شلوغ، پس پس از تهرانِ باز (بازی در استان هست)؛ قم تعطیل، آخر.
+    expect(ranked.map((r) => text(optionNote(r, now)))).toEqual([
+      'مشهد · 2 سفارش باز · هم‌استان مشتری، 73 کیلومتر',
+      'تهران · پیش‌فرض · 8 سفارش باز · 666 کیلومتر',
+      'سبزوار · 2 سفارش باز · 100 کیلومتر · شلوغ',
+      'قم · 2 سفارش باز · 738 کیلومتر · تعطیل تا چهارشنبه 15 مهر',
+    ]);
+    expect(Object.keys(RULE_TEXT).sort()).toEqual(['city', 'default', 'nearest', 'oldest', 'province', 'reopening']);
   });
 });

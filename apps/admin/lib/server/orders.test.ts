@@ -67,6 +67,10 @@ function session(permissions: string[] = ['orders.read', 'files.download'], part
 /** دو چاپخانه (۵٫۲): پیش‌فرض تهران، و چاپ نور مشهد. */
 const PARTNER_A = '11111111-1111-4111-8111-111111111111';
 const PARTNER_B = '22222222-2222-4222-8222-222222222222';
+/** چاپخانه‌های فعال ذخیره‌گاه (۵٫۲؛ از ۱۰٫۱ با جا و در دسترس بودن): جزوه‌یار در تهران، پیش‌فرض؛ چاپ نور در مشهد. */
+const OPTION_BASE = { availability: 'open', closedFrom: null, closedUntil: null, availabilityNote: null } as const;
+const OPTION_A = { ...OPTION_BASE, id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', cityId: 394, provinceId: 8, isDefault: true, openOrders: 8, createdAt: new Date('2026-01-01T00:00:00Z') };
+const OPTION_B = { ...OPTION_BASE, id: PARTNER_B, name: 'چاپ نور', cityName: 'مشهد', cityId: 1326, provinceId: 11, isDefault: false, openOrders: 2, createdAt: new Date('2026-02-01T00:00:00Z') };
 
 const SUMMARY: PanelDueSummary = { overdue: 1, today: 3, tomorrow: 4, later: 2, overdueRange: null, laterRange: null };
 
@@ -158,10 +162,8 @@ function fakeStore(over: Partial<PanelOrderStore> = {}) {
       calls.push({ method: 'setting', args });
       return undefined;
     },
-    partnerOptions: record('partnerOptions', [
-      { id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 8 },
-      { id: PARTNER_B, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, openOrders: 2 },
-    ]),
+    partnerOptions: record('partnerOptions', [OPTION_A, OPTION_B]),
+    partnerBoard: record('partnerBoard', []),
     assignPartner: async (scope, input) => {
       calls.push({ method: 'assignPartner', args: [input], scope });
       events.push(input.event);
@@ -306,6 +308,41 @@ describe('پیشخوان', () => {
     expect(assigner.ok && [assigner.value.alerts.failedPdf, assigner.value.alerts.unassigned]).toEqual([[], [10037]]);
     const importer = await service().orders.dashboard(session(['orders.read', 'shipments.import']));
     expect(importer.ok && importer.value.untracked.map((d) => d.orderNumbers)).toEqual([[10009, 10025]]);
+  });
+
+  it('کارت «چاپخانه‌ها» و «تعطیل است» (۱۰٫۱): کارت با `partners.availability` در محدودهٔ خود، هشدارها و حالت تخصیص با `orders.assign`', async () => {
+    const TODAY = new Date('2026-10-04T20:30:00Z');
+    const board = (closedB: boolean, closedA = false) => [
+      { id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, availability: closedA ? ('closed' as const) : ('open' as const), closedFrom: closedA ? TODAY : null, closedUntil: closedA ? new Date(TODAY.getTime() + 3 * 86_400_000) : null, availabilityNote: null, openOrders: 3, queued: [10031] },
+      { id: PARTNER_B, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, availability: closedB ? ('closed' as const) : ('busy' as const), closedFrom: closedB ? TODAY : null, closedUntil: closedB ? new Date(TODAY.getTime() + 2 * 86_400_000) : null, availabilityNote: 'تعمیر', openOrders: 1, queued: [10040] },
+    ];
+    const run = async (who: AdminSession, rows = board(true), mode: unknown = undefined) => {
+      const { orders, calls } = service({
+        partnerBoard: async (scope) => (calls.push({ method: 'partnerBoard', args: [], scope }), rows),
+        setting: async (key: string) => (key === 'assignment.mode' ? mode : undefined),
+      });
+      const result = await orders.dashboard(who);
+      if (!result.ok) throw new Error(result.error);
+      return { value: result.value, scopes: calls.filter((c) => c.method === 'partnerBoard').map((c) => c.scope) };
+    };
+    const staff = await run(session(['orders.read', 'orders.assign', 'partners.availability']));
+    expect(staff.value.partners.map((row) => row.name)).toEqual(['چاپخانهٔ جزوه‌یار', 'چاپ نور']);
+    expect(staff.value.assignment).toEqual({ mode: 'auto', closed: [expect.objectContaining({ id: PARTNER_B })], allClosed: null });
+    // همه تعطیل: اشتراک دو بازه، از امروز تا پایان روز دوم.
+    const all = await run(session(['orders.read', 'orders.assign', 'partners.availability']), board(true, true), 'manual');
+    expect(all.value.assignment).toEqual({
+      mode: 'manual',
+      closed: [expect.objectContaining({ id: PARTNER_A }), expect.objectContaining({ id: PARTNER_B })],
+      allClosed: { from: TODAY, until: new Date(TODAY.getTime() + 2 * 86_400_000) },
+    });
+    // کاربر چاپخانه کارت خودش را دارد (محدوده در ذخیره‌گاه)، ولی هشدار و حالت تخصیص نه؛ حسابدار هیچ‌کدام و ذخیره‌گاه را نمی‌خواند.
+    const noor = await run(session(['orders.read', 'partners.availability'], { id: PARTNER_B, name: 'چاپ نور' }));
+    expect([noor.value.partners.length, noor.value.assignment, noor.scopes]).toEqual([2, null, [{ kind: 'partner', partnerId: PARTNER_B }]]);
+    const accountant = await run(session(['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read']));
+    expect([accountant.value.partners, accountant.value.assignment, accountant.scopes]).toEqual([[], null, []]);
+    // جابه‌جاکننده‌ای بی `partners.availability` هشدار را دارد، ولی کارتی که «عوض کن»ش برایش باز نیست نه.
+    const mover = await run(session(['orders.read', 'orders.assign']));
+    expect([mover.value.partners, mover.value.assignment?.closed.map((row) => row.id)]).toEqual([[], [PARTNER_B]]);
   });
 
   it('«پیامک پرداخت نرفت» (۷٫۱)، هشدارهای پول و درگاه (۷٫۲) و بازپرداخت (۷٫۳) فقط با `orders.money`: بی مبلغ و چاپخانه هیچ', async () => {
@@ -569,6 +606,9 @@ function orderDetails(
       priceBreakdown: { items: [] },
       filesDeletedAt: over.filesDeletedAt ?? null,
       printPartnerId: partner,
+      // مشهد (۱۰٫۱): گزینه‌های سپردن به ترتیب قاعده برای همین جا.
+      provinceId: 11,
+      cityId: 1326,
       recipientName: 'مریم کاظمی',
       addressText: 'بلوار سجاد، سجاد 18، پلاک 42، واحد 6',
       postalCode: null,
@@ -1177,17 +1217,20 @@ describe('جابه‌جایی چاپخانه', () => {
       });
       const result = await orders.details(session(permissions), '10027');
       if (!result.ok) throw new Error(result.error);
-      return [result.value.canAssign, result.value.partnerOptions.map((p) => p.id), calls.filter((c) => c.method === 'partnerOptions').length];
+      return [result.value.canAssign, result.value.partnerOptions.map((p) => p.partner.id), calls.filter((c) => c.method === 'partnerOptions').length];
     };
     expect(await run(orderDetails('paid'))).toEqual([true, [PARTNER_B], 1]);
-    // بی چاپخانه: همهٔ فعال‌ها، پیش‌فرض اول (ترتیب ذخیره‌گاه).
-    expect(await run(orderDetails('paid', { partner: null }))).toEqual([true, [PARTNER_A, PARTNER_B], 1]);
+    // بی چاپخانه: همهٔ فعال‌ها به ترتیب قاعدهٔ تخصیص برای جای سفارش (۱۰٫۱): هم‌شهر مشهد پیش از پیش‌فرض تهران.
+    expect(await run(orderDetails('paid', { partner: null }))).toEqual([true, [PARTNER_B, PARTNER_A], 1]);
+    // چاپ نور تعطیل: آخر فهرست (اولی که باز می‌شود)، حتی هم‌شهر.
+    const closedB = { ...OPTION_B, availability: 'closed' as const, closedFrom: new Date(NOW.getTime() - 3_600_000), closedUntil: new Date(NOW.getTime() + 86_400_000) };
+    expect(await run(orderDetails('paid', { partner: null }), ASSIGNER, [OPTION_A, closedB])).toEqual([true, [PARTNER_A, PARTNER_B], 1]);
     expect(await run(orderDetails('paid'), ['orders.read'])).toEqual([false, [], 0]);
     for (const status of ['printing', 'handed_to_post', 'cancelled', 'awaiting_payment'] as const) {
       expect(await run(orderDetails(status))).toEqual([false, [], 0]);
     }
     // تنها چاپخانهٔ فعال همین است: جایی برای رفتن نیست.
-    expect(await run(orderDetails('paid'), ASSIGNER, [{ id: PARTNER_A, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 1 }])).toEqual([
+    expect(await run(orderDetails('paid'), ASSIGNER, [OPTION_A])).toEqual([
       false,
       [],
       1,
@@ -1219,9 +1262,11 @@ describe('جابه‌جایی چاپخانه', () => {
         at: NOW,
       },
     });
-    // سفارش بی چاپخانه: «از» خالی.
+    // سفارش بی چاپخانه: «از» خالی، و از ۱۰٫۱ دلیل نمی‌خواهد (سؤال ۱۹۹): یک کلیک «بسپار».
     const chosen = await run(orderDetails('paid', { partner: null }), { from: '' });
     expect([chosen.result, (chosen.calls[0]!.args[0] as { from: unknown }).from]).toEqual(['ok', null]);
+    const oneClick = await run(orderDetails('paid', { partner: null }), { from: '', reason: '' });
+    expect([oneClick.result, (oneClick.calls[0]!.args[0] as { reason: unknown }).reason]).toEqual(['ok', null]);
     expect((await run(orderDetails('paid'), {}, ['orders.read', 'orders.status'])).result).toBe('403 forbidden');
     expect((await run(null)).result).toBe('404 order_not_found');
     expect((await run(orderDetails('paid'), { reason: '   ' })).result).toBe('400 reason_required');
@@ -1781,6 +1826,7 @@ describe('«استعلام از درگاه» (۷٫۲، ADR-050)', () => {
     };
     const orderStore = {
       setting: async () => undefined,
+      partnerHours: async () => [],
       settle: async (lookup: unknown, _decide: unknown, options: unknown) => (settles.push({ lookup, options }), settled),
       recordGatewayCheck: async (id: string, check: unknown) => {
         checks.push({ id, check });

@@ -9,7 +9,7 @@
  */
 
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
-import { formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
+import { formatDeadlineDay, formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { AUDIENCE_NAMES } from './checkout';
 import { tehranDay } from './format';
@@ -174,7 +174,31 @@ function bandsRef(value: unknown): Segment[] {
   return boundsText(value).map((seg) => (typeof seg === 'string' ? seg : { ltr: 'num' in seg ? seg.num : '' }));
 }
 
+/** حالت تخصیص چاپخانه (۱۰٫۱) در رویداد. */
+const ASSIGNMENT_MODE_NAMES: Record<string, string> = { auto: 'خودکار', manual: 'دستی' };
+
+/**
+ * در دسترس بودن چاپخانه (۱۰٫۱) در رویداد: «باز»، «شلوغ (یادداشت)» یا «تعطیل از ۲۵ مهر تا ۲۸ مهر (یادداشت)»؛ روزها از ISO رویداد، روز
+ * آخر یک روز پیش از پایان انحصاری.
+ */
+function availabilityRef(value: unknown): Segment[] {
+  const state = (value ?? {}) as { availability?: unknown; closedFrom?: unknown; closedUntil?: unknown; note?: unknown };
+  const note = typeof state.note === 'string' && state.note ? ` (${state.note})` : '';
+  if (state.availability === 'busy') return [`شلوغ${note}`];
+  if (state.availability === 'closed' && typeof state.closedFrom === 'string' && typeof state.closedUntil === 'string') {
+    const from = new Date(state.closedFrom);
+    const until = new Date(state.closedUntil);
+    if (!Number.isNaN(from.getTime()) && !Number.isNaN(until.getTime())) {
+      return [`تعطیل از ${formatJalaliWeekday(from)} تا ${formatDeadlineDay(until)}${note}`];
+    }
+  }
+  return ['باز'];
+}
+
 function settingUpdate(detail: Detail): Segment[] {
+  if (detail.key === 'assignment.mode') {
+    return [`تخصیص چاپخانه: ${ASSIGNMENT_MODE_NAMES[str(detail.from)] ?? str(detail.from)} ← ${ASSIGNMENT_MODE_NAMES[str(detail.to)] ?? str(detail.to)}`];
+  }
   if (detail.key === 'calendar.official_through') return ['تعطیلی‌های ', ltrOf(detail.to), ' با تقویم رسمی تطبیق داده شد'];
   if (detail.key === 'report.weight_bands') return ['بازه‌های وزن گزارش ارسال: ', ...bandsRef(detail.from), ' ← ', ...bandsRef(detail.to)];
   if (detail.key === 'file.formats') return [`${SETTING_NAMES['file.formats']}: `, ...formatsRef(detail.from), ' ← ', ...formatsRef(detail.to)];
@@ -424,6 +448,9 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         text: [`چاپخانهٔ «${str(detail.name)}» پیش‌فرض شد${previous ? `، به جای «${str(previous.name)}»` : ''}`],
       };
     }
+    case 'partners.availability':
+      // در دسترس بودن (۱۰٫۱، سؤال ۲۰۰): از و به، با یادداشت.
+      return { badge: null, text: merged([`چاپخانهٔ «${str(detail.name)}»: `, ...availabilityRef(detail.from), ' ← ', ...availabilityRef(detail.to)]) };
     case 'partners.deactivate':
       return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» غیرفعال شد`] };
     case 'partners.activate':

@@ -378,6 +378,8 @@ describe('رویدادها', () => {
       setting('settings.update', { key: 'file.formats', from: { word: false, slides: false, image: false }, to: 'خراب' }),
       setting('settings.update', { key: 'file.max_mb', from: 1536, to: 200 }),
       setting('settings.update', { key: 'file.max_pages', from: 1500, to: 600 }),
+      // ۱۰٫۱: تخصیص چاپخانه.
+      setting('settings.update', { key: 'assignment.mode', from: 'auto', to: 'manual' }),
     ]);
     expect(lines.map((l) => l.text)).toEqual([
       ['روز کاری تحویل به پست: ', { ltr: '2' }, ' ← ', { ltr: '3' }],
@@ -413,6 +415,7 @@ describe('رویدادها', () => {
       ['فرمت‌های پذیرفته: ', 'فقط ', { ltr: 'PDF' }, ' ← ', '؟'],
       ['حجم هر فایل (مگابایت): ', { ltr: '1,536' }, ' ← ', { ltr: '200' }],
       ['صفحهٔ هر فایل: ', { ltr: '1,500' }, ' ← ', { ltr: '600' }],
+      ['تخصیص چاپخانه: خودکار ← دستی'],
     ]);
     // هیچ سطری مقدار کلید ندارد: فقط نام، نتیجه و موبایل پوشیده.
     expect(JSON.stringify(lines)).not.toMatch(/09\d{9}/);
@@ -533,6 +536,27 @@ describe('رویدادها', () => {
       ['سفارش ', { ltr: '10027' }, ' از «چاپ نور» به «چاپخانهٔ جزوه‌یار» رفت؛ دستگاه خراب است'],
       ['سفارش ', { ltr: '10037' }, ' به «چاپ نور» سپرده شد؛ تازه آمد'],
     ]);
+  });
+
+  it('در دسترس بودن (۱۰٫۱): از و به با یادداشت، روز آخر یک روز پیش از پایان انحصاری؛ سپردن بی دلیل؛ زیر «چاپخانه‌ها»', () => {
+    const partner = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'partner', detail });
+    const closed = { availability: 'closed', closedFrom: '2026-10-05T20:30:00.000Z', closedUntil: '2026-10-08T20:30:00.000Z', note: 'تعمیر' };
+    const lines = eventLines([
+      partner('partners.availability', { name: 'چاپ نور', from: { availability: 'open' }, to: { availability: 'busy', note: 'دستگاه کند است' } }),
+      partner('partners.availability', { name: 'چاپ نور', from: { availability: 'busy', note: 'دستگاه کند است' }, to: closed }),
+      partner('partners.availability', { name: 'چاپ نور', from: closed, to: { availability: 'open' } }),
+      // مقدار بدشکل «باز»، نه شکستن صفحه.
+      partner('partners.availability', { name: 'چاپ نور', from: { availability: 'closed', closedFrom: 'x' }, to: null }),
+      event('orders.assign', { targetType: 'order', detail: { orderNumber: 10037, from: null, to: { id: 'p1', name: 'چاپ نور' }, reason: null } }),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      ['چاپخانهٔ «چاپ نور»: باز ← شلوغ (دستگاه کند است)'],
+      ['چاپخانهٔ «چاپ نور»: شلوغ (دستگاه کند است) ← تعطیل از سه‌شنبه 14 مهر تا پنجشنبه 16 مهر (تعمیر)'],
+      ['چاپخانهٔ «چاپ نور»: تعطیل از سه‌شنبه 14 مهر تا پنجشنبه 16 مهر (تعمیر) ← باز'],
+      ['چاپخانهٔ «چاپ نور»: باز ← باز'],
+      ['سفارش ', { ltr: '10037' }, ' به «چاپ نور» سپرده شد'],
+    ]);
+    expect(inEventKind('partners.availability', 'partners')).toBe(true);
   });
 
   it('موبایل اعلان (۷٫۶، سؤال ۱۷۷): پوشیده و جدا از جمله، گذاشته، عوض یا برداشته؛ «دوباره بفرست» پیامک سفارش تازه زیر «سفارش»', () => {

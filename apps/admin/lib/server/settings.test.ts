@@ -424,6 +424,27 @@ describe('فایل‌ها (۸٫۴، سؤال ۱۹۰)', () => {
   });
 });
 
+describe('تخصیص چاپخانه (۱۰٫۱، سؤال ۱۹۹)', () => {
+  it('فقط مالک؛ خودکار ← دستی با رویداد از و به؛ مقصد یکسان بی رویداد؛ حالت ناشناس یا صفحهٔ کهنه نه', async () => {
+    const { panel, settings } = service();
+    expect(await panel.saveAssignmentMode(OPERATOR, { mode: 'manual', seen: 'auto' }, 'ip')).toMatchObject({ status: 403 });
+    expect(await panel.saveAssignmentMode(OWNER, { mode: 'nearest', seen: 'auto' }, 'ip')).toEqual(fail(400, 'invalid_setting', { key: 'assignment.mode' }));
+    expect(await panel.saveAssignmentMode(OWNER, { mode: 'auto', seen: 'auto' }, 'ip')).toEqual(ok({ mode: 'auto', written: false }));
+    expect(settings.events).toEqual([]);
+    expect(await panel.saveAssignmentMode(OWNER, { mode: 'manual', seen: 'auto' }, 'ip')).toEqual(ok({ mode: 'manual', written: true }));
+    expect(settings.values.get('assignment.mode')).toBe('manual');
+    expect(settings.events).toMatchObject([
+      { action: 'settings.update', targetId: 'assignment.mode', detail: { key: 'assignment.mode', from: 'auto', to: 'manual' } },
+    ]);
+    // صفحه‌ای که هنوز «خودکار» دید: رونویسی نمی‌کند.
+    expect(await panel.saveAssignmentMode(OWNER, { mode: 'auto', seen: 'auto' }, 'ip')).toEqual(fail(409, 'setting_changed', { key: 'assignment.mode' }));
+    expect(settings.values.get('assignment.mode')).toBe('manual');
+    // نمای صفحه حالت امروز را دارد.
+    const view = await panel.overview(OWNER);
+    expect(view.ok && view.value.values?.assignmentMode).toBe('manual');
+  });
+});
+
 describe('بازه‌های وزن گزارش ارسال (۶٫۴)', () => {
   const OWNER_REPORTS = session(['settings.edit', 'secrets.edit', 'tariff.read', 'reports.read']);
   const fields = (...values: string[]) => values;

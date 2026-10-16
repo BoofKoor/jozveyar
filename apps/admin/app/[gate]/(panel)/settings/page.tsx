@@ -7,6 +7,7 @@ import { templateText } from '@jozveyar/sms';
 import { formatJalaliNumeric, formatNumber } from '@jozveyar/text';
 
 import { Alert } from '../../../../components/Alert';
+import { AssignmentModeForm } from '../../../../components/AssignmentModeForm';
 import { CheckoutCard } from '../../../../components/CheckoutCard';
 import { FilesSettingsForm } from '../../../../components/FilesSettingsForm';
 import { HolidayAddForm } from '../../../../components/HolidayAddForm';
@@ -184,6 +185,12 @@ export default async function SettingsPage({ params, searchParams }: { params: P
       <Alert tone="success">
         آستانهٔ هشدار اعتبار پیامک ذخیره شد: <span className="num">{v}</span> روز مصرف.
       </Alert>
+    ) : values && done === 'assignment' && one(query, 'm') === values.assignmentMode ? (
+      <Alert tone="success">
+        {values.assignmentMode === 'manual'
+          ? 'تخصیص چاپخانه دستی شد: سفارش‌های پرداخت‌شدهٔ بعدی بی چاپخانه می‌مانند تا از پیشخوان بسپاری‌شان.'
+          : 'تخصیص چاپخانه خودکار شد: سفارش‌های پرداخت‌شدهٔ بعدی همان لحظه سپرده می‌شوند.'}
+      </Alert>
     ) : values &&
       done === 'files' &&
       one(query, 'f') === formatsSeen(values.files.formats) &&
@@ -355,6 +362,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                 maxMbError={`حجم هر فایل عدد صحیح ${formatNumber(MAX_MB.minValue ?? 1)} تا ${formatNumber(MAX_MB.maxValue ?? 1536)} مگابایت باشد.`}
                 maxPagesError={`صفحهٔ هر فایل عدد صحیح ${formatNumber(MAX_PAGES.minValue ?? 1)} تا ${formatNumber(MAX_PAGES.maxValue ?? 1500)} باشد.`}
               />
+              <AssignmentModeForm key={`assignment:${values.assignmentMode}:${mark}`} gate={gate} mode={values.assignmentMode} />
             </div>
 
             {ticketKinds ? (

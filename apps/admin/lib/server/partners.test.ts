@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { AdminEventInput, NewPartner, PartnerEdit, PartnerStore, PartnerView } from '@jozveyar/db';
+import { sameAvailability, type AdminEventInput, type NewPartner, type PartnerEdit, type PartnerStore, type PartnerView } from '@jozveyar/db';
 import { CITIES } from '@jozveyar/geo';
 
 import { ipHashOf, type AdminSession } from './auth';
@@ -52,6 +52,10 @@ function memoryPartners() {
         openOrders: 3,
         users: [],
         notifyMobile: null,
+        availability: 'open',
+        closedFrom: null,
+        closedUntil: null,
+        availabilityNote: null,
       },
     ],
   ]);
@@ -82,6 +86,10 @@ function memoryPartners() {
         openOrders: 0,
         users: [],
         notifyMobile: input.notifyMobile,
+        availability: 'open' as const,
+        closedFrom: null,
+        closedUntil: null,
+        availabilityNote: null,
       };
       rows.set(id, row);
       events.push(input.event);
@@ -122,6 +130,18 @@ function memoryPartners() {
       if (row.openOrders > 0) return 'open_orders';
       if (row.deactivatedAt) return 'already';
       row.deactivatedAt = at;
+      events.push(event);
+      return 'ok';
+    },
+    async setAvailability({ id, seen, next, event }) {
+      calls.push({ method: 'setAvailability', input: { id, seen, next } });
+      const row = rows.get(id);
+      if (!row) return 'not_found';
+      if (row.deactivatedAt) return 'inactive';
+      const current = { availability: row.availability, closedFrom: row.closedFrom, closedUntil: row.closedUntil, note: row.availabilityNote };
+      if (!sameAvailability(current, seen)) return 'changed';
+      if (sameAvailability(current, next)) return 'same';
+      Object.assign(row, { availability: next.availability, closedFrom: next.closedFrom, closedUntil: next.closedUntil, availabilityNote: next.note });
       events.push(event);
       return 'ok';
     },
@@ -341,5 +361,103 @@ describe('موبایل اعلان (۷٫۶، سؤال‌های ۱۲۶ و ۱۷۷)'
       field: 'mobile',
     });
     expect(other.calls).toEqual([]);
+  });
+});
+
+describe('در دسترس بودن (برش ۱۰٫۱)', () => {
+  const TODAY = new Date('2026-10-04T20:30:00Z');
+  const day = (n: number) => new Date(TODAY.getTime() + n * 86_400_000);
+  const ACCOUNTANT = session(['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read']);
+  const STAFF = session(['orders.read', 'orders.assign', 'partners.availability']);
+  const partnerUser = (id: string): AdminSession => ({ ...session(['orders.read', 'partners.availability']), partner: { id, name: 'چاپ' } });
+  const OPEN_SEEN = 'open|||';
+  const form = (over: Record<string, unknown> = {}) => ({ availability: 'busy', from: '', until: '', note: '', seen: OPEN_SEEN, ...over });
+
+  it('بی `partners.availability` (حسابدار) هیچ، و کاربر چاپخانه فقط خودش: چاپخانهٔ دیگر همان «پیدا نشد»', async () => {
+    const { partners, calls, events } = service();
+    expect(await partners.availability(ACCOUNTANT, FIRST)).toMatchObject({ ok: false, status: 403, error: 'forbidden' });
+    expect(await partners.setAvailability(ACCOUNTANT, FIRST, form(), '1.2.3.4')).toMatchObject({ ok: false, status: 403 });
+    expect(await partners.availability(partnerUser(NOOR), FIRST)).toMatchObject({ ok: false, status: 404, error: 'partner_not_found' });
+    expect(await partners.setAvailability(partnerUser(NOOR), FIRST, form(), '1.2.3.4')).toMatchObject({ ok: false, status: 404 });
+    expect(await partners.availability(STAFF, 'x')).toMatchObject({ ok: false, status: 404 });
+    expect(calls).toEqual([]);
+    expect(events).toEqual([]);
+    // شاهد: کاربر همان چاپخانه، و متصدی.
+    expect(await partners.availability(partnerUser(FIRST), FIRST)).toMatchObject({ ok: true, value: { id: FIRST } });
+    expect(await partners.availability(STAFF, FIRST)).toMatchObject({ ok: true, value: { id: FIRST } });
+  });
+
+  it('«شلوغ» با یادداشت، بعد «تعطیل از … تا …»: روزها به آغاز روز اول و آغاز روز پس از روز آخر؛ رویداد با هدف چاپخانه', async () => {
+    const { partners, rows, events } = service();
+    expect(await partners.setAvailability(STAFF, FIRST, form({ note: '  دستگاه  کند است ' }), '1.2.3.4')).toMatchObject({
+      ok: true,
+      value: { written: true, state: { availability: 'busy', note: 'دستگاه کند است' } },
+    });
+    expect(rows.get(FIRST)).toMatchObject({ availability: 'busy', availabilityNote: 'دستگاه کند است' });
+    const closed = await partners.setAvailability(
+      partnerUser(FIRST),
+      FIRST,
+      form({ availability: 'closed', from: '۱۴۰۵/۰۷/۱۴', until: '1405/07/16', note: '', seen: 'busy|||دستگاه کند است' }),
+      '1.2.3.4',
+    );
+    expect(closed).toMatchObject({ ok: true, value: { written: true, state: { availability: 'closed', closedFrom: day(1), closedUntil: day(4), note: null } } });
+    expect(rows.get(FIRST)).toMatchObject({ availability: 'closed', closedFrom: day(1), closedUntil: day(4), availabilityNote: null });
+    expect(events.map((e) => [e.action, e.targetType, e.targetId, e.ipHash])).toEqual([
+      ['partners.availability', 'partner', FIRST, ipHashOf(SECRET, '1.2.3.4')],
+      ['partners.availability', 'partner', FIRST, ipHashOf(SECRET, '1.2.3.4')],
+    ]);
+  });
+
+  it('همان که دیده شد: حالی که همین حالا جای دیگری عوض شد هیچ نمی‌نویسد؛ بی تغییر موفق و بی رویداد', async () => {
+    const { partners, calls, events } = service();
+    expect(await partners.setAvailability(STAFF, FIRST, form({ seen: 'busy|||' }), '1.2.3.4')).toMatchObject({
+      ok: false,
+      status: 409,
+      error: 'partner_availability_changed',
+    });
+    expect(calls.filter((c) => c.method === 'setAvailability')).toEqual([]);
+    expect(await partners.setAvailability(STAFF, FIRST, form({ availability: 'open', note: 'نادیده' }), '1.2.3.4')).toMatchObject({
+      ok: true,
+      value: { written: false, state: { availability: 'open', note: null } },
+    });
+    expect(events).toEqual([]);
+  });
+
+  it('فرم: حال ناشناس، روز بدشکل، روز اول گذشته، روز آخر پیش از اول یا بیش از ۹۰ روز بعد، و یادداشت بلند، هر کدام زیر فیلد خودش', async () => {
+    const { partners, calls } = service();
+    const tried = async (over: Record<string, unknown>) => partners.setAvailability(STAFF, FIRST, form(over), '1.2.3.4');
+    expect(await tried({ availability: 'paused' })).toMatchObject({ status: 400, error: 'invalid_availability', field: 'availability' });
+    expect(await tried({ availability: 'closed', from: '1405/13/01', until: '1405/07/16' })).toMatchObject({ error: 'invalid_day', field: 'from' });
+    expect(await tried({ availability: 'closed', from: '1405/07/14', until: 'فردا' })).toMatchObject({ error: 'invalid_last_day', field: 'until' });
+    expect(await tried({ availability: 'closed', from: '1405/07/12', until: '1405/07/16' })).toMatchObject({ error: 'day_past', field: 'from' });
+    expect(await tried({ availability: 'closed', from: '1405/07/16', until: '1405/07/14' })).toMatchObject({ error: 'day_order', field: 'until' });
+    expect(await tried({ availability: 'closed', from: '1405/07/14', until: '1405/10/14' })).toMatchObject({ error: 'day_too_far', field: 'until' });
+    expect(await tried({ note: 'ی'.repeat(201) })).toMatchObject({ error: 'availability_note_too_long', field: 'note' });
+    expect(calls.filter((c) => c.method === 'setAvailability')).toEqual([]);
+    // شاهد: امروز تا ۹۰ روز بعد، و یک روزه.
+    expect(await tried({ availability: 'closed', from: '1405/07/13', until: '1405/07/13' })).toMatchObject({
+      ok: true,
+      value: { state: { closedFrom: TODAY, closedUntil: day(1) } },
+    });
+  });
+
+  it('تعطیلی‌ای که همین حالا برقرار است: فرمش با همان روز اول گذشته، و روز آخر بی جابه‌جا شدن آغاز تمدید می‌شود', async () => {
+    const { partners, rows } = service();
+    Object.assign(rows.get(FIRST)!, { availability: 'closed', closedFrom: day(-2), closedUntil: day(2), availabilityNote: 'تعمیر' });
+    const seen = `closed|${day(-2).toISOString()}|${day(2).toISOString()}|تعمیر`;
+    expect(
+      await partners.setAvailability(STAFF, FIRST, form({ availability: 'closed', from: '1405/07/11', until: '1405/07/15', note: 'تعمیر', seen }), '1.2.3.4'),
+    ).toMatchObject({ ok: true, value: { written: true, state: { closedFrom: day(-2), closedUntil: day(3) } } });
+    // روز گذشتهٔ دیگری همان «از امروز».
+    const extended = `closed|${day(-2).toISOString()}|${day(3).toISOString()}|تعمیر`;
+    expect(
+      await partners.setAvailability(STAFF, FIRST, form({ availability: 'closed', from: '1405/07/12', until: '1405/07/15', note: 'تعمیر', seen: extended }), '1.2.3.4'),
+    ).toMatchObject({ ok: false, status: 400, error: 'day_past', field: 'from' });
+  });
+
+  it('چاپخانهٔ غیرفعال در دسترس بودن ندارد', async () => {
+    const { partners, rows } = service();
+    rows.get(FIRST)!.deactivatedAt = NOW;
+    expect(await partners.availability(STAFF, FIRST)).toMatchObject({ ok: false, status: 404 });
   });
 });

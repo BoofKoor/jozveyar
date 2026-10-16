@@ -1,3 +1,4 @@
+import { ClosureBar } from '../components/ClosureBar';
 import { Faq, faqItems } from '../components/Faq';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
@@ -5,6 +6,7 @@ import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
 import { acceptOf } from '../lib/fileRules';
+import { siteClosure } from '../lib/server/closure';
 import { siteFiles } from '../lib/server/fileRules';
 import { siteTariff } from '../lib/server/tariff';
 import { TARIFF_ELEMENT_ID, tariffJson } from '../lib/tariff';
@@ -36,10 +38,11 @@ const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})
  * سؤال‌ها در همان شبکه. قهرمان و بخش‌ها با CSS و نشانهٔ `data-jozve` جزیره کنار می‌روند.
  *
  * تعرفه و روز کاری تحویل به پست از پایگاه داده‌اند (برش ۴٫۴): در جدول تعرفه، سؤال‌ها و «روز کاری»ها، و به JSON درون HTML
- * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است.
+ * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است. از ۱۰٫۱ وقتی همهٔ
+ * چاپخانه‌ها تعطیل‌اند، نوار کوچکی بالای همه (`ClosureBar`).
  */
 export default async function HomePage() {
-  const [tariff, files] = await Promise.all([siteTariff(), siteFiles()]);
+  const [tariff, files, closure] = await Promise.all([siteTariff(), siteFiles(), siteClosure()]);
   const faq = faqItems(tariff, files);
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -81,6 +84,8 @@ export default async function HomePage() {
 
       {/* نام سایت را لوگوی سربرگ می‌گوید. سربرگ و پاورقی در layout است. */}
       <main className="home">
+        {/* همهٔ چاپخانه‌ها تعطیل‌اند (۱۰٫۱): فقط همان روزها، با ISR همین صفحه. */}
+        {closure ? <ClosureBar closure={closure} /> : null}
         <OrderFlow
           rules={files.rules}
           accept={acceptOf(files.rules.formats)}

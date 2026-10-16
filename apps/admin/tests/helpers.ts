@@ -12,6 +12,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import type postgres from 'postgres';
 
 import { POST_HEADERS, totalRow } from '@jozveyar/db/postfile.fixtures';
+import { rankPartners, type PartnerCandidate } from '@jozveyar/db/rank';
 import { partnerOrderText, partnerParams } from '@jozveyar/sms';
 import { formatDeadlineDay, tehranDayStart } from '@jozveyar/text';
 
@@ -148,39 +149,42 @@ export async function layoutProblems(page: Page): Promise<{ overflow: number; sm
 }
 
 /**
- * چاپخانهٔ سفارش، همان که برگشت درگاه در همان تراکنش پرداخت می‌نویسد (`assignAtPayment`، برش ۵٫۲، ADR-042): چاپخانهٔ فعال همان
- * شهر، وگرنه همان استان، وگرنه پیش‌فرض، وگرنه قدیمی‌ترین؛ و ردیف تخصیص با قاعده‌اش. هیچ چاپخانهٔ فعالی نیست؟ بی چاپخانه (null).
- * تست‌ها سفارش را با SQL می‌نشانند، چون Playwright ماژول ESM `@jozveyar/db` را بار نمی‌کند؛ پایگاه داده جابه‌جایی بی ردیف تخصیص را
- * رد می‌کند (`order_assignments_recorded`).
+ * چاپخانهٔ سفارش، همان که برگشت درگاه در همان تراکنش پرداخت می‌نویسد (`assignAtPayment`، برش ۵٫۲، ADR-042؛ از ۱۰٫۱ با همان قاعدهٔ خالص
+ * `rankPartners`: همان شهر، همان استان و نزدیک‌ترین، «شلوغ» و «تعطیل»، و در حالت دستی هیچ)؛ و ردیف تخصیص با قاعده‌اش. هیچ چاپخانهٔ فعالی
+ * نیست؟ بی چاپخانه (null). تست‌ها سفارش را با SQL می‌نشانند، چون Playwright ماژول ESM `@jozveyar/db` را بار نمی‌کند (قاعده از
+ * `@jozveyar/db/rank` می‌آید، که بی پایگاه داده است)؛ پایگاه داده جابه‌جایی بی ردیف تخصیص را رد می‌کند (`order_assignments_recorded`).
  *
  * از ۷٫۶: چاپخانه‌ای که موبایل اعلان دارد، ردیف «منتظر» پیامک سفارش تازه را هم در همان تراکنش می‌گیرد، با همان متن و پارامترهای
  * `queuedPartnerSms` (تریگر `order_assignments_partner_sms` بی آن تخصیص را رد می‌کند). مثل پرداخت واقعی پیش از فرستادن است: اینجا
  * هیچ‌کس نمی‌فرستدش، پس پس از پنج دقیقه «نرفت: … نیمه‌کاره ماند» می‌شود و «دوباره بفرست» دارد (۷٫۶ در `partners.spec.ts`).
  */
 export async function assignAtPayment(tx: postgres.TransactionSql, orderId: string, at: Date): Promise<string | null> {
-  const [chosen] = await tx<{ id: string; rule: string; notifyMobile: string | null; orderNumber: number; dueAt: Date | null }[]>`
-    SELECT p.id, p.notify_mobile AS "notifyMobile", o.order_number AS "orderNumber", o.post_handoff_due_at AS "dueAt",
-           CASE WHEN p.city_id = o.city_id THEN 'city' WHEN p.province_id = o.province_id THEN 'province'
-                WHEN p.is_default THEN 'default' ELSE 'oldest' END AS rule
-      FROM print_partners p, orders o
-     WHERE o.id = ${orderId} AND p.deactivated_at IS NULL
-     ORDER BY p.city_id = o.city_id DESC NULLS LAST, p.province_id = o.province_id DESC, p.is_default DESC, p.created_at, p.id
-     LIMIT 1`;
-  if (!chosen) return null;
+  const [mode] = await tx<{ value: unknown }[]>`SELECT value FROM settings WHERE key = 'assignment.mode'`;
+  if (mode?.value === 'manual') return null;
+  const [order] = await tx<{ orderNumber: number; dueAt: Date | null; cityId: number | null; provinceId: number }[]>`
+    SELECT order_number AS "orderNumber", post_handoff_due_at AS "dueAt", city_id AS "cityId", province_id AS "provinceId"
+      FROM orders WHERE id = ${orderId}`;
+  const partners = await tx<(PartnerCandidate & { notifyMobile: string | null })[]>`
+    SELECT id, city_id AS "cityId", province_id AS "provinceId", is_default AS "isDefault", created_at AS "createdAt",
+           availability, closed_from AS "closedFrom", closed_until AS "closedUntil", notify_mobile AS "notifyMobile"
+      FROM print_partners WHERE deactivated_at IS NULL`;
+  const first = rankPartners(partners, order!, at)[0];
+  if (!first) return null;
+  const chosen = first.partner;
   await tx`UPDATE orders SET print_partner_id = ${chosen.id} WHERE id = ${orderId}`;
   let smsId: string | null = null;
   if (chosen.notifyMobile) {
-    if (!chosen.dueAt) throw new Error(`سفارش ${chosen.orderNumber} مهلت تحویل به پست ندارد`);
-    const day = formatDeadlineDay(chosen.dueAt);
+    if (!order!.dueAt) throw new Error(`سفارش ${order!.orderNumber} مهلت تحویل به پست ندارد`);
+    const day = formatDeadlineDay(order!.dueAt);
     const [sms] = await tx<{ id: string }[]>`
       INSERT INTO sms_messages (provider, to_mobile, purpose, body, params, status, created_at)
-      VALUES ('queued', ${chosen.notifyMobile}, 'partner_order', ${partnerOrderText(chosen.orderNumber, day)},
-              ${tx.json(partnerParams(chosen.orderNumber, day))}, 'pending', ${at})
+      VALUES ('queued', ${chosen.notifyMobile}, 'partner_order', ${partnerOrderText(order!.orderNumber, day)},
+              ${tx.json(partnerParams(order!.orderNumber, day))}, 'pending', ${at})
       RETURNING id`;
     smsId = sms!.id;
   }
   await tx`INSERT INTO order_assignments (order_id, to_partner_id, at, actor, rule, sms_message_id)
-           VALUES (${orderId}, ${chosen.id}, ${at}, 'system', ${chosen.rule}, ${smsId})`;
+           VALUES (${orderId}, ${chosen.id}, ${at}, 'system', ${first.rule}, ${smsId})`;
   return chosen.id;
 }
 

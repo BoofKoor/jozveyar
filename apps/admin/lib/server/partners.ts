@@ -10,15 +10,18 @@
  *   بعدی است؛ در رویداد پوشیده («0915 ••• 4567»)، چون رویدادها را متصدی هم می‌بیند.
  * - **غیرفعال کردن** فقط وقتی سفارش باز ندارد و پیش‌فرض نیست؛ پایگاه داده هم می‌سنجد (`print_partners_guard`).
  * - **رویداد:** هر کار یک ردیف `admin_events` با هدف `partner`، در همان تراکنش (چیپ «چاپخانه‌ها» در «رویدادها»).
+ * - **در دسترس بودن** (برش ۱۰٫۱، سؤال‌های ۲۰۰ و ۲۶۶ تا ۲۶۸): «باز»، «شلوغ» یا «تعطیل از … تا …» با یادداشت. مجوز جدا
+ *   (`partners.availability`): مالک و متصدی برای هر چاپخانه، و کاربر چاپخانه فقط برای خودش (چاپخانهٔ دیگر برایش همان «نیست» است، ۴۰۴).
+ *   بی کد تازه، از همان که دیده شد، و فقط چاپخانهٔ فعال.
  *
  * بی نکست؛ ذخیره‌گاه از درگاه می‌آید (`PartnerStore`)، پس با ذخیره‌گاه ساختگی تست می‌شود. تراکنش‌ها و محافظ‌ها روی پستگرس در
  * تست یکپارچگی `packages/db`.
  */
 
-import type { AdminEventInput, PartnerStore, PartnerView } from '@jozveyar/db';
+import { sameAvailability, type AdminEventInput, type AvailabilityState, type PartnerStore, type PartnerView } from '@jozveyar/db';
 import type { City } from '@jozveyar/geo';
 
-import { partnerMobileOf, partnerNameOf, pickCity } from '../partners';
+import { availabilityOf, availabilitySeen, availabilityStateOf, partnerMobileOf, partnerNameOf, pickCity } from '../partners';
 import { maskMobile } from '../settings';
 import { can, ipHashOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
@@ -40,6 +43,15 @@ export interface PartnerForm {
   seenCity?: unknown;
   /** موبایل اعلانی که مالک دید؛ خالی یعنی نداشت. */
   seenMobile?: unknown;
+}
+
+/** فرم در دسترس بودن (برش ۱۰٫۱): حال، روز اول و آخر تعطیل، یادداشت، و حالی که ادمین دید (`availabilitySeen`). */
+export interface AvailabilityForm {
+  availability: unknown;
+  from: unknown;
+  until: unknown;
+  note: unknown;
+  seen: unknown;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -181,6 +193,48 @@ export function createPanelPartners(deps: PanelPartnersDeps) {
       if (done === 'default') return fail(409, 'partner_is_default');
       if (done === 'open_orders') return fail(409, 'partner_has_orders');
       return ok(true);
+    },
+
+    /**
+     * چاپخانه‌ای که در دسترس بودنش عوض می‌شود: فعال، و برای کاربر چاپخانه فقط خودش؛ چاپخانهٔ دیگر یا غیرفعال همان «نیست» (۴۰۴)، تا
+     * کاربر چاپخانه نام و حال چاپخانه‌های دیگر را نبیند.
+     */
+    async availability(session: AdminSession, idParam: string): Promise<Result<PartnerView>> {
+      if (!can(session, 'partners.availability')) return fail(403, 'forbidden');
+      const id = idOf(idParam);
+      if (!id || (session.partner !== null && session.partner.id !== id)) return fail(404, 'partner_not_found');
+      const partner = await store.find(id);
+      return partner && !partner.deactivatedAt ? ok(partner) : fail(404, 'partner_not_found');
+    },
+
+    /**
+     * «باز»، «شلوغ» یا «تعطیل از … تا …» با یادداشت (سؤال‌های ۲۶۶ و ۲۶۷)، بی کد تازه. اول همان که دیده شد (حالی که همین حالا جای دیگری
+     * عوض شد هیچ نمی‌نویسد، `partner_availability_changed`)، بعد فرم، بعد زیر قفل دوباره. بی تغییر موفق است، بی رویداد.
+     */
+    async setAvailability(
+      session: AdminSession,
+      idParam: string,
+      form: AvailabilityForm,
+      ip: string,
+    ): Promise<Result<{ name: string; state: AvailabilityState; written: boolean }>> {
+      const found = await this.availability(session, idParam);
+      if (!found.ok) return found;
+      const partner = found.value;
+      const current = availabilityStateOf(partner);
+      if (typeof form.seen !== 'string' || form.seen !== availabilitySeen(current)) return fail(409, 'partner_availability_changed');
+      const at = now();
+      const parsed = availabilityOf(form, at, partner);
+      if (!parsed.ok) return fail(400, parsed.error, { field: parsed.field });
+      if (sameAvailability(current, parsed.state)) return ok({ name: partner.name, state: parsed.state, written: false });
+      const done = await store.setAvailability({
+        id: partner.id,
+        seen: current,
+        next: parsed.state,
+        event: event(session, 'partners.availability', ip, at, partner.id),
+      });
+      if (done === 'not_found' || done === 'inactive') return fail(404, 'partner_not_found');
+      if (done === 'changed') return fail(409, 'partner_availability_changed');
+      return ok({ name: partner.name, state: parsed.state, written: done === 'ok' });
     },
 
     async activate(session: AdminSession, idParam: string, ip: string): Promise<Result<true>> {

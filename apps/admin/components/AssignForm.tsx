@@ -5,14 +5,17 @@ import { useActionState } from 'react';
 
 import { assignPartnerAction, type AssignState } from '../app/[gate]/actions';
 import { messageOf } from '../lib/messages';
+import type { Seg } from '../lib/orders';
+import { Segments } from './Segments';
 
-/** یک چاپخانهٔ فعال برای جابه‌جایی: کاشی طرح، «تهران · پیش‌فرض · 8 سفارش باز». */
+/**
+ * یک چاپخانهٔ فعال برای جابه‌جایی یا سپردن: کاشی طرح، «تهران · پیش‌فرض · 8 سفارش باز»، و از ۱۰٫۱ چرا اینجای فهرست است («هم‌شهر
+ * مشتری»، «320 کیلومتر»، «شلوغ»؛ `optionNote`).
+ */
 export interface AssignOption {
   id: string;
   name: string;
-  cityName: string;
-  isDefault: boolean;
-  openOrders: number;
+  note: Seg[];
 }
 
 interface Props {
@@ -28,8 +31,9 @@ interface Props {
 
 /**
  * جابه‌جایی چاپخانهٔ سفارش (طرح پنل `m-order-assign`، برش ۵٫۲): در ستون کنار و به جای کارت چاپخانه؛ فقط در «در صف چاپ». چاپخانهٔ
- * تازه از میان چاپخانه‌های فعال (پیش‌فرض اول و انتخاب‌شده)، و دلیل که فقط در پنل دیده می‌شود. سفارشی که چاپخانه نداشت همین فرم
- * را دارد با عنوان «انتخاب چاپخانه» (در طرح نیست).
+ * تازه از میان چاپخانه‌های فعال، و دلیل که فقط در پنل دیده می‌شود. سفارشی که چاپخانه نداشت همین فرم را دارد با عنوان «انتخاب چاپخانه»
+ * (در طرح نیست). از ۱۰٫۱ (سؤال ۱۹۹) گزینه‌ها به ترتیب همان قاعدهٔ تخصیص خودکار برای جای همین سفارش‌اند و اولی از پیش انتخاب‌شده، و
+ * سپردن سفارش بی چاپخانه دلیل نمی‌خواهد: یک کلیک «بسپار».
  */
 export function AssignForm({ gate, orderNumber, from, options, maxLength, back }: Props) {
   const [state, action, pending] = useActionState<AssignState, FormData>(assignPartnerAction, {});
@@ -47,7 +51,7 @@ export function AssignForm({ gate, orderNumber, from, options, maxLength, back }
           امروز: <b>{from.name}</b>، {from.cityName}
         </p>
       ) : (
-        <p className="ad-meta">این سفارش چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود.</p>
+        <p className="ad-meta">این سفارش چاپخانه ندارد. فهرست به ترتیب پیشنهاد است و اولی انتخاب شده.</p>
       )}
       <p className="jy-note jy-note--info ad-gap">
         <span className="jy-icon jy-icon-info" aria-hidden="true" />
@@ -74,8 +78,7 @@ export function AssignForm({ gate, orderNumber, from, options, maxLength, back }
                   <input className="jy-radio" type="radio" name="to" value={option.id} defaultChecked={option.id === chosen} />
                   <span className="jy-tile__title">{option.name}</span>
                   <span className="jy-tile__note">
-                    {option.cityName}
-                    {option.isDefault ? ' · پیش‌فرض' : ''} · <span className="num">{option.openOrders}</span> سفارش باز
+                    <Segments segs={option.note} />
                   </span>
                 </label>
               ))}
@@ -87,31 +90,33 @@ export function AssignForm({ gate, orderNumber, from, options, maxLength, back }
               </p>
             ) : null}
           </fieldset>
-          <div className="jy-field">
-            <label className="jy-label" htmlFor="as-why">
-              دلیل
-            </label>
-            <textarea
-              id="as-why"
-              name="reason"
-              className="jy-input"
-              rows={3}
-              maxLength={maxLength}
-              required
-              defaultValue={state.reason}
-              aria-invalid={reasonError ? true : undefined}
-              aria-describedby={reasonError ? 'as-why-error as-why-hint' : 'as-why-hint'}
-            />
-            {reasonError ? (
-              <p id="as-why-error" className="jy-error">
-                <span className="jy-icon jy-icon-error" aria-hidden="true" />
-                {reasonError}
+          {from ? (
+            <div className="jy-field">
+              <label className="jy-label" htmlFor="as-why">
+                دلیل
+              </label>
+              <textarea
+                id="as-why"
+                name="reason"
+                className="jy-input"
+                rows={3}
+                maxLength={maxLength}
+                required
+                defaultValue={state.reason}
+                aria-invalid={reasonError ? true : undefined}
+                aria-describedby={reasonError ? 'as-why-error as-why-hint' : 'as-why-hint'}
+              />
+              {reasonError ? (
+                <p id="as-why-error" className="jy-error">
+                  <span className="jy-icon jy-icon-error" aria-hidden="true" />
+                  {reasonError}
+                </p>
+              ) : null}
+              <p id="as-why-hint" className="jy-hint">
+                در رویدادهای سفارش می‌ماند؛ مشتری نمی‌بیند.
               </p>
-            ) : null}
-            <p id="as-why-hint" className="jy-hint">
-              در رویدادهای سفارش می‌ماند؛ مشتری نمی‌بیند.
-            </p>
-          </div>
+            </div>
+          ) : null}
         </div>
         <div className="ad-status__actions">
           <button type="submit" className={`jy-btn jy-btn--primary jy-btn--block${pending ? ' is-loading' : ''}`} disabled={pending}>

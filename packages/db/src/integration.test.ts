@@ -13,7 +13,7 @@
  * خراب را می‌گیرند، یا `bigint` سالم برمی‌گردد. اینها فقط با پستگرس معلوم می‌شوند.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { priceListSchema, type Breakdown, type PriceList } from '@jozveyar/contracts';
 import { quote } from '@jozveyar/pricing';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
@@ -93,6 +93,7 @@ import { serviceSecrets } from './schema.js';
 import { FILES_RETENTION_SETTING, OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTING } from './reference.js';
 import { orderAssignments, orderNotes, orderPrintFiles, printPartners } from './schema.js';
 import { createPartnerStore } from './partners.js';
+import { allClosedWindow, closedDays, rankPartners } from './assignment.js';
 import { sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { READ_POST_FILE_JOB, createShipmentStore } from './shipments.js';
@@ -1987,8 +1988,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است.
       expect(await read('owner')).toContain('reports.read');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
-      // گزینه‌های تعرفه و از ۹٫۳ یادداشت داخلی؛ چاپخانه فقط دیدن،
-      // وضعیت و دانلود (ADR-042) و از ۶٫۲ ورود فایل پست خودش، نه صف. هیچ‌کدام گزارش ارسال نه. صریح، نه از کد.
+      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی و از ۱۰٫۱ در دسترس بودن چاپخانه‌ها؛ چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042)، از ۶٫۲
+      // ورود فایل پست خودش، نه صف، و از ۱۰٫۱ «شلوغ» و «تعطیل» خودش. هیچ‌کدام گزارش ارسال نه. صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'files.download',
         'orders.address',
@@ -1998,13 +1999,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.notes',
         'orders.read',
         'orders.status',
+        'partners.availability',
         'shipments.import',
         'shipments.review',
         'tariff.pause',
         'tariff.read',
       ]);
       expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
-      expect(await read('print_partner')).toEqual(['files.download', 'orders.read', 'orders.status', 'shipments.import']);
+      expect(await read('print_partner')).toEqual(['files.download', 'orders.read', 'orders.status', 'partners.availability', 'shipments.import']);
       expect([...ADMIN_ROLES.print_partner.permissions].sort()).toEqual(await read('print_partner'));
       // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
       expect(await read('accountant')).toEqual(['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.read']);
@@ -2087,6 +2089,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.notes',
         'orders.read',
         'orders.status',
+        'partners.availability',
         'shipments.import',
         'shipments.review',
         'tariff.pause',
@@ -4888,7 +4891,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect((await conn.db.select().from(printPartners)).length).toBe(2);
     });
 
-    it('تخصیص در پرداخت: همان شهر، وگرنه همان استان، وگرنه پیش‌فرض؛ در هر سطح پیش‌فرض، وگرنه قدیمی‌ترین؛ هر کدام با ردیف و قاعده', async () => {
+    it('تخصیص در پرداخت: همان شهر، وگرنه همان استان، وگرنه نزدیک‌ترین (۱۰٫۱)؛ در همان شهر پیش‌فرض، وگرنه قدیمی‌ترین؛ هر کدام با ردیف و قاعده', async () => {
       const noor = await partner('چاپ نور', MASHHAD, { createdAt: new Date(NOW.getTime() - 3 * DAY) });
       const noor2 = await partner('چاپ نور دو', MASHHAD, { createdAt: new Date(NOW.getTime() - 2 * DAY) });
       const inactive = await partner('چاپ فارس', SHIRAZ, { deactivatedAt: new Date(NOW.getTime() - DAY) });
@@ -4905,20 +4908,21 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         (await assignmentsOf(orderId)).map((a) => [a.fromPartnerId, a.toPartnerId, a.actor, a.adminUserId, a.rule, a.reason]);
       expect(await rules(mashhad.id)).toEqual([[null, noor, 'system', null, 'city', null]]);
       expect(await rules(neyshabur.id)).toEqual([[null, noor, 'system', null, 'province', null]]);
-      // چاپخانهٔ غیرفعال شیراز انتخاب نمی‌شود (شاهد: فعالش پایین).
-      expect(await rules(shiraz.id)).toEqual([[null, first, 'system', null, 'default', null]]);
-      expect(await rules(noCity.id)).toEqual([[null, first, 'system', null, 'default', null]]);
+      // چاپخانهٔ غیرفعال شیراز انتخاب نمی‌شود (شاهد: فعالش پایین): تهران (حدود ۶۸۰ کیلومتر) نزدیک‌تر از مشهد است. سفارش بی شهر با مرکز
+      // استانش (شیراز) سنجیده می‌شود.
+      expect(await rules(shiraz.id)).toEqual([[null, first, 'system', null, 'nearest', null]]);
+      expect(await rules(noCity.id)).toEqual([[null, first, 'system', null, 'nearest', null]]);
       expect(await rules(tehran.id)).toEqual([[null, first, 'system', null, 'city', null]]);
 
       // در همان شهر، پیش‌فرض بر قدیمی‌ترین مقدم است.
       await conn.db.update(printPartners).set({ isDefault: false }).where(eq(printPartners.id, first));
       await conn.db.update(printPartners).set({ isDefault: true }).where(eq(printPartners.id, noor2));
       expect((await paidOrder(MASHHAD)).partnerId).toBe(noor2);
-      // بی پیش‌فرض بیرون از شهر و استان: قدیمی‌ترین چاپخانهٔ فعال، با قاعدهٔ خودش.
+      // بیرون از شهر و استان پیش‌فرض نه، نزدیک‌ترین: اصفهان به تهران نزدیک‌تر از مشهد است.
+      const nearest = await paidOrder(ISFAHAN);
+      expect(nearest.partnerId).toBe(first);
+      expect(await rules(nearest.id)).toEqual([[null, first, 'system', null, 'nearest', null]]);
       await conn.db.update(printPartners).set({ isDefault: false }).where(eq(printPartners.id, noor2));
-      const oldest = await paidOrder(ISFAHAN);
-      expect(oldest.partnerId).toBe(noor);
-      expect(await rules(oldest.id)).toEqual([[null, noor, 'system', null, 'oldest', null]]);
       // شاهد: همان چاپخانهٔ شیراز، فعال، سفارش شیراز را می‌گیرد.
       await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, inactive));
       expect((await paidOrder(SHIRAZ)).partnerId).toBe(inactive);
@@ -4975,6 +4979,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await moveWith(noor, history(first, first))).toBe('order_assignments_moves');
       expect(await moveWith(noor, history(off, noor))).toBe('order_assignments_chain');
       expect(await moveWith(noor, { ...history(first, noor), reason: '  ' })).toBe('order_assignments_actor');
+      // جابه‌جایی همیشه با دلیل؛ فقط سپردن سفارشی که چاپخانه نداشت بی دلیل است (۱۰٫۱، پایین).
+      expect(await moveWith(noor, { ...history(first, noor), reason: null } as never)).toBe('order_assignments_actor');
       expect(await moveWith(noor, { ...history(first, noor), actor: 'system', adminUserId: null, reason: null, rule: 'city' } as never)).toBe(
         'order_assignments_actor',
       );
@@ -5042,10 +5048,10 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect.objectContaining({ fromName: null, toName: 'چاپ نور', actor: 'system', adminName: null, rule: 'city', reason: null }),
         expect.objectContaining({ fromName: 'چاپ نور', toName: 'چاپخانهٔ جزوه‌یار', actor: 'admin', adminName: 'علی محمدی', rule: null }),
       ]);
-      // گزینه‌ها: فقط فعال‌ها، پیش‌فرض اول، با شمار سفارش باز.
+      // گزینه‌ها: فقط فعال‌ها، پیش‌فرض اول، با شمار سفارش باز (و از ۱۰٫۱ جا و در دسترس بودن، برای ترتیب پیشنهادی).
       expect(await panel.partnerOptions(ALL_ORDERS)).toEqual([
-        { id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 1 },
-        { id: noor, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, openOrders: 0 },
+        expect.objectContaining({ id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران', isDefault: true, openOrders: 1, availability: 'open' }),
+        expect.objectContaining({ id: noor, name: 'چاپ نور', cityName: 'مشهد', isDefault: false, openOrders: 0, cityId: 1326, provinceId: 11 }),
       ]);
 
       // دو ادمین هم‌زمان از همان چاپخانه: یکی جابه‌جا می‌کند، دیگری «عوض شد» با چاپخانهٔ تازه.
@@ -5202,7 +5208,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(paid.partnerId).toBe(first);
       const [row] = await conn.db.select().from(orders).where(eq(orders.id, paid.id));
       expect(row).toMatchObject({ status: 'paid', printPartnerId: first });
-      expect((await assignmentsOf(paid.id)).map((a) => [a.toPartnerId, a.rule])).toEqual([[first, 'default']]);
+      expect((await assignmentsOf(paid.id)).map((a) => [a.toPartnerId, a.rule])).toEqual([[first, 'nearest']]);
       // شاهد: همان سفارش مشهد، با چاپ نور فعال، هم‌شهر است.
       await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, noor));
       expect((await paidOrder(MASHHAD)).partnerId).toBe(noor);
@@ -5415,7 +5421,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         ]);
         expect(await store.findSession(hashes.hasan)).toMatchObject({
           roles: ['print_partner'],
-          permissions: ['files.download', 'orders.read', 'orders.status', 'shipments.import'],
+          permissions: ['files.download', 'orders.read', 'orders.status', 'partners.availability', 'shipments.import'],
           partner: { id: noor, name: 'چاپ نور' },
         });
         expect(await store.findSession(hashes.ali)).toMatchObject({ roles: ['operator'], partner: null });
@@ -6051,6 +6057,155 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         // رویداد شمارهٔ خام ندارد (پوشاندنش با سرویس پنل).
         expect(JSON.stringify(events.map((e) => e.detail))).not.toContain('09359998877');
         expect(JSON.stringify(events.map((e) => e.detail))).not.toContain(NOOR_MOBILE);
+      });
+    });
+
+    describe('در دسترس بودن، فاصله و حالت دستی (برش ۱۰٫۱)', () => {
+      /** نیمه‌شب آغاز دوشنبه ۱۳ مهر ۱۴۰۵ تهران، همان روز `NOW`. */
+      const TODAY = new Date('2026-10-04T20:30:00Z');
+      const days = (n: number) => new Date(TODAY.getTime() + n * DAY);
+      const setPartner = (id: string, set: Partial<typeof printPartners.$inferInsert>) =>
+        rejectedConstraint(conn.db.update(printPartners).set(set).where(eq(printPartners.id, id)));
+      const mode = (value: 'auto' | 'manual') =>
+        conn.db
+          .insert(settings)
+          .values({ key: 'assignment.mode', value })
+          .onConflictDoUpdate({ target: settings.key, set: { value } });
+      const OPEN = { availability: 'open' as const, closedFrom: null, closedUntil: null, note: null };
+
+      afterEach(async () => {
+        await conn.db.delete(settings).where(eq(settings.key, 'assignment.mode'));
+      });
+
+      it('محافظ‌های در دسترس بودن: «تعطیل» دقیقاً با هر دو روز و آغاز پیش از پایان، تا یک سال؛ یادداشت فقط برای شلوغ و تعطیل', async () => {
+        expect(await setPartner(first, { availability: 'paused' })).toBe('print_partners_closed');
+        expect(await setPartner(first, { availability: 'closed' })).toBe('print_partners_closed');
+        expect(await setPartner(first, { availability: 'closed', closedFrom: TODAY })).toBe('print_partners_closed');
+        expect(await setPartner(first, { availability: 'busy', closedFrom: TODAY, closedUntil: days(1) })).toBe('print_partners_closed');
+        expect(await setPartner(first, { availability: 'closed', closedFrom: days(1), closedUntil: days(1) })).toBe('print_partners_closed');
+        expect(await setPartner(first, { availability: 'closed', closedFrom: TODAY, closedUntil: days(367) })).toBe('print_partners_closed');
+        expect(await setPartner(first, { availabilityNote: 'دستگاه خراب است' })).toBe('print_partners_availability_note');
+        expect(await setPartner(first, { availability: 'busy', availabilityNote: ' دستگاه ' })).toBe('print_partners_availability_note');
+        expect(await setPartner(first, { availability: 'busy', availabilityNote: 'ب'.repeat(201) })).toBe('print_partners_availability_note');
+        // شاهد: همان‌ها درست.
+        expect(await setPartner(first, { availability: 'busy', availabilityNote: 'ب'.repeat(200) })).toBeUndefined();
+        expect(await setPartner(first, { availability: 'closed', closedFrom: TODAY, closedUntil: days(366), availabilityNote: null })).toBeUndefined();
+        expect(await setPartner(first, { availability: 'open', closedFrom: null, closedUntil: null })).toBeUndefined();
+      });
+
+      it('پرداخت چاپخانهٔ تعطیل را رد می‌کند، شلوغ را فقط بی باز هم‌استان، و وقتی همه تعطیل‌اند اولی که باز می‌شود', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { availability: 'busy' });
+        const sahar = await partner('چاپ سحر', NEYSHABUR);
+        // باز همان استان پیش از شلوغ همان شهر.
+        expect((await paidOrder(MASHHAD)).partnerId).toBe(sahar);
+        // نیشابور تعطیل: شلوغ همان شهر پیش از باز تهران.
+        await setPartner(sahar, { availability: 'closed', closedFrom: TODAY, closedUntil: days(2) });
+        const busy = await paidOrder(MASHHAD);
+        expect(busy.partnerId).toBe(noor);
+        expect((await assignmentsOf(busy.id)).map((a) => a.rule)).toEqual(['city']);
+        // همه تعطیل: نیشابور زودتر از تهران و مشهد باز می‌شود.
+        await setPartner(noor, { availability: 'closed', closedFrom: TODAY, closedUntil: days(3) });
+        await setPartner(first, { availability: 'closed', closedFrom: TODAY, closedUntil: days(5) });
+        const reopening = await paidOrder(TEHRAN);
+        expect(reopening.partnerId).toBe(sahar);
+        expect((await assignmentsOf(reopening.id)).map((a) => a.rule)).toEqual(['reopening']);
+        // تعطیلی آینده هنوز «باز» است.
+        await setPartner(first, { closedFrom: days(1), closedUntil: days(5) });
+        expect((await paidOrder(TEHRAN)).partnerId).toBe(first);
+        // روزهای «همه تعطیل» برای مهلت: فقط چاپخانه‌های فعال، با روزهایشان؛ غیرفعالِ «باز» بازه را نمی‌شکند.
+        await partner('چاپ خاموش', ISFAHAN, { deactivatedAt: NOW });
+        const hours = await createOrderStore(conn).partnerHours();
+        expect(hours).toHaveLength(3);
+        expect(closedDays(allClosedWindow(hours))).toEqual(['1405/07/14']);
+        await setPartner(sahar, { availability: 'open', closedFrom: null, closedUntil: null });
+        expect(allClosedWindow(await createOrderStore(conn).partnerHours())).toBeNull();
+      });
+
+      it('حالت دستی: پرداخت بی تخصیص، و سپردن اول بی دلیل؛ جابه‌جایی همان با دلیل (سؤال ۱۹۹)', async () => {
+        await mode('manual');
+        const order = await paidOrder(TEHRAN);
+        expect(order.partnerId).toBeNull();
+        expect(await assignmentsOf(order.id)).toEqual([]);
+        const panel = createPanelOrderStore(conn);
+        const clock: PanelClock = { at: NOW, staleBefore: new Date(NOW.getTime() + 60 * MINUTE), unreturnedBefore: new Date(NOW.getTime() - 30 * MINUTE), untrackedSince: new Date(NOW.getTime() - 45 * DAY) };
+        expect((await panel.alerts(ALL_ORDERS, clock)).unassigned).toEqual([order.orderNumber]);
+        const noor = await partner('چاپ نور', MASHHAD);
+        expect(await assign(order.id, null, first, null as never)).toMatchObject({ ok: true });
+        expect((await assignmentsOf(order.id)).map((a) => [a.fromPartnerId, a.toPartnerId, a.actor, a.reason])).toEqual([[null, first, 'admin', null]]);
+        // جابه‌جایی بی دلیل را پایگاه داده رد می‌کند.
+        expect(await rejectedConstraint(assign(order.id, first, noor, null as never))).toBe('order_assignments_actor');
+        expect(await partnerOf(order.id)).toBe(first);
+        expect(await assign(order.id, first, noor)).toMatchObject({ ok: true });
+        // ردیف سیستم فقط با قاعده‌های شناخته (شاهد: `nearest`).
+        const another = await paidOrder(TEHRAN);
+        const systemRow = (rule: string) =>
+          rejectedConstraint(
+            conn.db.transaction(async (tx) => {
+              await tx.update(orders).set({ printPartnerId: first }).where(eq(orders.id, another.id));
+              await tx.insert(orderAssignments).values({ orderId: another.id, fromPartnerId: null, toPartnerId: first, at: NOW, actor: 'system', rule });
+            }),
+          );
+        expect(await systemRow('closest')).toBe('order_assignments_actor');
+        expect(await systemRow(null as never)).toBe('order_assignments_actor');
+        expect(await systemRow('nearest')).toBeUndefined();
+        // برگشت به خودکار: پرداخت بعدی دوباره سپرده می‌شود؛ سفارش بی چاپخانهٔ قبلی خودکار سپرده نمی‌شد.
+        await mode('auto');
+        expect((await paidOrder(TEHRAN)).partnerId).toBe(first);
+      });
+
+      it('در دسترس بودن از پنل: از همان که دیده شد، بی تغییر بی رویداد، غیرفعال نه، و رویداد از و به', async () => {
+        const store = createPartnerStore(conn);
+        const noor = await partner('چاپ نور', MASHHAD);
+        const event: AdminEventInput = { adminUserId: admin, action: 'partners.availability', targetType: 'partner', at: NOW };
+        const closedState = { availability: 'closed' as const, closedFrom: days(1), closedUntil: days(4), note: 'تعمیر دستگاه' };
+        expect(await store.setAvailability({ id: noor, seen: OPEN, next: closedState, event })).toBe('ok');
+        expect(await store.setAvailability({ id: noor, seen: OPEN, next: OPEN, event })).toBe('changed');
+        expect(await store.setAvailability({ id: noor, seen: closedState, next: closedState, event })).toBe('same');
+        expect(await store.setAvailability({ id: randomUUID(), seen: OPEN, next: OPEN, event })).toBe('not_found');
+        expect(await store.find(noor)).toMatchObject({ availability: 'closed', closedFrom: days(1), closedUntil: days(4), availabilityNote: 'تعمیر دستگاه' });
+        const busyState = { availability: 'busy' as const, closedFrom: null, closedUntil: null, note: null };
+        expect(await store.setAvailability({ id: noor, seen: closedState, next: busyState, event })).toBe('ok');
+        await setPartner(noor, { deactivatedAt: NOW, availability: 'open' });
+        expect(await store.setAvailability({ id: noor, seen: OPEN, next: busyState, event })).toBe('inactive');
+        const events = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.targetId, noor), eq(adminEvents.action, 'partners.availability'))).orderBy(adminEvents.id);
+        expect(events.map((e) => e.detail)).toEqual([
+          {
+            name: 'چاپ نور',
+            from: { availability: 'open' },
+            to: { availability: 'closed', closedFrom: days(1).toISOString(), closedUntil: days(4).toISOString(), note: 'تعمیر دستگاه' },
+          },
+          {
+            name: 'چاپ نور',
+            from: { availability: 'closed', closedFrom: days(1).toISOString(), closedUntil: days(4).toISOString(), note: 'تعمیر دستگاه' },
+            to: { availability: 'busy' },
+          },
+        ]);
+      });
+
+      it('کارت «چاپخانه‌ها»: فعال‌ها با در دسترس بودن و سفارش‌های در صف به ترتیب مهلت؛ چاپخانه فقط خودش', async () => {
+        const noor = await partner('چاپ نور', MASHHAD, { availability: 'closed', closedFrom: TODAY, closedUntil: days(2), availabilityNote: 'تعمیر' });
+        await partner('چاپ خاموش', ISFAHAN, { deactivatedAt: NOW });
+        const a = await paidOrder(MASHHAD);
+        const b = await paidOrder(TEHRAN);
+        // تعطیل شدن پس از تخصیص: سفارش در صفش می‌ماند تا جابه‌جا شود.
+        const c = await paidOrder(TEHRAN);
+        await assign(c.id, first, noor);
+        expect(await move(b.id, { status: 'printing' })).toBeUndefined();
+        const panel = createPanelOrderStore(conn);
+        const board = await panel.partnerBoard(ALL_ORDERS);
+        expect(board.map((row) => [row.name, row.availability, row.openOrders, row.queued])).toEqual([
+          ['چاپخانهٔ جزوه‌یار', 'open', 2, [a.orderNumber]],
+          ['چاپ نور', 'closed', 1, [c.orderNumber]],
+        ]);
+        expect(board[1]).toMatchObject({ closedFrom: TODAY, closedUntil: days(2), availabilityNote: 'تعمیر', cityName: 'مشهد' });
+        expect((await panel.partnerBoard({ kind: 'partner', partnerId: noor })).map((row) => row.name)).toEqual(['چاپ نور']);
+        // فهرست جابه‌جایی همان فعال‌ها، با جا و در دسترس بودن برای ترتیب پیشنهادی.
+        const options = await panel.partnerOptions(ALL_ORDERS);
+        expect(options.map((o) => [o.name, o.availability, o.provinceId])).toEqual([
+          ['چاپخانهٔ جزوه‌یار', 'open', 8],
+          ['چاپ نور', 'closed', 11],
+        ]);
+        expect(rankPartners(options, MASHHAD, NOW).map((r) => r.partner.name)).toEqual(['چاپخانهٔ جزوه‌یار', 'چاپ نور']);
       });
     });
   });

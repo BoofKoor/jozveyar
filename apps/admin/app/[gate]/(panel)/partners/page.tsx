@@ -9,7 +9,7 @@ import { Segments } from '../../../../components/Segments';
 import { StatusButton } from '../../../../components/StatusButton';
 import { panelPath } from '../../../../lib/gate';
 import { messageOf } from '../../../../lib/messages';
-import { partnerMeta } from '../../../../lib/partners';
+import { availabilityView, partnerMeta } from '../../../../lib/partners';
 import { can } from '../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../lib/server/context';
 import { partnerStateAction } from '../../actions';
@@ -31,6 +31,18 @@ function StateForm({ gate, partner, intent, children }: { gate: string; partner:
   );
 }
 
+/** «شلوغ»، «تعطیل تا …» یا تعطیلی آینده کنار نام (۱۰٫۱)؛ «باز» هیچ، چون حال معمول است. */
+function AvailabilityBadge({ partner }: { partner: PartnerView }) {
+  const view = availabilityView(partner, new Date());
+  if (view.tone === 'open') return null;
+  const tone = view.tone === 'closed' ? 'jy-badge--error' : view.tone === 'busy' ? 'jy-badge--warning' : 'jy-badge--info';
+  return (
+    <span className={`jy-badge ${tone}`} data-availability={view.tone}>
+      {view.text}
+    </span>
+  );
+}
+
 /** پیام پس از هر کار، فقط اگر هنوز راست است (مثل «تنظیمات»، ۴٫۶). */
 function doneNote(done: string, partner: PartnerView | undefined) {
   if (!partner) return null;
@@ -40,11 +52,13 @@ function doneNote(done: string, partner: PartnerView | undefined) {
     case 'update':
       return `«${partner.name}» ذخیره شد.`;
     case 'default':
-      return partner.isDefault ? `«${partner.name}» حالا پیش‌فرض است: سفارشی که در شهر و استانش چاپخانه‌ای نیست، به آن می‌رود.` : null;
+      return partner.isDefault ? `«${partner.name}» حالا پیش‌فرض است: وقتی دو چاپخانه به یک اندازه به مشتری نزدیک‌اند، مثل دو چاپخانهٔ یک شهر، سفارش به آن می‌رود.` : null;
     case 'deactivate':
       return partner.deactivatedAt ? `«${partner.name}» غیرفعال شد؛ از این لحظه سفارش تازه نمی‌گیرد.` : null;
     case 'activate':
       return partner.deactivatedAt ? null : `«${partner.name}» دوباره فعال شد.`;
+    case 'availability':
+      return partner.deactivatedAt ? null : `«${partner.name}» حالا ${availabilityView(partner, new Date()).text} است؛ از سفارش بعدی اثر دارد.`;
     default:
       return null;
   }
@@ -73,7 +87,10 @@ export default async function PartnersPage({ params, searchParams }: { params: P
       <div className="ad-pagehead">
         <div>
           <h1 className="ad-title">چاپخانه‌ها</h1>
-          <p className="ad-sub">هر سفارش هنگام پرداخت به چاپخانهٔ همان شهر می‌رود، وگرنه همان استان، وگرنه پیش‌فرض.</p>
+          <p className="ad-sub">
+            هر سفارش هنگام پرداخت به چاپخانهٔ همان شهر می‌رود، وگرنه همان استان، وگرنه نزدیک‌ترین؛ «شلوغ» فقط وقتی چاپخانهٔ باز دیگری در
+            استان نیست، و «تعطیل» هیچ.
+          </p>
         </div>
         <Link href={panelPath(gate, '/partners/new')} className="jy-btn jy-btn--primary">
           <span className="jy-icon jy-icon-plus" aria-hidden="true" />
@@ -92,7 +109,7 @@ export default async function PartnersPage({ params, searchParams }: { params: P
                 <p>
                   <span className="ad-partners__name">{partner.name}</span>
                   {partner.isDefault ? <span className="jy-badge jy-badge--neutral">پیش‌فرض</span> : null}
-                  {partner.deactivatedAt ? <span className="jy-badge jy-badge--neutral">غیرفعال</span> : null}
+                  {partner.deactivatedAt ? <span className="jy-badge jy-badge--neutral">غیرفعال</span> : <AvailabilityBadge partner={partner} />}
                 </p>
                 <p className="ad-partners__meta">
                   <Segments segs={partnerMeta(partner)} />
@@ -107,6 +124,9 @@ export default async function PartnersPage({ params, searchParams }: { params: P
                   <>
                     <Link href={panelPath(gate, `/partners/${partner.id}`)} className="jy-btn jy-btn--text">
                       ویرایش
+                    </Link>
+                    <Link href={`${panelPath(gate, `/partners/${partner.id}/availability`)}?back=partners`} className="jy-btn jy-btn--text">
+                      در دسترس بودن
                     </Link>
                     {partner.isDefault ? null : (
                       <StateForm gate={gate} partner={partner} intent="default">

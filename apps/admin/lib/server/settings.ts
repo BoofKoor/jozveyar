@@ -27,6 +27,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import {
   CHECKOUT_AUDIENCES,
   SETTING_SCHEMAS,
+  type AssignmentMode,
   type CheckoutAudience,
   type FileRules,
   type Holiday,
@@ -231,6 +232,8 @@ export interface SettingsView {
     creditAlertDays: number;
     /** فایل‌هایی که سایت می‌پذیرد (برش ۸٫۴، سؤال ۱۹۰): خانواده‌های روشن، سقف حجم و صفحهٔ هر فایل. */
     files: FileRules;
+    /** تخصیص چاپخانه در پرداخت (برش ۱۰٫۱، سؤال ۱۹۹): خودکار یا دستی. */
+    assignmentMode: AssignmentMode;
   } | null;
   /** شمار کد ساعت و ۲۴ ساعت گذشته، کل سایت (برش ۷٫۱)؛ اگر `settings.edit`. */
   otpUsage: { hour: number; day: number } | null;
@@ -521,6 +524,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               readSetting(read, 'file.formats', log),
               readSetting(read, 'file.max_mb', log),
               readSetting(read, 'file.max_pages', log),
+              readSetting(read, 'assignment.mode', log),
             ])
           : null,
         canSecrets ? deps.secrets.list() : [],
@@ -542,6 +546,7 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
               officialThrough: values[3],
               creditAlertDays: values[6],
               files: { formats: values[7], maxMb: values[8], maxPages: values[9] },
+              assignmentMode: values[10],
             }
           : null,
         otpUsage: usage ? { hour: usage.hour, day: usage.day } : null,
@@ -642,6 +647,36 @@ export function createPanelSettings(deps: PanelSettingsDeps) {
         if (saved.value.written) written.push(saved.value.key);
       }
       return ok({ written });
+    },
+
+    /**
+     * تخصیص چاپخانه (برش ۱۰٫۱، سؤال ۱۹۹): «خودکار» یا «دستی»، فقط مالک (`settings.edit`)، بی کد تازه (برگشت‌پذیر است و سفارش سپرده‌شده
+     * را دست نمی‌زند)، از همان که دیده شد، با رویداد `settings.update`. پرداخت بعدی حالت تازه را در همان تراکنش می‌خواند.
+     */
+    async saveAssignmentMode(
+      session: AdminSession,
+      input: { mode: unknown; seen: unknown },
+      ip: string,
+    ): Promise<Result<{ mode: AssignmentMode; written: boolean }>> {
+      if (!can(session, 'settings.edit')) return fail(403, 'forbidden');
+      const parsed = SETTING_SCHEMAS['assignment.mode'].safeParse(input.mode);
+      if (!parsed.success) return fail(400, 'invalid_setting', { key: 'assignment.mode' });
+      const mode = parsed.data;
+      const seen = text(input.seen);
+      const result = await deps.settings.change({
+        key: 'assignment.mode',
+        action: 'settings.update',
+        at: now(),
+        actor: actor(session, ip),
+        decide: (raw) => {
+          const current = effective('assignment.mode', raw);
+          if (current === mode) return { kind: 'same' };
+          if (current !== seen) return { kind: 'reject', reason: 'changed' };
+          return { kind: 'write', value: mode, detail: { key: 'assignment.mode', from: current, to: mode } };
+        },
+      });
+      if (!result.ok) return fail(409, 'setting_changed', { key: 'assignment.mode' });
+      return ok({ mode, written: result.written });
     },
 
     /** تعطیلی تازه، روی فهرست امروز: روز واقعی و آینده، بی تکرار، مرتب. */
