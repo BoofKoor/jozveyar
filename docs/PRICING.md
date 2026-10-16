@@ -74,17 +74,24 @@ paperRials = برگ × نرخ کاغذ همان اندازه     ← تحریر 
 تحریر ۸۰ گرم پیش‌فرض است، با نرخ هر برگ صفر برای هر اندازه. کاغذ دیگر (گلاسه) را مالک در پنل می‌افزاید:
 نام، گرماژ (برای وزن)، و نرخ هر برگ هر اندازه (`paper_rates`؛ اندازهٔ بی نرخ یعنی این کاغذ آن را ندارد).
 
-### تخفیف پلکانی و حداقل سفارش
+### حداقل سفارش، تخفیف سفارش بزرگ و کد تخفیف
 
-فعلاً غیرفعال. `discount_tiers` و `pricing_settings.min_order_rials` ساخته می‌شوند
-و از پنل ادمین قابل فعال‌سازی‌اند.
+- **حداقل سفارش** (۸٫۴): `settings.minOrderRials` تعرفه، روی جمع چاپ، کاغذ و صحافی پیش از کرایه؛ زیرش «ادامه» بسته است و مانده را می‌گوید
+  (`minOrderGapRials`). امروز صفر.
+- **تخفیف سفارش بزرگ** (۱۱٫۴، ADR-062): تا ۵ پله در هر نسخهٔ تعرفه (`discount_tiers`، نسخه‌دار و منجمد مثل بقیهٔ ردیف‌ها). هر پله آستانه‌ای روی همان
+  جمع چاپ، کاغذ و صحافی، درصدی تا ۵۰، و «ارسال رایگان» اختیاری دارد (دست‌کم یکی). فقط بالاترین پله‌ای که جمع به آن رسیده می‌نشیند؛ پله‌ها روی هم جمع
+  نمی‌شوند. امروز هیچ پله‌ای نیست؛ مالک از ویرایشگر تعرفه می‌افزاید.
+- **کد تخفیف** (۱۱٫۴): درصد (با سقف اختیاری هر سفارش) یا مبلغ ثابت، با حداقل اختیاری روی همان جمع؛ مالک از «تخفیف‌ها»ی پنل می‌سازد. موتور فقط
+  شرط‌هایی را می‌بیند که سرور پیدا و سنجیده (`DiscountCodeTerms`)؛ روز، روشن بودن و ظرفیت کار سرور و پایگاه داده است.
+- **هر سفارش یکی:** پله یا کد، هر کدام به ریال بیشتر؛ ارزش ارسال رایگان همان کرایهٔ همان جاست. برابر، پله، و کد مصرف نمی‌شود.
 
 ---
 
 ## ۳. امضای موتور قیمت
 
 ```ts
-export function quote(spec: OrderSpec, list: PriceList): Breakdown
+export function quote(spec: OrderSpec, list: PriceList, options: QuoteOptions = {}): Breakdown
+// QuoteOptions = { code?: DiscountCodeTerms | null }   ← فقط سرور، در مرور (۱۱٫۴)
 ```
 
 تابع خالص: بدون I/O، بدون تاریخ، بدون تصادف. همان فایل در Web Worker و در API
@@ -106,8 +113,20 @@ bindingRials = Σ به‌ازای هر جلد، از بازهٔ «برگ» هم�
 weightGrams  = sheets × gsm × مساحت برگ آن اندازه + وزن صحافی × volumes + بسته‌بندی
              ×= copies   (برای print، paper، binding، weight)
 shippingRials= جدول (روش × منطقه × بازهٔ وزن)
-             − تخفیف پلکانی، + حداقل سفارش، + مالیات، سپس رُند
+subtotal     = Σ print + paper + binding همهٔ جزوه‌ها
+tier         = بالاترین پلهٔ تعرفه با fromRials ≤ subtotal
+tierRials    = round(subtotal × tier.percent / 100) + (tier.freeShipping ? shippingRials : 0)
+codeRials    = subtotal < code.minOrderRials ? 0
+             : fixed ? min(amount, subtotal) : min(round(subtotal × percent / 100), subtotal, max ?? ∞)
+discount     = codeRials > tierRials ? کد (discountRials = codeRials)
+             : پله (discountRials = بخش درصدی؛ ارسال رایگان: shippingRials = 0 و کرایه در waivedShippingRials)
+vatRials     = round((subtotal − discountRials + shippingRials) × vat / 100)
+total        = رُند با گام تعرفه
 ```
+
+ریز قیمت `discount` را با منبعش منجمد می‌کند (`{ source: 'tier', fromRials, percent, freeShipping, waivedShippingRials }` یا
+`{ source: 'code', codeId, code, percent }`)، و با کد نتیجهٔ همان کد را (`code`: `applied`، `smaller` یا `below_minimum` با مانده). میز پیش از هویت بی کد
+قیمت می‌دهد، با «X تومان دیگر تا …» از `nextTierOf` وقتی جمع دست‌کم نصف آستانهٔ پلهٔ بعد است.
 
 مساحت برگ از خود اندازه است (`sheetAreaM2`): A4 همان `0.06237` متر مربع پیش از ۸٫۳، A5 `0.03108` و A3 `0.12474`. کاغذ ۸۰ گرمی A4 ≈ ۵ گرم
 در هر برگ. اندازه‌ای که تعرفه ندارد `paper_size_unavailable` می‌دهد، و صحافی‌ای که نمی‌خورد `binding_does_not_fit`.
@@ -183,7 +202,7 @@ shippingRials= جدول (روش × منطقه × بازهٔ وزن)
    138,000 ارسال = 263,000 تومان که ۵۲٪ آن ارسال است. این قوی‌ترین دلیل برای سبد
    چندفایلی و حداقل سفارش است.
 4. **«ارسال رایگان بالای X»** اینجا غیرعادی قوی عمل می‌کند، چون ارسال یک هزینهٔ
-   ثابت است. زیرساخت در `discount_tiers`، خاموش.
+   ثابت است. از ۱۱٫۴ پلهٔ تعرفه با «ارسال رایگان» همین است (`discount_tiers`)؛ امروز هیچ پله‌ای نیست.
 5. **چاپ نزدیک مشتری** بزرگ‌ترین اهرم کل کسب‌وکار است: سفارش مشهد که در تهران چاپ
    شود ~161,000 پست می‌خورد؛ در مشهد با پیک محلی ~30,000. جزئیات در ADR-012.
 
