@@ -101,6 +101,17 @@ const partnerOf = async (o: Seeded) =>
   (await sql<{ name: string | null; rule: string | null }[]>`
     SELECT p.name, (SELECT a.rule FROM order_assignments a WHERE a.order_id = o.id ORDER BY a.id DESC LIMIT 1) AS rule
       FROM orders o LEFT JOIN print_partners p ON p.id = o.print_partner_id WHERE o.id = ${o.id}`)[0]!;
+/**
+ * صفحهٔ اصلی سایت در زبانهٔ تازهٔ همان مرورگر. نشان اینماد پاورقی از `trustseal.enamad.ir` است و از اجراگر CI گاهی جواب نمی‌دهد، پس `load`
+ * صفحه دو دقیقه می‌ماند و یک `goto` کل مهلت `expect.poll` را می‌خورد، بی هیچ پاسخی (CI همین PR همین را دید)؛ جوابش این‌جا خالی است، مثل
+ * `sms.spec.ts`.
+ */
+async function sitePage(context: BrowserContext): Promise<Page> {
+  const site = await context.newPage();
+  await site.route('https://trustseal.enamad.ir/**', (route) => route.fulfill({ status: 204, body: '' }));
+  return site;
+}
+
 const board = (page: Page) => page.locator('[data-board]');
 const boardRow = (page: Page, name: string) => board(page).locator(`li[data-partner="${name}"]`);
 const partnerCard = (page: Page) => page.locator('section', { has: page.getByRole('heading', { name: 'چاپخانه', exact: true }) });
@@ -328,7 +339,7 @@ test.describe.serial('در دسترس بودن چاپخانه و تخصیص (۱�
 
     if (WEB) {
       // صفحهٔ اصلی با ISR یک دقیقه‌ای: نوار تا یک دقیقه می‌آید.
-      const site = await ownerPage.context().newPage();
+      const site = await sitePage(ownerPage.context());
       await expect
         .poll(
           async () => {
@@ -364,7 +375,7 @@ test.describe.serial('در دسترس بودن چاپخانه و تخصیص (۱�
     test.skip(!WEB, 'بی E2E_WEB_BASE_URL');
     test.setTimeout(150_000);
     await sql`UPDATE print_partners SET availability = 'open', closed_from = NULL, closed_until = NULL, availability_note = NULL WHERE is_default`;
-    const site = await who.owner.context.newPage();
+    const site = await sitePage(who.owner.context);
     await expect
       .poll(
         async () => {
