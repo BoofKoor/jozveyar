@@ -534,6 +534,9 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
           detail.outcome === 'sent' ? ' دوباره فرستاده شد و رفت' : ' دوباره فرستاده شد و باز نرفت',
         ]),
       };
+    case 'orders.note':
+      // یادداشت داخلی (۹٫۳): متن یادداشت در رویداد نیست (در صفحهٔ سفارش است)، فقط اینکه چاپخانه هم می‌بیندش.
+      return { badge: null, text: ['یادداشت تازه روی سفارش ', ...orderRef(detail), ...(detail.partnerVisible === true ? ['، چاپخانه هم می‌بیند'] : [])] };
     case 'orders.recipient': {
       const changed = Array.isArray(detail.changed) ? detail.changed.map((field) => RECIPIENT[String(field)] ?? String(field)) : [];
       return { badge: null, text: ['گیرندهٔ سفارش ', ...orderRef(detail), ` ویرایش شد${changed.length ? `: ${changed.join('، ')}` : ''}`] };

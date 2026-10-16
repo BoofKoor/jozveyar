@@ -1061,6 +1061,37 @@ export const orderAssignments = pgTable(
 );
 
 /**
+ * یادداشت داخلی سفارش (برش ۹٫۳، ADR-058؛ سؤال ۱۹۵): مالک و متصدی می‌نویسند و می‌خوانند؛ چاپخانه فقط یادداشتی را می‌بیند که «چاپخانه هم
+ * ببیند» دارد («اسم استاد روی جلد نیاید»)، و فقط روی سفارش‌های خودش. فقط افزودنی، مثل تاریخچهٔ تخصیص (تریگر `order_notes_append_only`،
+ * 0043؛ پاک شدن فقط با خود سفارش): اشتباه با یادداشت تازه درست می‌شود.
+ *
+ * - `body` متن نرمال‌شده (`tidyInputLinesFa`: هر خط فارسی‌نرمال، خط خالی نه)، ۱ تا ۱٬۰۰۰ نویسه (`order_notes_body`).
+ * - `request_id` شناسهٔ فرمی که یادداشت را فرستاد (صفحه با هر بار ساختن فرم یکی تازه می‌گذارد): دو کلیک، یا فرستادن دوباره پس از پاسخی
+ *   که نرسید، یک یادداشت است (`order_notes_request`).
+ */
+export const orderNotes = pgTable(
+  'order_notes',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    adminUserId: uuid('admin_user_id')
+      .notNull()
+      .references(() => adminUsers.id),
+    body: text('body').notNull(),
+    partnerVisible: boolean('partner_visible').notNull(),
+    requestId: uuid('request_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('order_notes_order').on(t.orderId, t.id),
+    uniqueIndex('order_notes_request').on(t.requestId),
+    check('order_notes_body', sql`length(${t.body}) <= 1000 AND btrim(${t.body}, E' \\n') <> '' AND ${t.body} = btrim(${t.body}, E' \\n')`),
+  ],
+);
+
+/**
  * هر تلاش پرداخت. سفارشی که پرداختش ناموفق شد، تلاش تازه می‌گیرد با همان مبلغ منجمد؛ تلاش قبلی
  * می‌ماند. کلید خارجی به سفارش cascade ندارد: سابقهٔ پول بی‌صدا پاک نمی‌شود.
  */

@@ -6,15 +6,29 @@ import { formatNumber } from '@jozveyar/text';
 import { panelPath } from '../lib/gate';
 import { breakdownOf, specLine, specSum, zipNote, zipView } from '../lib/orders';
 import { FileWarnings } from './FileWarnings';
+import { OrderNotes } from './OrderNotes';
 import { Segments } from './Segments';
 import { ZipButton } from './ZipButton';
 
 /**
  * مشخصات فایل‌های یک سفارش در فهرست جمع‌وجور (برش ۹٫۱، طرح `m-l91`؛ سؤال‌های ۲۲۹ تا ۲۳۴): برای هر جزوه یک کارت، با یک خط مشخصات،
- * فایل‌ها به ترتیب صحافی با صفحهٔ هر کدام، خط جمع و هشدارهای فایل ۸٫۱؛ و زیرشان «همهٔ فایل‌ها (zip)» و «صفحهٔ کامل سفارش». دانلود
- * تک‌تک و «PDF اصلی جزوه» فقط در صفحهٔ سفارش، کنار «چه عوض شد».
+ * فایل‌ها به ترتیب صحافی با صفحهٔ هر کدام، خط جمع و هشدارهای فایل ۸٫۱؛ از ۹٫۳ یادداشت‌های داخلی، همان که صفحهٔ سفارش به همین نشست
+ * نشان می‌دهد (چاپخانه فقط «چاپخانه هم ببیند»)؛ و زیرشان «همهٔ فایل‌ها (zip)» و «صفحهٔ کامل سفارش». دانلود تک‌تک و «PDF اصلی جزوه» فقط
+ * در صفحهٔ سفارش، کنار «چه عوض شد».
  */
-export function OrderSpec({ gate, spec, at, canZip }: { gate: string; spec: PanelOrderSpec; at: Date; canZip: boolean }) {
+export function OrderSpec({
+  gate,
+  spec,
+  at,
+  canZip,
+  canNote,
+}: {
+  gate: string;
+  spec: PanelOrderSpec;
+  at: Date;
+  canZip: boolean;
+  canNote: boolean;
+}) {
   const { order } = spec;
   const breakdown = breakdownOf(order);
   const many = spec.items.length > 1;
@@ -57,6 +71,14 @@ export function OrderSpec({ gate, spec, at, canZip }: { gate: string; spec: Pane
           <FileWarnings item={item} />
         </section>
       ))}
+      {spec.notes.length > 0 ? (
+        <section className="ad-jz" aria-label="یادداشت‌ها">
+          <p className="ad-jz__head">
+            <b>یادداشت‌ها</b>
+          </p>
+          <OrderNotes notes={spec.notes} now={at} visibility={canNote} />
+        </section>
+      ) : null}
       <div className="ad-zip">
         {canZip ? (
           <ZipButton gate={gate} orderNumber={order.orderNumber} view={zip} />

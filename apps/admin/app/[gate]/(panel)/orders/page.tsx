@@ -63,7 +63,7 @@ export default async function OrdersPage({
     untracked: one(query.untracked),
   });
   if (!result.ok) return <NoAccess gate={gate} partner={session.partner} />;
-  const { buckets, bucket, q, counts, page, pages, rows, specs, canZip, bounds, untracked } = result.value;
+  const { buckets, bucket, q, counts, page, pages, rows, specs, canZip, canNote, bounds, untracked } = result.value;
   const money = can(session, 'orders.money');
   // نام چاپخانه زیر وضعیت (۹٫۱): کاربر چاپخانه فقط سفارش‌های خودش را دارد.
   const staff = session.partner === null;
@@ -134,6 +134,7 @@ export default async function OrdersPage({
               money={money}
               partner={staff}
               canZip={canZip}
+              canNote={canNote}
             />
           </>
         ) : (

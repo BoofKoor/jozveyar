@@ -63,6 +63,7 @@ import {
   orderAssignments,
   orderItemSections,
   orderItems,
+  orderNotes,
   orderPrintFiles,
   orderStatusEvents,
   orderTickets,
@@ -498,6 +499,16 @@ export interface PanelOrderEvent {
   adminName: string | null;
 }
 
+/** یادداشت داخلی سفارش (برش ۹٫۳، ADR-058)، با نام نویسنده. */
+export interface PanelOrderNote {
+  id: number;
+  at: Date;
+  body: string;
+  /** «چاپخانه هم ببیند»: کاربر چاپخانهٔ سفارش هم می‌بیندش. */
+  partnerVisible: boolean;
+  adminName: string | null;
+}
+
 export interface PanelOrderDetails {
   order: OrderRow;
   provinceName: string;
@@ -525,6 +536,8 @@ export interface PanelOrderDetails {
   shipments: PanelShipment[];
   /** بازپرداخت‌ها (برش ۷٫۳)، تازه‌ترین اول، با نام ادمین. */
   refunds: PanelRefund[];
+  /** یادداشت‌های داخلی (برش ۹٫۳)، به ترتیب نوشتن؛ در محدودهٔ یک چاپخانه فقط «چاپخانه هم ببیند». */
+  notes: PanelOrderNote[];
 }
 
 /**
@@ -541,6 +554,8 @@ export interface PanelOrderSpec {
   lastAssignmentAt: Date | null;
   /** آخرین ویرایش گیرنده از پنل (رویداد `orders.recipient`)؛ null یعنی هرگز. */
   lastRecipientEditAt: Date | null;
+  /** همان یادداشت‌های `details` (برش ۹٫۳)، با همان محدوده. */
+  notes: PanelOrderNote[];
 }
 
 /** سفارشِ یک فایل: برای مجوز وضعیت و «پاک شد». */
@@ -627,6 +642,24 @@ export type PanelAssignWrite =
   | { ok: false; reason: 'partner_inactive' }
   | { ok: false; reason: 'changed'; current: OrderStatus | null; partnerId: string | null };
 
+/** یادداشت تازه روی یک سفارش (برش ۹٫۳)، از فرمی با شناسهٔ `requestId`. */
+export interface PanelNoteInput {
+  orderId: string;
+  adminUserId: string;
+  /** متن نرمال‌شده، ۱ تا ۱٬۰۰۰ نویسه (`order_notes_body`). */
+  body: string;
+  partnerVisible: boolean;
+  requestId: string;
+  at: Date;
+  event: AdminEventInput;
+}
+
+/**
+ * نتیجهٔ یادداشت تازه: نوشته شد؛ همان فرم پیش‌تر همین یادداشت را نوشته بود (`duplicate`: دو کلیک، یا فرستادن دوباره پس از پاسخی که
+ * نرسید)؛ سفارش (در این محدوده) نیست؛ یا شناسهٔ فرم مال یادداشت دیگری است (`conflict`).
+ */
+export type PanelNoteWrite = { ok: true; noteId: number; duplicate: boolean } | { ok: false; reason: 'not_found' | 'conflict' };
+
 /**
  * ذخیره‌گاه سفارش‌های پنل. هر تابعی که سفارش می‌خواند یا می‌نویسد، محدوده (`PanelScope`) را آرگومان اول می‌گیرد؛ سفارش بیرون از
  * محدوده همان «نیست» است (null، `not_found`، یا `current: null`). فقط `logEvent` (ردیف `admin_events`، پس از خواندنی که در محدوده
@@ -687,6 +720,12 @@ export interface PanelOrderStore {
    * (چاپخانه‌های دیگر و سفارش‌هایشان بیرون از محدوده‌اند).
    */
   partnerOptions(scope: PanelScope): Promise<PanelPartnerOption[]>;
+  /**
+   * یادداشت داخلی تازه (برش ۹٫۳، ADR-058): فقط روی سفارشی در محدوده، با رویداد ادمین در همان تراکنش (بی متن یادداشت، با شناسه‌اش).
+   * فرمی که یک بار فرستاده شد (`requestId`، شاخص یکتای `order_notes_request`) یادداشت دوم نمی‌سازد: دو فرستادن هم‌زمان پشت همان شاخص
+   * می‌ایستند و دومی همان اولی را می‌بیند.
+   */
+  addNote(scope: PanelScope, input: PanelNoteInput): Promise<PanelNoteWrite>;
   /**
    * جابه‌جایی در یک تراکنش: چاپخانهٔ تازه `FOR SHARE` (فعال بماند)، `UPDATE … WHERE status = 'paid' AND چاپخانه = from`، ردیف
    * `order_assignments` با ادمین و دلیل، کار برگه دوباره در صف (نام و شهر چاپخانه روی برگه است)، و رویداد ادمین با نام هر دو
@@ -930,6 +969,34 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
    * صحافی و کاغذ از همان نسخهٔ تعرفهٔ سفارش. `details` یک سفارش می‌دهد و `specs` (برش ۹٫۱) همهٔ ردیف‌های یک صفحهٔ فهرست، با همین
    * چهار کوئری، نه چهار کوئری برای هر سفارش. هر شناسه در نقشه هست، بی جزوه هم.
    */
+  /**
+   * یادداشت‌های همین سفارش‌ها (برش ۹٫۳)، به ترتیب نوشتن. در محدودهٔ یک چاپخانه فقط «چاپخانه هم ببیند»، در خود کوئری، مثل محدودهٔ
+   * سفارش‌ها (۵٫۳)؛ سرویس دوباره نمی‌پالایدش.
+   */
+  async function notesOf(scope: PanelScope, orderIds: readonly string[]): Promise<Map<string, PanelOrderNote[]>> {
+    const out = new Map<string, PanelOrderNote[]>();
+    if (orderIds.length === 0) return out;
+    const rows = await db
+      .select({
+        orderId: orderNotes.orderId,
+        id: orderNotes.id,
+        at: orderNotes.createdAt,
+        body: orderNotes.body,
+        partnerVisible: orderNotes.partnerVisible,
+        adminName: adminUsers.displayName,
+      })
+      .from(orderNotes)
+      .leftJoin(adminUsers, eq(adminUsers.id, orderNotes.adminUserId))
+      .where(and(inArray(orderNotes.orderId, [...orderIds]), scope.kind === 'partner' ? eq(orderNotes.partnerVisible, true) : undefined))
+      .orderBy(asc(orderNotes.id));
+    for (const { orderId, ...note } of rows) {
+      const list = out.get(orderId);
+      if (list) list.push(note);
+      else out.set(orderId, [note]);
+    }
+    return out;
+  }
+
   async function itemsOf(orderIds: readonly string[]): Promise<Map<string, PanelOrderItem[]>> {
     const out = new Map<string, PanelOrderItem[]>(orderIds.map((id) => [id, []]));
     if (orderIds.length === 0) return out;
@@ -1322,6 +1389,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         assignmentRows,
         shipmentRows,
         refundRows,
+        noteMap,
       ] = await Promise.all([
         itemsOf([order.id]),
         db
@@ -1421,6 +1489,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .leftJoin(adminUsers, eq(adminUsers.id, refunds.adminUserId))
           .where(eq(refunds.orderId, order.id))
           .orderBy(desc(refunds.createdAt), desc(refunds.id)),
+        notesOf(scope, [order.id]),
       ]);
 
       const jobOf = (kind: OrderJobKind): PanelPdfJob | null => pdfJobOf(jobRows.find((row) => row.kind === kind));
@@ -1458,6 +1527,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           };
         }),
         refunds: refundRows.map(({ refund, adminName }) => ({ ...refund, adminName })),
+        notes: noteMap.get(order.id) ?? [],
       };
     },
 
@@ -1471,7 +1541,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
         .where(and(inArray(orders.id, [...orderIds]), inScope(scope)));
       const ids = orderRows.map((order) => order.id);
       if (ids.length === 0) return out;
-      const [itemMap, jobRows, ticketRows, assignedRows, editedRows] = await Promise.all([
+      const [itemMap, jobRows, ticketRows, assignedRows, editedRows, noteMap] = await Promise.all([
         itemsOf(ids),
         db
           .select()
@@ -1488,6 +1558,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           .from(adminEvents)
           .where(and(eq(adminEvents.targetType, 'order'), eq(adminEvents.action, 'orders.recipient'), inArray(adminEvents.targetId, ids)))
           .groupBy(adminEvents.targetId),
+        notesOf(scope, ids),
       ]);
       for (const order of orderRows) {
         const job = (kind: OrderJobKind) => pdfJobOf(jobRows.find((row) => row.orderId === order.id && row.kind === kind));
@@ -1500,6 +1571,7 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           ticket: ticket ? (({ orderId: _order, ...rest }) => rest)(ticket) : null,
           lastAssignmentAt: assignedRows.find((row) => row.orderId === order.id)?.at ?? null,
           lastRecipientEditAt: editedRows.find((row) => row.orderId === order.id)?.at ?? null,
+          notes: noteMap.get(order.id) ?? [],
         });
       }
       return out;
@@ -1696,6 +1768,45 @@ export function createPanelOrderStore({ db }: Database): PanelOrderStore {
           }),
         );
         return { ok: true as const, order: updated!, changed };
+      });
+    },
+
+    async addNote(scope, input) {
+      return db.transaction(async (tx): Promise<PanelNoteWrite> => {
+        const [order] = await tx
+          .select({ id: orders.id })
+          .from(orders)
+          .where(and(eq(orders.id, input.orderId), inScope(scope)))
+          .limit(1);
+        if (!order) return { ok: false, reason: 'not_found' };
+        const [note] = await tx
+          .insert(orderNotes)
+          .values({
+            orderId: input.orderId,
+            adminUserId: input.adminUserId,
+            body: input.body,
+            partnerVisible: input.partnerVisible,
+            requestId: input.requestId,
+            createdAt: input.at,
+          })
+          .onConflictDoNothing({ target: orderNotes.requestId })
+          .returning({ id: orderNotes.id });
+        if (!note) {
+          // همان فرم پیش‌تر نوشته شد. فقط اگر همان یادداشت است (دو کلیک) همان را برمی‌گرداند؛ شناسهٔ فرمی که با متن یا سفارش دیگری
+          // دوباره آمد چیزی نمی‌نویسد.
+          const [earlier] = await tx.select().from(orderNotes).where(eq(orderNotes.requestId, input.requestId)).limit(1);
+          const same =
+            earlier &&
+            earlier.orderId === input.orderId &&
+            earlier.adminUserId === input.adminUserId &&
+            earlier.body === input.body &&
+            earlier.partnerVisible === input.partnerVisible;
+          return same ? { ok: true, noteId: earlier.id, duplicate: true } : { ok: false, reason: 'conflict' };
+        }
+        await tx.insert(adminEvents).values(
+          adminEventRow({ ...input.event, detail: { ...(input.event.detail as Record<string, unknown> | undefined), note: note.id } }),
+        );
+        return { ok: true, noteId: note.id, duplicate: false };
       });
     },
 

@@ -38,6 +38,10 @@ export type AdminErrorCode =
   | 'reason_too_long'
   | 'invalid_recipient'
   | 'recipient_locked'
+  /** یادداشت داخلی سفارش (۹٫۳). */
+  | 'note_required'
+  | 'note_too_long'
+  | 'note_form_stale'
   /** فایل چاپ، برگه و نگهداری (۵٫۱). */
   | 'ticket_not_ready'
   /** همهٔ فایل‌ها (zip، ۹٫۱): فایل چاپی یا برگه‌ای هنوز آماده یا تازه نیست. */

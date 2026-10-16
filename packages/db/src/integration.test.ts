@@ -91,14 +91,14 @@ import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TA
 import { seal } from './sealed.js';
 import { serviceSecrets } from './schema.js';
 import { FILES_RETENTION_SETTING, OFFICIAL_THROUGH_SETTING, OTP_SITE_LIMIT_SETTING } from './reference.js';
-import { orderAssignments, orderPrintFiles, printPartners } from './schema.js';
+import { orderAssignments, orderNotes, orderPrintFiles, printPartners } from './schema.js';
 import { createPartnerStore } from './partners.js';
 import { sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { READ_POST_FILE_JOB, createShipmentStore } from './shipments.js';
 import { shipmentImportRows, shipmentImports, shipments } from './schema.js';
 import { barcodeOf, parcel, postTable } from './postfile.fixtures.js';
-import { MISMATCH_ALERT_MS, type PanelScope } from './panel.js';
+import { MISMATCH_ALERT_MS, type PanelNoteInput, type PanelScope } from './panel.js';
 import { bandsDecision, bandsSeen, createShippingReportStore, currentBands } from './report.js';
 import { readSetting, REPORT_BANDS_SETTING } from './reference.js';
 import { createZibalMock, type ZibalMock } from '@jozveyar/payments/mock';
@@ -1930,7 +1930,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -1986,8 +1986,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
       // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است.
       expect(await read('owner')).toContain('reports.read');
-      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید و از ۸٫۴ خاموش موقت
-      // گزینه‌های تعرفه؛ چاپخانه فقط دیدن،
+      // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
+      // گزینه‌های تعرفه و از ۹٫۳ یادداشت داخلی؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042) و از ۶٫۲ ورود فایل پست خودش، نه صف. هیچ‌کدام گزارش ارسال نه. صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'files.download',
@@ -1995,6 +1995,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.assign',
         'orders.cancel',
         'orders.money',
+        'orders.notes',
         'orders.read',
         'orders.status',
         'shipments.import',
@@ -2080,6 +2081,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.assign',
         'orders.cancel',
         'orders.money',
+        'orders.notes',
         'orders.read',
         'orders.status',
         'shipments.import',
@@ -2331,7 +2333,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -2810,7 +2812,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -3636,6 +3638,128 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(customer!.refunds.map((row) => row.id)).toEqual([id]);
       });
     });
+
+    // یادداشت داخلی (برش ۹٫۳، ADR-058): محافظ‌ها، شناسهٔ فرم، رویداد و محدودهٔ چاپخانه.
+    describe('یادداشت داخلی سفارش (برش ۹٫۳)', () => {
+      /** یادداشت متصدی از فرمی تازه، با رویدادش، همان‌طور که سرویس پنل می‌سازد. */
+      function noteInput(order: { id: string; orderNumber: number }, over: Partial<PanelNoteInput> = {}): PanelNoteInput {
+        const at = over.at ?? NOW;
+        const adminUserId = over.adminUserId ?? operator;
+        const partnerVisible = over.partnerVisible ?? false;
+        return {
+          orderId: order.id,
+          adminUserId,
+          body: 'اسم استاد روی جلد نیاید',
+          partnerVisible,
+          requestId: randomUUID(),
+          at,
+          event: {
+            adminUserId,
+            action: 'orders.note',
+            targetType: 'order',
+            targetId: order.id,
+            ipHash: 'ip',
+            detail: { orderNumber: order.orderNumber, partnerVisible },
+            at,
+          },
+          ...over,
+        };
+      }
+      const notesOf = (id: string) => conn.db.select().from(orderNotes).where(eq(orderNotes.orderId, id)).orderBy(orderNotes.id);
+      const noteEvents = async (id: string) => (await eventsOf(id)).filter((event) => event.action === 'orders.note');
+
+      it('محافظ‌ها: متن ۱ تا ۱٬۰۰۰ نویسه بی فاصله و خط تازه در لبه، یک یادداشت برای هر فرم، و عوض و پاک نمی‌شود جز با خود سفارش', async () => {
+        const order = await paidOrder();
+        const row = (body: string) => ({ orderId: order.id, adminUserId: owner, body, partnerVisible: false, requestId: randomUUID() });
+        const insert = (body: string) => rejectedConstraint(conn.db.insert(orderNotes).values(row(body)));
+        expect(await insert('')).toBe('order_notes_body');
+        expect(await insert(' \n ')).toBe('order_notes_body');
+        expect(await insert('\nاسم استاد روی جلد نیاید')).toBe('order_notes_body');
+        expect(await insert('اسم استاد روی جلد نیاید ')).toBe('order_notes_body');
+        expect(await insert('ی'.repeat(1001))).toBe('order_notes_body');
+        expect(await insert('ی'.repeat(1000))).toBeUndefined();
+        expect(await insert('جلد اول\nجلد دوم جدا')).toBeUndefined();
+        const [first, second] = await notesOf(order.id);
+        expect(second!.body).toBe('جلد اول\nجلد دوم جدا');
+        // همان فرم دو بار (`request_id`).
+        expect(await rejectedConstraint(conn.db.insert(orderNotes).values({ ...row('دوباره'), requestId: first!.requestId }))).toBe('order_notes_request');
+        const byId = eq(orderNotes.id, first!.id);
+        expect(await rejectedConstraint(conn.db.update(orderNotes).set({ body: 'عوض شد' }).where(byId))).toBe('order_notes_append_only');
+        expect(await rejectedConstraint(conn.db.update(orderNotes).set({ partnerVisible: true }).where(byId))).toBe('order_notes_append_only');
+        expect(await rejectedConstraint(conn.db.delete(orderNotes).where(byId))).toBe('order_notes_append_only');
+        expect(await notesOf(order.id)).toHaveLength(2);
+        // پاک شدن خود سفارش (فقط تست‌ها؛ پرداخت cascade ندارد) یادداشت‌هایش را هم می‌برد.
+        await conn.db.delete(payments).where(eq(payments.orderId, order.id));
+        await conn.db.delete(orders).where(eq(orders.id, order.id));
+        expect(await notesOf(order.id)).toEqual([]);
+      });
+
+      it('یادداشت با رویدادش در یک تراکنش؛ همان فرم دو بار یک یادداشت است، هم‌زمان هم، و با متن دیگر هیچ', async () => {
+        const order = await paidOrder();
+        const panel = createPanelOrderStore(conn);
+        const input = noteInput(order, { body: 'جلد دوم را جدا ببند', partnerVisible: true });
+        const written = await panel.addNote(ALL_ORDERS, input);
+        expect(written).toMatchObject({ ok: true, duplicate: false });
+        const [note] = await notesOf(order.id);
+        expect(note).toMatchObject({ adminUserId: operator, body: 'جلد دوم را جدا ببند', partnerVisible: true, requestId: input.requestId });
+        expect(note!.createdAt).toEqual(NOW);
+        const [event] = await noteEvents(order.id);
+        expect(event).toMatchObject({ adminUserId: operator, detail: { orderNumber: order.orderNumber, partnerVisible: true, note: note!.id } });
+        expect(JSON.stringify(event!.detail)).not.toContain('جلد');
+
+        // دو کلیک: همان یادداشت، بی ردیف و رویداد دوم.
+        expect(await panel.addNote(ALL_ORDERS, input)).toEqual({ ok: true, noteId: note!.id, duplicate: true });
+        // شناسهٔ همان فرم با متن دیگر، تیک دیگر، ادمین دیگر یا سفارش دیگر: هیچ.
+        const other = await paidOrder(END_MONDAY, 'مریم کاظمی');
+        expect(await panel.addNote(ALL_ORDERS, { ...input, body: 'متن دیگر' })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await panel.addNote(ALL_ORDERS, { ...input, partnerVisible: false })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await panel.addNote(ALL_ORDERS, { ...input, adminUserId: owner })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await panel.addNote(ALL_ORDERS, { ...noteInput(other), requestId: input.requestId, body: input.body, partnerVisible: true })).toEqual({
+          ok: false,
+          reason: 'conflict',
+        });
+        expect(await notesOf(order.id)).toHaveLength(1);
+        expect(await notesOf(other.id)).toEqual([]);
+        expect(await noteEvents(order.id)).toHaveLength(1);
+        expect(await noteEvents(other.id)).toEqual([]);
+
+        // دو فرستادن هم‌زمان یک فرم: دومی پشت شاخص یکتا می‌ماند و همان اولی را می‌بیند.
+        const again = noteInput(order, { body: 'دو کلیک هم‌زمان' });
+        const both = await Promise.all([panel.addNote(ALL_ORDERS, again), panel.addNote(ALL_ORDERS, again)]);
+        expect(both.map((result) => result.ok && result.duplicate).sort()).toEqual([false, true]);
+        expect((await notesOf(order.id)).map((row) => row.body)).toEqual(['جلد دوم را جدا ببند', 'دو کلیک هم‌زمان']);
+        expect(await noteEvents(order.id)).toHaveLength(2);
+      });
+
+      it('چاپخانه فقط «چاپخانه هم ببیند» را می‌بیند، در جزئیات و مشخصات فهرست؛ سفارش دیگران نه، و یادداشت رویش هم نه', async () => {
+        const order = await paidOrder();
+        const panel = createPanelOrderStore(conn);
+        const later = (minutes: number) => new Date(NOW.getTime() + minutes * MINUTE);
+        await panel.addNote(ALL_ORDERS, noteInput(order, { body: 'مشتری زنگ زد؛ فقط داخلی', at: later(1) }));
+        await panel.addNote(ALL_ORDERS, noteInput(order, { body: 'اسم استاد روی جلد نیاید', partnerVisible: true, adminUserId: owner, at: later(2) }));
+        const own: PanelScope = { kind: 'partner', partnerId: order.printPartnerId! };
+        const stranger: PanelScope = { kind: 'partner', partnerId: randomUUID() };
+
+        const all = await panel.details(ALL_ORDERS, order.orderNumber);
+        expect(all!.notes.map(({ body, partnerVisible, adminName }) => ({ body, partnerVisible, adminName }))).toEqual([
+          { body: 'مشتری زنگ زد؛ فقط داخلی', partnerVisible: false, adminName: 'علی محمدی' },
+          { body: 'اسم استاد روی جلد نیاید', partnerVisible: true, adminName: 'سارا رضایی' },
+        ]);
+        expect(all!.notes.map((note) => note.at)).toEqual([later(1), later(2)]);
+        const partner = await panel.details(own, order.orderNumber);
+        expect(partner!.notes.map((note) => note.body)).toEqual(['اسم استاد روی جلد نیاید']);
+
+        const specs = await panel.specs(ALL_ORDERS, [order.id]);
+        expect(specs.get(order.id)!.notes).toEqual(all!.notes);
+        const partnerSpecs = await panel.specs(own, [order.id]);
+        expect(partnerSpecs.get(order.id)!.notes).toEqual(partner!.notes);
+        expect((await panel.specs(stranger, [order.id])).size).toBe(0);
+
+        // سفارشی بیرون از محدوده «نیست»، حتی برای نوشتن.
+        expect(await panel.addNote(stranger, noteInput(order))).toEqual({ ok: false, reason: 'not_found' });
+        expect(await notesOf(order.id)).toHaveLength(2);
+      });
+    });
   });
 
   // فایل چاپ، برگه و نگهداری (برش ۵٫۱، ADR-043 و ADR-044): محافظ‌ها، اثر انگشت برگه، و ذخیره‌گاه پنل. ساختن فایل‌ها و پاک
@@ -3739,7 +3863,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -4018,6 +4142,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           ticket: details.ticket,
           lastAssignmentAt: details.assignments.at(-1)?.at ?? null,
           lastRecipientEditAt: null,
+          // یادداشت‌ها (۹٫۳)، همان `details`؛ با یادداشت در «یادداشت داخلی سفارش (برش ۹٫۳)».
+          notes: details.notes,
         });
       }
       expect(specs.get(small.id)).toMatchObject({
@@ -4121,7 +4247,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -4601,7 +4727,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -5893,7 +6019,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -6269,7 +6395,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -6743,7 +6869,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -8526,7 +8652,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
