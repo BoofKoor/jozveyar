@@ -30,6 +30,9 @@
   برش ۱۱ (docs/UI.md، قدم ۱۱، «پیش از ۱۱٫۱»؛ سؤال‌های ۲۰۵ و ۲۰۸): زبانهٔ «محتوای سایت» با نوار اعلان (مالک و متصدی) و متن‌های سایت
   (فقط مالک): ویرایش صفحهٔ ثابت با Markdown محدود، جای‌نگهدارها و پیش‌نمایش کنارش، خطای متن، انتشار با «چه عوض می‌شود» و کد
   تازه، نسخه‌ها و متن پیش‌فرض، صفحهٔ اصلی، سؤال‌ها، و تماس و پاورقی. همان‌ها روی سایت: content.html.
+  برش ۱۲ (docs/UI.md، قدم ۱۱، «پیش از ۱۲٫۱»؛ سؤال ۲۱۱): زبانهٔ «پشتیبانی» (مالک و متصدی) با شمار پیام‌های بی پاسخ، صندوق با چیپ‌های
+  حال و قدیمی‌ترین انتظار اول، گفت‌وگو با پاسخ و پیامک پاسخ، هشدار پیشخوان، کارت «پیام‌های مشتری» در صفحهٔ سفارش، کلید هفتم «تنظیمات»
+  (قالب پیامک پاسخ)، و رویدادهای «پشتیبانی». همان گفت‌وگو از چشم مشتری: account.html.
   به زبان کیت: packages/ui/src/base.css و components.css مستقیم بار می‌شوند و توکن‌ها از docs/brand/jozveyar-colors.css
   می‌آیند؛ اینجا هیچ کد رنگی نیست. اجزای تازهٔ کیت نام jy- دارند (دکمهٔ کار برگشت‌ناپذیر، نشان خنثی، آیکون دانلود)؛
   چیدمان پنل ad- است، و صفحهٔ مشتری همان site- و ck- طرح مسیر خرید.
@@ -650,7 +653,7 @@
 .scr, .st { display: none; }
 /* سه پوسته: ورود و ثبت، پنل، صفحهٔ مشتری */
 body:has(:is(#m-login, #m-login-error, #m-login-locked, #m-invite, #m-invite-expired):checked) .scr-auth { display: block; }
-body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped, #m-dash-alerts, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-l91, #m-l91-more, #m-o91, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar):checked) .scr-shell { display: block; }
+body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped, #m-dash-alerts, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-l91, #m-l91-more, #m-o91, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s12, #m-s12-thread, #m-s12-replied, #m-s12-dash, #m-s12-order, #m-s12-key, #m-s12-events):checked) .scr-shell { display: block; }
 body:has(:is(#m-c-print, #m-c-handed, #m-c-cancelled, #m-c-shipped, #m-c-guest):checked) .scr-site { display: block; }
 
 body:has(#m-login:checked) :is(.st-login, .st-login-any),
@@ -730,6 +733,16 @@ body:has(#m-s11-home:checked) .st-s11-home,
 body:has(#m-s11-faq:checked) .st-s11-faq,
 body:has(#m-s11-contact:checked) .st-s11-contact,
 body:has(#m-s11-bar:checked) .st-s11-bar { display: contents; }
+/* برش ۱۲: پشتیبانی */
+body:has(#m-s12:checked) .st-s12,
+body:has(#m-s12-thread:checked) :is(.st-s12-conv, .st-s12-thread),
+body:has(#m-s12-replied:checked) :is(.st-s12-conv, .st-s12-replied),
+body:has(#m-s12-dash:checked) :is(.st-dash, .st-s12-dash),
+body:has(#m-s12-order:checked) :is(.st-s12-order, .st-order, .st-o27, .st-pdf-ok, .st-rcpt, .st-open, .st-paid, .st-prt-card),
+body:has(#m-s12-key:checked) :is(.st-settings, .st-settings-any, .st-live-pre, .st-s12-key),
+body:has(#m-s12-events:checked) :is(.st-events, .st-s12-events) { display: contents; }
+body:has(#m-s12-key:checked) .ad-keys > li.st-s12-key,
+body:has(#m-s12-events:checked) .ad-log > li.st-s12-events { display: grid; }
 
 /* برش ۷: پیامک پرداخت «رفت» در همهٔ حالت‌های سفارش، جز پرداخت دوم که «نرفت» دارد */
 body:has(#m-order-second:checked) .ad-paysms-std { display: none; }
@@ -740,7 +753,7 @@ body:has(#r-partner:checked) .ad-log > li.ad-money { display: none !important; }
 /* ردیف جدول و ردیف رویدادی که فقط در یک حالت هست: جعبهٔ خودش را نگه می‌دارد، نه contents */
 body:has(#m-tariff-invalid:checked) tr.st-tariff-invalid { display: table-row; }
 body:has(:is(#m-order-print, #m-order-handed):checked) .ad-log > li.st-printed,
-body:has(:is(#m-order, #m-o91, #m-order-edit, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed):checked) .ad-log > li.st-pdf-ok,
+body:has(:is(#m-order, #m-o91, #m-s12-order, #m-order-edit, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed):checked) .ad-log > li.st-pdf-ok,
 body:has(#m-order-handed:checked) .ad-log > li.st-order-handed,
 body:has(:is(#m-order-cancelled, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed):checked) .ad-log > li.st-cx,
 body:has(:is(#m-refunding, #m-refunded):checked) .ad-log > li.st-rf-asked,
@@ -751,16 +764,17 @@ body:has(#m-order-shipped:checked) .ad-log > li:is(.st-printed, .st-pdf-ok, .st-
 body:has(#m-o91:checked) .ad-log > li.st-zip { display: grid; }
 
 /* زبانهٔ جاری (در سایت aria-current، اینجا فقط ظاهر) */
-body:has(:is(#m-dash, #m-dash-alerts):checked) .ad-nav [data-tab='dash'],
-body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-order-shipped, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-l91, #m-l91-more, #m-o91):checked) .ad-nav [data-tab='orders'],
+body:has(:is(#m-dash, #m-dash-alerts, #m-s12-dash):checked) .ad-nav [data-tab='dash'],
+body:has(:is(#m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-order-shipped, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-l91, #m-l91-more, #m-o91, #m-s12-order):checked) .ad-nav [data-tab='orders'],
+body:has(:is(#m-s12, #m-s12-thread, #m-s12-replied):checked) .ad-nav [data-tab='support'],
 body:has(:is(#m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-nav [data-tab='ship'],
 body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate):checked) .ad-nav [data-tab='tariff'],
-body:has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open):checked) .ad-nav [data-tab='settings'],
+body:has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-s12-key):checked) .ad-nav [data-tab='settings'],
 body:has(:is(#m-partners, #m-partner-edit):checked) .ad-nav [data-tab='partners'],
 body:has(:is(#m-admins, #m-admin-invite, #m-admin-link):checked) .ad-nav [data-tab='admins'],
-body:has(#m-events:checked) .ad-nav [data-tab='events'],
+body:has(:is(#m-events, #m-s12-events):checked) .ad-nav [data-tab='events'],
 body:has(:is(#m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar):checked) .ad-nav [data-tab='site'],
-body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
+body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s12-key, #m-s12-events, #m-s12, #m-s12-thread, #m-s12-replied, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
 
 /*
  * نقش: متصدی تعرفه را فقط می‌بیند، و تنظیمات، چاپخانه‌ها، ادمین‌ها و رویدادها را ندارد. چاپخانه (برش ۵، ADR-042) فقط پیشخوان و
@@ -775,9 +789,9 @@ body:has(#r-partner:checked) .prt { display: contents; }
 .ad-facts > div.staff { display: grid; }
 body:has(:is(#r-operator, #r-partner):checked) .st-ownpage { display: none !important; }
 body:has(#r-partner:checked) .st-staffpage { display: none !important; }
-body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact):checked) .ad-noaccess { display: block; }
+body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s12-key, #m-s12-events):checked) .ad-noaccess { display: block; }
 .ad-noaccess-prt, .ad-notfound { display: none; max-width: 32rem; }
-body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-dash-alerts, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar):checked) .ad-noaccess-prt { display: block; }
+body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-dash-alerts, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s12, #m-s12-thread, #m-s12-replied, #m-s12-key, #m-s12-events):checked) .ad-noaccess-prt { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged):checked) .ad-notfound { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged, #m-order-edit, #m-order-cancel, #m-order-assign):checked) :is(.st-o27, .st-order-unpaid, .st-order-vols, .st-order-purged) { display: none; }
 
@@ -854,6 +868,13 @@ body:has(#m-s11-home:checked) .mock [for='m-s11-home'],
 body:has(#m-s11-faq:checked) .mock [for='m-s11-faq'],
 body:has(#m-s11-contact:checked) .mock [for='m-s11-contact'],
 body:has(#m-s11-bar:checked) .mock [for='m-s11-bar'],
+body:has(#m-s12:checked) .mock [for='m-s12'],
+body:has(#m-s12-thread:checked) .mock [for='m-s12-thread'],
+body:has(#m-s12-replied:checked) .mock [for='m-s12-replied'],
+body:has(#m-s12-dash:checked) .mock [for='m-s12-dash'],
+body:has(#m-s12-order:checked) .mock [for='m-s12-order'],
+body:has(#m-s12-key:checked) .mock [for='m-s12-key'],
+body:has(#m-s12-events:checked) .mock [for='m-s12-events'],
 body:has(#r-owner:checked) .mock [for='r-owner'],
 body:has(#r-operator:checked) .mock [for='r-operator'],
 body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-green-700); }
@@ -997,6 +1018,37 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
 .ad-pvh__how h3 { font-weight: 600; }
 .ad-pvh__how p { font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
 @media (max-width: 520px) { .ad-pv__frame { padding: 16px; } .ad-pvh__title { font-size: var(--text-h3); } }
+/*
+ * برش ۱۲ (docs/UI.md، قدم ۱۱، «پیش از ۱۲٫۱»؛ سؤال ۲۱۱): «پشتیبانی»، مالک و متصدی. زبانه در ردیف اصلی با شمار بی پاسخ‌ها؛ صندوق با چیپ‌های
+ * حال و قدیمی‌ترین انتظار اول؛ گفت‌وگو با پیام‌ها و پاسخ در ستون اصلی، و مشتری، سفارش و «بستن» در ستون کنار (در گوشی بالای همه، مثل صفحهٔ
+ * سفارش). پیام‌ها زیر هم‌اند، نه حباب، مثل account.html؛ پاسخ پشتیبانی زمینهٔ green-50 دارد.
+ */
+.ad-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; margin-inline-start: 6px; padding-inline: 6px; border-radius: 999px; background: var(--color-green-600); color: var(--color-paper); font-size: 12px; font-weight: 600; line-height: 1; }
+.ad-threads > li + li { border-block-start: 1px solid var(--color-green-100); }
+.ad-thread {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr) auto; grid-template-areas: 'who snip wait' 'about snip wait';
+  align-items: center; column-gap: 16px; row-gap: 2px; min-height: 64px; padding: 12px 24px; color: inherit; text-decoration: none; cursor: pointer;
+}
+.ad-thread:hover { background: var(--color-green-50); }
+.ad-thread__who { grid-area: who; min-width: 0; overflow-wrap: anywhere; }
+.ad-thread__who b { font-weight: 600; }
+.ad-thread__about { grid-area: about; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); }
+.ad-thread__snip { grid-area: snip; min-width: 0; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ad-thread__wait { grid-area: wait; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); white-space: nowrap; text-align: end; }
+@media (width <= 860px) {
+  .ad-thread { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'who wait' 'about about' 'snip snip'; column-gap: 10px; padding-inline: 16px; }
+}
+.ad-msgs { display: flex; flex-direction: column; gap: 12px; margin-block-start: 12px; }
+.ad-msg { padding: 12px 16px; border: 1px solid var(--color-line); border-radius: var(--radius-md); }
+.ad-msg--us { background: var(--color-green-50); border-color: var(--color-green-100); }
+.ad-msg__who { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+.ad-msg__who b { font-weight: 600; color: var(--color-ink); }
+.ad-msg__body { margin-block-start: 4px; line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; }
+.ad-msg .ad-paysms { border-block-start-color: var(--color-green-100); }
+.ad-reply { margin-block-start: 16px; padding-block-start: 16px; border-block-start: 1px solid var(--color-line); }
+textarea.ad-reply__text { min-height: 9rem; line-height: 1.9; }
+/* گفت‌وگو در گوشی: پیام‌ها و پاسخ اول، چون کار همین‌جاست؛ صفحهٔ سفارش برعکس، وضعیت و کار بعدی اول */
+@media (width <= 860px) { .ad-grid--main-first { grid-template-areas: 'main' 'side'; } }
 </style>
 </head>
 <body>
@@ -1074,6 +1126,13 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
   <input type="radio" name="m" id="m-s11-faq" tabindex="-1">
   <input type="radio" name="m" id="m-s11-contact" tabindex="-1">
   <input type="radio" name="m" id="m-s11-bar" tabindex="-1">
+  <input type="radio" name="m" id="m-s12" tabindex="-1">
+  <input type="radio" name="m" id="m-s12-thread" tabindex="-1">
+  <input type="radio" name="m" id="m-s12-replied" tabindex="-1">
+  <input type="radio" name="m" id="m-s12-dash" tabindex="-1">
+  <input type="radio" name="m" id="m-s12-order" tabindex="-1">
+  <input type="radio" name="m" id="m-s12-key" tabindex="-1">
+  <input type="radio" name="m" id="m-s12-events" tabindex="-1">
   <input type="radio" name="r" id="r-owner" checked tabindex="-1">
   <input type="radio" name="r" id="r-operator" tabindex="-1">
   <input type="radio" name="r" id="r-partner" tabindex="-1">
@@ -1151,6 +1210,14 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
     <label for="m-s11-faq">سؤال‌ها</label>
     <label for="m-s11-contact">تماس و پاورقی</label>
     <label for="m-s11-bar">نوار اعلان</label>
+    <hr><p>پشتیبانی (برش ۱۲)</p>
+    <label for="m-s12">صندوق</label>
+    <label for="m-s12-thread">گفت‌وگو و پاسخ</label>
+    <label for="m-s12-replied">پاسخ رفت</label>
+    <label for="m-s12-dash">هشدار پیشخوان</label>
+    <label for="m-s12-order">سفارش با پیام</label>
+    <label for="m-s12-key">قالب پیامک پاسخ</label>
+    <label for="m-s12-events">رویدادها</label>
     <hr><p>تعرفه و تنظیمات</p>
     <label for="m-tariff">تعرفه</label>
     <label for="m-tariff-draft">نسخهٔ تازه</label>
@@ -1280,7 +1347,11 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
     <nav class="ad-wrap ad-nav" aria-label="بخش‌های پنل">
       <label for="m-dash" data-tab="dash">پیشخوان</label>
       <label for="m-orders" data-tab="orders">سفارش‌ها</label>
-      <label for="m-ship" data-tab="ship">ارسال</label>
+      <!-- برش ۱۲: پشتیبانی با شمار بی پاسخ‌ها، مالک و متصدی؛ مالک در گوشی زیر «بیشتر»، با همان شمار روی «بیشتر» -->
+      <span class="own"><label for="m-s12" data-tab="support" class="ad-nav__wide">پشتیبانی<span class="ad-count num" aria-hidden="true">3</span><span class="sr-only">، 3 بی پاسخ</span></label></span>
+      <span class="opr"><label for="m-s12" data-tab="support">پشتیبانی<span class="ad-count num" aria-hidden="true">3</span><span class="sr-only">، 3 بی پاسخ</span></label></span>
+      <span class="own"><label for="m-ship" data-tab="ship" class="ad-nav__wide">ارسال</label></span>
+      <span class="opr prt"><label for="m-ship" data-tab="ship">ارسال</label></span>
       <span class="own"><label for="m-tariff" data-tab="tariff" class="ad-nav__wide">تعرفه</label></span>
       <span class="opr"><label for="m-tariff" data-tab="tariff">تعرفه</label></span>
       <span class="opr"><label for="m-s11" data-tab="site">محتوای سایت</label></span>
@@ -1292,8 +1363,10 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
         <label for="m-events" data-tab="events" class="ad-nav__wide">رویدادها</label>
         <!-- گوشی: بخش‌های مالک زیر «بیشتر»، تا زبانهٔ جاری همیشه دیده شود؛ از برش ۶ «تعرفه» هم -->
         <details class="ad-more">
-          <summary data-tab="more">بیشتر<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
+          <summary data-tab="more">بیشتر<span class="ad-count num" aria-hidden="true">3</span><span class="sr-only">، 3 پیام بی پاسخ</span><span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
           <div class="ad-more__list">
+            <label for="m-s12">پشتیبانی<span class="ad-count num" aria-hidden="true">3</span><span class="sr-only">، 3 بی پاسخ</span></label>
+            <label for="m-ship">ارسال</label>
             <label for="m-tariff">تعرفه</label>
             <label for="m-s11">محتوای سایت</label>
             <label for="m-settings">تنظیمات</label>
@@ -1349,6 +1422,7 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
       </section>
 
       <div class="ad-alerts">
+        <div class="st st-s12-dash"><span class="staff"><p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-s12" class="jy-link"><span class="num">3</span> پیام پشتیبانی</label> بی پاسخ است؛ قدیمی‌ترین از ساعت <span class="num">08:12</span>.</span></p></span></div>
         <p class="jy-note jy-note--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>PDF جزوهٔ <label for="m-order-pdf" class="jy-link">سفارش <span class="num">10031</span></label> ساخته نشد؛ پیش از چاپ دوباره بسازش.</span></p>
         <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><label for="m-order-unpaid" class="jy-link">یک تلاش پرداخت</label> از درگاه برنگشت و زیبال هم به استعلام جواب نداد؛ هر <span class="num">2</span> دقیقه دوباره می‌پرسیم. از صبح استعلام خودکار <span class="num">3</span> تلاش بی برگشت را بست: <span class="num">2</span> پرداخت‌نشده، <span class="num">1</span> پرداخت‌شده.</span></p>
         <p class="jy-note jy-note--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span><label for="m-ship-review" class="jy-link"><span class="num">5</span> سطر فایل پست</label> منتظر تأیید است؛ تا تأیید نشده، مشتری پیامک رهگیری نمی‌گیرد.</span></p>
@@ -1820,6 +1894,14 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
               </div>
             </section>
           </div>
+          <!-- برش ۱۲: گفت‌وگوی مشتری دربارهٔ همین سفارش، فقط مالک و متصدی -->
+          <div class="st st-s12-order"><span class="staff">
+            <section class="jy-card" aria-labelledby="t-s12-oc">
+              <div class="jy-card__head"><h2 id="t-s12-oc" class="jy-card__title">پیام‌های مشتری</h2><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>پاسخ داده شد</span></div>
+              <p class="ad-meta">یک گفت‌وگو · آخرین پیام: علی، امروز <span class="num">10:42</span></p>
+              <div class="ad-actions"><label for="m-s12-replied" class="jy-btn jy-btn--secondary">دیدن گفت‌وگو</label></div>
+            </section>
+          </span></div>
         </aside>
 
         <div class="ad-main">
@@ -3304,6 +3386,16 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
               </div>
               <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">وارد کن</button></div>
             </li>
+            <!-- برش ۱۲: قالب پنجم، پیامک پاسخ پشتیبانی؛ بیرون از آمادگی live، مثل پیامک چاپخانه -->
+            <li class="st st-s12-key">
+              <div>
+                <p class="ad-keys__name">شناسهٔ قالب پیامک پاسخ پشتیبانی</p>
+                <p class="ad-keys__meta"><span class="jy-badge jy-badge--neutral">خالی</span><span>قالبی که با همین متن در sms.ir تأیید شد</span></p>
+                <p class="ad-keys__tpl">متن در sms.ir: «جزوه‌یار: پاسخ پیامت دربارهٔ <code>#TOPIC#</code> آمد. jozveyar.com/orders» · پارامتر: <code>TOPIC</code>، «سفارش 10027» یا «سؤال کلی»</p>
+                <p class="ad-keys__test"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>تا شناسه وارد نشود، پاسخ‌ها می‌روند ولی پیامکشان «نرفت» است؛ هشدار پیشخوان همین را می‌گوید.</span></p>
+              </div>
+              <div class="ad-keys__btns"><button type="button" class="jy-btn jy-btn--text">وارد کن</button></div>
+            </li>
             <li>
               <div>
                 <p class="ad-keys__name">کد پذیرندهٔ زیبال</p>
@@ -3448,6 +3540,7 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
         <a class="ad-chip" href="#">ارسال</a>
         <a class="ad-chip" href="#">تعرفه</a>
         <a class="ad-chip" href="#">محتوای سایت</a>
+        <span class="st st-s12-events"><a class="ad-chip" href="#">پشتیبانی</a></span>
         <a class="ad-chip" href="#">تنظیمات و کلیدها</a>
         <a class="ad-chip" href="#">چاپخانه‌ها</a>
         <a class="ad-chip" href="#">ادمین‌ها</a>
@@ -3465,6 +3558,7 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
           <li><span class="ad-log__when"><span class="num">11:07</span> · سارا</span><span>فایل پست <bdi>FileName-1981.xls</bdi> ثبت شد: <span class="num">9</span> کد رهگیری، <span class="num">4</span> سطر در صف تأیید، <span class="num">1</span> پیدا نشد، <span class="num">1</span> تکراری</span></li>
           <li><span class="ad-log__when"><span class="num">11:05</span> · سارا</span><span>فایل پست <bdi>FileName-1981.xls</bdi> بارگذاری شد، <span class="num">15</span> سطر</span></li>
           <li><span class="ad-log__when"><span class="num">10:44</span> · سارا</span><span>پیوند ثبت برای حسن (چاپخانه، چاپ نور) ساخته شد</span></li>
+          <li class="st st-s12-events"><span class="ad-log__when"><span class="num">10:42</span> · علی</span><span>پاسخ به گفت‌وگوی سفارش <span class="num">10027</span> (مریم کاظمی)؛ پیامک پاسخ رفت</span></li>
           <li><span class="ad-log__when"><span class="num">10:40</span> · سارا</span><span>چاپخانهٔ «چاپ نور» در مشهد افزوده شد</span></li>
           <li><span class="ad-log__when"><span class="num">11:02</span> · سارا</span><span>مسیر خرید روی سایت: پیش‌نمایش مالک ← همه، با کد تازه</span></li>
           <li><span class="ad-log__when"><span class="num">11:01</span> · سارا</span><span>نسخهٔ <span class="num">2</span> تعرفه فعال شد</span></li>
@@ -3475,6 +3569,8 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
           <li><span class="ad-log__when"><span class="num">10:41</span> · سارا</span><span>پیوند پیش‌نمایش مسیر خرید ساخته شد، تا <span class="num">10:56</span></span></li>
           <li><span class="ad-log__when"><span class="num">10:31</span> · سارا</span><span>پیوند ثبت برای رضا (متصدی) ساخته شد</span></li>
           <li><span class="ad-log__when"><span class="num">10:05</span> · علی</span><span>نوار اعلان روشن شد، تا پنجشنبه <span class="num">30</span> مهر، با کد تازه</span></li>
+          <li class="st st-s12-events"><span class="ad-log__when"><span class="num">09:31</span> · سارا</span><span>گفت‌وگوی «سؤال کلی» امیر حسینی بسته شد</span></li>
+          <li class="st st-s12-events"><span class="ad-log__when"><span class="num">09:28</span> · سارا</span><span>پاسخ به گفت‌وگوی «سؤال کلی» امیر حسینی؛ پیامک پاسخ رفت</span></li>
           <li><span class="ad-log__when"><span class="num">10:02</span> · سارا</span><span>ورود</span></li>
           <li><span class="ad-log__when"><span class="num">09:40</span> · علی</span><span>PDF سفارش <span class="num">10027</span> دانلود شد</span></li>
           <li><span class="ad-log__when"><span class="num">09:15</span> · علی</span><span>سفارش <span class="num">10024</span>: در صف چاپ ← در حال چاپ</span></li>
@@ -3482,6 +3578,104 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
           <li><span class="ad-log__when"><span class="num">03:47</span></span><span><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>ورود ناموفق</span><span class="num">5</span> بار با نام کاربری <bdi class="ltr">admin</bdi>، که چنین کاربری نیست</span></li>
         </ol>
       </section>
+    </div>
+
+    <!-- ===================== پشتیبانی (برش ۱۲، پیش از ۱۲٫۱): صندوق، ساعت 10:40 ===================== -->
+    <div class="st st-s12 st-staffpage">
+      <div class="ad-pagehead"><div><h1 class="ad-title">پشتیبانی</h1><p class="ad-sub">پیام مشتری‌ها از «سفارش‌های من». باز به ترتیب انتظار، قدیمی‌ترین اول.</p></div></div>
+      <div class="ad-search">
+        <span class="jy-icon jy-icon-search" aria-hidden="true"></span>
+        <input class="jy-input" type="search" placeholder="موبایل، شمارهٔ سفارش یا نام" aria-label="جست‌وجوی گفت‌وگو">
+      </div>
+      <nav class="ad-chips" aria-label="حال گفت‌وگو">
+        <a class="ad-chip is-current" href="#" aria-current="page">باز <span class="num">3</span></a>
+        <a class="ad-chip" href="#">پاسخ داده شد <span class="num">5</span></a>
+        <a class="ad-chip" href="#">بسته <span class="num">12</span></a>
+        <a class="ad-chip" href="#">همه <span class="num">20</span></a>
+      </nav>
+      <section class="jy-card ad-list" aria-label="گفت‌وگوهای باز">
+        <ul class="ad-threads">
+          <li><label for="m-s12-thread" class="ad-thread"><span class="ad-thread__who"><b>مریم کاظمی</b> <span class="ad-row__city">مشهد</span></span><span class="ad-thread__about">سفارش <span class="num">10027</span> · در صف چاپ</span><span class="ad-thread__snip">سلام. پنجشنبه امتحان دارم و جزوه را برای همان می‌خواهم. تا چهارشنبه به مشهد می‌رسد؟ اگر راه سریع‌تری هست، هزینه‌اش را می‌دهم.</span><span class="ad-thread__wait">منتظر از دیروز <span class="num">21:14</span></span></label></li>
+          <li><a href="#" class="ad-thread"><span class="ad-thread__who"><b>حسین رحیمی</b> <span class="ad-row__city">شیراز</span></span><span class="ad-thread__about">سؤال کلی</span><span class="ad-thread__snip">برای 20 نسخه از یک جزوه تخفیف دارید؟ برای کلاسمان می‌خواهم.</span><span class="ad-thread__wait">منتظر از <span class="num">08:12</span></span></a></li>
+          <li><a href="#" class="ad-thread"><span class="ad-thread__who"><b>زهرا محمدی</b> <span class="ad-row__city">تهران</span></span><span class="ad-thread__about">سفارش <span class="num">10019</span> · در صف چاپ</span><span class="ad-thread__snip">کد پستی را اشتباه زدم؛ درستش <span class="num">1613763141</span> است.</span><span class="ad-thread__wait">منتظر از <span class="num">10:30</span></span></a></li>
+        </ul>
+      </section>
+    </div>
+
+    <!-- گفت‌وگو: «باز» با پاسخی که علی نوشته (10:40)، و «پاسخ داده شد» پس از فرستادن (10:42) -->
+    <div class="st st-s12-conv st-staffpage">
+      <label for="m-s12" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>پشتیبانی</label>
+      <div class="ad-pagehead">
+        <div class="ad-title-row">
+          <h1 class="ad-title">مریم کاظمی · سفارش <span class="num">10027</span></h1>
+          <div class="st st-s12-thread"><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>باز</span></div>
+          <div class="st st-s12-replied"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>پاسخ داده شد</span></div>
+        </div>
+      </div>
+      <div class="ad-grid ad-grid--main-first">
+        <aside class="ad-side" aria-label="مشتری و سفارش">
+          <section class="jy-card" aria-labelledby="t-s12-cust">
+            <h2 id="t-s12-cust" class="jy-card__title">مشتری</h2>
+            <dl class="ad-facts">
+              <div><dt>موبایل</dt><dd><span class="num">0915 234 5678</span></dd></div>
+              <div><dt>سفارش‌ها</dt><dd><span class="num">4</span> سفارش، <span class="num">3</span> پرداخت‌شده</dd></div>
+              <div><dt>گفت‌وگوها</dt><dd>همین، و یک «سؤال کلی» بسته</dd></div>
+            </dl>
+            <div class="ad-actions"><label for="m-orders" class="jy-btn jy-btn--text">سفارش‌های این مشتری</label></div>
+          </section>
+          <section class="jy-card" aria-labelledby="t-s12-ord">
+            <div class="jy-card__head"><h2 id="t-s12-ord" class="jy-card__title">سفارش <span class="num">10027</span></h2><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>در صف چاپ</span></div>
+            <dl class="ad-facts">
+              <div class="staff"><dt>چاپخانه</dt><dd>چاپ نور، مشهد</dd></div>
+              <div><dt>تحویل به پست</dt><dd>تا امروز، دوشنبه <span class="num">13</span> مهر</dd></div>
+            </dl>
+            <div class="ad-actions"><label for="m-s12-order" class="jy-btn jy-btn--secondary">صفحهٔ سفارش</label></div>
+          </section>
+          <section class="jy-card" aria-labelledby="t-s12-state">
+            <h2 id="t-s12-state" class="jy-card__title">گفت‌وگو</h2>
+            <p class="ad-meta">از یکشنبه <span class="num">12</span> مهر، <span class="num">21:14</span></p>
+            <div class="ad-status__actions">
+              <button type="button" class="jy-btn jy-btn--secondary jy-btn--block">بستن گفت‌وگو</button>
+              <p class="ad-hint">فهرست «باز» را خلوت می‌کند؛ مشتری «بسته» می‌بیند و با پیام تازه دوباره بازش می‌کند. بی کد تازه.</p>
+            </div>
+          </section>
+        </aside>
+        <div class="ad-main">
+          <section class="jy-card" aria-labelledby="t-s12-msgs">
+            <h2 id="t-s12-msgs" class="jy-card__title">پیام‌ها</h2>
+            <ol class="ad-msgs">
+              <li class="ad-msg"><p class="ad-msg__who"><b>مریم کاظمی</b><span>یکشنبه <span class="num">12</span> مهر، <span class="num">21:14</span></span></p><p class="ad-msg__body">سلام. پنجشنبه امتحان دارم و جزوه را برای همان می‌خواهم. تا چهارشنبه به مشهد می‌رسد؟ اگر راه سریع‌تری هست، هزینه‌اش را می‌دهم.</p></li>
+              <li class="st st-s12-replied"><div class="ad-msg ad-msg--us">
+                <p class="ad-msg__who"><b>علی</b><span>پاسخ پشتیبانی · امروز <span class="num">10:42</span></span></p>
+                <p class="ad-msg__body">سلام. جزوه‌ات امروز چاپ و تحویل پست می‌شود. پست پیشتاز به مشهد معمولاً یک تا دو روز کاری در راه است، پس به احتمال زیاد سه‌شنبه یا چهارشنبه می‌رسد. کد رهگیری را همان موقع پیامک می‌کنیم تا مسیرش را ببینی.
+فعلاً ارسالی سریع‌تر از پیشتاز نداریم.</p>
+                <p class="ad-paysms"><b>پیامک پاسخ</b><span class="ad-paysms__ok"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>به <span class="num">0915 234 5678</span> رفت، <span class="num">10:42</span></span></p>
+              </div></li>
+            </ol>
+            <div class="st st-s12-thread">
+              <form class="ad-form ad-reply" action="#" onsubmit="return false">
+                <div class="jy-field">
+                  <label class="jy-label" for="s12-reply">پاسخ</label>
+                  <textarea id="s12-reply" class="jy-input ad-reply__text" rows="6" maxlength="2000" aria-describedby="s12-reply-hint">سلام. جزوه‌ات امروز چاپ و تحویل پست می‌شود. پست پیشتاز به مشهد معمولاً یک تا دو روز کاری در راه است، پس به احتمال زیاد سه‌شنبه یا چهارشنبه می‌رسد. کد رهگیری را همان موقع پیامک می‌کنیم تا مسیرش را ببینی.
+فعلاً ارسالی سریع‌تر از پیشتاز نداریم.</textarea>
+                  <p id="s12-reply-hint" class="jy-hint">مشتری «پشتیبانی جزوه‌یار» می‌بیند، نه نامت. با فرستادن، پیامک «پاسخ پیامت دربارهٔ سفارش 10027 آمد» به <span class="num">0915 234 5678</span> می‌رود.</p>
+                </div>
+                <div class="ad-actions"><label for="m-s12-replied" class="jy-btn jy-btn--primary">فرستادن پاسخ</label></div>
+              </form>
+            </div>
+            <div class="st st-s12-replied">
+              <p class="jy-note jy-note--success ad-gap" role="status"><span class="jy-icon jy-icon-success" aria-hidden="true"></span><span><b>پاسخ رفت.</b> مریم کاظمی آن را در «سفارش‌های من» می‌بیند، با نام «پشتیبانی جزوه‌یار».</span></p>
+              <form class="ad-form ad-reply" action="#" onsubmit="return false">
+                <div class="jy-field">
+                  <label class="jy-label" for="s12-reply2">پاسخ دیگر</label>
+                  <textarea id="s12-reply2" class="jy-input ad-reply__text" rows="4" maxlength="2000"></textarea>
+                </div>
+                <div class="ad-actions"><button type="button" class="jy-btn jy-btn--secondary">فرستادن پاسخ</button></div>
+              </form>
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
 
     <!-- ===================== محتوای سایت (برش ۱۱، پیش از ۱۱٫۱) ===================== -->
