@@ -25,6 +25,7 @@
  * می‌شود. کوئری‌ها و تراکنش «دوباره بساز» روی پستگرس در تست یکپارچگی `packages/db`.
  */
 
+import type { AssignmentMode } from '@jozveyar/contracts';
 import {
   FILE_MARGIN_MS,
   MONEY_HELD_STATUSES,
@@ -33,6 +34,9 @@ import {
   PREPARE_TICKET_JOB,
   TRACKING_ALERT_DAYS,
   TRACKING_GRACE_WORKDAYS,
+  allClosedWindow,
+  availabilityAt,
+  rankPartners,
   inquireRefund as inquireRefundRow,
   isLiveRefund,
   isPaidStatus,
@@ -54,9 +58,11 @@ import {
   type PanelOrderLine,
   type PanelOrderSpec,
   type PanelOrderStore,
+  type PanelPartnerBoardRow,
   type PanelPartnerOption,
   type PanelSearch,
   type OrderStore,
+  type RankedPartner,
   type RefundRow,
   type RefundStore,
 } from '@jozveyar/db';
@@ -157,6 +163,12 @@ export interface UntrackedDay {
   orderNumbers: number[];
 }
 
+/** همهٔ چاپخانه‌های فعال همین حالا تعطیل‌اند (سؤال ۲۶۵)؟ بازهٔ «همه تعطیل» که امروز درونش است، یا null. */
+function allClosedOpenNow(board: readonly PanelPartnerBoardRow[], at: Date): { from: Date; until: Date } | null {
+  const window = allClosedWindow(board);
+  return window && window.from.getTime() <= at.getTime() && at.getTime() < window.until.getTime() ? window : null;
+}
+
 export interface DashboardView {
   bounds: DayBounds;
   tiles: DueTile[];
@@ -174,6 +186,16 @@ export interface DashboardView {
   slaDays: number;
   /** سطر آمار: در حال چاپ‌ها، و تحویل‌های پست هفتهٔ گذشته. */
   stats: PanelDashboardStats;
+  /**
+   * کارت «چاپخانه‌ها» (برش ۱۰٫۱، سؤال ۲۶۷): چاپخانه‌های فعال با در دسترس بودن، فقط با `partners.availability` (مالک، متصدی و کاربر
+   * چاپخانه، که فقط خودش را می‌بیند)؛ بقیه خالی.
+   */
+  partners: PanelPartnerBoardRow[];
+  /**
+   * هشدار «تعطیل است» (سؤال ۲۶۸) با سفارش‌های «در صف چاپ» هر چاپخانه، فقط برای کسی که جابه‌جا می‌کند (`orders.assign`)؛ و حالت تخصیص،
+   * که متن «بی چاپخانه» را عوض می‌کند (سؤال ۱۹۹).
+   */
+  assignment: { mode: AssignmentMode; closed: PanelPartnerBoardRow[]; allClosed: { from: Date; until: Date } | null } | null;
 }
 
 export interface OrdersListView {
@@ -229,8 +251,11 @@ export interface OrderDetailsView {
   canNote: boolean;
   /** جابه‌جایی چاپخانه (۵٫۲): مجوزش، فقط «در صف چاپ»، و فقط وقتی چاپخانهٔ فعال دیگری هست. */
   canAssign: boolean;
-  /** چاپخانه‌های فعالی که سفارش به آن‌ها می‌رود (جز چاپخانهٔ امروزش)؛ فقط با `canAssign`. */
-  partnerOptions: PanelPartnerOption[];
+  /**
+   * چاپخانه‌های فعالی که سفارش به آن‌ها می‌رود (جز چاپخانهٔ امروزش)، به ترتیب همان قاعدهٔ تخصیص خودکار برای جای همین سفارش
+   * (`rankPartners`، سؤال ۱۹۹)؛ فقط با `canAssign`.
+   */
+  partnerOptions: RankedPartner<PanelPartnerOption>[];
   /**
    * ردیف «پیامک سفارش تازه» کارت «چاپخانه» و «دوباره بفرست»ش (۷٫۶، سؤال ۱۷۲): مالک و متصدی (`orders.assign`)؛ بی آن، پیامک تخصیص‌ها در
    * `details` نیست (`withoutPartnerSms`).
@@ -368,13 +393,16 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const at = now();
       const bounds = dayBounds(at);
       const clock = clockOf(at);
-      const [summary, alerts, queue, slaDays, stats, holidays] = await Promise.all([
+      const boardFor = can(session, 'partners.availability') || can(session, 'orders.assign');
+      const [summary, alerts, queue, slaDays, stats, holidays, board, mode] = await Promise.all([
         store.dueSummary(scope, { at, tomorrowStart: bounds.tomorrowStart, dayAfterStart: bounds.dayAfterStart }),
         store.alerts(scope, clock),
         store.list(scope, { bucket: 'open', search: null, clock, limit: QUEUE_SIZE, offset: 0 }),
         readSetting((key) => store.setting(key), 'order.sla_days', log),
         store.stats(scope, { since: new Date(at.getTime() - STATS_WINDOW_MS), at }),
         readSetting((key) => store.setting(key), 'calendar.holidays', log),
+        boardFor ? store.partnerBoard(scope) : Promise.resolve([]),
+        readSetting((key) => store.setting(key), 'assignment.mode', log),
       ]);
       return ok({
         bounds,
@@ -410,6 +438,11 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         queue: can(session, 'orders.money') ? queue : linesWithoutMoney(queue),
         slaDays,
         stats,
+        partners: can(session, 'partners.availability') ? board : [],
+        // جابه‌جایی و سپردن با `orders.assign` است، پس «تعطیل است» با سفارش‌های صفش و «همه تعطیل‌اند» هم (سؤال ۲۶۸).
+        assignment: can(session, 'orders.assign')
+          ? { mode, closed: board.filter((row) => availabilityAt(row, at) === 'closed'), allClosed: allClosedOpenNow(board, at) }
+          : null,
       });
     },
 
@@ -474,7 +507,11 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       const live = status === 'handed_to_post' ? details.shipments.find((shipment) => shipment.voidedAt === null) : undefined;
       const partnerOptions =
         can(session, 'orders.assign') && status === 'paid'
-          ? (await store.partnerOptions(scope)).filter((partner) => partner.id !== details.order.printPartnerId)
+          ? rankPartners(
+              (await store.partnerOptions(scope)).filter((partner) => partner.id !== details.order.printPartnerId),
+              details.order,
+              now(),
+            )
           : [];
       // پولی که برگشته یا در راه برگشت است، لغو را نهایی می‌کند (۷٫۳)؛ پایگاه داده هم (`orders_status_flow`).
       const refunded = found.refunds.some(isLiveRefund);
@@ -569,7 +606,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
 
     /**
      * جابه‌جایی چاپخانه (۵٫۲، ADR-042؛ طرح `m-order-assign`): مالک و متصدی (`orders.assign`)، فقط در «در صف چاپ»، به چاپخانهٔ
-     * فعال، با دلیل ۱ تا ۵۰۰ نویسه، بی کد تازه (برگشت‌پذیر است). از چاپخانه‌ای که ادمین دید؛ سفارشی که همین حالا جای دیگری رفت
+     * فعال، با دلیل ۱ تا ۵۰۰ نویسه، بی کد تازه (برگشت‌پذیر است). از ۱۰٫۱ سپردن سفارش بی چاپخانه بی دلیل (سؤال ۱۹۹). از چاپخانه‌ای که ادمین دید؛ سفارشی که همین حالا جای دیگری رفت
      * یا چاپش شروع شد، جابه‌جا نمی‌شود. سفارش، ردیف تخصیص، کار برگه و رویداد در یک تراکنش. کرایهٔ مشتری عوض نمی‌شود.
      */
     async assign(session: AdminSession, numberParam: string, form: AssignForm, ip: string): Promise<Result<{ to: string }>> {
@@ -583,8 +620,9 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
       if (from !== details.order.printPartnerId) return fail(409, 'order_partner_changed');
       if (details.order.status !== 'paid') return fail(409, 'assign_closed', { current: details.order.status });
       if (!to || to === from) return fail(400, 'partner_required');
+      // سپردن سفارشی که چاپخانه نداشت دلیل نمی‌خواهد (۱۰٫۱، سؤال ۱۹۹)؛ جابه‌جایی همیشه با دلیل.
       const reason = tidyInputFa(text(form.reason));
-      if (!reason) return fail(400, 'reason_required');
+      if (!reason && from !== null) return fail(400, 'reason_required');
       if (reason.length > REASON_MAX) return fail(400, 'reason_too_long');
 
       const at = now();
@@ -594,7 +632,7 @@ export function createPanelOrders(deps: PanelOrdersDeps) {
         to,
         at,
         adminUserId: session.userId,
-        reason,
+        reason: reason || null,
         event: {
           adminUserId: session.userId,
           action: 'orders.assign',

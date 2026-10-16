@@ -55,6 +55,8 @@ export const REPORT_BANDS_SETTING = 'report.weight_bands';
 export const CHECKOUT_AUDIENCE_SETTING = 'checkout.audience';
 /** خانواده‌های فایلی که پذیرفته می‌شوند (برش ۸٫۴، سؤال ۱۹۰)؛ PDF همیشه. */
 export const FILE_FORMATS_SETTING = 'file.formats';
+/** تخصیص چاپخانه در پرداخت (برش ۱۰٫۱، سؤال ۱۹۹): `auto` یا `manual`. */
+export const ASSIGNMENT_MODE_SETTING = 'assignment.mode';
 /** سقف حجم هر فایل، مگابایت (برش ۸٫۴). */
 export const FILE_MAX_MB_SETTING = 'file.max_mb';
 /** سقف صفحهٔ هر فایل (برش ۸٫۴). */
@@ -81,6 +83,8 @@ export const CATALOG_PAUSED_SETTING = 'catalog.paused';
  * مخاطب مسیر خرید پس از استقرار «پیش‌نمایش مالک» است (برش ۷٫۵، ADR-052): با `CHECKOUT_MODE=live` در `.env`، مردم همچنان «ثبت سفارش
  * آنلاین به‌زودی» می‌بینند تا مالک با پیوند پیش‌نمایش یک سفارش واقعی کوچک بدهد و بعد «همه» را با کد تازه بزند.
  *
+ * تخصیص چاپخانه پس از استقرار ۱۰٫۱ «خودکار» است (سؤال ۱۹۹): همان رفتار پیش از آن، با فاصله به جای پیش‌فرض.
+ *
  * سقف کد در ۲۴ ساعت ۲٬۰۰۰ است (برش ۷، سؤال ۱۱۷): کمتر از هفت ساعت پشت‌سرهم با سقف ساعتی، پس روز شلوغ واقعی را نمی‌بندد، و
  * بدترین هزینهٔ روزانهٔ کد را به ۲٬۰۰۰ تکه می‌بندد. هشدار اعتبار ۷ روز مصرف است (سؤال ۱۳۷): یک هفته برای شارژ.
  */
@@ -98,6 +102,7 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [FILE_MAX_MB_SETTING]: DEFAULT_FILE_RULES.maxMb,
   [FILE_MAX_PAGES_SETTING]: DEFAULT_FILE_RULES.maxPages,
   [CATALOG_PAUSED_SETTING]: { sizes: [], papers: [], bindings: [] },
+  [ASSIGNMENT_MODE_SETTING]: 'auto',
 };
 
 /**

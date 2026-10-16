@@ -265,12 +265,15 @@ export const FIRST_MEMORY_PARTNER: MemoryPartner = {
   isDefault: true,
   createdAt: new Date('2026-01-01T00:00:00Z'),
   active: true,
+  availability: 'open',
+  closedFrom: null,
+  closedUntil: null,
 };
 
 /**
  * `OrderStore` حافظه‌ای، با همان محافظ‌هایی که پایگاه داده دارد و سرویس به آنها تکیه می‌کند: پوشش دقیق
  * صفحه‌ها، یکتایی `checkout_key`، یک پرداخت موفق برای هر سفارش، و «پرداخت برگشت ندارد». از برش ۵٫۲ پرداخت چاپخانه را
- * با همان قاعدهٔ پایگاه داده (`choosePartner`) انتخاب می‌کند.
+ * با همان قاعدهٔ پایگاه داده (`choosePartner`) انتخاب می‌کند، و از ۱۰٫۱ در حالت دستی (`assignment.mode`) هیچ.
  */
 export function memoryOrderStore(options: { priceList: PriceList; now: () => Date }): OrderStore & {
   documentsById: Map<string, CheckoutDocument>;
@@ -434,6 +437,9 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     },
     async setting(key) {
       return settings.get(key);
+    },
+    async partnerHours() {
+      return partners.filter((p) => p.active).map(({ availability, closedFrom, closedUntil }) => ({ availability, closedFrom, closedUntil }));
     },
     async findByCheckoutKey(checkoutKey) {
       const order = orders.find((o) => o.checkoutKey === checkoutKey);
@@ -615,11 +621,15 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         actor: 'gateway',
         note: { paymentId: payment.id, provider: payment.provider, refId: outcome.refId, ...(settleOptions.via ? { via: settleOptions.via } : {}) },
       });
-      // چاپخانه، مثل `assignAtPayment`: فقط فعال‌ها؛ هیچ؟ بی چاپخانه.
-      const chosen = choosePartner(
-        partners.filter((p) => p.active),
-        order,
-      );
+      // چاپخانه، مثل `assignAtPayment`: فقط فعال‌ها؛ هیچ؟ بی چاپخانه. حالت دستی (۱۰٫۱) هم بی چاپخانه.
+      const chosen =
+        settings.get('assignment.mode') === 'manual'
+          ? null
+          : choosePartner(
+              partners.filter((p) => p.active),
+              order,
+              outcome.paidAt,
+            );
       let partnerSmsId: number | null = null;
       if (chosen) {
         order.printPartnerId = chosen.partnerId;

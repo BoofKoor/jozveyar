@@ -11,11 +11,14 @@
  * - **موبایل اعلان** (برش ۷٫۶، سؤال‌های ۱۲۶ و ۱۷۷): اختیاری، از همان فرم و با همان «همان که دیدی» نام و شهر. روی برگه نیست، پس
  *   عوض شدنش کار برگه نمی‌سازد؛ شمارهٔ تازه فقط برای سفارش‌های بعدی است (پیامک‌های ساخته‌شده و «دوباره بفرست»شان همان شمارهٔ خودشان).
  *   شماره در رویداد پوشیده است و پوشاندنش با سرویس پنل (`detail` رویداد)، نه اینجا.
+ * - **در دسترس بودن** (برش ۱۰٫۱، سؤال ۲۰۰): «باز»، «شلوغ» یا «تعطیل از … تا …» با یادداشت، زیر همان قفل و از همان که ادمین دید؛ مالک،
+ *   متصدی و کاربر خود چاپخانه (مجوز و محدوده در سرویس پنل). فقط سفارش‌های بعدی را جابه‌جا می‌کند (`rankPartners`)؛ روی برگه نیست.
  */
 
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import { adminEventRow, PARTNER_ROLE, type AdminEventInput } from './admin.js';
+import type { PartnerAvailability } from './assignment.js';
 import type { Database } from './index.js';
 import { requeueTicket } from './orders.js';
 import { adminEvents, adminUserRoles, adminUsers, cities, orderAssignments, orders, printPartners, provinces } from './schema.js';
@@ -53,6 +56,19 @@ export interface PartnerView {
   users: string[];
   /** موبایل اعلان (برش ۷٫۶)؛ null یعنی بی پیامک. */
   notifyMobile: string | null;
+  /** در دسترس بودن ذخیره‌شده (برش ۱۰٫۱)؛ تعطیلی آینده یا گذشته را `availabilityAt` «باز» می‌خواند. */
+  availability: PartnerAvailability;
+  closedFrom: Date | null;
+  closedUntil: Date | null;
+  availabilityNote: string | null;
+}
+
+/** در دسترس بودن یک چاپخانه (برش ۱۰٫۱): «تعطیل» با هر دو روز، بقیه بی روز؛ یادداشت فقط برای شلوغ و تعطیل. */
+export interface AvailabilityState {
+  availability: PartnerAvailability;
+  closedFrom: Date | null;
+  closedUntil: Date | null;
+  note: string | null;
 }
 
 export interface NewPartner {
@@ -100,7 +116,35 @@ export interface PartnerStore {
   /** غیرفعال: از این لحظه سفارش تازه نمی‌گیرد. پیش‌فرض نه، و با سفارش باز نه. */
   deactivate(input: { id: string; at: Date; event: AdminEventInput }): Promise<'ok' | 'not_found' | 'default' | 'open_orders' | 'already'>;
   activate(input: { id: string; event: AdminEventInput }): Promise<'ok' | 'not_found' | 'already'>;
+  /**
+   * در دسترس بودن تازه (برش ۱۰٫۱)، از همان که ادمین دید (`seen`؛ وگرنه `changed`)، با رویداد در همان تراکنش؛ بی تغییر `same` و بی
+   * رویداد. فقط چاپخانهٔ فعال: غیرفعال سفارشی نمی‌گیرد که در دسترس بودنش معنا داشته باشد.
+   */
+  setAvailability(input: {
+    id: string;
+    seen: AvailabilityState;
+    next: AvailabilityState;
+    event: AdminEventInput;
+  }): Promise<'ok' | 'same' | 'not_found' | 'inactive' | 'changed'>;
 }
+
+/** دو حالت در دسترس بودن یکی‌اند؟ */
+export function sameAvailability(a: AvailabilityState, b: AvailabilityState): boolean {
+  return (
+    a.availability === b.availability &&
+    (a.closedFrom?.getTime() ?? null) === (b.closedFrom?.getTime() ?? null) &&
+    (a.closedUntil?.getTime() ?? null) === (b.closedUntil?.getTime() ?? null) &&
+    (a.note ?? null) === (b.note ?? null)
+  );
+}
+
+/** حالت برای رویداد: روزها به ISO، تا رویداد بی وابستگی به منطقهٔ زمانی خوانده شود. */
+const availabilityDetail = (state: AvailabilityState) => ({
+  availability: state.availability,
+  ...(state.closedFrom ? { closedFrom: state.closedFrom.toISOString() } : {}),
+  ...(state.closedUntil ? { closedUntil: state.closedUntil.toISOString() } : {}),
+  ...(state.note ? { note: state.note } : {}),
+});
 
 type PgError = { code?: string; constraint_name?: string; cause?: PgError };
 
@@ -133,6 +177,10 @@ export function createPartnerStore({ db }: Database): PartnerStore {
         openOrders,
         users,
         notifyMobile: printPartners.notifyMobile,
+        availability: sql<PartnerAvailability>`${printPartners.availability}`,
+        closedFrom: printPartners.closedFrom,
+        closedUntil: printPartners.closedUntil,
+        availabilityNote: printPartners.availabilityNote,
       })
       .from(printPartners)
       .innerJoin(provinces, eq(provinces.id, printPartners.provinceId))
@@ -293,6 +341,40 @@ export function createPartnerStore({ db }: Database): PartnerStore {
         }
         await tx.insert(adminEvents).values(
           adminEventRow({ ...event, targetId: id, detail: { ...(event.detail as Record<string, unknown> | undefined), name: partner.name } }),
+        );
+        return 'ok' as const;
+      });
+    },
+
+    async setAvailability({ id, seen, next, event }) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${PARTNERS_LOCK})`);
+        const [partner] = await tx.select().from(printPartners).where(eq(printPartners.id, id)).limit(1).for('update');
+        if (!partner) return 'not_found' as const;
+        if (partner.deactivatedAt) return 'inactive' as const;
+        const current: AvailabilityState = {
+          availability: partner.availability as PartnerAvailability,
+          closedFrom: partner.closedFrom,
+          closedUntil: partner.closedUntil,
+          note: partner.availabilityNote,
+        };
+        if (!sameAvailability(current, seen)) return 'changed' as const;
+        if (sameAvailability(current, next)) return 'same' as const;
+        await tx
+          .update(printPartners)
+          .set({ availability: next.availability, closedFrom: next.closedFrom, closedUntil: next.closedUntil, availabilityNote: next.note })
+          .where(eq(printPartners.id, id));
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...event,
+            targetId: id,
+            detail: {
+              ...(event.detail as Record<string, unknown> | undefined),
+              name: partner.name,
+              from: availabilityDetail(current),
+              to: availabilityDetail(next),
+            },
+          }),
         );
         return 'ok' as const;
       });

@@ -35,8 +35,8 @@ const INVITE = 15 * MINUTE;
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 200;
 // لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را، از ۶٫۱ ورود فایل پست، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت گزینه‌های
-// تعرفه و از ۹٫۳ یادداشت داخلی. چاپخانه دیدن، وضعیت و دانلود
-// (ADR-042)، و از ۶٫۲ ورود فایل پست خودش.
+// تعرفه، از ۹٫۳ یادداشت داخلی و از ۱۰٫۱ در دسترس بودن چاپخانه‌ها. چاپخانه دیدن، وضعیت و دانلود
+// (ADR-042)، از ۶٫۲ ورود فایل پست خودش، و از ۱۰٫۱ «شلوغ» و «تعطیل» خودش.
 const OPERATOR_PERMISSIONS = [
   'files.download',
   'orders.address',
@@ -46,12 +46,13 @@ const OPERATOR_PERMISSIONS = [
   'orders.notes',
   'orders.read',
   'orders.status',
+  'partners.availability',
   'shipments.import',
   'shipments.review',
   'tariff.pause',
   'tariff.read',
 ];
-const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status', 'shipments.import'];
+const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status', 'partners.availability', 'shipments.import'];
 // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
 const ACCOUNTANT_PERMISSIONS = ['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.read'];
 
@@ -565,7 +566,7 @@ describe('ورود پنل و ادمین‌ها', () => {
       store.partners.set(AFTAB, { id: AFTAB, name: 'چاپ آفتاب', cityName: 'اصفهان', isDefault: false, active: false });
     });
 
-    it('با پیوند یک‌باره و کد تازه، مثل متصدی؛ نشست محدودهٔ چاپخانه و فقط چهار مجوز دارد؛ رویداد با نام چاپخانه', async () => {
+    it('با پیوند یک‌باره و کد تازه، مثل متصدی؛ نشست محدودهٔ چاپخانه و فقط مجوزهای چاپخانه را دارد؛ رویداد با نام چاپخانه', async () => {
       const sara = await enroll('sara');
       later(STEP);
       const invited = await auth.inviteAdmin(

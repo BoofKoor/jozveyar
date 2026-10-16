@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
-    "./postfile.fixtures": "./src/postfile.fixtures.ts"
+    "./postfile.fixtures": "./src/postfile.fixtures.ts",
+    "./rank": "./src/rank.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

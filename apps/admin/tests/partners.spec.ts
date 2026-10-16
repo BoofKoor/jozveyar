@@ -220,7 +220,9 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await nav.locator('.ad-nav__wide', { hasText: 'چاپخانه‌ها' }).click();
     await expect(ownerPage.getByRole('heading', { name: 'چاپخانه‌ها', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'چاپخانه‌ها' })).toHaveAttribute('aria-current', 'page');
-    await expect(ownerPage.locator('.ad-sub')).toHaveText('هر سفارش هنگام پرداخت به چاپخانهٔ همان شهر می‌رود، وگرنه همان استان، وگرنه پیش‌فرض.');
+    await expect(ownerPage.locator('.ad-sub')).toHaveText(
+      'هر سفارش هنگام پرداخت به چاپخانهٔ همان شهر می‌رود، وگرنه همان استان، وگرنه نزدیک‌ترین؛ «شلوغ» فقط وقتی چاپخانهٔ باز دیگری در استان نیست، و «تعطیل» هیچ.',
+    );
     // اولین چاپخانه، از دادهٔ پایه: تهران، پیش‌فرض، و بی «غیرفعال کن» (پیش‌فرض غیرفعال نمی‌شود).
     const first = row(ownerPage, FIRST);
     await expect(first.locator('.jy-badge')).toHaveText('پیش‌فرض');
@@ -335,10 +337,11 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(form.locator('.jy-note--info')).toHaveText(
       `فقط پیش از «شروع چاپ». از همین لحظه ${NOOR} این سفارش را نمی‌بیند و چاپخانهٔ تازه آن را در صفش می‌بیند. کرایهٔ مشتری عوض نمی‌شود.`,
     );
-    // گزینه‌ها: فقط فعال‌ها جز همین، پیش‌فرض اول و انتخاب‌شده، با شهر و سفارش باز.
+    // گزینه‌ها: فقط فعال‌ها جز همین، به ترتیب قاعدهٔ تخصیص برای جای سفارش (۱۰٫۱): برای مشهد، تهران نزدیک‌تر از اصفهان؛ اولی انتخاب‌شده،
+    // با شهر، سفارش باز و فاصله.
     const tiles = form.locator('.jy-tile');
     await expect(tiles.locator('.jy-tile__title')).toHaveText([FIRST, AFTAB]);
-    await expect(tiles.first().locator('.jy-tile__note')).toHaveText('تهران · پیش‌فرض · 0 سفارش باز');
+    await expect(tiles.first().locator('.jy-tile__note')).toHaveText('تهران · پیش‌فرض · 0 سفارش باز · 739 کیلومتر');
     await expect(tiles.first().locator('input')).toBeChecked();
     // کارهای وضعیت پشت فرم پنهان‌اند، مثل طرح.
     await expect(ownerPage.locator('.ad-status').getByRole('button', { name: 'شروع چاپ' })).toHaveCount(0);
@@ -428,12 +431,12 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     expect(ownerProblems).toEqual([]);
   });
 
-  test('بی چاپخانه: هشدار پیشخوان و ردیف، «اول چاپخانه انتخاب شود»، و انتخاب با دلیل', async () => {
+  test('بی چاپخانه: هشدار پیشخوان و ردیف، «اول چاپخانه انتخاب شود»، و سپردن بی دلیل (۱۰٫۱)', async () => {
     o.C = await paidOrder('امیر حسینی', phone(3), { assign: false });
     await expect.poll(() => jobStatus(o.C), { timeout: 60_000 }).toBe('done');
     await ownerPage.goto(at());
     const alert = ownerPage.locator('[data-alert="partner"]');
-    await expect(alert).toHaveText(`سفارش ${o.C.number} چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.`);
+    await expect(alert).toHaveText(`سفارش ${o.C.number} چاپخانه ندارد؛ یکی را برایش انتخاب کن.`);
     await expect(alert.locator('.jy-icon-warning')).toHaveCount(1);
     await ownerPage.goto(at('/orders'));
     await expect(ownerPage.locator(`.ad-row[data-order="${o.C.number}"] .ad-row__state`)).toHaveText('بی چاپخانه');
@@ -444,21 +447,26 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(ownerPage).toHaveURL(new RegExp(`/orders/${o.C.number}\\?do=assign$`));
     const form = ownerPage.locator('[data-assign]');
     await expect(form.getByRole('heading', { name: 'انتخاب چاپخانه' })).toBeVisible();
-    await expect(form.locator('.ad-meta').first()).toHaveText('این سفارش چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود.');
+    await expect(form.locator('.ad-meta').first()).toHaveText('این سفارش چاپخانه ندارد. فهرست به ترتیب پیشنهاد است و اولی انتخاب شده.');
+    // سپردن سفارش بی چاپخانه دلیل نمی‌خواهد (۱۰٫۱، سؤال ۱۹۹)؛ گزینه‌ها به ترتیب قاعده برای مشهد: هم‌شهر اول و انتخاب‌شده.
+    await expect(form.getByLabel('دلیل')).toHaveCount(0);
+    const tiles = form.locator('.jy-tile');
+    await expect(tiles.locator('.jy-tile__title')).toHaveText([NOOR, FIRST, AFTAB]);
+    await expect(tiles.first().locator('.jy-tile__note')).toHaveText('مشهد · 0 سفارش باز · هم‌شهر مشتری');
+    await expect(tiles.first().locator('input')).toBeChecked();
     await ownerPage.goto(at(`/orders/${o.C.number}`));
-    await expect(partnerCard(ownerPage).locator('.jy-note--warning')).toHaveText(
-      'این سفارش چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.',
-    );
+    await expect(partnerCard(ownerPage).locator('.jy-note--warning')).toHaveText('این سفارش چاپخانه ندارد؛ یکی را برایش انتخاب کن.');
     const blocked = ownerPage.locator('.ad-status').getByRole('button', { name: 'اول چاپخانه انتخاب شود' });
     await expect(blocked).toHaveAttribute('aria-disabled', 'true');
     await expect(ownerPage.locator('.ad-status').getByRole('button', { name: 'شروع چاپ' })).toHaveCount(0);
 
+    // انتخاب جز پیشنهاد اول هم آزاد است: اولین چاپخانه، تا چاپ نور برای تست بعد بی سفارش باز بماند.
     await partnerCard(ownerPage).getByRole('link', { name: 'انتخاب' }).click();
-    await form.getByLabel('دلیل').fill('چاپخانهٔ تازه اضافه شد.');
+    await form.getByLabel(FIRST).check();
     await form.getByRole('button', { name: 'بسپار' }).click();
     await expect(partnerCard(ownerPage).locator('.ad-partner b')).toHaveText(FIRST);
-    await expect(partnerCard(ownerPage).locator('p.ad-meta')).toHaveText('دستی سپرده شد، سارا رضایی: چاپخانهٔ تازه اضافه شد.');
-    await expect(ownerPage.locator('.ad-log li').filter({ hasText: `به ${FIRST} سپرده شد؛ چاپخانهٔ تازه اضافه شد.` })).toContainText('· سارا رضایی');
+    await expect(partnerCard(ownerPage).locator('p.ad-meta')).toHaveText('دستی سپرده شد، سارا رضایی.');
+    await expect(ownerPage.locator('.ad-log li').filter({ hasText: `به ${FIRST} سپرده شد` })).toContainText('· سارا رضایی');
     await expect(ownerPage.locator('.ad-status').getByRole('button', { name: 'شروع چاپ' })).toBeVisible();
     await ownerPage.goto(at());
     await expect(ownerPage.locator('[data-alert="partner"]')).toHaveCount(0);
@@ -472,7 +480,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(row(ownerPage, AFTAB).getByRole('button')).toHaveText(['پیش‌فرض کن']);
     await row(ownerPage, NOOR).getByRole('button', { name: 'پیش‌فرض کن' }).click();
     await expect(ownerPage.locator('main .jy-note--success')).toHaveText(
-      `«${NOOR}» حالا پیش‌فرض است: سفارشی که در شهر و استانش چاپخانه‌ای نیست، به آن می‌رود.`,
+      `«${NOOR}» حالا پیش‌فرض است: وقتی دو چاپخانه به یک اندازه به مشتری نزدیک‌اند، مثل دو چاپخانهٔ یک شهر، سفارش به آن می‌رود.`,
     );
     await expect(row(ownerPage, NOOR).locator('.jy-badge')).toHaveText('پیش‌فرض');
     await expect(row(ownerPage, FIRST).locator('.jy-badge')).toHaveCount(0);
@@ -502,7 +510,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(row(ownerPage, NOOR).locator('.jy-badge')).toHaveText('غیرفعال');
     await expect(row(ownerPage, NOOR).locator('.ad-partners__meta')).toHaveText(/^مشهد · از \d{4}\/\d\d\/\d\d سفارش تازه نمی‌گیرد$/);
     await expect(row(ownerPage, NOOR).getByRole('button')).toHaveText(['فعال کن']);
-    // غیرفعال سفارش تازه نمی‌گیرد: سفارش مشهد به پیش‌فرض می‌رود.
+    // غیرفعال سفارش تازه نمی‌گیرد: سفارش مشهد به نزدیک‌ترین چاپخانهٔ فعال می‌رود، تهران (۱۰٫۱).
     const E = await paidOrder('کیوان احمدی', phone(5));
     expect(await partnerOf(E)).toBe(FIRST);
     await row(ownerPage, NOOR).getByRole('button', { name: 'فعال کن' }).click();
@@ -653,8 +661,11 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(partnerCard(operatorPage).getByRole('button', { name: 'دوباره بفرست' })).toHaveCount(0);
     expect(await partnerSmsRows(Y)).toMatchObject([{ to_mobile: MEHR_MOBILE, status: 'logged', provider: 'console', attempts: 1 }]);
 
-    // Z به پیش‌فرض (بی موبایل اعلان: بی پیامک تازه)؛ «دوباره بفرست» زبانهٔ کهنه دیگر نمی‌رود و پیامک Z همان منتظر می‌ماند.
+    // Z به پیش‌فرض (بی موبایل اعلان: بی پیامک تازه)؛ «دوباره بفرست» زبانهٔ کهنه دیگر نمی‌رود و پیامک Z همان منتظر می‌ماند. پیشنهاد اول
+    // برای یزد آفتاب اصفهان است، نزدیک‌ترین (۱۰٫۱)؛ پیش‌فرض را خود مالک انتخاب می‌کند.
     await ownerPage.goto(at(`/orders/${Z.number}?do=assign`));
+    await expect(ownerPage.locator('[data-assign] .jy-tile').first().locator('.jy-tile__title')).toHaveText(AFTAB);
+    await ownerPage.locator('[data-assign]').getByLabel(`${FIRST} ${RUN}`).check();
     await ownerPage.locator('[data-assign]').getByLabel('دلیل').fill('چاپ مهر امروز تعطیل است.');
     await ownerPage.locator('[data-assign]').getByRole('button', { name: 'جابه‌جا کن' }).click();
     await expect(partnerCard(ownerPage).locator('.ad-partner b')).toHaveText(`${FIRST} ${RUN}`);

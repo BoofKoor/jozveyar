@@ -309,6 +309,13 @@
       "when": 1792065333262,
       "tag": "0043_order_notes_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792112850596,
+      "tag": "0044_partner_availability",
+      "breakpoints": true
     }
   ]
 }

@@ -69,6 +69,15 @@ export type AdminErrorCode =
   | 'partner_changed'
   | 'partner_is_default'
   | 'partner_has_orders'
+  /** در دسترس بودن چاپخانه (۱۰٫۱). */
+  | 'partner_availability_changed'
+  | 'invalid_availability'
+  | 'invalid_day'
+  | 'invalid_last_day'
+  | 'day_past'
+  | 'day_order'
+  | 'day_too_far'
+  | 'availability_note_too_long'
   /** تعرفه (۴٫۵). */
   | 'tariff_not_found'
   | 'not_draft'

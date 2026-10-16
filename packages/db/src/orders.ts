@@ -19,7 +19,7 @@ import type { Breakdown, PaperSize, PriceList } from '@jozveyar/contracts';
 import { formatDeadlineDay } from '@jozveyar/text';
 
 import { adminEventRow } from './admin.js';
-import { assignAtPayment } from './assignment.js';
+import { assignAtPayment, partnerCandidateOf, type PartnerHours } from './assignment.js';
 import type { DocumentRow } from './documents.js';
 import type { Database } from './index.js';
 import {
@@ -31,6 +31,7 @@ import {
   orderStatusEvents,
   orders,
   payments,
+  printPartners,
   printRules,
   refunds,
   settings,
@@ -248,6 +249,11 @@ export interface OrderStore {
   priceList(version: number): Promise<PriceList>;
   /** مقدار خام یک کلید `settings`؛ undefined یعنی تنظیم نشده. */
   setting(key: string): Promise<unknown>;
+  /**
+   * در دسترس بودن چاپخانه‌های فعال (برش ۱۰٫۱): روزهایی که همه تعطیل‌اند (`allClosedWindow`) در مهلت تحویل به پست روز کاری نیستند، و
+   * سایت تا پایانشان نوار تعطیلی نشان می‌دهد.
+   */
+  partnerHours(): Promise<PartnerHours[]>;
   findByCheckoutKey(checkoutKey: string): Promise<OrderRow | null>;
   /**
    * سفارش کامل در یک تراکنش. اگر سفارشی با همین `checkoutKey` هست (دو کلیک، تلاش دوبارهٔ شبکه)، همان
@@ -463,6 +469,14 @@ export function createOrderStore({ db }: Database): OrderStore {
     async setting(key) {
       const [row] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
       return row?.value;
+    },
+
+    async partnerHours() {
+      const rows = await db
+        .select({ availability: printPartners.availability, closedFrom: printPartners.closedFrom, closedUntil: printPartners.closedUntil })
+        .from(printPartners)
+        .where(isNull(printPartners.deactivatedAt));
+      return rows.map(partnerCandidateOf);
     },
 
     findByCheckoutKey,

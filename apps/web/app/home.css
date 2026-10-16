@@ -33,6 +33,11 @@
   .home-top {
     background: var(--color-band);
   }
+  /* «چاپخانه‌ها تعطیل‌اند» (۱۰٫۱): روی همان نوار، پیش و پس از فایل */
+  .home-closure {
+    background: var(--color-band);
+    padding-block-start: 16px;
+  }
   .home-hero {
     padding-block: 32px 64px;
   }

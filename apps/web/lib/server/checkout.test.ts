@@ -13,6 +13,7 @@ import type { PriceList } from '@jozveyar/contracts';
 import { MAX_FILES_PER_ORDER, MAX_ITEMS_PER_ORDER } from '@jozveyar/contracts/checkout';
 import type { CheckoutDocument } from '@jozveyar/db';
 import { quote } from '@jozveyar/pricing';
+import { formatDeadlineDay } from '@jozveyar/text';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import type { SmsMessage, SmsTransport } from '@jozveyar/sms';
 
@@ -34,6 +35,18 @@ const MINUTE = 60_000;
 const TEHRAN = { provinceId: 8, cityId: 394 };
 const MASHHAD = { provinceId: 11, cityId: 1326 };
 const KARAJ_IN_TEHRAN = { provinceId: 8, cityId: 1094 };
+/** چاپخانهٔ دوم در مشهد (برش ۵٫۲)، باز؛ `createdAt` را هر تست با ساعت خودش می‌دهد. */
+const NOOR = {
+  id: 'partner-noor',
+  name: 'چاپ نور',
+  cityId: 1326,
+  provinceId: 11,
+  isDefault: false,
+  active: true,
+  availability: 'open',
+  closedFrom: null,
+  closedUntil: null,
+} as const;
 
 describe('مسیر خرید روی سرور', () => {
   let clock: Date;
@@ -550,7 +563,7 @@ describe('مسیر خرید روی سرور', () => {
       expect(orders.sms.get(1)).toMatchObject({ status: 'logged', attempts: 1, to: SARA.mobile });
     });
 
-    it('پرداخت چاپخانه را هم انتخاب می‌کند (برش ۵٫۲): هم‌شهر، وگرنه هم‌استان، وگرنه پیش‌فرض؛ کرایه همان', async () => {
+    it('پرداخت چاپخانه را هم انتخاب می‌کند (برش ۵٫۲): هم‌شهر، وگرنه هم‌استان، وگرنه نزدیک‌ترین (۱۰٫۱)؛ کرایه همان', async () => {
       /** سفارش در یک جا، با قیمت همان جا. */
       async function placedAt(place: { provinceId: number; cityId: number | null }) {
         const documentIds = [doc(10)];
@@ -567,7 +580,7 @@ describe('مسیر خرید روی سرور', () => {
         await pay(result.value.payment!.redirectUrl, 'success');
         return orders.orders.find((o) => o.publicToken === result.value.order.token)!;
       }
-      orders.partners.push({ id: 'partner-noor', name: 'چاپ نور', cityId: 1326, provinceId: 11, isDefault: false, createdAt: clock, active: true });
+      orders.partners.push({ ...NOOR, createdAt: clock });
       const tehran = await placedAt(TEHRAN);
       const mashhad = await placedAt(MASHHAD);
       const neyshabur = await placedAt({ provinceId: 11, cityId: 1447 });
@@ -578,23 +591,15 @@ describe('مسیر خرید روی سرور', () => {
         'partner-noor',
         'partner-jozveyar',
       ]);
-      expect(orders.assignments.map((a) => a.rule)).toEqual(['city', 'city', 'province', 'default']);
+      // شیراز: هیچ چاپخانه‌ای در فارس نیست؛ تهران (حدود ۶۸۰ کیلومتر) نزدیک‌تر از مشهد (حدود ۹۷۰) است (۱۰٫۱).
+      expect(orders.assignments.map((a) => a.rule)).toEqual(['city', 'city', 'province', 'nearest']);
       // کرایهٔ مشتری همان کرایهٔ استانش است، هر جا چاپ شود (ADR-042).
       expect(mashhad.shippingZoneId).toBe('other');
       expect(tehran.shippingZoneId).toBe('tehran');
     });
 
     it('پیامک سفارش تازه به چاپخانهٔ با موبایل اعلان (برش ۷٫۶): در همان پرداخت، و بعد از commit با پیامک پرداخت؛ بی موبایل هیچ', async () => {
-      orders.partners.push({
-        id: 'partner-noor',
-        name: 'چاپ نور',
-        cityId: 1326,
-        provinceId: 11,
-        isDefault: false,
-        createdAt: clock,
-        active: true,
-        notifyMobile: '09151234567',
-      });
+      orders.partners.push({ ...NOOR, createdAt: clock, notifyMobile: '09151234567' });
       const tehran = await placed([doc(10)]);
       await pay(tehran.payment!.redirectUrl, 'success');
       // چاپخانهٔ پیش‌فرض موبایل اعلان ندارد: فقط پیامک پرداخت.
@@ -661,6 +666,44 @@ describe('مسیر خرید روی سرور', () => {
       expect(orders.assignments).toEqual([]);
       expect(orders.jobs).toHaveLength(2);
       expect(sent).toHaveLength(1);
+    });
+
+    it('حالت دستی (برش ۱۰٫۱، سؤال ۱۹۹): پرداخت همان است و سفارش بی چاپخانه می‌ماند تا متصدی بسپاردش', async () => {
+      orders.settings.set('assignment.mode', 'manual');
+      const { order, payment } = await placed([doc(10)]);
+      expect(await pay(payment!.redirectUrl, 'success')).toEqual({ ok: true, value: { token: order.token, payment: 'succeeded' } });
+      expect(orders.orders[0]).toMatchObject({ status: 'paid', printPartnerId: null });
+      expect(orders.assignments).toEqual([]);
+      expect(orders.jobs).toHaveLength(2);
+    });
+
+    it('همه تعطیل (برش ۱۰٫۱، سؤال ۲۶۵): سفارش پیش اولین چاپخانه‌ای که باز می‌شود، و مهلت تحویل به پست روزهای «همه تعطیل» را نمی‌شمارد', async () => {
+      // امروز شنبه ۴ مهر است. جزوه‌یار تا پایان ۶ مهر تعطیل است و چاپ نور تا پایان ۵ مهر؛ پس ۴ و ۵ مهر هیچ‌کس چاپ نمی‌کند.
+      const day4 = new Date('2026-09-25T20:30:00Z');
+      orders.partners[0]!.availability = 'closed';
+      orders.partners[0]!.closedFrom = day4;
+      orders.partners[0]!.closedUntil = new Date(day4.getTime() + 3 * DAY);
+      orders.partners.push({ ...NOOR, createdAt: clock, availability: 'closed', closedFrom: day4, closedUntil: new Date(day4.getTime() + 2 * DAY) });
+      const { payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      expect(orders.orders[0]!.printPartnerId).toBe('partner-noor');
+      expect(orders.assignments.map((a) => a.rule)).toEqual(['reopening']);
+      // بی تعطیلی: تا پایان دوشنبه ۶ مهر. ۵ مهر روز کاری نیست، پس دوشنبه و سه‌شنبه: تا پایان سه‌شنبه ۷ مهر.
+      expect(formatDeadlineDay(orders.orders[0]!.postHandoffDueAt!)).toBe('سه‌شنبه 7 مهر');
+      expect(sent[0]!.params).toContain('سه‌شنبه 7 مهر');
+    });
+
+    it('تعطیلی یک چاپخانه مهلت را عوض نمی‌کند؛ سفارش به چاپخانهٔ باز می‌رود (برش ۱۰٫۱)', async () => {
+      const day4 = new Date('2026-09-25T20:30:00Z');
+      orders.partners[0]!.availability = 'closed';
+      orders.partners[0]!.closedFrom = day4;
+      orders.partners[0]!.closedUntil = new Date(day4.getTime() + 3 * DAY);
+      orders.partners.push({ ...NOOR, createdAt: clock });
+      const { payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      expect(orders.orders[0]!.printPartnerId).toBe('partner-noor');
+      expect(orders.assignments.map((a) => a.rule)).toEqual(['nearest']);
+      expect(formatDeadlineDay(orders.orders[0]!.postHandoffDueAt!)).toBe('دوشنبه 6 مهر');
     });
 
     it('برگشت تکراری (رفرش) همان نتیجه است: پیامک و کار دوم نمی‌سازد', async () => {

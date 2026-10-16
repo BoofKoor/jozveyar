@@ -18,6 +18,7 @@ import {
   type SettledVia,
   type Settlement,
 } from './orders.js';
+import { allClosedWindow, closedDays } from './assignment.js';
 import { readSetting } from './reference.js';
 import type { PaymentRow } from './orders.js';
 
@@ -50,6 +51,9 @@ export const providersOf = (gateways: Readonly<Record<string, PaymentGateway>>) 
 export async function settleWith(input: SettleWithInput): Promise<SettledPayment | 'busy' | null> {
   const { store, gateways, now } = input;
   const holidays = new Set((await readSetting((key) => store.setting(key), 'calendar.holidays', input.log)).map((day) => day.date));
+  // روزهایی که همهٔ چاپخانه‌های فعال تعطیل‌اند هم روز کاری نیستند (برش ۱۰٫۱، سؤال ۲۶۵): تعهد «N روز کاری» از روزی شمرده می‌شود که
+  // کسی چاپ می‌کند. پیش از قفل خوانده می‌شود، مثل تعطیلی‌ها؛ تعطیل شدن هم‌زمان مهلت این یک سفارش را عوض نمی‌کند.
+  for (const day of closedDays(allClosedWindow(await store.partnerHours()))) holidays.add(day);
   return store.settle(
     input.lookup,
     async ({ payment, order }): Promise<Settlement> => {

@@ -547,13 +547,17 @@ export const cities = pgTable(
  * تهران است، پیش‌فرض، و دادهٔ پایه وقتی جدول خالی است می‌نشاندش (`seedReferenceData`).
  *
  * - شهر و استان با کلید خارجی دوستونی به `cities`، مثل سفارش: تخصیص خودکار در پرداخت با همین دو (همان شهر، وگرنه همان
- *   استان، وگرنه پیش‌فرض؛ `choosePartner`).
+ *   استان، وگرنه نزدیک‌ترین با مختصات `@jozveyar/geo`، از ۱۰٫۱؛ `rankPartners`). پیش‌فرض فقط در برابری فاصله، مثل دو چاپخانهٔ یک شهر.
  * - حداکثر یک پیش‌فرض (`print_partners_one_default`)، و پیش‌فرض فعال است (`print_partners_default_active`).
  * - پاک نمی‌شود، غیرفعال می‌شود (`deactivated_at`): سفارش‌ها و تاریخچهٔ تخصیص به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی
  *   سفارش باز ندارد؛ هر دو را تریگر `print_partners_guard` هم می‌سنجد (0018).
  * - `created_by` بی کلید خارجی، مثل `price_lists.created_by`؛ null یعنی دادهٔ پایه.
  * - `notify_mobile` (برش ۷٫۶، سؤال ۱۲۶): موبایل اعلان اختیاری، نرمال (`09…`)؛ هر سفارش تازه‌ای که به این چاپخانه برسد یک پیامک از صف
  *   به همین شماره دارد (`order_assignments.sms_message_id`). خالی یعنی بی پیامک.
+ * - **در دسترس بودن** (برش ۱۰٫۱، سؤال ۲۰۰، ADR-060): `availability` «باز» (`open`)، «شلوغ» (`busy`) یا «تعطیل» (`closed`) با روزهایش:
+ *   `closed_from` آغاز اولین روز تعطیل و `closed_until` آغاز روز باز شدن (پایان انحصاری)، هر دو نیمه‌شب تهران، مثل مهلت تحویل به
+ *   پست؛ تعطیلی آینده تا رسیدنش «باز» است، و گذشته دیگر هیچ (`availabilityAt`). یادداشت فقط برای شلوغ و تعطیل. سفارش و تخصیص گذشته را
+ *   دست نمی‌زند: فقط سفارش‌های بعدی (`rankPartners`).
  */
 export const printPartners = pgTable(
   'print_partners',
@@ -572,6 +576,14 @@ export const printPartners = pgTable(
     createdBy: uuid('created_by'),
     /** موبایل اعلان (برش ۷٫۶): پیامک سفارش تازه به همین؛ null یعنی بی پیامک. */
     notifyMobile: text('notify_mobile'),
+    /** `open`، `busy` یا `closed` (برش ۱۰٫۱). */
+    availability: text('availability').notNull().default('open'),
+    /** آغاز اولین روز تعطیل، نیمه‌شب تهران؛ فقط با `closed`. */
+    closedFrom: timestamp('closed_from', { withTimezone: true }),
+    /** آغاز روز باز شدن (پایان انحصاری)، نیمه‌شب تهران؛ فقط با `closed`. */
+    closedUntil: timestamp('closed_until', { withTimezone: true }),
+    /** «دستگاه خراب است»: فقط برای شلوغ و تعطیل، ۱ تا ۲۰۰ نویسه. */
+    availabilityNote: text('availability_note'),
   },
   (t) => [
     foreignKey({
@@ -584,6 +596,21 @@ export const printPartners = pgTable(
     check('print_partners_default_active', sql`NOT ${t.isDefault} OR ${t.deactivatedAt} IS NULL`),
     /** همان شکل `users.mobile`: نرمال‌شده با `normalizeIranMobile`. */
     check('print_partners_notify_mobile', sql`${t.notifyMobile} IS NULL OR ${t.notifyMobile} ~ '^09[0-9]{9}$'`),
+    /** «تعطیل» یعنی دقیقاً هر دو روز، آغاز پیش از پایان و حداکثر یک سال؛ «باز» و «شلوغ» هیچ‌کدام. */
+    check(
+      'print_partners_closed',
+      sql`${t.availability} IN ('open', 'busy', 'closed')
+       AND (${t.availability} = 'closed') = (${t.closedFrom} IS NOT NULL)
+       AND (${t.closedFrom} IS NULL) = (${t.closedUntil} IS NULL)
+       AND (${t.closedFrom} IS NULL OR (${t.closedFrom} < ${t.closedUntil} AND ${t.closedUntil} <= ${t.closedFrom} + interval '366 days'))`,
+    ),
+    /** یادداشت فقط برای شلوغ و تعطیل، تمیز و ۱ تا ۲۰۰ نویسه. */
+    check(
+      'print_partners_availability_note',
+      sql`${t.availabilityNote} IS NULL
+       OR (${t.availability} <> 'open' AND length(${t.availabilityNote}) BETWEEN 1 AND 200
+           AND ${t.availabilityNote} = btrim(${t.availabilityNote}))`,
+    ),
   ],
 );
 
@@ -1018,9 +1045,12 @@ export const orderStatusEvents = pgTable(
  * مثل `order_status_events` (تریگر `order_assignments_append_only`؛ پاک شدن فقط با خود سفارش)، و آخرین ردیف هر سفارش همان
  * `orders.print_partner_id` است (تریگر معوق `orders_partner_recorded`، 0018).
  *
- * - سیستم فقط در پرداخت: از هیچ، با `rule` — `city` هم‌شهر مشتری، `province` هم‌استان، `default` چاپخانهٔ پیش‌فرض، و
- *   `oldest` قدیمی‌ترین چاپخانهٔ فعال وقتی پیش‌فرضی نیست.
- * - ادمین (جابه‌جایی، یا چاپخانهٔ سفارشی که نداشت): با `admin_user_id` و دلیل ۱ تا ۵۰۰ نویسه، که فقط در پنل دیده می‌شود.
+ * - سیستم فقط در پرداخت: از هیچ، با `rule` — `city` هم‌شهر مشتری، `province` هم‌استان، از ۱۰٫۱ `nearest` نزدیک‌ترین چاپخانه و
+ *   `reopening` اولین چاپخانه‌ای که باز می‌شود وقتی همه تعطیل‌اند (`rankPartners`)؛ `default` (چاپخانهٔ پیش‌فرض) و `oldest`
+ *   (قدیمی‌ترین وقتی پیش‌فرضی نیست) فقط در تخصیص‌های پیش از ۱۰٫۱.
+ * - ادمین (جابه‌جایی، یا چاپخانهٔ سفارشی که نداشت): با `admin_user_id` و دلیل ۱ تا ۵۰۰ نویسه، که فقط در پنل دیده می‌شود. از ۱۰٫۱
+ *   (سؤال ۱۹۹) سپردن سفارشی که چاپخانه نداشت دلیل نمی‌خواهد: یک کلیک در حالت دستی؛ جابه‌جایی همیشه با دلیل. CHECKی که null می‌شود
+ *   می‌گذرد، پس هر شاخه `IS NOT NULL` صریح دارد: پیش از ۱۰٫۱ ردیف ادمین بی دلیل و ردیف سیستم بی قاعده هم پذیرفته می‌شد.
  * - پیامک چاپخانه (برش ۷٫۶، سؤال ۱۲۶): تخصیص به چاپخانه‌ای که موبایل اعلان دارد ردیف «منتظر» `sms_messages` خودش را دارد، در همان
  *   تراکنش؛ بی موبایل، بی پیامک (تریگر `order_assignments_sms`، 0036). یک پیامک برای هر تخصیص (`order_assignments_sms`)، و چون ردیف
  *   تخصیص عوض نمی‌شود، پیامکش هم.
@@ -1053,9 +1083,10 @@ export const orderAssignments = pgTable(
     check(
       'order_assignments_actor',
       sql`(${t.actor} = 'system' AND ${t.adminUserId} IS NULL AND ${t.fromPartnerId} IS NULL AND ${t.reason} IS NULL
-            AND ${t.rule} IN ('city', 'province', 'default', 'oldest'))
+            AND ${t.rule} IS NOT NULL AND ${t.rule} IN ('city', 'province', 'nearest', 'reopening', 'default', 'oldest'))
        OR (${t.actor} = 'admin' AND ${t.adminUserId} IS NOT NULL AND ${t.rule} IS NULL
-            AND length(btrim(${t.reason})) BETWEEN 1 AND 500)`,
+            AND ((${t.reason} IS NOT NULL AND length(btrim(${t.reason})) BETWEEN 1 AND 500)
+                 OR (${t.reason} IS NULL AND ${t.fromPartnerId} IS NULL)))`,
     ),
   ],
 );

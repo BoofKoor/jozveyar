@@ -154,6 +154,29 @@ export async function changeRoleAction(_state: FormState, form: FormData): Promi
   redirect(`${panelPath(gate, '/admins')}?done=role&id=${result.value.userId}`);
 }
 
+/**
+ * در دسترس بودن چاپخانه (برش ۱۰٫۱، سؤال ۲۶۷): «باز»، «شلوغ» یا «تعطیل از … تا …» با یادداشت، بی کد تازه. موفق به همان جایی برمی‌گردد که
+ * فرم از آن باز شد (`back`: پیشخوان یا «چاپخانه‌ها»)؛ فرم کهنه صفحه را با حال تازه دوباره می‌سازد، و خطای فیلد زیر همان فیلد.
+ */
+export async function partnerAvailabilityAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { partners } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const values = {
+    availability: field(form, 'availability'),
+    from: field(form, 'from').slice(0, 40),
+    until: field(form, 'until').slice(0, 40),
+    note: field(form, 'note').slice(0, 1000),
+  };
+  const back = field(form, 'back') === 'partners' ? 'partners' : 'dashboard';
+  const result = await partners.setAvailability(session, id, { ...values, seen: field(form, 'seen') }, await requestIp());
+  const page = `${panelPath(gate, `/partners/${encodeURIComponent(id)}/availability`)}?back=${back}`;
+  if (!result.ok && result.error === 'partner_availability_changed') redirect(`${page}&e=partner_availability_changed`);
+  if (!result.ok) return failure(result, values);
+  redirect(`${panelPath(gate, back === 'partners' ? '/partners' : '/')}?done=availability&p=${encodeURIComponent(id)}`);
+}
+
 export async function revokeInviteAction(form: FormData): Promise<void> {
   const gate = field(form, 'gate');
   const { auth } = requirePanel(gate);
@@ -611,6 +634,17 @@ export async function setAvailabilityAction(form: FormData): Promise<void> {
     redirect(`${home}?done=availability&k=${item.kind}&o=${encodeURIComponent(item.id)}&p=${item.paused ? 1 : 0}&${doneMark()}#availability`);
   }
   redirect(`${home}?e=${result.error}&${doneMark()}#availability`);
+}
+
+/** تخصیص چاپخانه، خودکار یا دستی (برش ۱۰٫۱، سؤال ۱۹۹): برگشت به همان کارت با پیامش. */
+export async function assignmentModeAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { settings } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await settings.saveAssignmentMode(session, { mode: field(form, 'mode'), seen: field(form, 'seen') }, await requestIp());
+  const home = panelPath(gate, '/settings');
+  if (result.ok) redirect(`${home}?done=assignment&m=${result.value.mode}&${doneMark()}#assignment`);
+  redirect(`${home}?e=${result.error}&${doneMark()}#assignment`);
 }
 
 export interface FilesState {

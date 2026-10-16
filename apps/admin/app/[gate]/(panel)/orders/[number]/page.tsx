@@ -33,7 +33,7 @@ import { ZipButton } from '../../../../../components/ZipButton';
 import { dayHeading, dayText, tehranDay, whenText } from '../../../../../lib/format';
 import { panelPath } from '../../../../../lib/gate';
 import { messageOf } from '../../../../../lib/messages';
-import { partnerCard } from '../../../../../lib/partners';
+import { optionNote, partnerCard } from '../../../../../lib/partners';
 import { parcelsCount, weightSegs } from '../../../../../lib/shipments';
 import { REFUND_NOTE_MAX, rejectionNow, rejectionResult, viaGateway } from '../../../../../lib/refunds';
 import { partnerSmsView, paymentSmsView, smsView } from '../../../../../lib/sms';
@@ -726,8 +726,9 @@ function PartnerCard({ gate, view }: { gate: string; view: OrderDetailsView }) {
         <p className="jy-note jy-note--warning ad-gap">
           <span className="jy-icon jy-icon-warning" aria-hidden="true" />
           <span>
+            {/* بی چاپخانه: تخصیص دستی (۱۰٫۱)، یا هنگام پرداخت هیچ چاپخانهٔ فعالی نبود. */}
             {canAssign
-              ? 'این سفارش چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.'
+              ? 'این سفارش چاپخانه ندارد؛ یکی را برایش انتخاب کن.'
               : 'این سفارش چاپخانه ندارد و هیچ چاپخانهٔ فعالی نیست؛ مالک پنل از «چاپخانه‌ها» یکی را فعال یا اضافه کند.'}
           </span>
         </p>
@@ -1407,7 +1408,7 @@ export default async function OrderPage({
               gate={gate}
               orderNumber={order.orderNumber}
               from={details.partner ? { id: details.partner.id, name: details.partner.name, cityName: details.partner.cityName } : null}
-              options={view.partnerOptions}
+              options={view.partnerOptions.map((ranked) => ({ id: ranked.partner.id, name: ranked.partner.name, note: optionNote(ranked, now) }))}
               maxLength={REASON_MAX}
               back={self}
             />

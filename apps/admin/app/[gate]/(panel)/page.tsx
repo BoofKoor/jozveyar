@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { Fragment } from 'react';
 
 import { HELD_WATCH_MS } from '@jozveyar/db';
-import { formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
+import { formatDeadlineDay, formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
+import { Alert } from '../../../components/Alert';
 import { DueBadge } from '../../../components/OrderBadges';
 import { OrderRows } from '../../../components/OrderRows';
 import { Segments } from '../../../components/Segments';
@@ -12,6 +13,7 @@ import { liveAlert } from '../../../lib/checkout';
 import { dayText, whenText } from '../../../lib/format';
 import { panelPath } from '../../../lib/gate';
 import { statsSegs } from '../../../lib/orders';
+import { availabilityView } from '../../../lib/partners';
 import { can } from '../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../lib/server/context';
 import { otpCapAlert } from '../../../lib/settings';
@@ -29,6 +31,14 @@ function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: read
     </Fragment>
   ));
 }
+
+/** چیپ در دسترس بودن چاپخانه (۱۰٫۱): باز خبر خوب، شلوغ هشدار، تعطیل خطا، تعطیلی آینده خبر. */
+const AVAILABILITY_BADGE = {
+  open: 'jy-badge jy-badge--success',
+  busy: 'jy-badge jy-badge--warning',
+  closed: 'jy-badge jy-badge--error',
+  scheduled: 'jy-badge jy-badge--info',
+} as const;
 
 /** رنگ سطر وضعیت مسیر خرید (کلاس کامل و ثابت، برای آیکون‌های کیت). */
 const LIVE_NOTES = { error: 'jy-note jy-note--error', warning: 'jy-note jy-note--warning', info: 'jy-note jy-note--info' } as const;
@@ -63,8 +73,15 @@ function HeldList({ gate, held }: { gate: string; held: readonly { orderNumber: 
  * «فایل پست آن روز را بده» (تصمیم ۸۲). بقیهٔ هشدارها هرگز به او نمی‌رسند (سفارش پرداخت‌نشده و بی چاپخانه در محدوده‌اش نیست، و صف
  * تأیید با مالک و متصدی است).
  */
-export default async function Dashboard({ params }: { params: Promise<{ gate: string }> }) {
+export default async function Dashboard({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ gate: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { gate } = await params;
+  const query = await searchParams;
   const { orders, settings } = requirePanel(gate);
   const session = await requireSession(gate);
   const now = new Date();
@@ -81,7 +98,7 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
   if (!can(session, 'orders.read')) return head;
   const result = await orders.dashboard(session);
   if (!result.ok) return head;
-  const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked } = result.value;
+  const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked, partners: board, assignment } = result.value;
   // هشدارهای پیامک (۷٫۱) و وضعیت مسیر خرید روی سایت (۷٫۵): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
   const [sms, checkout] = await Promise.all([settings.smsAlerts(session), settings.checkoutStatus(session)]);
   const live = liveAlert(checkout, now);
@@ -123,6 +140,11 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
     'به مالک بگو کد پذیرنده را در «تنظیمات» بیازماید.'
   );
   const auto = alerts.autoClosed;
+  // تخصیص دستی (۱۰٫۱، سؤال ۱۹۹): سفارش بی چاپخانه کار روزمره است، پس خبر، نه هشدار.
+  const manual = assignment?.mode === 'manual';
+  const closed = assignment?.closed ?? [];
+  const allClosed = assignment?.allClosed ?? null;
+  const doneAvailability = query.done === 'availability' ? board.find((row) => row.id === query.p) : undefined;
 
   return (
     <>
@@ -155,7 +177,14 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
         ) : null}
       </section>
 
+      {doneAvailability ? (
+        <Alert tone="success">
+          {doneAvailability.name} حالا {availabilityView(doneAvailability, now).text} است؛ از سفارش بعدی اثر دارد.
+        </Alert>
+      ) : null}
+
       {live ||
+      closed.length > 0 ||
       alerts.failedPdf.length > 0 ||
       unreturned > 0 ||
       rejected ||
@@ -338,16 +367,53 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
               </span>
             </p>
           ) : null}
-          {alerts.unassigned.length > 0 ? (
-            // همان الگوی «PDF ساخته نشد» (۵٫۲): هر شماره پیوند سفارش، این‌بار یکراست به فرم انتخاب چاپخانه.
-            <p className="jy-note jy-note--warning" data-alert="partner">
+          {allClosed ? (
+            // همه تعطیل (۱۰٫۱، سؤال ۲۶۵): سفارش تازه پیش اولین چاپخانه‌ای می‌ماند که باز می‌شود، و سایت نوارش را نشان می‌دهد.
+            <p className="jy-note jy-note--warning" data-alert="all-closed">
               <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                همهٔ چاپخانه‌ها تا {formatDeadlineDay(allClosed.until)} تعطیل‌اند. سفارش تازه پیش اولین چاپخانه‌ای می‌رود که باز می‌شود، مهلت تحویل به
+                پستش از روز باز شدن شمرده می‌شود، و صفحهٔ اصلی سایت همین را در نواری بالای صفحه می‌گوید.
+              </span>
+            </p>
+          ) : null}
+          {closed.map((row) =>
+            // چاپخانهٔ تعطیل (۱۰٫۱، سؤال ۲۶۸): سفارش‌های «در صف چاپ»ش تا باز شدن می‌مانند؛ هر شماره یکراست به فرم جابه‌جایی.
+            row.queued.length > 0 ? (
+              <p key={row.id} className="jy-note jy-note--warning" data-alert="closed" data-partner={row.name}>
+                <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+                <span>
+                  {row.name} {availabilityView(row, now).text} است{row.availabilityNote ? ` (${row.availabilityNote})` : ''}، و{' '}
+                  {row.queued.length === 1 ? 'سفارش ' : 'سفارش‌های '}
+                  <OrderLinks gate={gate} numbers={row.queued.slice(0, 12)} query="?do=assign" />
+                  {row.queued.length > 12 ? ` و ${formatNumber(row.queued.length - 12)} سفارش دیگر` : ''} هنوز در صفش{' '}
+                  {row.queued.length === 1 ? 'است؛ اگر مهلتش پیش از باز شدن است، جابه‌جایش کن.' : 'هستند؛ اگر مهلتشان پیش از باز شدن است، جابه‌جایشان کن.'}
+                </span>
+              </p>
+            ) : (
+              <p key={row.id} className="jy-note jy-note--info" data-alert="closed" data-partner={row.name}>
+                <span className="jy-icon jy-icon-info" aria-hidden="true" />
+                <span>
+                  {row.name} {availabilityView(row, now).text} است{row.availabilityNote ? ` (${row.availabilityNote})` : ''}؛ تا آن روز سفارش تازه
+                  نمی‌گیرد.
+                </span>
+              </p>
+            ),
+          )}
+          {alerts.unassigned.length > 0 ? (
+            // همان الگوی «PDF ساخته نشد» (۵٫۲): هر شماره پیوند سفارش، این‌بار یکراست به فرم انتخاب چاپخانه. در تخصیص دستی (۱۰٫۱) خبر است.
+            <p className={manual ? 'jy-note jy-note--info' : 'jy-note jy-note--warning'} data-alert="partner" data-mode={manual ? 'manual' : 'auto'}>
+              <span className={manual ? 'jy-icon jy-icon-info' : 'jy-icon jy-icon-warning'} aria-hidden="true" />
               <span>
                 {oneUnassigned ? 'سفارش ' : 'سفارش‌های '}
                 <OrderLinks gate={gate} numbers={alerts.unassigned} query={can(session, 'orders.assign') ? '?do=assign' : ''} />{' '}
-                {oneUnassigned
-                  ? 'چاپخانه ندارد: هنگام پرداختش هیچ چاپخانهٔ فعالی نبود. یکی را برایش انتخاب کن.'
-                  : 'چاپخانه ندارند: هنگام پرداختشان هیچ چاپخانهٔ فعالی نبود. برای هر کدام یکی انتخاب کن.'}
+                {manual
+                  ? oneUnassigned
+                    ? 'منتظر سپردن به چاپخانه است (تخصیص دستی): چاپخانهٔ پیشنهادی در فرمش از پیش انتخاب شده.'
+                    : 'منتظر سپردن به چاپخانه‌اند (تخصیص دستی): چاپخانهٔ پیشنهادی هر کدام در فرمش از پیش انتخاب شده.'
+                  : oneUnassigned
+                    ? 'چاپخانه ندارد؛ یکی را برایش انتخاب کن.'
+                    : 'چاپخانه ندارند؛ برای هر کدام یکی انتخاب کن.'}
               </span>
             </p>
           ) : null}
@@ -478,6 +544,45 @@ export default async function Dashboard({ params }: { params: Promise<{ gate: st
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {board.length > 0 ? (
+        // کارت «چاپخانه‌ها» (۱۰٫۱، سؤال ۲۶۷): مالک و متصدی همهٔ چاپخانه‌های فعال، کاربر چاپخانه فقط خودش؛ «عوض کن» بی کد تازه.
+        <section className="jy-card" aria-labelledby="t-partners" data-board="">
+          <div className="jy-card__head">
+            <h2 id="t-partners" className="jy-card__title">
+              {partner ? 'چاپخانهٔ تو' : 'چاپخانه‌ها'}
+            </h2>
+            {can(session, 'partners.manage') ? (
+              <Link href={panelPath(gate, '/partners')} className="jy-btn jy-btn--text ad-card-head-btn">
+                همهٔ چاپخانه‌ها
+              </Link>
+            ) : null}
+          </div>
+          <ul className="ad-board">
+            {board.map((row) => {
+              const view = availabilityView(row, now);
+              return (
+                <li key={row.id} data-partner={row.name}>
+                  <span className="ad-board__name">
+                    <b>{row.name}</b>
+                    <span className="ad-meta">
+                      {row.cityName}
+                      {row.isDefault ? ' · پیش‌فرض' : ''} · <span className="num">{formatNumber(row.openOrders)}</span> سفارش باز
+                      {row.availabilityNote && view.tone !== 'open' ? ` · ${row.availabilityNote}` : ''}
+                    </span>
+                  </span>
+                  <span className={AVAILABILITY_BADGE[view.tone]} data-availability={view.tone}>
+                    {view.text}
+                  </span>
+                  <Link className="jy-link" href={panelPath(gate, `/partners/${row.id}/availability`)}>
+                    عوض کن
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       ) : null}
 
       <section className={`jy-card ad-list${money ? '' : ' ad-list--nosum'}`} aria-labelledby="t-queue">

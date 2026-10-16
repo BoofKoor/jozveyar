@@ -42,6 +42,13 @@ export const catalogPausedSchema = z.object({
 });
 export type CatalogPaused = z.infer<typeof catalogPausedSchema>;
 
+/**
+ * تخصیص چاپخانه در پرداخت (برش ۱۰٫۱، سؤال ۱۹۹): `auto` با قاعدهٔ همان شهر، همان استان و نزدیک‌ترین (`rankPartners`)، یا `manual`: سفارش
+ * پرداخت‌شده بی چاپخانه می‌ماند تا متصدی بسپاردش.
+ */
+export const ASSIGNMENT_MODES = ['auto', 'manual'] as const;
+export type AssignmentMode = (typeof ASSIGNMENT_MODES)[number];
+
 /** مخاطب مسیر خرید در `live` (برش ۷٫۵، ADR-052)، به ترتیب نردبان: متوقف ← پیش‌نمایش مالک ← همه. */
 export const CHECKOUT_AUDIENCES = ['paused', 'preview', 'everyone'] as const;
 export type CheckoutAudience = (typeof CHECKOUT_AUDIENCES)[number];
@@ -101,6 +108,11 @@ export const SETTING_SCHEMAS = {
    * با ۴۰۹ `option_unavailable` رد می‌کند.
    */
   'catalog.paused': catalogPausedSchema,
+  /**
+   * تخصیص چاپخانه در پرداخت (برش ۱۰٫۱، سؤال ۱۹۹): `auto` یا `manual`. فقط مالک از «تنظیمات» عوضش می‌کند، بی کد تازه (برگشت‌پذیر است)؛
+   * سفارشی که پیش‌تر سپرده شد دست نمی‌خورد، و سفارش بی چاپخانه با رفتن به `auto` خودکار سپرده نمی‌شود.
+   */
+  'assignment.mode': z.enum(ASSIGNMENT_MODES),
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

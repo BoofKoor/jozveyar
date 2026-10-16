@@ -254,6 +254,16 @@
   .ad-roles-form:has(.ad-role-partner:checked) .jy-field.ad-if-partner {
     display: flex;
   }
+  /* روزهای تعطیل فقط با «تعطیل»، و یادداشت با «شلوغ» یا «تعطیل» (۱۰٫۱)، بی JS */
+  .jy-field.ad-if-closed,
+  .jy-field.ad-if-away {
+    display: none;
+  }
+  .ad-availability-form:has(.ad-av-closed:checked) .jy-field.ad-if-closed,
+  .ad-availability-form:has(.ad-av-closed:checked) .jy-field.ad-if-away,
+  .ad-availability-form:has(.ad-av-busy:checked) .jy-field.ad-if-away {
+    display: flex;
+  }
   .ad-form fieldset {
     border: 0;
   }
@@ -1048,6 +1058,40 @@
   }
   .ad-partner b {
     overflow-wrap: anywhere;
+  }
+  /* کارت «چاپخانه‌ها»ی پیشخوان (۱۰٫۱): نام و شهر، چیپ در دسترس بودن، «عوض کن» */
+  .ad-board {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .ad-board > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding-block: 12px;
+  }
+  .ad-board > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-board__name {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-wrap: anywhere;
+  }
+  .ad-board__name .ad-meta {
+    margin: 0;
+  }
+  @media (max-width: 520px) {
+    .ad-board > li {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .ad-board > li > .jy-badge {
+      grid-column: 1;
+      justify-self: start;
+    }
   }
   .ad-partners > li {
     display: grid;
