@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Fragment, useActionState, useMemo, useRef, useState } from 'react';
 
-import type { PaperSize, PriceList } from '@jozveyar/contracts';
+import { DISCOUNT_TIERS_MAX, type PaperSize, type PriceList } from '@jozveyar/contracts';
 import { PAPER_SIZES, PAPER_SIZE_ORDER } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
@@ -21,10 +21,12 @@ import {
   diffText,
   newBinding,
   newPaper,
+  newTier,
   parseWhole,
   previewRows,
   rateRows,
   readDraft,
+  tierRewardText,
   weightLabel,
   ZONES,
   type BandInput,
@@ -33,6 +35,7 @@ import {
   type DraftIssue,
   type PaperInput,
   type RestInput,
+  type TierInput,
 } from '../lib/tariff';
 import { Segments } from './Segments';
 import { StatusButton } from './StatusButton';
@@ -141,7 +144,9 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
     }
     return keys;
   });
-  /** فیلدی که تازه ساخته شد و فوکوس می‌گیرد: ردیف بازه، کاغذ یا صحافی. */
+  /** کلید هر پلهٔ تخفیف (۱۱٫۴)، تا حذف پلهٔ میانی فیلدهای بقیه را جابه‌جا نکند. */
+  const [tierKeys, setTierKeys] = useState<number[]>(() => (initial.tiers ?? []).map(() => nextKey.current++));
+  /** فیلدی که تازه ساخته شد و فوکوس می‌گیرد: ردیف بازه، کاغذ، صحافی یا پله. */
   const [added, setAdded] = useState<string | null>(null);
   const [state, action, pending] = useActionState<DraftState, FormData>(saveDraftAction, {});
   const [intent, setIntent] = useState<'save' | 'activate'>('save');
@@ -214,6 +219,19 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
     setAdded(`binding:${binding.id}`);
   };
   const removeBinding = (index: number) => setForm((current) => ({ ...current, bindings: current.bindings.filter((_, i) => i !== index) }));
+
+  const setTier = (index: number, patch: Partial<TierInput>) =>
+    setForm((current) => ({ ...current, tiers: (current.tiers ?? []).map((tier, i) => (i === index ? { ...tier, ...patch } : tier)) }));
+  const addTier = () => {
+    const key = nextKey.current++;
+    setForm((current) => ({ ...current, tiers: [...(current.tiers ?? []), newTier()] }));
+    setTierKeys((keys) => [...keys, key]);
+    setAdded(`tier:${key}`);
+  };
+  const removeTier = (index: number) => {
+    setForm((current) => ({ ...current, tiers: (current.tiers ?? []).filter((_, i) => i !== index) }));
+    setTierKeys((keys) => keys.filter((_, i) => i !== index));
+  };
 
   const hasErrors = check.errors.length > 0;
   // خطای ذخیره تا وقتی فرم همان است که فرستاده شد؛ پیش‌نویسی که جای دیگر عوض شد یا دیگر پیش‌نویس نیست، تا بازخوانی صفحه.
@@ -727,6 +745,78 @@ export function TariffEditor({ gate, version, initial, fingerprint, base, active
                 ))}
               </div>
             ) : null}
+          </section>
+
+          <section className="jy-card" aria-labelledby="t-d-tiers" data-tiers="">
+            <h2 id="t-d-tiers" className="jy-card__title">
+              تخفیف سفارش بزرگ
+            </h2>
+            <p className="ad-hint ad-gap">
+              روی جمع چاپ، کاغذ و صحافی، پیش از کرایه. فقط بالاترین پله‌ای که سفارش به آن رسیده می‌نشیند، و با کد تخفیف جمع نمی‌شود: هر کدام
+              بیشتر است. نسخهٔ فعال:{' '}
+              {(active.discountTiers ?? []).length === 0 ? (
+                'ندارد'
+              ) : (
+                (active.discountTiers ?? []).map((tier, i) => (
+                  <Fragment key={tier.fromRials}>
+                    {i > 0 ? '؛ ' : null}
+                    از <span className="num">{formatTomans(tier.fromRials, false)}</span> تومان، <Segments segs={tierRewardText(tier)} />
+                  </Fragment>
+                ))
+              )}
+              .
+            </p>
+            {/* نشانهٔ کارت: فرمی که این را ندارد (زبانهٔ پیش از ۱۱٫۴) پله‌های پیش‌نویس را دست نمی‌زند */}
+            <input type="hidden" name="tiers" value="1" />
+            {(form.tiers ?? []).map((tier, i) => {
+              const key = tierKeys[i]!;
+              return (
+                <fieldset key={key} className="ad-option" data-tier={i} aria-label={`پلهٔ ${i + 1}`}>
+                  <div className="ad-option__row">
+                    {field({
+                      id: `d-tier-${key}-from`,
+                      name: `tier.${i}.from`,
+                      label: 'از جمع (تومان)',
+                      value: tier.from,
+                      onChange: (value) => setTier(i, { from: value }),
+                      money: true,
+                      className: 'ad-in-p',
+                      autoFocus: added === `tier:${key}`,
+                    })}
+                    {field({
+                      id: `d-tier-${key}-percent`,
+                      name: `tier.${i}.percent`,
+                      label: 'درصد تخفیف',
+                      value: tier.percent,
+                      onChange: (value) => setTier(i, { percent: value }),
+                      className: 'ad-in-n',
+                    })}
+                  </div>
+                  <div className="ad-option__row ad-option__foot">
+                    <label className="ad-size__toggle">
+                      <input
+                        type="checkbox"
+                        className="ad-check"
+                        name={`tier.${i}.free`}
+                        checked={tier.freeShipping}
+                        onChange={(event) => setTier(i, { freeShipping: event.target.checked })}
+                      />
+                      ارسال رایگان
+                    </label>
+                    <button type="button" className="jy-btn jy-btn--text" onClick={() => removeTier(i)}>
+                      حذف این پله
+                    </button>
+                  </div>
+                </fieldset>
+              );
+            })}
+            {(form.tiers ?? []).length < DISCOUNT_TIERS_MAX ? (
+              <button type="button" className="jy-btn jy-btn--text ad-add" onClick={addTier}>
+                <span className="jy-icon jy-icon-plus" aria-hidden="true" />
+                افزودن پله
+              </button>
+            ) : null}
+            <Issues id="d-tiers" errors={errorsAt('tiers')} warnings={[]} />
           </section>
 
           <section className="jy-card" aria-labelledby="t-d-rest" data-rest="">

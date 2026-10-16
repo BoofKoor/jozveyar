@@ -287,7 +287,7 @@ describe('فعال کردن با کد تازه', () => {
     expect(activation.active.version).toBe(1);
     expect(activation.again).toBe(false);
     expect(activation.problems).toEqual([]);
-    expect(activation.changes.unchanged).toEqual(['کاغذ', 'صحافی', 'پست', 'بقیه']);
+    expect(activation.changes.unchanged).toEqual(['کاغذ', 'صحافی', 'پست', 'تخفیف', 'بقیه']);
     expect(activation.changes.lines).toHaveLength(4);
     expect(activation.fingerprint).toBe(fingerprint(activation.list));
     expect(await tariff.activation(OWNER, '1')).toMatchObject({ ok: false, status: 409, error: 'already_active' });

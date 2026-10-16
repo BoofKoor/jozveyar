@@ -16,7 +16,19 @@
  * - **هشدار، نه خطا:** عددی بیش از ده برابر همان عدد نسخهٔ فعال، «شاید ریال نوشته‌ای».
  */
 
-import type { BindingBand, BindingType, CatalogPaused, PaperSize, PaperType, PriceList, PrintRate, ShippingRate } from '@jozveyar/contracts';
+import {
+  DISCOUNT_TIERS_MAX,
+  TIER_PERCENT_MAX,
+  type BindingBand,
+  type BindingType,
+  type CatalogPaused,
+  type DiscountTier,
+  type PaperSize,
+  type PaperType,
+  type PriceList,
+  type PrintRate,
+  type ShippingRate,
+} from '@jozveyar/contracts';
 import { PAPER_SIZES, PAPER_SIZE_ORDER, offeredSizes, pausedOf, quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatJalali, formatJalaliNumeric, formatNumber, formatTehranTime, rialsToTomans, toLatinDigits, tomansToRials } from '@jozveyar/text';
@@ -130,6 +142,13 @@ export interface RestInput {
   packaging: string | null;
 }
 
+/** پلهٔ تخفیف سفارش بزرگ (برش ۱۱٫۴، سؤال ۲۹۵): آستانه تومان روی جمع چاپ، کاغذ و صحافی، درصد، و ارسال رایگان. */
+export interface TierInput {
+  from: string;
+  percent: string;
+  freeShipping: boolean;
+}
+
 /** فرم پیش‌نویس، همان که تایپ شد. پول تومان است؛ کرایه هر خانه با کلید `rateKey`. */
 export interface DraftForm {
   label: string;
@@ -140,6 +159,8 @@ export interface DraftForm {
   bindings: BindingInput[];
   ship: Record<string, string>;
   rest: RestInput;
+  /** پله‌های تخفیف سفارش بزرگ (۱۱٫۴)؛ null یعنی فرمی که پله‌ها را نفرستاد (زبانهٔ پیش از ۱۱٫۴): همان پیش‌نویس می‌ماند. */
+  tiers: TierInput[] | null;
 }
 
 /**
@@ -214,7 +235,17 @@ export function draftFormOf(list: PriceList): DraftForm {
       minOrder: tomansField(list.settings.minOrderRials),
       packaging: String(list.settings.packagingWeightGrams),
     },
+    tiers: (list.discountTiers ?? []).map((tier) => ({
+      from: tomansField(tier.fromRials),
+      percent: String(tier.percent),
+      freeShipping: tier.freeShipping,
+    })),
   };
+}
+
+/** پلهٔ تازه: ۵٪ بی ارسال رایگان، آستانه خالی تا مالک بنویسد. */
+export function newTier(): TierInput {
+  return { from: '', percent: '5', freeShipping: false };
 }
 
 /** کاغذ تازه: روشن، نرخ صفر برای هر اندازهٔ ارائه‌شده (مالک عوضش می‌کند). */
@@ -246,8 +277,9 @@ export function newBinding(at?: number, random?: number): BindingInput {
  * فرم پیش‌نویس از فیلدهای فرم HTML (server action)، به نام‌های `DraftIssue`: `label`؛ `size.a5|a3` (تیک)؛
  * `print.<اندازه>.<یکرو|دورو>.<رنگ>`؛ `paper.<ردیف>.id|name|gsm|enabled|rate.<اندازه>`؛
  * `binding.<ردیف>.id|name|enabled|min|max|splits|weight` و `binding.<ردیف>.band.<اندازه>.<ردیف>.from|to|price`؛
- * `ship.<منطقه>:<آغاز وزن>`؛ و `rest.rounding|minOrder|packaging`. تیکی که نیامد خاموش است؛ فیلد «بقیه»ای که نیامد null (همان
- * پیش‌نویس)؛ ردیف بی شناسه نادیده؛ هر چیز دیگر نادیده؛ هر مقدار کوتاه‌شده، و ردیف‌ها به ترتیب شماره‌شان. سنجش با `readDraft`.
+ * `ship.<منطقه>:<آغاز وزن>`؛ `rest.rounding|minOrder|packaging`؛ و از ۱۱٫۴ `tiers` (نشانهٔ کارت پله‌ها) و `tier.<ردیف>.from|percent|free`. تیکی که
+ * نیامد خاموش است؛ فیلد «بقیه»ای که نیامد null (همان پیش‌نویس)، و پله‌ها بی نشانه null؛ ردیف بی شناسه نادیده؛ هر چیز دیگر نادیده؛ هر
+ * مقدار کوتاه‌شده، و ردیف‌ها به ترتیب شماره‌شان. سنجش با `readDraft`.
  */
 export function draftFormFromEntries(entries: Iterable<[string, unknown]>): DraftForm {
   const form: DraftForm = {
@@ -258,8 +290,11 @@ export function draftFormFromEntries(entries: Iterable<[string, unknown]>): Draf
     bindings: [],
     ship: {},
     rest: { rounding: null, minOrder: null, packaging: null },
+    tiers: null,
   };
   const papers = new Map<number, PaperInput>();
+  const tiers = new Map<number, TierInput>();
+  let tiersSent = false;
   const bindings = new Map<number, { row: BindingInput; bands: Record<PaperSize, Map<number, BandInput>> }>();
   const paperAt = (index: number) => {
     let row = papers.get(index);
@@ -304,12 +339,21 @@ export function draftFormFromEntries(entries: Iterable<[string, unknown]>): Draf
       rows.set(index, band);
     } else if ((m = /^ship\.([a-z_]{1,20}:\d{1,9})$/.exec(key))) form.ship[m[1]!] = value;
     else if ((m = /^rest\.(rounding|minOrder|packaging)$/.exec(key))) form.rest[m[1] as keyof RestInput] = value;
+    else if (key === 'tiers') tiersSent = true;
+    else if ((m = /^tier\.(\d)\.(from|percent|free)$/.exec(key))) {
+      const index = Number(m[1]);
+      const tier = tiers.get(index) ?? { from: '', percent: '', freeShipping: false };
+      if (m[2] === 'free') tier.freeShipping = value !== '';
+      else tier[m[2] as 'from' | 'percent'] = value;
+      tiers.set(index, tier);
+    }
   }
   const ordered = <T>(map: Map<number, T>) => [...map.entries()].sort(([a], [b]) => a - b).map(([, value]) => value);
   form.papers = ordered(papers).filter((row) => row.id !== '');
   form.bindings = ordered(bindings)
     .map(({ row, bands }) => ({ ...row, bands: bySize((size) => ordered(bands[size])) }))
     .filter((row) => row.id !== '');
+  if (tiersSent) form.tiers = ordered(tiers);
   return form;
 }
 
@@ -714,6 +758,37 @@ export function readDraft(form: DraftForm, base: PriceList, active: PriceList | 
     if (grams !== null) settings.packagingWeightGrams = grams;
   }
 
+  // ── تخفیف سفارش بزرگ (۱۱٫۴، سؤال ۲۹۵): آستانه تومان، درصد تا سقف قرارداد، دست‌کم یک تخفیف، هر آستانه یک بار، و به ترتیب آستانه ──
+  let discountTiers: DiscountTier[] = base.discountTiers ?? [];
+  if (form.tiers !== null) {
+    if (form.tiers.length > DISCOUNT_TIERS_MAX) error('tiers', ['حداکثر ', num(DISCOUNT_TIERS_MAX), ' پله.']);
+    const parsed: { index: number; tier: DiscountTier }[] = [];
+    form.tiers.forEach((row, index) => {
+      const at = (part: string) => `tier.${index}.${part}`;
+      const fromRials = money(at('from'), row.from, 0);
+      const percent = whole(at('percent'), row.percent, 0, TIER_PERCENT_MAX, ['درصد از ', num(0), ' تا ', num(TIER_PERCENT_MAX), ' است.']);
+      if (fromRials === 0) error(at('from'), ['آستانه صفر نمی‌شود؛ پله از جمعی بالاتر از صفر است.']);
+      if (fromRials === null || fromRials === 0 || percent === null) return;
+      if (percent === 0 && !row.freeShipping) {
+        error(at('percent'), ['این پله تخفیفی ندارد: درصد بگذار، یا «ارسال رایگان» را بزن.']);
+        return;
+      }
+      if (parsed.some((other) => other.tier.fromRials === fromRials)) {
+        error(at('from'), ['این آستانه را پلهٔ دیگری هم دارد.']);
+        return;
+      }
+      parsed.push({ index, tier: { fromRials, percent, freeShipping: row.freeShipping } });
+    });
+    const sorted = parsed.slice().sort((a, b) => a.tier.fromRials - b.tier.fromRials);
+    sorted.forEach(({ index, tier }, k) => {
+      const lower = sorted[k - 1]?.tier;
+      if (lower && (tier.percent < lower.percent || (lower.freeShipping && !tier.freeShipping))) {
+        warn(`tier.${index}.percent`, ['تخفیف این پله از پلهٔ پایین‌ترش کمتر است؛ پله‌ها روی هم جمع نمی‌شوند و فقط بالاترین می‌نشیند.']);
+      }
+    });
+    discountTiers = sorted.map(({ tier }) => tier);
+  }
+
   if (errors.length > 0) return { list: null, errors, warnings };
   const list: PriceList = {
     ...base,
@@ -726,6 +801,7 @@ export function readDraft(form: DraftForm, base: PriceList, active: PriceList | 
       const rials = rate.methodId === DEFAULT_SHIPPING_METHOD_ID ? shipRials.get(rateKey(rate)) : undefined;
       return rials === undefined ? rate : { ...rate, priceRials: rials };
     }),
+    discountTiers,
   };
   for (const problem of checkPriceList(list)) error('list', problem);
   return { list: errors.length > 0 ? null : list, errors, warnings };
@@ -887,6 +963,20 @@ export function restRows(list: PriceList): { label: string; value: Seg[] }[] {
   ];
 }
 
+/** پاداش یک پله: «۵٪»، «ارسال رایگان»، یا «۵٪ و ارسال رایگان». */
+export function tierRewardText(tier: Pick<DiscountTier, 'percent' | 'freeShipping'>): Seg[] {
+  const off: Seg[] = tier.percent > 0 ? [num(tier.percent), '٪'] : [];
+  if (off.length && tier.freeShipping) return [...off, ' و ارسال رایگان'];
+  return off.length ? off : ['ارسال رایگان'];
+}
+
+/** کارت «تخفیف سفارش بزرگ» (۱۱٫۴): هر پله «از 3,000,000 تومان» با پاداشش؛ بی پله یک ردیف «ندارد». */
+export function tierRows(list: PriceList): { label: Seg[]; value: Seg[] }[] {
+  const tiers = list.discountTiers ?? [];
+  if (tiers.length === 0) return [{ label: ['پله‌ها'], value: ['ندارد'] }];
+  return tiers.map((tier) => ({ label: ['از ', tomans(tier.fromRials), ' تومان'], value: tierRewardText(tier) }));
+}
+
 /** نام پیش‌فرض پیش‌نویس تازه: «تعرفهٔ مهر 1405»، ماه و سال تهران. */
 export function draftLabel(at: Date): string {
   return `تعرفهٔ ${formatJalali(at).replace(/^\d+ /, '')}`;
@@ -901,11 +991,11 @@ export interface ChangeLine {
 
 export interface TariffChanges {
   lines: ChangeLine[];
-  /** گروه‌هایی که هیچ عددشان عوض نشده، به ترتیب: چاپ، کاغذ، صحافی، پست، بقیه. */
+  /** گروه‌هایی که هیچ عددشان عوض نشده، به ترتیب: چاپ، کاغذ، صحافی، پست، تخفیف، بقیه. */
   unchanged: string[];
 }
 
-const GROUPS = ['چاپ', 'کاغذ', 'صحافی', 'پست', 'بقیه'] as const;
+const GROUPS = ['چاپ', 'کاغذ', 'صحافی', 'پست', 'تخفیف', 'بقیه'] as const;
 type Group = (typeof GROUPS)[number];
 
 /** «1,600 ← 1,700 تومان». */
@@ -1052,6 +1142,19 @@ export function tariffChanges(from: PriceList, to: PriceList): TariffChanges {
   }
   for (const rate of ratesA) if (!ratesB.some((b) => sameRate(b, rate))) line('پست', rateKeyOf(rate), ['برداشته شد']);
 
+  // ── تخفیف سفارش بزرگ (۱۱٫۴): پلهٔ تازه، پاداش عوض‌شده، یا پلهٔ برداشته؛ پله با آستانه‌اش شناخته می‌شود ──
+  const tiersA = from.discountTiers ?? [];
+  const tiersB = to.discountTiers ?? [];
+  const tierKey = (tier: DiscountTier): Seg[] => ['تخفیف سفارش بزرگ، از ', tomans(tier.fromRials), ' تومان'];
+  for (const tier of tiersB) {
+    const old = tiersA.find((a) => a.fromRials === tier.fromRials);
+    if (!old) line('تخفیف', tierKey(tier), ['تازه: ', ...tierRewardText(tier)]);
+    else if (old.percent !== tier.percent || old.freeShipping !== tier.freeShipping) {
+      line('تخفیف', tierKey(tier), [...tierRewardText(old), ' ← ', ...tierRewardText(tier)]);
+    }
+  }
+  for (const tier of tiersA) if (!tiersB.some((b) => b.fromRials === tier.fromRials)) line('تخفیف', tierKey(tier), ['برداشته شد']);
+
   // ── بقیه ──
   const restA = restRows(from);
   const restB = restRows(to);
@@ -1070,6 +1173,7 @@ export function tariffChanges(from: PriceList, to: PriceList): TariffChanges {
       bindingTypes: {},
       shippingRates: list.shippingRates.filter((rate) => rate.methodId !== DEFAULT_SHIPPING_METHOD_ID),
       settings: { ...list.settings, vatPercent: 0, roundingStepRials: 0, minOrderRials: 0, packagingWeightGrams: 0 },
+      discountTiers: [],
     });
   if (rest(from) !== rest(to)) line('بقیه', ['جزئیات دیگر'], ['عوض شد (روش‌های ارسال)']);
 

@@ -21,6 +21,8 @@ import {
   draftFormFromEntries,
   draftFormOf,
   draftLabel,
+  newTier,
+  tierRows,
   newBinding,
   newOptionId,
   newPaper,
@@ -108,6 +110,17 @@ function fieldsOf(f: DraftForm): [string, string][] {
     ...Object.entries(f.rest)
       .filter((entry): entry is [string, string] => entry[1] !== null)
       .map(([key, value]): [string, string] => [`rest.${key}`, value]),
+    // پله‌های تخفیف (۱۱٫۴): نشانهٔ کارت، و هر پله با تیک «ارسال رایگان» فقط وقتی زده شده
+    ...(f.tiers === null
+      ? []
+      : [
+          ['tiers', '1'] as [string, string],
+          ...f.tiers.flatMap((tier, i): [string, string][] => [
+            [`tier.${i}.from`, tier.from],
+            [`tier.${i}.percent`, tier.percent],
+            ...(tier.freeShipping ? [[`tier.${i}.free`, 'on'] as [string, string]] : []),
+          ]),
+        ]),
   ];
 }
 
@@ -231,6 +244,7 @@ describe('فرم پیش‌نویس', () => {
       ],
       ship: { 'tehran:0': '130,000' },
       rest: NO_REST,
+      tiers: null,
     });
     // فرم کامل ویرایشگر، رفت‌وبرگشت؛ با A5 و کاغذ و صحافی تازه هم.
     expect(draftFormFromEntries(fieldsOf(draftFormOf(V1)))).toEqual(draftFormOf(V1));
@@ -713,21 +727,21 @@ describe('تغییرها نسبت به نسخهٔ فعال', () => {
   };
   const draft = (f: DraftForm) => readDraft(f, { ...V1, version: 2 }, V1).list!;
 
-  it('فقط نرخ چاپ: یک خط برای هر رنگ و رو؛ «کاغذ، صحافی، پست و بقیه» بی تغییر', () => {
+  it('فقط نرخ چاپ: یک خط برای هر رنگ و رو؛ «کاغذ، صحافی، پست، تخفیف و بقیه» بی تغییر', () => {
     const v2 = draft(form({ label: 'تعرفهٔ مهر 1405', print: { ...form().print, a4: { single: rates('1,600', '2,000').single, double: rates('1,700', '2,200').double } } }));
     expect(changesOf(v2)).toEqual({
       lines: [
         ['چاپ سیاه‌سفید، دورو، A4، هر رو', '1,600 ← 1,700 تومان'],
         ['چاپ رنگی، دورو، A4، هر رو', '2,000 ← 2,200 تومان'],
       ],
-      unchanged: ['کاغذ', 'صحافی', 'پست', 'بقیه'],
+      unchanged: ['کاغذ', 'صحافی', 'پست', 'تخفیف', 'بقیه'],
     });
     // برگشت: همان خطوط، برعکس.
     expect(changesOf(V1, v2).lines).toEqual([
       ['چاپ سیاه‌سفید، دورو، A4، هر رو', '1,700 ← 1,600 تومان'],
       ['چاپ رنگی، دورو، A4، هر رو', '2,200 ← 2,000 تومان'],
     ]);
-    expect(changesOf({ ...V1, version: 3, label: 'فقط نام' })).toEqual({ lines: [], unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست', 'بقیه'] });
+    expect(changesOf({ ...V1, version: 3, label: 'فقط نام' })).toEqual({ lines: [], unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست', 'تخفیف', 'بقیه'] });
   });
 
   it('«بقیه» (۸٫۴): گرد کردن و حداقل سفارش هر کدام یک خط؛ گروه‌های دیگر بی تغییر', () => {
@@ -737,7 +751,7 @@ describe('تغییرها نسبت به نسخهٔ فعال', () => {
         ['گرد کردن', 'ندارد ← به 1,000 تومان'],
         ['حداقل سفارش', 'ندارد ← 50,000 تومان'],
       ],
-      unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست'],
+      unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست', 'تخفیف'],
     });
     expect(changesOf(draft(form({ rest: { ...form().rest, packaging: '150' } }))).lines).toEqual([['وزن بسته‌بندی', '100 گرم ← 150 گرم']]);
   });
@@ -761,7 +775,7 @@ describe('تغییرها نسبت به نسخهٔ فعال', () => {
         ['صحافی «طلق و سیم»، A5', 'تازه'],
         ['صحافی «منگنه»', 'تازه'],
       ],
-      unchanged: ['پست', 'بقیه'],
+      unchanged: ['پست', 'تخفیف', 'بقیه'],
     });
     // پایگاه داده گزینه‌ها را به ترتیب شناسه می‌دهد («binding_…» پیش از «spiral_clear»)؛ خطوط همان، پیش‌فرض اول.
     const fromDb: PriceList = {
@@ -802,7 +816,7 @@ describe('تغییرها نسبت به نسخهٔ فعال', () => {
         ['صحافی «منگنه»، A4، 2 تا 40 برگ', 'تازه: 5,000 تومان'],
         ['صحافی «منگنه»، A4، 1 تا 50 برگ', 'برداشته شد'],
       ],
-      unchanged: ['چاپ', 'پست', 'بقیه'],
+      unchanged: ['چاپ', 'پست', 'تخفیف', 'بقیه'],
     });
   });
 
@@ -822,13 +836,13 @@ describe('تغییرها نسبت به نسخهٔ فعال', () => {
         ['مالیات', '0٪ ← 9٪'],
         ['گرد کردن', 'ندارد ← به 1,000 تومان'],
       ],
-      unchanged: ['چاپ', 'کاغذ'],
+      unchanged: ['چاپ', 'کاغذ', 'تخفیف'],
     });
   });
 
   it('هرچه خط خودش را ندارد، «جزئیات دیگر»؛ ترتیب ردیف‌ها و گزینه‌ها تغییر نیست', () => {
     const tipax: PriceList = { ...V1, version: 2, shippingMethods: { ...V1.shippingMethods, tipax: { nameFa: 'تیپاکس', enabled: true } } };
-    expect(changesOf(tipax)).toEqual({ lines: [['جزئیات دیگر', 'عوض شد (روش‌های ارسال)']], unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست'] });
+    expect(changesOf(tipax)).toEqual({ lines: [['جزئیات دیگر', 'عوض شد (روش‌های ارسال)']], unchanged: ['چاپ', 'کاغذ', 'صحافی', 'پست', 'تخفیف'] });
     const reordered: PriceList = {
       ...V1,
       shippingRates: [...V1.shippingRates].reverse(),
@@ -880,5 +894,71 @@ describe('دوره‌های فعال بودن', () => {
     // و نسخه‌ای که همان SQL خاموشش کرد: پایانش ثبت نشده.
     expect(text(periodsText([{ from: at1102, to: null, by: 'سارا' }], false))).toBe('فعال بود از 1405/07/05');
     expect(text(periodsText([], true))).toBe('فعال');
+  });
+});
+
+describe('تخفیف سفارش بزرگ در تعرفه (۱۱٫۴)', () => {
+  const tier = (from: string, percent: string, freeShipping = false) => ({ from, percent, freeShipping });
+  const base: PriceList = { ...V1, version: 2 };
+  const issues = (f: DraftForm) => {
+    const check = readDraft(f, base, V1);
+    return {
+      errors: check.errors.map((issue) => [issue.field, text(issue.text)]),
+      warnings: check.warnings.map((issue) => [issue.field, text(issue.text)]),
+      tiers: check.list?.discountTiers ?? null,
+    };
+  };
+
+  it('فرم پله‌ها: از نسخه، و رفت‌وبرگشت فیلدهای HTML؛ فرم بی نشانهٔ کارت (زبانهٔ پیش از ۱۱٫۴) پله‌ها را null می‌گذارد', () => {
+    const list: PriceList = { ...V1, discountTiers: [{ fromRials: 30_000_000, percent: 5, freeShipping: true }] };
+    expect(draftFormOf(list).tiers).toEqual([tier('3,000,000', '5', true)]);
+    expect(draftFormOf(V1).tiers).toEqual([]);
+    const f = form({ tiers: [tier('3,000,000', '5', true), tier('7,000,000', '10'), newTier()] });
+    expect(draftFormFromEntries(fieldsOf(f))).toEqual(f);
+    expect(draftFormFromEntries(fieldsOf(form({ tiers: [] }))).tiers).toEqual([]);
+    expect(draftFormFromEntries(fieldsOf(form({ tiers: null }))).tiers).toBeNull();
+  });
+
+  it('سنجش: آستانه تومان و بیش از صفر، درصد تا ۵۰، دست‌کم یک تخفیف، آستانهٔ یکتا، تا ۵ پله؛ خروجی به ترتیب آستانه', () => {
+    const ok = issues(form({ tiers: [tier('7,000,000', '10', true), tier('۳٬۰۰۰٬۰۰۰', '5')] }));
+    expect(ok.errors).toEqual([]);
+    expect(ok.tiers).toEqual([
+      { fromRials: 30_000_000, percent: 5, freeShipping: false },
+      { fromRials: 70_000_000, percent: 10, freeShipping: true },
+    ]);
+    expect(issues(form({ tiers: [tier('0', '5')] })).errors).toEqual([['tier.0.from', 'آستانه صفر نمی‌شود؛ پله از جمعی بالاتر از صفر است.']]);
+    expect(issues(form({ tiers: [tier('1,000', '51')] })).errors).toEqual([['tier.0.percent', 'درصد از 0 تا 50 است.']]);
+    expect(issues(form({ tiers: [tier('1,000', '0')] })).errors).toEqual([['tier.0.percent', 'این پله تخفیفی ندارد: درصد بگذار، یا «ارسال رایگان» را بزن.']]);
+    expect(issues(form({ tiers: [tier('1,000', '0', true)] })).errors).toEqual([]);
+    expect(issues(form({ tiers: [tier('1,000', '5'), tier('1,000', '8')] })).errors).toEqual([['tier.1.from', 'این آستانه را پلهٔ دیگری هم دارد.']]);
+    expect(issues(form({ tiers: [tier('', '5')] })).errors.map(([field]) => field)).toEqual(['tier.0.from']);
+    const six = Array.from({ length: 6 }, (_, i) => tier(String((i + 1) * 1000), '5'));
+    expect(issues(form({ tiers: six })).errors.map(([field]) => field)).toContain('tiers');
+  });
+
+  it('هشدار: پلهٔ بالاتر با تخفیف کمتر (پله‌ها جمع نمی‌شوند)؛ و فرم بی پله همان پله‌های پیش‌نویس را نگه می‌دارد', () => {
+    expect(issues(form({ tiers: [tier('1,000', '10', true), tier('5,000', '8')] })).warnings).toEqual([
+      ['tier.1.percent', 'تخفیف این پله از پلهٔ پایین‌ترش کمتر است؛ پله‌ها روی هم جمع نمی‌شوند و فقط بالاترین می‌نشیند.'],
+    ]);
+    const kept: PriceList = { ...base, discountTiers: [{ fromRials: 10_000, percent: 5, freeShipping: false }] };
+    expect(readDraft(form({ tiers: null }), kept, V1).list!.discountTiers).toEqual(kept.discountTiers);
+    expect(readDraft(form({ tiers: [] }), kept, V1).list!.discountTiers).toEqual([]);
+  });
+
+  it('«چه عوض می‌شود»: پلهٔ تازه، پاداش عوض‌شده و پلهٔ برداشته؛ و جدول فقط‌خواندنی', () => {
+    const from: PriceList = { ...V1, discountTiers: [{ fromRials: 30_000_000, percent: 5, freeShipping: false }, { fromRials: 50_000_000, percent: 8, freeShipping: false }] };
+    const to: PriceList = { ...V1, version: 2, discountTiers: [{ fromRials: 30_000_000, percent: 5, freeShipping: true }, { fromRials: 70_000_000, percent: 0, freeShipping: true }] };
+    const changes = tariffChanges(from, to);
+    expect(changes.lines.map((l) => [text(l.key), text(l.value)])).toEqual([
+      ['تخفیف سفارش بزرگ، از 3,000,000 تومان', '5٪ ← 5٪ و ارسال رایگان'],
+      ['تخفیف سفارش بزرگ، از 7,000,000 تومان', 'تازه: ارسال رایگان'],
+      ['تخفیف سفارش بزرگ، از 5,000,000 تومان', 'برداشته شد'],
+    ]);
+    expect(changes.unchanged).toEqual(['چاپ', 'کاغذ', 'صحافی', 'پست', 'بقیه']);
+    expect(tierRows(to).map((row) => [text(row.label), text(row.value)])).toEqual([
+      ['از 3,000,000 تومان', '5٪ و ارسال رایگان'],
+      ['از 7,000,000 تومان', 'ارسال رایگان'],
+    ]);
+    expect(tierRows(V1).map((row) => [text(row.label), text(row.value)])).toEqual([['پله‌ها', 'ندارد']]);
   });
 });
