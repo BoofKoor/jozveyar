@@ -10,12 +10,14 @@
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
 S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
 مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، از برش ۳ب
-ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، از ۶٫۱ خواندن فایل پست، و از ۹٫۲ پیش‌نمایش قالب برگه)،
+ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، از ۶٫۱ خواندن فایل پست، از ۹٫۲ پیش‌نمایش قالب برگه، و از ۱۰٫۲
+PDF گزارش‌های پنل)،
 DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰)، DOCWORKER_TICKET_TIMEOUT (اختیاری، ثانیه؛ ساختن برگه از قالب، پیش‌فرض ۹۰)،
 DOCWORKER_RETENTION_SECONDS (اختیاری؛ فاصلهٔ دورهای پاک کردن فایل‌های سفارش بسته، پیش‌فرض ۶۰۰).
 
 نودی که کار سفارش (`prepare_order`) برمی‌دارد، بین کارها فایل‌های سفارش‌های بسته را هم پس از روزهای نگهداری پاک می‌کند
-(ADR-044)، و از ۶٫۱ فایل پست خام و متن سطرهایی که سفارش ما نشدند (ADR-045)؛ نود فقط‌تحلیل نه.
+(ADR-044)، و از ۶٫۱ فایل پست خام و متن سطرهایی که سفارش ما نشدند (ADR-045)؛ نود فقط‌تحلیل نه. نودی که PDF گزارش می‌سازد
+(`render_report`)، در همان دور خروجی‌های یک روزه را هم پاک می‌کند (۱۰٫۲، ADR-061).
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from .jobs import (
     mark_document_failed,
 )
 from .orders import PREPARE_ORDER, prepare_order
+from .report import RENDER_REPORT, mark_export_failed, purge_exports, render_report
 from .retention import sweep
 from .shipments import READ_POST_FILE, mark_import_failed, read_post_file
 from .storage import S3Storage
@@ -49,7 +52,7 @@ log = logging.getLogger("docworker")
 # سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
 
-KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET, READ_POST_FILE, PREVIEW_TICKET_TEMPLATE)
+KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET, READ_POST_FILE, PREVIEW_TICKET_TEMPLATE, RENDER_REPORT)
 # شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
 EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
 
@@ -75,9 +78,10 @@ class Worker:
         self.office = convert.LibreOffice()
         # اولین هم‌گام‌سازی فونت همان اول کار؛ بعد هر ده دقیقه، بین کارها.
         self.fonts_due = 0.0
-        # پاک کردن فایل‌های سفارش بسته (ADR-044): همان الگو، فقط روی نودی که کار سفارش برمی‌دارد.
+        # پاک کردن فایل‌های سفارش بسته (ADR-044): همان الگو، فقط روی نودی که کار سفارش برمی‌دارد؛ و از ۱۰٫۲ خروجی‌های کهنهٔ گزارش، روی
+        # نودی که PDF گزارش می‌سازد.
         self.retention_every = float(os.environ.get("DOCWORKER_RETENTION_SECONDS", "600"))
-        self.retention_due = 0.0 if PREPARE_ORDER in self.kinds else float("inf")
+        self.retention_due = 0.0 if PREPARE_ORDER in self.kinds or RENDER_REPORT in self.kinds else float("inf")
 
     def stop(self, *_: object) -> None:
         # کار جاری تمام می‌شود؛ اگر داکر زودتر بکشد، اجاره کار را برمی‌گرداند.
@@ -102,16 +106,23 @@ class Worker:
             )
 
     def sweep_if_due(self, conn: psycopg.Connection) -> None:
-        """فایل‌های سفارش‌های بستهٔ سررسیده. شکستش کار را نگه نمی‌دارد: دور بعد دوباره."""
+        """فایل‌های سفارش‌های بستهٔ سررسیده، و خروجی‌های کهنهٔ گزارش. شکست هر کدام کار را نگه نمی‌دارد: دور بعد دوباره."""
         now = time.monotonic()
         if now < self.retention_due:
             return
         self.retention_due = now + self.retention_every
-        try:
-            sweep(conn, self.storage)
-        except Exception as error:  # noqa: BLE001
-            conn.rollback()
-            log.warning("فایل‌های سفارش‌های بسته پاک نشدند: %s", error)
+        if PREPARE_ORDER in self.kinds:
+            try:
+                sweep(conn, self.storage)
+            except Exception as error:  # noqa: BLE001
+                conn.rollback()
+                log.warning("فایل‌های سفارش‌های بسته پاک نشدند: %s", error)
+        if RENDER_REPORT in self.kinds:
+            try:
+                purge_exports(conn)
+            except Exception as error:  # noqa: BLE001
+                conn.rollback()
+                log.warning("خروجی‌های کهنهٔ گزارش پاک نشدند: %s", error)
 
     def run_once(self, conn: psycopg.Connection) -> bool:
         """یک کار برمی‌دارد و انجام می‌دهد. false یعنی صف خالی بود."""
@@ -122,6 +133,7 @@ class Worker:
             f"سفارش {job.order_id}" if job.order_id
             else f"ورود فایل پست {job.shipment_import_id}" if job.shipment_import_id
             else f"قالب {job.ticket_template_id}" if job.ticket_template_id
+            else f"خروجی گزارش {job.report_export_id}" if job.report_export_id
             else f"سند {job.document_id}"
         )
         log.info("کار %s (%s) %s — تلاش %s", job.id, job.kind, target, job.attempts)
@@ -136,6 +148,8 @@ class Worker:
                 result = read_post_file(conn, job.shipment_import_id)
             elif job.kind == PREVIEW_TICKET_TEMPLATE:
                 result = preview_ticket_template(conn, self.storage, job.ticket_template_id, job.payload)
+            elif job.kind == RENDER_REPORT:
+                result = render_report(conn, job.report_export_id)
             else:
                 result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)
@@ -150,6 +164,9 @@ class Worker:
                 mark_document_failed(conn, job.document_id, failure.code)
             if job.shipment_import_id:
                 mark_import_failed(conn, job.shipment_import_id)
+            # خروجی گزارشی که ساخته نشد «ساخته نشد» است با کد و پیام کوتاه، تا صفحه‌اش تا ابد «در حال ساختن» نماند.
+            if job.report_export_id:
+                mark_export_failed(conn, job.report_export_id, f"{failure.code}: {failure}")
             conn.commit()
             log.warning("✗ کار %s شکست قطعی: %s", job.id, failure.code)
         except Exception as error:  # noqa: BLE001 — هر خطای دیگری گذرا فرض می‌شود
@@ -160,6 +177,8 @@ class Worker:
             # ورودی که پس از آخرین تلاش هم خوانده نشد، «خوانده نشد» است، نه تا ابد «در حال خواندن».
             if final and job.shipment_import_id:
                 mark_import_failed(conn, job.shipment_import_id)
+            if final and job.report_export_id:
+                mark_export_failed(conn, job.report_export_id, f"render_failed: {type(error).__name__}")
             conn.commit()
             log.exception("✗ کار %s شکست%s", job.id, " — تلاش‌ها تمام شد" if final else "، دوباره تلاش می‌شود")
         return True
