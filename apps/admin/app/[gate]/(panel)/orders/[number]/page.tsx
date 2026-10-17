@@ -13,6 +13,7 @@ import { bytesParts, formatCardMask, formatJalaliNumeric, formatNumber, formatTe
 import { Alert } from '../../../../../components/Alert';
 import { AssignForm } from '../../../../../components/AssignForm';
 import { Barcode } from '../../../../../components/Barcode';
+import { BlockForm } from '../../../../../components/BlockForm';
 import { NoAccess } from '../../../../../components/NoAccess';
 import { InquiryForm } from '../../../../../components/InquiryForm';
 import { NoteForm } from '../../../../../components/NoteForm';
@@ -73,7 +74,8 @@ import {
 import { can } from '../../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../../lib/server/context';
 import type { InquiryOutcome, OrderDetailsView, RefundOutcome, RefundView } from '../../../../../lib/server/orders';
-import { advanceOrderAction, rebuildPdfAction } from '../../../actions';
+import type { OrderBlock } from '../../../../../lib/server/blocks';
+import { advanceOrderAction, rebuildPdfAction, unblockMobileAction } from '../../../actions';
 
 export async function generateMetadata({ params }: { params: Promise<{ number: string }> }): Promise<Metadata> {
   const orderNumber = orderNumberOf((await params).number);
@@ -120,19 +122,23 @@ const PAGE_ERRORS = new Set([
   'refund_not_found',
   'refund_not_inquirable',
   'note_form_stale',
+  'mobile_already_blocked',
+  'block_not_found',
 ]);
 
 /**
  * فرم باز ستون کنار یا کارت‌ها (`?do=`): لغو، برگرداندن، ویرایش گیرنده، جابه‌جایی چاپخانه (۵٫۲)، کنار گذاشتن یک کد رهگیری (۶٫۲،
- * با `code`)، یا بازپرداخت از درگاه و ثبت دستی (۷٫۳)؛ هر چیز دیگر یعنی هیچ.
+ * با `code`)، بازپرداخت از درگاه و ثبت دستی (۷٫۳)، یا مسدود کردن موبایل مشتری (۱۲٫۲)؛ هر چیز دیگر یعنی هیچ.
  */
-type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | 'void' | 'refund' | 'refund-manual' | null;
-const MODES: readonly Exclude<Mode, null>[] = ['cancel', 'revert', 'edit', 'assign', 'void', 'refund', 'refund-manual'];
+type Mode = 'cancel' | 'revert' | 'edit' | 'assign' | 'void' | 'refund' | 'refund-manual' | 'block' | null;
+const MODES: readonly Exclude<Mode, null>[] = ['cancel', 'revert', 'edit', 'assign', 'void', 'refund', 'refund-manual', 'block'];
 const modeOf = (value: unknown): Mode => MODES.find((mode) => mode === value) ?? null;
 
 /** هر فرم، با مجوزی که می‌خواهد؛ کاربر چاپخانه (۵٫۳) هیچ‌کدام را ندارد و به جای سفارش «این بخش برای چاپخانه باز نیست» می‌بیند. */
-const modeAllowed = (mode: Exclude<Mode, null>, view: OrderDetailsView, canVoid: boolean): boolean =>
-  mode === 'refund' || mode === 'refund-manual'
+const modeAllowed = (mode: Exclude<Mode, null>, view: OrderDetailsView, canVoid: boolean, canBlock: boolean): boolean =>
+  mode === 'block'
+    ? canBlock
+    : mode === 'refund' || mode === 'refund-manual'
     ? refundFormOpen(mode, view.refund)
     : mode === 'cancel'
     ? view.canCancel
@@ -1302,6 +1308,52 @@ const INQUIRY_DONE: Record<InquiryOutcome, { tone: 'success' | 'info' | 'warning
   verified: { tone: 'error', text: 'درگاه این تلاش را تأییدشده می‌گوید، پس پولش خودکار برنمی‌گردد؛ دستی به مشتری برش گردان.' },
 };
 
+/**
+ * مسدودی موبایل صاحب سفارش (۱۲٫۲، سؤال ۲۱۲)، زیر کارت «ارسال به»، فقط برای مالک و متصدی: مسدود با از کی، چه کسی و دلیل، و «رفع مسدودی»؛
+ * وگرنه «مسدود کردن این شماره» که فرم دلیل را در همین کارت باز می‌کند (`?do=block`).
+ */
+function BlockRow({ gate, block, orderNumber, open, self, now }: { gate: string; block: OrderBlock; orderNumber: number; open: boolean; self: string; now: Date }) {
+  const live = block.live;
+  if (live) {
+    return (
+      <div className="ad-gap" data-testid="mobile-blocked">
+        <p className="jy-note jy-note--error">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>
+            این شماره مسدود است: کد پیامکی نمی‌گیرد، و سفارش تازه و پرداخت تازه نمی‌سازد. از {whenText(live.blockedAt, now)}
+            {live.blockedByName ? `، ${live.blockedByName}` : ''}
+            {live.orderNumber !== null && live.orderNumber !== orderNumber ? (
+              <>
+                {' '}
+                (از سفارش{' '}
+                <Link className="jy-link num" href={panelPath(gate, `/orders/${live.orderNumber}`)}>
+                  {live.orderNumber}
+                </Link>
+                )
+              </>
+            ) : null}
+            . دلیل: {live.reason}
+          </span>
+        </p>
+        <form action={unblockMobileAction} className="ad-actions">
+          <input type="hidden" name="gate" value={gate} />
+          <input type="hidden" name="id" value={live.id} />
+          <input type="hidden" name="number" value={orderNumber} />
+          <StatusButton className="jy-btn jy-btn--secondary">رفع مسدودی</StatusButton>
+        </form>
+      </div>
+    );
+  }
+  if (open) return <BlockForm gate={gate} order={{ number: orderNumber, phone: phoneText(block.mobile) }} maxLength={REASON_MAX} back={self} />;
+  return (
+    <div className="ad-actions ad-gap">
+      <Link href={`${self}?do=block`} className="jy-btn jy-btn--text" scroll={false}>
+        مسدود کردن این شماره
+      </Link>
+    </div>
+  );
+}
+
 export default async function OrderPage({
   params,
   searchParams,
@@ -1311,7 +1363,7 @@ export default async function OrderPage({
 }) {
   const { gate, number } = await params;
   const query = await searchParams;
-  const { orders } = requirePanel(gate);
+  const { orders, blocks } = requirePanel(gate);
   const session = await requireSession(gate);
   if (!can(session, 'orders.read')) return <NoAccess gate={gate} session={session} />;
   const back = (
@@ -1326,11 +1378,14 @@ export default async function OrderPage({
   const view = result.value;
   const mode = modeOf(query.do);
   const canVoid = can(session, 'shipments.revert');
-  if (mode && view.partnerView && !modeAllowed(mode, view, canVoid)) return <NoAccess gate={gate} session={session} />;
+  const canBlock = can(session, 'customers.block');
+  if (mode && view.partnerView && !modeAllowed(mode, view, canVoid, canBlock)) return <NoAccess gate={gate} session={session} />;
   const voiding = mode === 'void' && canVoid && typeof query.code === 'string' ? query.code : null;
   const { details, bounds, canDownload, canEditRecipient } = view;
   const { order } = details;
   const now = bounds.at;
+  // مسدودی موبایل صاحب سفارش (۱۲٫۲): فقط با `customers.block`؛ بی آن کارت «ارسال به» همان امروز است.
+  const block = await blocks.ofOrder(session, order.orderNumber);
   const stale = staleSections(
     details.items.flatMap((item) => item.sections),
     now,
@@ -1391,6 +1446,10 @@ export default async function OrderPage({
       {query.done === 'refund_inquiry' && typeof query.r === 'string' && query.r in REFUND_INQUIRY_DONE ? (
         <Alert tone={REFUND_INQUIRY_DONE[query.r as RefundOutcome].tone}>{REFUND_INQUIRY_DONE[query.r as RefundOutcome].text}</Alert>
       ) : null}
+      {query.done === 'block' || query.done === 'block_again' ? (
+        <Alert tone="success">این شماره مسدود شد: کد پیامکی نمی‌گیرد، و سفارش تازه و پرداخت تازه نمی‌سازد.</Alert>
+      ) : null}
+      {query.done === 'unblock' ? <Alert tone="success">مسدودی این شماره برداشته شد؛ از همین حالا دوباره سفارش می‌دهد.</Alert> : null}
       {query.done === 'void' ? (
         <Alert tone="success">
           کد رهگیری کنار رفت و سطرش به صف تأیید برگشت
@@ -1526,6 +1585,12 @@ export default async function OrderPage({
                   <dt>موبایل</dt>
                   <dd>
                     <span className="num">{phoneText(order.recipientPhone)}</span>
+                    {block?.live ? (
+                      <>
+                        {' '}
+                        <span className="jy-badge jy-badge--error">مسدود</span>
+                      </>
+                    ) : null}
                   </dd>
                 </div>
                 <div>
@@ -1541,6 +1606,7 @@ export default async function OrderPage({
                   <dd>{shippingText(details)}</dd>
                 </div>
               </dl>
+              {block ? <BlockRow gate={gate} block={block} orderNumber={order.orderNumber} open={mode === 'block'} self={self} now={now} /> : null}
             </section>
           )}
 

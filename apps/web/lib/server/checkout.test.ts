@@ -1341,6 +1341,79 @@ describe('مسیر خرید روی سرور', () => {
     });
   });
 
+  describe('موبایل مسدود (۱۲٫۲، سؤال ۲۱۲)', () => {
+    const body = (documentIds: string[], expectedTotalRials: number, checkoutKey = randomUUID()) => ({
+      items: [item(documentIds)],
+      place: TEHRAN,
+      recipient,
+      checkoutKey,
+      expectedTotalRials,
+      quoteSnapshot: null,
+    });
+    const totalOf = async (documentIds: string[]) => {
+      const priced = await service.quote(ME, { items: [item(documentIds)], place: TEHRAN });
+      if (!priced.ok) throw new Error(priced.error);
+      return priced.value.breakdown.totalRials;
+    };
+
+    it('«پرداخت»: سفارش تازه نه، ۴۰۳ پیش از هر حساب؛ قیمت هنوز باز؛ شمارهٔ دیگر و پس از رفع مسدودی همان', async () => {
+      const scan = doc(10);
+      const total = await totalOf([scan]);
+      orders.blockedMobiles.add(SARA.mobile);
+      // قیمت پیش از هویت است و مسدودی آن را نمی‌بندد.
+      expect((await service.quote(ME, { items: [item([scan])], place: TEHRAN })).ok).toBe(true);
+      expect(await service.placeOrder(ME, SARA, body([scan], total))).toEqual({ ok: false, status: 403, error: 'mobile_blocked' });
+      // پیش از حساب: عدد نادرست هم همان ۴۰۳ است، نه ۴۰۹ قیمت.
+      expect(await service.placeOrder(ME, SARA, body([scan], 1))).toMatchObject({ status: 403, error: 'mobile_blocked' });
+      expect([orders.orders, orders.payments]).toEqual([[], []]);
+
+      expect((await service.placeOrder(ME, REZA, body([scan], total))).ok).toBe(true);
+      orders.blockedMobiles.delete(SARA.mobile);
+      expect((await service.placeOrder(ME, SARA, body([scan], total))).ok).toBe(true);
+    });
+
+    it('«دوباره پرداخت کن»: تلاش تازه نه، پیش از درگاه، ۴۰۳ با سفارش؛ سفارش پرداخت‌شده همان‌طور دیده می‌شود', async () => {
+      const gateway = mockGateway({ newRefId: () => '803114' });
+      build(capture, gateway);
+      const { order, payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'cancel');
+      const paid = await placed([doc(12)]);
+      await pay(paid.payment!.redirectUrl, 'success');
+      orders.blockedMobiles.add(SARA.mobile);
+      const before = orders.payments.length;
+      const started = vi.spyOn(gateway, 'start');
+      expect(await service.payAgain(SARA, order.token)).toMatchObject({ ok: false, status: 403, error: 'mobile_blocked', order: { number: order.number } });
+      // درگاه اصلاً شروع نشد: تلاشی بی ردیف نزد درگاه نمی‌ماند.
+      expect(started).not.toHaveBeenCalled();
+      expect(orders.payments).toHaveLength(before);
+      // دو زبانه با همان کلید «پرداخت»: سفارشی که هست، همان حکم.
+      expect(await service.payAgain(SARA, paid.order.token)).toMatchObject({ ok: true, value: { payment: null, order: { status: 'paid' } } });
+      orders.blockedMobiles.delete(SARA.mobile);
+      expect((await service.payAgain(SARA, order.token)).ok).toBe(true);
+      expect(started).toHaveBeenCalledTimes(1);
+    });
+
+    it('مسدودی میان سنجش و درج (محافظ پایگاه داده): همان ۴۰۳، بی سفارش و بی تلاش', async () => {
+      const scan = doc(10);
+      const total = await totalOf([scan]);
+      // سنجش بی قفل «نه» می‌گوید، و درج سفارش به محافظ می‌خورد.
+      const blockedNow = vi.spyOn(orders, 'mobileBlocked').mockResolvedValue(false);
+      orders.blockedMobiles.add(SARA.mobile);
+      expect(await service.placeOrder(ME, SARA, body([scan], total))).toEqual({ ok: false, status: 403, error: 'mobile_blocked' });
+      expect(orders.orders).toEqual([]);
+
+      // سفارش پیش از مسدودی؛ مسدودی پیش از درج تلاش: تلاش درگاه بی ردیف رها می‌شود.
+      orders.blockedMobiles.delete(SARA.mobile);
+      const { order, payment } = await placed([scan]);
+      await pay(payment!.redirectUrl, 'cancel');
+      orders.blockedMobiles.add(SARA.mobile);
+      const before = orders.payments.length;
+      expect(await service.payAgain(SARA, order.token)).toMatchObject({ ok: false, status: 403, error: 'mobile_blocked', order: { number: order.number } });
+      expect(orders.payments).toHaveLength(before);
+      blockedNow.mockRestore();
+    });
+  });
+
   describe('کد تخفیف و تخفیف سفارش بزرگ (۱۱٫۴)', () => {
     const T = (tomans: number) => tomans * 10;
     // ۱۴۷ صفحه: ۲۸۰,۲۰۰ تومان چاپ و صحافی؛ کرایهٔ استان تهران ۱۲۹,۵۰۰.

@@ -344,6 +344,20 @@
       "when": 1792150794745,
       "tag": "0048_discounts_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792230289163,
+      "tag": "0049_mobile_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792230560524,
+      "tag": "0050_mobile_blocks_guards",
+      "breakpoints": true
     }
   ]
 }

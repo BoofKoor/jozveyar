@@ -2,6 +2,7 @@
  * کد پیامکی و نشست (ADR-033): هویت فقط موقع پرداخت، بی رمز و ثبت‌نام.
  *
  * - **کد:** ۵ رقم، ۲ دقیقه اعتبار، ۳ فرصت، ارسال دوباره پس از ۹۰ ثانیه.
+ * - **شمارهٔ مسدود** (برش ۱۲٫۲، ADR-063، سؤال ۲۱۲): کد نمی‌گیرد، با ۴۰۳ `mobile_blocked` و پیام «تماس».
  * - **سقف ارسال، لایه‌لایه** (برش ۷، ADR-049، سؤال ۱۱۷): کد فقط برای مرورگری که جزوهٔ آماده و زنده روی سرور دارد (دروازهٔ جزوه، همان
  *   شرط «ادامه»)؛ ۵ کد در ساعت برای هر مرورگر؛ ۵ در ساعت و ۱۰ در ۲۴ ساعت برای هر شماره؛ ۲۰ در ساعت برای هر IP؛ و ترمز آخر کل
  *   سایت، ساعتی و ۲۴ ساعته (`settings`، پیش‌فرض ۳۰۰ و ۲٬۰۰۰). پنجره‌ها لغزان‌اند (سؤال ۱۳۳). شمارش از ردیف‌های `otp_requests`، زیر یک
@@ -85,7 +86,9 @@ export function createAuthService(deps: AuthServiceDeps) {
 
   /**
    * سقف پرشده، یا null. «چند ثانیهٔ دیگر» تا بیرون رفتن قدیمی‌ترین کد همان پنجره. اول دروازهٔ جزوه (کد برای مرورگری که جزوه‌ای
-   * روی سرور ندارد اصلاً معنا ندارد)، بعد لایه‌ها از تنگ به گشاد، و ترمز کل سایت آخر.
+   * روی سرور ندارد اصلاً معنا ندارد)، بعد شمارهٔ مسدود (برش ۱۲٫۲، ADR-063: پیامکی نمی‌رود و چیزی شمرده نمی‌شود، و «چند ثانیهٔ دیگر» به
+   * شماره‌ای که هرگز کد نمی‌گیرد معنا ندارد)، بعد لایه‌ها از تنگ به گشاد، و ترمز کل سایت آخر. دروازهٔ جزوه پیش از مسدودی است، تا رباتی
+   * بی جزوه نتواند شماره‌ها را بپرسد.
    */
   function limitHit(counts: OtpCounts, at: Date, siteLimit: number, siteDayLimit: number): Failure | null {
     const wait = (from: Date | null, span: number) =>
@@ -93,6 +96,7 @@ export function createAuthService(deps: AuthServiceDeps) {
     const tooMany = (scope: string, from: Date | null, span: number) =>
       fail(429, 'too_many_codes', { scope, retryAfterSeconds: wait(from, span) });
     if (!counts.ready) return fail(409, 'otp_no_documents');
+    if (counts.blocked) return fail(403, 'mobile_blocked');
     if (counts.mobileLatest && at.getTime() - counts.mobileLatest.getTime() < OTP_RESEND_MS) {
       return fail(429, 'resend_too_soon', { retryAfterSeconds: wait(counts.mobileLatest, OTP_RESEND_MS) });
     }

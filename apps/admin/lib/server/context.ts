@@ -10,6 +10,7 @@ import { notFound, redirect } from 'next/navigation';
 import {
   REFUND_AUTO_EVERY_MS,
   createAdminStore,
+  createBlockStore,
   createCheckoutPreviewStore,
   createDiscountStore,
   createOrderStore,
@@ -40,6 +41,7 @@ import { panelPath } from '../gate';
 import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
 import { adminConfig, panelMockGateway, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
+import { createPanelBlocks, type PanelBlocks } from './blocks';
 import { createPanelDiscounts, type PanelDiscounts } from './discounts';
 import { createPanelExports, type PanelExports } from './exports';
 import { createPanelOrders, type PanelOrders } from './orders';
@@ -65,6 +67,7 @@ interface Panel {
   exports: PanelExports;
   templates: PanelTemplates;
   discounts: PanelDiscounts;
+  blocks: PanelBlocks;
 }
 
 let cached: Panel | null | undefined;
@@ -155,6 +158,8 @@ function build(config: AdminConfig): Panel {
     templates: createPanelTemplates({ store: createTicketTemplateStore(getDb()), storage, stepUp: auth.stepUp, secret: config.secret }),
     // کدهای تخفیف (۱۱٫۴، ADR-062): دیدن مالک و حسابدار، ساختن و عوض کردن فقط مالک با همان کد تازهٔ ورود؛ خاموش کردن تنها بی کد.
     discounts: createPanelDiscounts({ store: createDiscountStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
+    // مسدودی موبایل مشتری (۱۲٫۲، ADR-063): مالک و متصدی، بی کد تازه؛ برگشت‌پذیر است و پولی جابه‌جا نمی‌کند.
+    blocks: createPanelBlocks({ store: createBlockStore(getDb()), secret: config.secret }),
   };
 }
 

@@ -615,6 +615,59 @@ test.describe('قدم‌ها', () => {
   });
 });
 
+test('موبایل مسدود (۱۲٫۲، سؤال ۲۱۲): کد نمی‌رود، «پرداخت» و «دوباره پرداخت کن» نه، با «تماس»؛ پس از رفع مسدودی همان راه', async ({ browser }) => {
+  const MESSAGE = 'ثبت سفارش با این شماره ممکن نیست؛ از «تماس» پیام بده.';
+  /** مسدودی همان‌طور که پنل می‌نشاند؛ رفعش همان بستن یک‌بارهٔ ردیف (`mobile_blocks_guard`). */
+  const block = (mobile: string) =>
+    sql()`insert into mobile_blocks (mobile, reason, blocked_by) values (${mobile}, 'آزمایش سرتاسری', gen_random_uuid())`;
+  const unblock = (mobile: string) =>
+    sql()`update mobile_blocks set unblocked_at = now(), unblocked_by = gen_random_uuid() where mobile = ${mobile} and unblocked_at is null`;
+  const contactOf = async (note: ReturnType<Page['getByTestId']>) => {
+    const link = note.getByRole('link', { name: '«تماس»' });
+    await expect(link).toHaveAttribute('href', '/contact');
+    await expect(link).toHaveAttribute('target', '_blank');
+  };
+
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  await dropReady(page);
+  await toPay(page);
+
+  // کد پیامکی نمی‌رود: پیام زیر فیلد، بی ردیف کد.
+  const blocked = newMobile();
+  await block(blocked);
+  await page.getByLabel('شمارهٔ موبایل').fill(blocked);
+  await visibleButton(page, 'ارسال کد').click();
+  await expect(page.getByTestId('ck-tel-error')).toHaveText(MESSAGE);
+  await contactOf(page.getByTestId('ck-tel-error'));
+  await expect(page.getByLabel('شمارهٔ موبایل')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByRole('heading', { level: 1, name: 'تأیید با پیامک' })).toBeVisible();
+  expect(await sql()`select 1 from otp_requests where mobile = ${blocked}`).toHaveLength(0);
+
+  // شمارهٔ دیگر کد می‌گیرد؛ مسدودی میان کد و «پرداخت»: سفارش ساخته نمی‌شود.
+  const mobile = newMobile();
+  await signIn(page, mobile);
+  await block(mobile);
+  await visibleButton(page, `پرداخت ${toman(TEN.other.totalRials)} تومان`).click();
+  await expect(page.getByTestId('pay-failed')).toHaveText(MESSAGE);
+  await contactOf(page.getByTestId('pay-failed'));
+  expect(await sql()`select 1 from orders where recipient_phone = ${mobile}`).toHaveLength(0);
+
+  // پس از رفع: سفارش و پرداخت ناموفق؛ مسدودی دوباره: «دوباره پرداخت کن» درگاه را باز نمی‌کند.
+  await unblock(mobile);
+  const number = await payAt(page, 'انصراف و بازگشت', TEN.other.totalRials);
+  await block(mobile);
+  await visibleButton(page, 'دوباره پرداخت کن').click();
+  await expect(page.getByTestId('pay-again-failed')).toHaveText(MESSAGE);
+  await contactOf(page.getByTestId('pay-again-failed'));
+  await expect(page).toHaveURL(/\/order\//);
+  const attempts = await sql()`select count(*)::int as n from payments p join orders o on o.id = p.order_id where o.order_number = ${number}`;
+  expect(attempts[0]!.n).toBe(1);
+  await unblock(mobile);
+  await unblock(blocked);
+  await context.close();
+});
+
 test.describe('پرداخت', () => {
   test('پرداخت ناموفق: علت از درگاه (کارت، لغو)، همان قیمت منجمد، و «دوباره پرداخت کن» تا «ثبت شد»', async ({ browser }) => {
     const context = await newContext(browser);

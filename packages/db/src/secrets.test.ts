@@ -68,9 +68,14 @@ describe('کلیدهای سرویس‌ها', () => {
     expect(resolveServiceKey('PAYMENT_MERCHANT_ID', rowOf('PAYMENT_MERCHANT_ID', VALUE, serviceKeyContext('SMS_API_KEY')), {}, KEY, log)).toMatchObject({
       source: 'unreadable',
     });
-    // دستکاری
+    // دستکاری: یک بیت از رمزشده، نه چند نویسهٔ آخر base64url، که گاهی همان بایت‌ها را می‌داد (بیت‌های اضافهٔ نویسهٔ آخر را رمزگشا دور
+    // می‌ریزد، و بایت آخری که خودش صفر بود «AA» را همان می‌خواند) و تست بی هیچ تغییری می‌افتاد.
     const row = rowOf('SMS_API_KEY');
-    expect(resolveServiceKey('SMS_API_KEY', { ...row, sealed: `${row.sealed.slice(0, -2)}AA` }, env, KEY, log)).toMatchObject({ source: 'unreadable' });
+    const [version, iv, body] = row.sealed.split('.');
+    const flipped = Buffer.from(body!, 'base64url');
+    flipped[0]! ^= 1;
+    const tampered = `${version}.${iv}.${flipped.toString('base64url')}`;
+    expect(resolveServiceKey('SMS_API_KEY', { ...row, sealed: tampered }, env, KEY, log)).toMatchObject({ source: 'unreadable' });
     expect(logs).toHaveLength(4);
     expect(logs.every((line) => /SMS_API_KEY|PAYMENT_MERCHANT_ID/.test(line) && line.includes('SECRETS_KEY'))).toBe(true);
     expect(logs.join('\n')).not.toContain(VALUE);

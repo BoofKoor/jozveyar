@@ -11,6 +11,7 @@ import {
   choosePartner,
   dayRefusal,
   DiscountRefusedError,
+  MobileBlockedError,
   PAYMENT_ATTEMPT_TTL_MS,
   termsOf,
   type AssignmentRule,
@@ -117,10 +118,11 @@ export function memoryStore(): DocumentStore & {
 /**
  * `AuthStore` حافظه‌ای. شمارش همان پنجره‌ها و همان شرط‌های اتمی نسخهٔ پستگرس را دارد؛ قفل لازم ندارد، چون
  * اینجا هیچ دو کاری وسط هم اجرا نمی‌شوند (هم‌زمانی را تست یکپارچگی `packages/db` می‌سنجد). دروازهٔ جزوه (برش ۷) از
- * `ready`: این مرورگر سند آماده و زنده دارد؟ پیش‌فرض آری؛ پرسش واقعی سند را تست یکپارچگی می‌سنجد.
+ * `ready`: این مرورگر سند آماده و زنده دارد؟ پیش‌فرض آری؛ پرسش واقعی سند را تست یکپارچگی می‌سنجد. `blocked`: این شماره مسدود است؟
+ * (برش ۱۲٫۲)؛ پیش‌فرض نه.
  */
 export function memoryAuthStore(
-  options: { ready?: (sessionHash: string, readyUntil: Date) => boolean } = {},
+  options: { ready?: (sessionHash: string, readyUntil: Date) => boolean; blocked?: (mobile: string) => boolean } = {},
 ): AuthStore & {
   otps: OtpRow[];
   users: Map<string, { id: string; mobile: string }>;
@@ -158,6 +160,7 @@ export function memoryAuthStore(
         siteDay: inDay.length,
         siteDayOldest: oldest(inDay),
         ready: (options.ready ?? (() => true))(input.sessionHash, input.readyUntil),
+        blocked: (options.blocked ?? (() => false))(input.mobile),
       });
       if (!otp) return null;
       const id = randomUUID();
@@ -329,7 +332,10 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[];
   /** کدهای تخفیف (برش ۱۱٫۴)؛ پنل می‌سازدشان، اینجا تست (`memoryDiscountCode`). */
   discountCodes: DiscountCodeRow[];
+  /** موبایل‌های مسدود (برش ۱۲٫۲)؛ پنل مسدودشان می‌کند، اینجا تست. */
+  blockedMobiles: Set<string>;
 } {
+  const blockedMobiles = new Set<string>();
   const rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[] = [];
   const parcels = new Map<string, OrderDetails['parcels']>();
   const refunds = new Map<string, OrderDetails['refunds']>();
@@ -445,6 +451,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     sms,
     rejections,
     discountCodes,
+    blockedMobiles,
     // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامکی که زنده است: پیامک پرداختی که سفارشش لغو نشده، و پیامک
     // چاپخانه‌ای که تخصیصش امروزِ سفارشی است که هنوز «در صف چاپ» همان چاپخانه است (سؤال ۱۷۴).
     smsOutbox: {
@@ -504,6 +511,9 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       return order ? { ...order } : null;
     },
     async createOrder(input) {
+      // همان `orders_mobile_blocked` (0050)، که مثل هر تریگر BEFORE پیش از شاخص یکتای کلید می‌خورد. سرویس `recipientPhone` را از موبایل نشست
+      // می‌گذارد، پس همان `users.mobile` است.
+      if (blockedMobiles.has(input.recipientPhone)) throw new MobileBlockedError();
       const existing = orders.find((o) => o.checkoutKey === input.checkoutKey);
       if (existing) return { order: { ...existing }, created: false };
       input.items.forEach(coverPages);
@@ -589,6 +599,9 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       const order = orders.find((o) => o.id === orderId);
       return order?.discountCodeId ? discountRefusal(order.discountCodeId, order.userId, orderId) : null;
     },
+    async mobileBlocked(mobile) {
+      return blockedMobiles.has(mobile);
+    },
     async insertPayment(payment) {
       if (payments.some((p) => p.provider === payment.provider && p.authority === payment.authority)) {
         throw new Error('payments_provider_authority');
@@ -601,6 +614,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         const refused = discountRefusal(order.discountCodeId, order.userId, order.id);
         if (refused) throw new DiscountRefusedError(refused);
       }
+      // همان `payments_mobile_blocked` (0050).
+      if (blockedMobiles.has(order.recipientPhone)) throw new MobileBlockedError();
       const row: PaymentRow = {
         id: payment.id ?? randomUUID(),
         orderId: payment.orderId,

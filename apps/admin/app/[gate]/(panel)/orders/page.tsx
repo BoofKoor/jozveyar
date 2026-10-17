@@ -80,6 +80,12 @@ export default async function OrdersPage({
     <>
       <div className="ad-pagehead">
         <h1 className="ad-title">سفارش‌ها</h1>
+        {can(session, 'customers.block') ? (
+          // شماره‌های مسدود (۱۲٫۲، سؤال ۳۱۹): مالک و متصدی؛ مسدود کردن خود از صفحهٔ هر سفارش است، یا از همین فهرست.
+          <Link href={panelPath(gate, '/orders/blocked')} className="jy-btn jy-btn--secondary">
+            شماره‌های مسدود
+          </Link>
+        ) : null}
       </div>
       <form className="ad-search" role="search" action={base} method="get">
         <span className="jy-icon jy-icon-search" aria-hidden="true" />

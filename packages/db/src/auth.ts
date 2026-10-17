@@ -9,7 +9,7 @@
 import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 
 import type { Database } from './index.js';
-import { documents, otpRequests, sessions, users } from './schema.js';
+import { documents, mobileBlocks, otpRequests, sessions, users } from './schema.js';
 
 /** کلید قفل مشورتی صدور کد پیامکی: «otp» به عدد. */
 const OTP_LOCK = 0x6f7470;
@@ -18,7 +18,7 @@ export type OtpRow = typeof otpRequests.$inferSelect;
 
 /**
  * شمارش کدها در پنجرهٔ یک ساعت (بی پسوند) و ۲۴ ساعت (`…Day`، برش ۷، ADR-049)؛ `…Oldest` برای «چند ثانیهٔ دیگر». `ready`: این مرورگر
- * دست‌کم یک سند آماده و زنده روی سرور دارد (دروازهٔ جزوه، همان شرط «ادامه»).
+ * دست‌کم یک سند آماده و زنده روی سرور دارد (دروازهٔ جزوه، همان شرط «ادامه»). `blocked`: این شماره مسدودی زنده دارد (برش ۱۲٫۲، ADR-063).
  */
 export interface OtpCounts {
   mobile: number;
@@ -35,6 +35,7 @@ export interface OtpCounts {
   siteDay: number;
   siteDayOldest: Date | null;
   ready: boolean;
+  blocked: boolean;
 }
 
 export interface NewOtp {
@@ -137,6 +138,11 @@ export function createAuthStore({ db }: Database): AuthStore {
             ),
           )
           .limit(1);
+        const [blocked] = await tx
+          .select({ id: mobileBlocks.id })
+          .from(mobileBlocks)
+          .where(and(eq(mobileBlocks.mobile, input.mobile), isNull(mobileBlocks.unblockedAt)))
+          .limit(1);
         const counts: OtpCounts = {
           mobile: row?.mobile ?? 0,
           mobileOldest: asDate(row?.mobileOldest),
@@ -152,6 +158,7 @@ export function createAuthStore({ db }: Database): AuthStore {
           siteDay: row?.siteDay ?? 0,
           siteDayOldest: asDate(row?.siteDayOldest),
           ready: ready !== undefined,
+          blocked: blocked !== undefined,
         };
         const otp = decide(counts);
         if (!otp) return null;

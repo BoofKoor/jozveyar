@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { formatTehranTime } from '@jozveyar/text';
 import { checkoutApi, type ApiFailure } from '../../lib/checkout/api';
 import { publishDockHeight } from '../../lib/dock';
+import { MobileBlocked } from './blocked';
 import { SumValue } from './sum';
 
 /*
@@ -77,7 +78,7 @@ export function PayAgainButton({ token, short = false }: { token: string; short?
   );
 }
 
-const MESSAGE: Partial<Record<ApiFailure['error'], string>> = {
+const MESSAGE: Partial<Record<ApiFailure['error'], ReactNode>> = {
   network: 'ارتباط برقرار نشد. اینترنت را ببین و دوباره «دوباره پرداخت کن» را بزن.',
   gateway_unavailable: 'درگاه پرداخت الان جواب نمی‌دهد. سفارشت با همین قیمت مانده؛ چند دقیقهٔ دیگر دوباره بزن.',
   // برش ۷٫۲ (سؤال‌های ۱۳۹ و ۱۴۸): کد پذیرنده آماده نیست، یا مبلغ منجمد از سقف یک پرداخت درگاه بیشتر است.
@@ -88,6 +89,8 @@ const MESSAGE: Partial<Record<ApiFailure['error'], string>> = {
   auth_required: 'برای پرداخت، این صفحه را با همان گوشی و مرورگری باز کن که با آن سفارش دادی.',
   // برش ۱۱٫۴ (سؤال ۳۰۱): رزرو کد پس از مهلت تلاش رفت و جایش را دیگری گرفت؛ قیمت با همان کد منجمد است.
   discount_unavailable: 'کد تخفیف این سفارش دیگر جا ندارد، پس با همین قیمت پرداخت نمی‌شود. جزوه را دوباره بینداز و بی این کد سفارش بده.',
+  // برش ۱۲٫۲ (سؤال ۲۱۲): موبایل مسدود؛ تلاش پرداخت تازه نه.
+  mobile_blocked: <MobileBlocked />,
   not_found: 'پرداخت آنلاین الان بسته است؛ سفارشت با همین قیمت مانده.',
 };
 
