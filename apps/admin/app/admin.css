@@ -2349,4 +2349,21 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
+
+  /* ===== نظر مشتری‌ها (برش ۱۲٫۳، ADR-064): متن مشتری با خط‌هایش، و تأیید «پاک کن» زیر همان نظر در کل پهنا ===== */
+  .ad-review__body {
+    margin-block: 4px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .ad-reviews > li > .ad-review__confirm {
+    grid-column: 1 / -1;
+    margin-block-start: 8px;
+    padding-block-start: 12px;
+  }
+  .ad-pagehead__btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }

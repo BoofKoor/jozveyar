@@ -200,7 +200,12 @@ export type AdminErrorCode =
   /** مسدودی موبایل مشتری (۱۲٫۲). */
   | 'invalid_block_mobile'
   | 'mobile_already_blocked'
-  | 'block_not_found';
+  | 'block_not_found'
+  /** نظر مشتری (۱۲٫۳): نظر پیدا نشد، همان لحظه کس دیگری عوضش کرد، یا بی متن روی سایت نمی‌رود. */
+  | 'review_not_found'
+  | 'review_stale'
+  | 'review_no_body'
+  | 'review_bad_action';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;
