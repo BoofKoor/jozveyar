@@ -22,7 +22,8 @@ import { createDb, type Database } from './index.js';
 import { createDiscountStore, termsOf } from './discounts.js';
 import { DiscountRefusedError, MobileBlockedError } from './orders.js';
 import { createBlockStore } from './blocks.js';
-import { mobileBlocks } from './schema.js';
+import { createReviewStore } from './reviews.js';
+import { mobileBlocks, orderReviews } from './schema.js';
 import { discountCodes, discountTiers } from './schema.js';
 import { DISCOUNT_TIERS_MAX, TIER_PERCENT_MAX } from '@jozveyar/contracts';
 import { runMigrations } from './migrate.js';
@@ -2417,6 +2418,178 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect((await blocks.list(0)).past).toEqual([]);
       });
     });
+
+    describe('نظر مشتری روی پستگرس (برش ۱۲٫۳)', () => {
+      let owner: string;
+
+      beforeAll(async () => {
+        const [row] = await conn.db
+          .insert(adminUsers)
+          .values({ username: `rev-${randomUUID().slice(0, 8)}`, displayName: 'پروین' })
+          .returning();
+        owner = row!.id;
+      });
+
+      // نظر با پاک شدن سفارش می‌رود (cascade)، و جز آن هرگز (`order_reviews_append_only`).
+      beforeEach(async () => {
+        await clearOrders(conn);
+      });
+
+      afterAll(async () => {
+        await clearOrders(conn);
+      });
+
+      /** سفارش پرداخت‌شده‌ای که چاپ شد و «تحویل پست شد»، همان گذارهای پنل. */
+      const deliveredOrder = async () => {
+        const store = createOrderStore(conn);
+        const order = (await store.createOrder(await newOrder())).order;
+        const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+        await store.insertPayment({ orderId: order.id, provider: 'mock', amountRials: order.totalRials, authority, raw: null });
+        const paidAt = new Date();
+        await store.settlePayment('mock', authority, async ({ payment }) => ({
+          kind: 'succeeded',
+          verifiedAmountRials: payment.amountRials,
+          refId: '803116',
+          cardMask: null,
+          raw: { decision: 'success' },
+          paidAt,
+          postHandoffDueAt: new Date(paidAt.getTime() + 2 * 86_400_000),
+        }));
+        await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, order.id));
+        await conn.db.update(orders).set({ status: 'handed_to_post', handedToPostAt: new Date() }).where(eq(orders.id, order.id));
+        return order;
+      };
+
+      const reviewRow = (orderId: string, over: Partial<typeof orderReviews.$inferInsert> = {}) =>
+        conn.db
+          .insert(orderReviews)
+          .values({ orderId, rating: 5, body: 'خیلی تمیز و سر وقت رسید.', publicName: 'سارا', publicPlace: 'مشهد', ...over })
+          .returning();
+
+      it('محافظ‌های 0051 و 0052: فقط پس از رسیدن به پست، یکی برای هر سفارش، تازه منتظر، منجمد جز وضعیت، گذارها، و پاک فقط با سفارش', async () => {
+        const store = createOrderStore(conn);
+        const awaiting = (await store.createOrder(await newOrder())).order;
+        expect(await rejectedConstraint(reviewRow(awaiting.id))).toBe('order_reviews_delivered');
+        const order = await deliveredOrder();
+        expect(await rejectedConstraint(reviewRow(order.id, { status: 'approved', decidedAt: new Date(), decidedBy: owner }))).toBe('order_reviews_insert_state');
+        expect(await rejectedConstraint(reviewRow(order.id, { decidedBy: owner }))).toBe('order_reviews_insert_state');
+        expect(await rejectedConstraint(reviewRow(order.id, { rating: 6 }))).toBe('order_reviews_rating');
+        expect(await rejectedConstraint(reviewRow(order.id, { rating: 0 }))).toBe('order_reviews_rating');
+        expect(await rejectedConstraint(reviewRow(order.id, { rating: null }))).toBe('order_reviews_content');
+        expect(await rejectedConstraint(reviewRow(order.id, { body: ' \n ' }))).toBe('order_reviews_body');
+        expect(await rejectedConstraint(reviewRow(order.id, { body: ' متن' }))).toBe('order_reviews_body');
+        expect(await rejectedConstraint(reviewRow(order.id, { body: 'ن'.repeat(501) }))).toBe('order_reviews_body');
+        expect(await rejectedConstraint(reviewRow(order.id, { publicName: ' ' }))).toBe('order_reviews_public');
+        expect(await rejectedConstraint(reviewRow(order.id, { publicName: 'ن'.repeat(101) }))).toBe('order_reviews_public');
+        expect(await rejectedConstraint(reviewRow(order.id, { publicPlace: '' }))).toBe('order_reviews_public');
+        expect(await rejectedConstraint(reviewRow(order.id, { publicPlace: 'ن'.repeat(81) }))).toBe('order_reviews_public');
+        const [first] = await reviewRow(order.id, { body: 'ن'.repeat(500) });
+        expect(await rejectedConstraint(reviewRow(order.id))).toBe('order_reviews_order');
+        // نمرهٔ تنها، بی متن، هم نظر است.
+        const [bare] = await reviewRow((await deliveredOrder()).id, { rating: 3, body: null });
+        expect(bare).toMatchObject({ status: 'pending', body: null, decidedAt: null });
+
+        const byId = eq(orderReviews.id, first!.id);
+        const later = new Date(first!.createdAt.getTime() + 60_000);
+        const set = (patch: Partial<typeof orderReviews.$inferInsert>) => rejectedConstraint(conn.db.update(orderReviews).set(patch).where(byId));
+        expect(await set({ rating: 4 })).toBe('order_reviews_frozen');
+        expect(await set({ body: 'متن دیگر' })).toBe('order_reviews_frozen');
+        expect(await set({ orderId: bare!.orderId })).toBe('order_reviews_frozen');
+        expect(await set({ createdAt: later })).toBe('order_reviews_frozen');
+        // نام و شهری که مشتری زیر فرم دید همان است که روی سایت می‌آید.
+        expect(await set({ publicName: 'مریم' })).toBe('order_reviews_frozen');
+        expect(await set({ publicPlace: 'تهران' })).toBe('order_reviews_frozen');
+        expect(await set({ status: 'approved', publicName: 'مریم', decidedAt: later, decidedBy: owner })).toBe('order_reviews_frozen');
+        expect(await set({ status: 'approved' })).toBe('order_reviews_decided');
+        expect(await set({ status: 'approved', decidedAt: new Date(first!.createdAt.getTime() - 1_000), decidedBy: owner })).toBe('order_reviews_decided');
+        expect(await rejectedConstraint(conn.db.update(orderReviews).set({ status: 'approved', decidedAt: later, decidedBy: owner }).where(eq(orderReviews.id, bare!.id)))).toBe(
+          'order_reviews_approved_body',
+        );
+        expect(await set({ status: 'approved', decidedAt: later, decidedBy: owner })).toBeUndefined();
+        expect(await set({ status: 'pending', decidedAt: null, decidedBy: null })).toBe('order_reviews_flow');
+        expect(await set({ status: 'approved', decidedAt: new Date(later.getTime() + 1_000), decidedBy: owner })).toBe('order_reviews_flow');
+        expect(await set({ status: 'hidden', decidedAt: new Date(later.getTime() + 2_000), decidedBy: owner })).toBeUndefined();
+        expect(await set({ status: 'deleted', decidedAt: new Date(later.getTime() + 3_000), decidedBy: owner })).toBe('order_reviews_content');
+        expect(await set({ status: 'deleted', rating: null, decidedAt: new Date(later.getTime() + 3_000), decidedBy: owner })).toBe('order_reviews_content');
+        expect(await set({ status: 'deleted', rating: null, body: null, decidedAt: new Date(later.getTime() + 3_000), decidedBy: owner })).toBeUndefined();
+        // پاک‌شده دیگر عوض نمی‌شود: نه نمره و متن، نه وضعیت، نه زمان تصمیم؛ ردیفش هم جز با سفارش پاک نمی‌شود.
+        expect(await set({ status: 'hidden', rating: 5, body: 'برگشت', decidedAt: new Date(later.getTime() + 4_000), decidedBy: owner })).toBe('order_reviews_frozen');
+        expect(await set({ status: 'hidden', decidedAt: new Date(later.getTime() + 4_000), decidedBy: owner })).toBe('order_reviews_flow');
+        expect(await set({ decidedAt: new Date(later.getTime() + 5_000) })).toBe('order_reviews_flow');
+        expect(await rejectedConstraint(conn.db.delete(orderReviews).where(byId))).toBe('order_reviews_append_only');
+        await conn.db.delete(payments).where(eq(payments.orderId, order.id));
+        await conn.db.delete(orders).where(eq(orders.id, order.id));
+        expect(await conn.db.select().from(orderReviews).where(byId)).toEqual([]);
+      });
+
+      it('ذخیره‌گاه: نوشتن مشتری و صفحهٔ سفارش، صفحهٔ اصلی فقط تأییدشده، تصمیم مالک با رویداد، دو کلیک یکی، کهنه رد، پاک یعنی پاک، و شمار', async () => {
+        const reviews = createReviewStore(conn);
+        const store = createOrderStore(conn);
+        const awaiting = (await store.createOrder(await newOrder())).order;
+        const at = new Date();
+        const who = { publicName: 'سارا', publicPlace: 'مشهد' };
+        expect(await reviews.submit({ orderId: awaiting.id, rating: 5, body: null, ...who, at })).toEqual({ ok: false, reason: 'not_delivered' });
+
+        const order = await deliveredOrder();
+        const body = 'صحافی محکم بود و زودتر از روزی که گفته بودید رسید.';
+        const sent = await reviews.submit({ orderId: order.id, rating: 5, body, ...who, at });
+        expect(sent).toMatchObject({ ok: true, review: { orderId: order.id, rating: 5, body, ...who, status: 'pending', createdAt: at } });
+        expect(await reviews.submit({ orderId: order.id, rating: 1, body: 'دوباره', publicName: 'مریم', publicPlace: 'تهران', at })).toEqual({ ok: false, reason: 'exists' });
+        expect((await store.details(order.publicToken))?.review).toMatchObject({ rating: 5, body, status: 'pending' });
+        expect((await store.details(awaiting.publicToken))?.review).toBeNull();
+        if (!sent.ok) throw new Error('نظر ثبت نشد');
+        const id = sent.review.id;
+
+        const bareOrder = await deliveredOrder();
+        const bare = await reviews.submit({ orderId: bareOrder.id, rating: 2, body: null, publicName: 'رضا', publicPlace: 'تهران، تهران', at: new Date(at.getTime() + 1_000) });
+        if (!bare.ok) throw new Error('نظر بی متن ثبت نشد');
+
+        // هیچ نظری پیش از تأیید عمومی نیست.
+        expect(await reviews.published(6)).toEqual([]);
+        const event = (action: string, seconds: number) => ({ adminUserId: owner, action, at: new Date(at.getTime() + seconds * 1_000), detail: { orderNumber: order.orderNumber, rating: 5 } });
+        const approved = await reviews.decide({ id, from: 'pending', to: 'approved', event: event('reviews.approve', 10) });
+        expect(approved).toMatchObject({ ok: true, already: false, review: { status: 'approved', decidedByName: 'پروین', orderNumber: order.orderNumber } });
+        expect(await reviews.decide({ id, from: 'pending', to: 'approved', event: event('reviews.approve', 11) })).toMatchObject({ ok: true, already: true });
+        expect(await reviews.decide({ id, from: 'pending', to: 'hidden', event: event('reviews.hide', 12) })).toMatchObject({ ok: false, reason: 'stale', review: { status: 'approved' } });
+        expect(await reviews.decide({ id: randomUUID(), from: 'pending', to: 'hidden', event: event('reviews.hide', 12) })).toEqual({ ok: false, reason: 'not_found' });
+        // نظر بی متن روی سایت نمی‌رود: دیوار دوم، اگر سرویس نسنجید.
+        expect(await reviews.decide({ id: bare.review.id, from: 'pending', to: 'approved', event: event('reviews.approve', 13) })).toMatchObject({
+          ok: false,
+          reason: 'no_body',
+          review: { status: 'pending' },
+        });
+
+        const [published] = await reviews.published(6);
+        expect(published).toEqual({ rating: 5, body, ...who, createdAt: at });
+        expect(await reviews.counts()).toEqual({ pending: 1, approved: 1, hidden: 0, total: 2, averageRating: 3.5 });
+        expect((await reviews.list('pending', 10)).map((r) => r.id)).toEqual([bare.review.id]);
+        expect((await reviews.list('all', 10)).map((r) => r.id)).toEqual([bare.review.id, id]);
+
+        expect(await reviews.decide({ id, from: 'approved', to: 'hidden', event: event('reviews.hide', 20) })).toMatchObject({ ok: true, review: { status: 'hidden' } });
+        expect(await reviews.published(6)).toEqual([]);
+        // پاک یعنی پاک: نمره و متن می‌روند، ردیف خالی می‌ماند و همان سفارش دوباره نظر نمی‌گیرد.
+        const deleted = await reviews.decide({ id, from: 'hidden', to: 'deleted', event: event('reviews.delete', 30) });
+        expect(deleted).toMatchObject({ ok: true, review: { status: 'deleted', rating: null, body: null } });
+        expect((await reviews.list('all', 10)).map((r) => r.id)).toEqual([bare.review.id]);
+        expect((await store.details(order.publicToken))?.review).toMatchObject({ status: 'deleted', rating: null, body: null });
+        expect(await reviews.submit({ orderId: order.id, rating: 4, body: 'دوباره می‌نویسم', ...who, at: new Date() })).toEqual({ ok: false, reason: 'exists' });
+        expect(await reviews.counts()).toEqual({ pending: 1, approved: 0, hidden: 0, total: 1, averageRating: 2 });
+
+        const logged = await conn.db
+          .select()
+          .from(adminEvents)
+          .where(and(eq(adminEvents.targetType, 'order_review'), eq(adminEvents.targetId, id)))
+          .orderBy(asc(adminEvents.id));
+        expect(logged.map((e) => [e.action, e.adminUserId])).toEqual([
+          ['reviews.approve', owner],
+          ['reviews.hide', owner],
+          ['reviews.delete', owner],
+        ]);
+        expect(JSON.stringify(logged)).not.toContain('صحافی');
+        expect(await reviews.get(id)).toMatchObject({ status: 'deleted', decidedByName: 'پروین' });
+        expect(await reviews.get(randomUUID())).toBeNull();
+      });
+    });
   });
   describe('پنل ادمین روی پستگرس (برش ۴٫۱)', () => {
     const at = new Date('2026-10-05T07:50:00Z');
@@ -2483,8 +2656,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const read = async (role: string) =>
         (await conn.db.select().from(rolePermissions).where(eq(rolePermissions.roleId, role))).map((r) => r.permissionId).sort();
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
-      // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است.
+      // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است. نظر مشتری‌ها (۱۲٫۳، سؤال ۲۱۳: «امکان حذف توسط من») هم فقط مالک.
       expect(await read('owner')).toContain('reports.read');
+      expect(await read('owner')).toContain('reviews.manage');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
       // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها و از ۱۲٫۲ مسدود کردن موبایل مشتری؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی
