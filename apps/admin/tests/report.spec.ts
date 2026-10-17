@@ -15,6 +15,7 @@ import {
   awayFromMidnight,
   BASE,
   codeFor,
+  download,
   enroll,
   GATE,
   layoutProblems,
@@ -23,6 +24,7 @@ import {
   serverInvite,
   uploadPostFile as upload,
   watch,
+  xlsxParts,
 } from './helpers';
 
 /**
@@ -30,7 +32,8 @@ import {
  * و تخصیص پرداخت (`assignAtPayment`)، و کد رهگیری از فایل پست ساختگی که **کارگر واقعی** می‌خواند و مالک «ثبت» می‌زند؛ پس هر عدد
  * گزارش از همان راهی است که روی سایت زنده می‌آید. مالک عددهای ماه جاری و ماه قبل را می‌بیند (سفارش چندبسته‌ای یکی، کنارگذاشته،
  * بی کد رهگیری جدا با پیوند به «سفارش‌ها»، لغوشده نه)، بازه‌های وزن را همان‌جا عوض می‌کند و برمی‌گرداند؛ متصدی و چاپخانه نه دکمه
- * دارند و نه صفحه؛ و ۳۲۰، ۳۹۰ و ۱۲۸۰ بی سرریز.
+ * دارند و نه صفحه؛ و ۳۲۰، ۳۹۰ و ۱۲۸۰ بی سرریز. از ۱۰٫۲ (سؤال ۲۸۰) «خروجی اکسل» و «خروجی PDF» همان ماه: کتاب با همان جمع‌ها و فهرست
+ * سفارش‌های ماه، و PDF که همان کارگر با موتور قالب برگه‌ها می‌سازد.
  *
  * همان پنل، پایگاه داده و کارگر `shipments.spec.ts` (طرز اجرا بالای همان). پایگاه دادهٔ دورریختنی، مثل `review.spec.ts`: همهٔ سفارش‌ها
  * در آغاز پاک می‌شوند، چون گزارش همهٔ سفارش‌های «تحویل پست شد» را می‌شمارد. بازه‌های وزن در پایان همان پیش از تست می‌شوند، و
@@ -324,6 +327,48 @@ test.describe.serial('گزارش ارسال', () => {
     expect(ownerProblems).toEqual([]);
   });
 
+  test('خروجی اکسل و PDF همان ماه (۱۰٫۲، سؤال ۲۸۰): همان جمع‌ها، حاشیهٔ منفی به شکل عدد، فهرست سفارش‌های ماه، و PDF کارگر؛ رویداد', async () => {
+    test.setTimeout(180_000);
+    const page = ownerPage;
+    await page.goto(at(`/shipments/report?month=${THIS_KEY}`));
+    // مالک هر دو گزارش را دارد: چیپ «گزارش تولید» بالای صفحه.
+    await expect(page.getByRole('navigation', { name: 'گزارش‌ها' }).getByRole('link')).toHaveText(['گزارش تولید', 'گزارش ارسال']);
+    const file = await download(page, () => page.locator('[data-export="xlsx"]').click());
+    expect(file.name).toBe(`gozaresh-ersal-${THIS_KEY}.xlsx`);
+    const parts = xlsxParts(file.bytes);
+    const summary = parts.get('xl/worksheets/sheet1.xml')!;
+    const month = `${MONTHS[thisMonth - 1]} ${thisYear}، تا امروز`;
+    expect(summary).toContain('گزارش ارسال');
+    expect(summary).toContain(`${month} · به روز «تحویل پست شد» · مبلغ‌ها تومان`);
+    expect(summary).toContain('1 سفارش تحویل پست‌شدهٔ این ماه هنوز کد رهگیری ندارد و در جمع‌ها نیست.');
+    // حاشیهٔ ماه (−1,496,500 ریال) عدد منفی تومان است، نه متن «−149,650».
+    const margin = o.A.shipping + o.B.shipping + o.E.shipping - (FARE.a1 + FARE.a2 + FARE.b + FARE.e) - (tax(FARE.a1) + tax(FARE.a2) + tax(FARE.b) + tax(FARE.e));
+    expect(summary).toMatch(new RegExp(`<t xml:space="preserve">حاشیه \\(تومان\\)</t></is></c><c r="B\\d+" s="1"><v>${margin / 10}</v>`));
+    // فهرست: سفارش‌های «تحویل پست شد» همین ماه، با کد یا بی کد؛ لغوشده و ماه قبل نه.
+    const detail = parts.get('xl/worksheets/sheet2.xml')!;
+    for (const one of [o.A, o.B, o.C, o.E]) expect(detail).toContain(`<v>${one.number}</v>`);
+    for (const one of [o.D, o.P]) expect(detail).not.toContain(`<v>${one.number}</v>`);
+
+    await page.locator('[data-export="pdf"]').getByRole('button', { name: 'خروجی PDF' }).click();
+    await expect(page).toHaveURL(/\/reports\/exports\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole('heading', { name: 'خروجی PDF گزارش ارسال', level: 1 })).toBeVisible();
+    await expect(page.locator('.ad-lead')).toHaveText(`${month} · به روز «تحویل پست شد» · مبلغ‌ها تومان`);
+    await expect(page.locator('[data-export-state]')).toHaveAttribute('data-export-state', 'ready', { timeout: 120_000 });
+    const pdf = await download(page, () => page.locator('[data-export="download"]').click());
+    expect(pdf.name).toBe(`gozaresh-ersal-${THIS_KEY}.pdf`);
+    expect(pdf.bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    await page.locator('.ad-back').click();
+    await expect(page.getByRole('heading', { name: 'گزارش ارسال', level: 1 })).toBeVisible();
+
+    const events = await sql<{ detail: { report: string; format: string; range: string } }[]>`
+      SELECT detail FROM admin_events WHERE action = 'reports.export' AND detail ->> 'report' = 'shipping' ORDER BY id`;
+    expect(events.map((event) => [event.detail.format, event.detail.range])).toEqual([
+      ['xlsx', `${month} · به روز «تحویل پست شد» · مبلغ‌ها تومان`],
+      ['pdf', `${month} · به روز «تحویل پست شد» · مبلغ‌ها تومان`],
+    ]);
+    expect(ownerProblems).toEqual([]);
+  });
+
   test('بازه‌ها را عوض کن: خطا سر جای خودش، ذخیره، «همان که دیده شد»، برگرداندن به بازه‌های تعرفه، و رویداد', async () => {
     const page = ownerPage;
     await page.goto(at('/shipments/report'));
@@ -399,7 +444,7 @@ test.describe.serial('گزارش ارسال', () => {
     await expect(operator.getByRole('link', { name: 'کرایه‌ای که پست واقعاً گرفت' })).toHaveCount(0);
     await operator.goto(at('/shipments/report'));
     await expect(operator.getByRole('heading', { name: OWNER_ONLY })).toBeVisible();
-    await expect(operator.locator('main')).toContainText('برگرداندن ورود فایل پست با مالک پنل است، و گزارش ارسال با مالک و حسابدار');
+    await expect(operator.locator('main')).toContainText('برگرداندن ورود فایل پست با مالک پنل است، و گزارش‌ها با مالک و حسابدار');
     await expect(operator.locator('[data-report]')).toHaveCount(0);
     await operator.goto(at(`/shipments/report?month=${THIS_KEY}&bands=edit`));
     await expect(operator.getByRole('heading', { name: OWNER_ONLY })).toBeVisible();

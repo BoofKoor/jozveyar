@@ -161,6 +161,11 @@ export type AdminErrorCode =
   | 'sms_not_failed'
   /** بازه‌های وزن گزارش ارسال (۶٫۴): خطای هر فیلد در `errors`. */
   | 'invalid_bands'
+  /** خروجی گزارش‌ها (۱۰٫۲): بازهٔ گزارش تولید درست نیست؛ گزارش ارسال هنوز ماهی ندارد. */
+  | 'invalid_report_range'
+  | 'report_empty'
+  /** PDF خروجی هنوز ساخته نشده (یا ساخته نشد). */
+  | 'export_not_ready'
   /** قالب برگه‌ها (۹٫۲، ADR-057): بارگذاری، پیش‌نمایش و فعال کردن. */
   | 'template_not_found'
   | 'invalid_template_kind'

@@ -17,10 +17,12 @@ import { formatTehranTime } from '@jozveyar/text';
 
 import { panelPath } from '../../lib/gate';
 import { cityLabel } from '../../lib/partners';
+import { searchOf } from '../../lib/production';
 import { parseWholeNumber } from '../../lib/settings';
 import { boundErrorText, monthKey, parseMonthKey, type BoundError } from '../../lib/report';
 import { draftFormFromEntries, type DraftIssue } from '../../lib/tariff';
 import type { IssuedInvite } from '../../lib/server/auth';
+import { isReportKind } from '../../lib/server/exports';
 import {
   clearSessionCookie,
   publicOrigin,
@@ -1137,6 +1139,31 @@ export async function resetBandsAction(form: FormData): Promise<void> {
   const result = await settings.resetReportBands(session, { seen: field(form, 'seen') }, await requestIp());
   const home = reportHome(gate, field(form, 'month'));
   redirect(withQuery(home, result.ok ? `done=bands&b=tariff&${doneMark()}#weights` : `e=${result.error}&${doneMark()}#weights`));
+}
+
+/* ───────────────────────── خروجی گزارش‌ها (۱۰٫۲) ───────────────────────── */
+
+/** پارامترهای نشانی گزارش در فرم «خروجی PDF»: گزارش تولید بازه و چاپخانه، گزارش ارسال ماه. */
+const REPORT_PARAMS = ['d', 'from', 'to', 'nfrom', 'nto', 'p', 'month'] as const;
+
+/**
+ * «خروجی PDF» (برش ۱۰٫۲، ADR-061، سؤال ۲۷۸): همان گزارشی که صفحه با همین پارامترها نشان داد، منجمد در ردیف خروجی با کار کارگر و رویدادش؛
+ * به صفحهٔ خروجی، که تا ساخته شدن خودش را تازه می‌کند. شکست به همان گزارش با پیامش (`?e=`).
+ */
+export async function requestReportPdfAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { exports } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const kind = field(form, 'report');
+  const params = Object.fromEntries(
+    REPORT_PARAMS.map((name) => [name, field(form, name).slice(0, 40)] as const).filter(([, value]) => value !== ''),
+  ) as Partial<Record<(typeof REPORT_PARAMS)[number], string>>;
+  const { month, ...range } = params;
+  const home = kind === 'shipping' ? reportHome(gate, month ?? '') : `${panelPath(gate, '/reports')}${searchOf(range)}`;
+  if (!isReportKind(kind)) redirect(home);
+  const result = await exports.requestPdf(session, kind, params, await requestIp());
+  if (!result.ok) redirect(withQuery(home, `e=${result.error}`));
+  redirect(panelPath(gate, `/reports/exports/${result.value}`));
 }
 
 /* ───────────────────────── مسیر خرید روی سایت (۷٫۵) ───────────────────────── */

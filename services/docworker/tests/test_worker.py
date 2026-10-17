@@ -83,10 +83,12 @@ def test_unreachable_database_waits(worker, monkeypatch):
 
 
 def test_worker_takes_every_kind_by_default(monkeypatch):
-    """از برش ۳ب ساختن PDF جزوهٔ سفارش پرداخت‌شده (`prepare_order`)، از ۵٫۱ برگهٔ سفارش (`prepare_ticket`)، و از ۹٫۲ پیش‌نمایش قالب."""
+    """از برش ۳ب ساختن PDF جزوهٔ سفارش پرداخت‌شده (`prepare_order`)، از ۵٫۱ برگهٔ سفارش (`prepare_ticket`)، از ۹٫۲ پیش‌نمایش قالب، و از
+    ۱۰٫۲ PDF گزارش‌ها (`render_report`)."""
     monkeypatch.delenv("DOCWORKER_KINDS", raising=False)
     assert kinds_from_env() == [
-        "convert_document", "analyze_document", "prepare_order", "prepare_ticket", "read_post_file", "preview_ticket_template"
+        "convert_document", "analyze_document", "prepare_order", "prepare_ticket", "read_post_file", "preview_ticket_template",
+        "render_report",
     ] == list(KINDS)
 
 
@@ -100,26 +102,52 @@ def test_only_a_node_that_takes_order_jobs_deletes_order_files(monkeypatch):
     assert Worker().retention_due == 0.0
 
 
+class FakeConn:
+    rolled_back = 0
+
+    def rollback(self):
+        FakeConn.rolled_back += 1
+
+
 def test_a_retention_failure_never_stops_the_worker(worker, monkeypatch):
-    """استوریج یا پایگاه داده در دسترس نیست ← هشدار، نه کرش؛ و دور بعد دوباره."""
+    """استوریج یا پایگاه داده در دسترس نیست ← هشدار، نه کرش؛ و دور بعد دوباره. از ۱۰٫۲ پاک کردن خروجی‌های گزارش هم، جدا از فایل‌های
+    سفارش: شکست یکی دیگری را نگه نمی‌دارد."""
     calls = []
 
     def broken(conn, storage):
-        calls.append(conn)
+        calls.append("sweep")
         raise OSError("storage down")
 
-    class Conn:
-        rolled_back = 0
-
-        def rollback(self):
-            Conn.rolled_back += 1
+    def broken_purge(conn):
+        calls.append("purge")
+        raise OSError("db down")
 
     monkeypatch.setattr(main, "sweep", broken)
+    monkeypatch.setattr(main, "purge_exports", broken_purge)
+    FakeConn.rolled_back = 0
     worker.retention_due = 0.0
-    worker.sweep_if_due(Conn())
-    worker.sweep_if_due(Conn())  # هنوز وقتش نشده
-    assert len(calls) == 1 and Conn.rolled_back == 1
+    worker.sweep_if_due(FakeConn())
+    worker.sweep_if_due(FakeConn())  # هنوز وقتش نشده
+    assert calls == ["sweep", "purge"] and FakeConn.rolled_back == 2
     assert worker.retention_due > 0
+
+
+def test_a_report_node_purges_exports_but_never_order_files(monkeypatch):
+    """نودی که فقط PDF گزارش می‌سازد (۱۰٫۲) خروجی‌های کهنه را پاک می‌کند، ولی فایل سفارشی نه (نگهداری ADR-044 کار نود سفارش است)."""
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("DOCWORKER_KINDS", "render_report")
+    node = Worker()
+    assert node.retention_due == 0.0
+    calls = []
+    monkeypatch.setattr(main, "sweep", lambda conn, storage: calls.append("sweep"))
+    monkeypatch.setattr(main, "purge_exports", lambda conn: calls.append("purge"))
+    node.sweep_if_due(FakeConn())
+    assert calls == ["purge"]
+    monkeypatch.setenv("DOCWORKER_KINDS", "prepare_order")
+    order_node = Worker()
+    order_node.sweep_if_due(FakeConn())
+    assert calls == ["purge", "sweep"]
 
 
 def test_a_node_can_take_only_analysis(monkeypatch):

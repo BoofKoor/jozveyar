@@ -101,6 +101,11 @@ export const ADMIN_PERMISSIONS = {
    * حاشیه راز کسب‌وکار است، و متصدی و چاپخانه لازمش ندارند. عوض کردن بازه‌های وزن گزارش `settings.edit` هم می‌خواهد.
    */
   'reports.read': 'گزارش ارسال',
+  /**
+   * گزارش تولید (برش ۱۰٫۲، ADR-061، سؤال ۲۰۱): سفارش، جزوه، فایل، نسخه، صفحه، برگ، صحافی و اندازه در یک بازه، با خروجی اکسل و PDF. مالک و
+   * حسابدار همهٔ چاپخانه‌ها و با مبلغ؛ کاربر چاپخانه فقط سفارش‌های خودش (محدوده) و بی مبلغ (`orders.money` ندارد). متصدی نه (سؤال ۲۰۱).
+   */
+  'reports.production': 'گزارش تولید',
   'admins.manage': 'ادمین‌ها',
   'events.read': 'رویدادها',
 } as const;
@@ -118,7 +123,8 @@ const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
  * «چاپخانه» (برش ۵٫۳، ADR-042) فقط دیدن، «شروع چاپ» و «تحویل پست شد»، و دانلود و «دوباره بساز» فایل‌ها، همه فقط روی سفارش‌هایی
  * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش. از ۶٫۲ فایل پست
  * خودش را هم وارد می‌کند، فقط برای همان سفارش‌ها؛ صف تأیید نه (تأیید کد به مشتری می‌فرستد، ADR-046). از ۱۰٫۱ «شلوغ» و «تعطیل» خودش
- * را هم می‌گذارد (سؤال ۲۰۰).
+ * را هم می‌گذارد (سؤال ۲۰۰)، و از ۱۰٫۲ گزارش تولید خودش را می‌بیند، بی مبلغ (سؤال ۲۰۱).
+ * از ۱۰٫۲ حسابدار گزارش تولید همهٔ چاپخانه‌ها را هم دارد، با مبلغ.
  *
  * هر ادمین یک نقش دارد (فرم «افزودن ادمین» و «عوض کردن نقش»)، هرچند جدول چند ردیف را برای نقش‌های بی محدوده می‌پذیرد.
  */
@@ -144,11 +150,18 @@ export const ADMIN_ROLES = {
   },
   accountant: {
     nameFa: 'حسابدار',
-    permissions: ['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read'] as AdminPermission[],
+    permissions: ['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read', 'reports.production'] as AdminPermission[],
   },
   print_partner: {
     nameFa: 'چاپخانه',
-    permissions: ['orders.read', 'orders.status', 'files.download', 'partners.availability', 'shipments.import'] as AdminPermission[],
+    permissions: [
+      'orders.read',
+      'orders.status',
+      'files.download',
+      'partners.availability',
+      'shipments.import',
+      'reports.production',
+    ] as AdminPermission[],
   },
 } as const satisfies Record<string, { nameFa: string; permissions: readonly AdminPermission[] }>;
 

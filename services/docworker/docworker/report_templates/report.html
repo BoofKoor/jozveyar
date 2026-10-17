@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<style>
+  /* قالب گزارش‌های پنل (برش ۱۰٫۲، ADR-061): خلاصه روی A4 عمودی و فهرست سفارش‌ها روی A4 افقی، با سرستون تکرارشونده؛ فقط سیاه، برای چاپ
+     تک‌رنگ. همهٔ متن‌ها آماده از پنل می‌آیند (`apps/admin/lib/reportDocument.ts`، `pdfContext`) و قالب هیچ چیز حساب نمی‌کند. بارگذاری‌شدنی نیست. */
+  @page {
+    size: A4;
+    margin: 14mm 14mm 16mm;
+    @bottom-center { content: "صفحهٔ " counter(page) " از " counter(pages); font-family: Vazirmatn, sans-serif; font-size: 8pt; }
+  }
+  @page detail { size: A4 landscape; }
+  html { font-family: Vazirmatn, sans-serif; font-size: 10pt; line-height: 1.55; }
+  body { margin: 0; }
+  p { margin: 0; }
+  h1 { font-size: 18pt; font-weight: 600; line-height: 1.3; margin: 2pt 0 0; }
+  h2 { font-size: 12pt; font-weight: 600; margin: 0 0 4pt; }
+  .brand { font-size: 9pt; }
+  .sub { font-size: 12pt; margin-top: 2pt; }
+  .made { font-size: 9pt; margin-top: 2pt; }
+  .notes { list-style: none; margin: 10pt 0 0; padding: 0; }
+  .notes li { border-inline-start: 2pt solid; padding-inline-start: 6pt; margin-top: 4pt; }
+  table { border-collapse: collapse; width: 100%; }
+  .stats { margin-top: 12pt; table-layout: fixed; }
+  .stats td { border: 0.8pt solid; padding: 5pt 7pt; vertical-align: top; }
+  .stats .k { display: block; font-size: 9pt; }
+  .stats .v { display: block; font-size: 15pt; font-weight: 600; line-height: 1.3; }
+  section { margin-top: 14pt; break-inside: avoid; }
+  th, td { padding: 3pt 5pt; text-align: start; vertical-align: top; }
+  thead th { font-weight: 600; border-bottom: 1.2pt solid; }
+  tbody td { border-bottom: 0.4pt solid; }
+  .n { text-align: end; white-space: nowrap; }
+  tr.total td { font-weight: 600; border-top: 1.2pt solid; border-bottom: 0; }
+  .note { font-size: 9pt; margin-top: 3pt; }
+  .detail { page: detail; break-before: page; break-inside: auto; margin-top: 0; }
+  .detail table { font-size: 8.5pt; }
+  .detail th, .detail td { padding: 2pt 4pt; }
+  .detail tr { break-inside: avoid; }
+</style>
+</head>
+<body>
+  <p class="brand">جزوه‌یار</p>
+  <h1>{{ title }}</h1>
+  <p class="sub">{{ subtitle }}</p>
+  <p class="made">{{ made }}</p>
+  {%- if notes %}
+  <ul class="notes">
+    {%- for note in notes %}
+    <li>{{ note }}</li>
+    {%- endfor %}
+  </ul>
+  {%- endif %}
+  {%- if stats %}
+  <table class="stats">
+    {%- for row in stats | batch(4) %}
+    <tr>
+      {%- for stat in row %}
+      <td><span class="k">{{ stat.label }}</span><span class="v">{{ stat.value }}</span></td>
+      {%- endfor %}
+    </tr>
+    {%- endfor %}
+  </table>
+  {%- endif %}
+  {%- for t in tables %}
+  <section>
+    <h2>{{ t.title }}</h2>
+    <table>
+      <thead>
+        <tr>
+          {%- for column in t.columns %}
+          <th{% if column.numeric %} class="n"{% endif %}>{{ column.label }}</th>
+          {%- endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {%- for row in t.rows %}
+        <tr>
+          {%- for cell in row %}
+          <td{% if t.columns[loop.index0].numeric %} class="n"{% endif %}>{{ cell }}</td>
+          {%- endfor %}
+        </tr>
+        {%- endfor %}
+        {%- if t.total %}
+        <tr class="total">
+          {%- for cell in t.total %}
+          <td{% if t.columns[loop.index0].numeric %} class="n"{% endif %}>{{ cell }}</td>
+          {%- endfor %}
+        </tr>
+        {%- endif %}
+      </tbody>
+    </table>
+    {%- if t.note %}
+    <p class="note">{{ t.note }}</p>
+    {%- endif %}
+  </section>
+  {%- endfor %}
+  {%- if detail %}
+  <section class="detail">
+    <h2>{{ detail.title }} · {{ subtitle }}</h2>
+    <table>
+      <thead>
+        <tr>
+          {%- for column in detail.columns %}
+          <th{% if column.numeric %} class="n"{% endif %}>{{ column.label }}</th>
+          {%- endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {%- for row in detail.rows %}
+        <tr>
+          {%- for cell in row %}
+          <td{% if detail.columns[loop.index0].numeric %} class="n"{% endif %}>{{ cell }}</td>
+          {%- endfor %}
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+    {%- if detail.note %}
+    <p class="note">{{ detail.note }}</p>
+    {%- endif %}
+  </section>
+  {%- endif %}
+</body>
+</html>

@@ -476,6 +476,8 @@ export const jobs = pgTable(
     shipmentImportId: uuid('shipment_import_id').references(() => shipmentImports.id, { onDelete: 'cascade' }),
     /** نسخهٔ قالب برگه‌ای که کار رویش است: پیش‌نمایشش (`preview_ticket_template`، برش ۹٫۲، ADR-057). */
     ticketTemplateId: integer('ticket_template_id').references(() => ticketTemplates.id, { onDelete: 'cascade' }),
+    /** خروجی PDF گزارشی که کار رویش است: ساختنش (`render_report`، برش ۱۰٫۲، ADR-061). */
+    reportExportId: uuid('report_export_id').references(() => reportExports.id, { onDelete: 'cascade' }),
     payload: jsonb('payload').notNull().default({}),
     status: jobStatus('status').notNull().default('queued'),
     attempts: integer('attempts').notNull().default(0),
@@ -499,10 +501,12 @@ export const jobs = pgTable(
     uniqueIndex('jobs_shipment_import_kind').on(t.shipmentImportId, t.kind),
     /** و برای نسخهٔ قالب: یک کار پیش‌نمایش، که پیش‌نمایش دوباره همان را دوباره در صف می‌گذارد. */
     uniqueIndex('jobs_ticket_template_kind').on(t.ticketTemplateId, t.kind),
-    /** هر کار مال یک چیز است: سند، سفارش، ورود فایل پست یا نسخهٔ قالب. */
+    /** و برای خروجی گزارش: یک کار ساختن برای هر خروجی. */
+    uniqueIndex('jobs_report_export_kind').on(t.reportExportId, t.kind),
+    /** هر کار مال یک چیز است: سند، سفارش، ورود فایل پست، نسخهٔ قالب یا خروجی گزارش. */
     check(
       'jobs_one_target',
-      sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}, ${t.ticketTemplateId}) <= 1`,
+      sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}, ${t.ticketTemplateId}, ${t.reportExportId}) <= 1`,
     ),
   ],
 );
@@ -1886,6 +1890,69 @@ export const ticketTemplates = pgTable(
       'ticket_templates_preview_files',
       sql`(${t.previewPages} IS NULL) = (${t.previewPdfKey} IS NULL) AND (${t.previewPages} IS NULL) = (${t.previewPngKey} IS NULL)
           AND (${t.previewPages} IS NULL OR ${t.previewPages} >= 1)`,
+    ),
+  ],
+);
+
+/* ──────────────────────────── خروجی گزارش‌ها (برش ۱۰٫۲) ──────────────────────────── */
+
+/** بیشترین PDF یک خروجی گزارش؛ گزارشی با فهرست ۳۰۰ سفارش (سقف فهرست PDF) چند صد کیلوبایت است. */
+export const REPORT_EXPORT_MAX_BYTES = 16 * 1024 * 1024;
+/** بیشترین صفحهٔ PDF یک خروجی، همان سقف برگه‌ها (`MAX_TICKET_PAGES` کارگر). */
+export const REPORT_EXPORT_MAX_PAGES = 200;
+
+/**
+ * خروجی PDF یک گزارش (برش ۱۰٫۲، ADR-061، سؤال ۲۰۲): پنل گزارش را همان‌طور که در لحظهٔ درخواست ساخت (متن‌ها و عددها، `context`) با
+ * کار `render_report` به کارگر می‌دهد، و کارگر با همان موتور قالب برگه‌ها (۹٫۲، در قفس) PDF را می‌سازد و همین‌جا می‌نشاند. خروجی اکسل
+ * همان لحظه در خود پنل ساخته می‌شود و ردیفی ندارد.
+ *
+ * فقط کسی که خواست دانلودش می‌کند. کارگر ردیف‌ها را یک روز پس از درخواست پاک می‌کند (`retention.py`): PDF مبلغ دارد و دوباره
+ * ساختنش یک کلیک است. گزارش در خود ردیف منجمد است و نتیجه یک بار نوشته می‌شود (تریگر `report_exports_guard`، 0046).
+ */
+export const reportExports = pgTable(
+  'report_exports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** `production` (گزارش تولید، ۱۰٫۲) یا `shipping` (گزارش ارسال، ۶٫۴). */
+    report: text('report').notNull(),
+    /** دادهٔ قالب PDF: عنوان، بازه، کاشی‌ها و جدول‌ها، همه متن آماده (`apps/admin/lib/reportDocument.ts`). */
+    context: jsonb('context').notNull(),
+    /** نام فایل دانلود، ASCII: `gozaresh-tolid-1405-07-24.pdf`. */
+    fileName: text('file_name').notNull(),
+    /**
+     * دسترسی‌ای که گزارش با آن ساخته شد، تا دانلود همان را دوباره بخواهد (مجوز با هر درخواست، ADR-038): گزارش مبلغ دارد (`orders.money`
+     * خواهنده)، و محدودهٔ خواهنده (چاپخانهٔ کاربر چاپخانه؛ null یعنی همهٔ سفارش‌ها).
+     */
+    money: boolean('money').notNull(),
+    printPartnerId: uuid('print_partner_id').references(() => printPartners.id),
+    requestedBy: uuid('requested_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    pdf: bytea('pdf'),
+    pages: integer('pages'),
+    sha256: text('sha256'),
+    /** ساخته نشد: کد و پیام کوتاه، برای صفحهٔ خروجی. */
+    error: text('error'),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('report_exports_requested').on(t.requestedAt),
+    check('report_exports_report', sql`${t.report} IN ('production', 'shipping')`),
+    check('report_exports_file_name', sql`${t.fileName} ~ '^[a-z0-9][a-z0-9-]{0,118}[.]pdf$'`),
+    check('report_exports_context', sql`jsonb_typeof(${t.context}) = 'object' AND octet_length(${t.context}::text) <= 4194304`),
+    /**
+     * در حال ساختن (هیچ)، ساخته (PDF با صفحه و هش)، یا ساخته نشد (خطا)؛ هرگز دو تا، و پایان با زمانش. هر شاخه `IS NOT NULL` صریح دارد:
+     * CHECKی که NULL شود پذیرفته است، و `octet_length(NULL)` همان NULL است.
+     */
+    check(
+      'report_exports_result',
+      sql`(${t.finishedAt} IS NULL AND ${t.pdf} IS NULL AND ${t.pages} IS NULL AND ${t.sha256} IS NULL AND ${t.error} IS NULL)
+          OR (${t.finishedAt} IS NOT NULL AND ${t.error} IS NULL AND ${t.pdf} IS NOT NULL AND ${t.pages} IS NOT NULL AND ${t.sha256} IS NOT NULL
+              AND octet_length(${t.pdf}) BETWEEN 1 AND ${sql.raw(String(REPORT_EXPORT_MAX_BYTES))}
+              AND ${t.pages} BETWEEN 1 AND ${sql.raw(String(REPORT_EXPORT_MAX_PAGES))} AND ${t.sha256} ~ '^[0-9a-f]{64}$')
+          OR (${t.finishedAt} IS NOT NULL AND ${t.error} IS NOT NULL AND ${t.pdf} IS NULL AND ${t.pages} IS NULL AND ${t.sha256} IS NULL
+              AND length(btrim(${t.error})) BETWEEN 1 AND 500)`,
     ),
   ],
 );

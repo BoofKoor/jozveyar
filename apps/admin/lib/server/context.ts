@@ -14,7 +14,9 @@ import {
   createOrderStore,
   createPanelOrderStore,
   createPartnerStore,
+  createProductionReportStore,
   createRefundStore,
+  createReportExportStore,
   createSecretStore,
   createSettingsStore,
   createShipmentStore,
@@ -37,9 +39,11 @@ import { panelPath } from '../gate';
 import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
 import { adminConfig, panelMockGateway, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
+import { createPanelExports, type PanelExports } from './exports';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
+import { createPanelProduction, type PanelProduction } from './production';
 import { createPanelReport, type PanelReport } from './report';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelShipments, type PanelShipments } from './shipments';
@@ -55,14 +59,17 @@ interface Panel {
   partners: PanelPartners;
   shipments: PanelShipments;
   report: PanelReport;
+  production: PanelProduction;
+  exports: PanelExports;
   templates: PanelTemplates;
 }
 
 let cached: Panel | null | undefined;
 
 function build(config: AdminConfig): Panel {
+  const admins = createAdminStore(getDb());
   const auth = createAdminAuth({
-    store: createAdminStore(getDb()),
+    store: admins,
     passwords: argon2Passwords(),
     secretsKey: config.secretsKey,
     secret: config.secret,
@@ -85,6 +92,9 @@ function build(config: AdminConfig): Panel {
     ...(panelMockGateway(process.env) ? { mock: mockGateway() } : {}),
   };
   const storage = storageFromEnv(process.env)?.driver ?? null;
+  // گزارش‌ها (۶٫۴ و ۱۰٫۲): فقط خواندن، کوئری زنده؛ خروجی اکسل در خود درخواست و PDF با کارگر، هر دو از همان سند صفحه.
+  const report = createPanelReport({ store: createShippingReportStore(getDb()) });
+  const production = createPanelProduction({ store: createProductionReportStore(getDb()) });
   return {
     config,
     auth,
@@ -133,7 +143,11 @@ function build(config: AdminConfig): Panel {
       secret: config.secret,
     }),
     // گزارش ارسال (۶٫۴، ADR-048): فقط خواندن، کوئری زنده؛ بازه‌های وزنش را سرویس تنظیمات عوض می‌کند.
-    report: createPanelReport({ store: createShippingReportStore(getDb()) }),
+    report,
+    // گزارش تولید (۱۰٫۲، ADR-061): مالک، حسابدار و کاربر چاپخانه (فقط خودش، بی مبلغ).
+    production,
+    // خروجی اکسل و PDF گزارش‌ها (۱۰٫۲): PDF را کارگر می‌سازد و فقط خواهنده، با همان دسترسی امروز، دانلودش می‌کند.
+    exports: createPanelExports({ store: createReportExportStore(getDb()), events: admins, production, report, secret: config.secret }),
     // قالب برگه‌ها (۹٫۲، ADR-057): فقط مالک؛ فعال کردن با همان کد تازهٔ ورود. پیش‌نمایش را کارگر می‌سازد و پنل فقط فایلش را می‌خواند.
     templates: createPanelTemplates({ store: createTicketTemplateStore(getDb()), storage, stepUp: auth.stepUp, secret: config.secret }),
   };
