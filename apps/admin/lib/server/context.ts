@@ -19,6 +19,7 @@ import {
   createProductionReportStore,
   createRefundStore,
   createReportExportStore,
+  createReviewStore,
   createSecretStore,
   createSettingsStore,
   createShipmentStore,
@@ -49,6 +50,7 @@ import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
 import { createPanelProduction, type PanelProduction } from './production';
 import { createPanelReport, type PanelReport } from './report';
+import { createPanelReviews, type PanelReviews } from './reviews';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelShipments, type PanelShipments } from './shipments';
 import { createPanelTariff, type PanelTariff } from './tariff';
@@ -68,6 +70,7 @@ interface Panel {
   templates: PanelTemplates;
   discounts: PanelDiscounts;
   blocks: PanelBlocks;
+  reviews: PanelReviews;
 }
 
 let cached: Panel | null | undefined;
@@ -160,6 +163,8 @@ function build(config: AdminConfig): Panel {
     discounts: createPanelDiscounts({ store: createDiscountStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
     // مسدودی موبایل مشتری (۱۲٫۲، ADR-063): مالک و متصدی، بی کد تازه؛ برگشت‌پذیر است و پولی جابه‌جا نمی‌کند.
     blocks: createPanelBlocks({ store: createBlockStore(getDb()), secret: config.secret }),
+    // نظر مشتری‌ها (۱۲٫۳، ADR-064): فقط مالک، بی کد تازه؛ پاک کردن تأیید جدای صفحه را دارد.
+    reviews: createPanelReviews({ store: createReviewStore(getDb()), secret: config.secret }),
   };
 }
 

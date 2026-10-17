@@ -80,11 +80,21 @@ export default async function OrdersPage({
     <>
       <div className="ad-pagehead">
         <h1 className="ad-title">سفارش‌ها</h1>
-        {can(session, 'customers.block') ? (
-          // شماره‌های مسدود (۱۲٫۲، سؤال ۳۱۹): مالک و متصدی؛ مسدود کردن خود از صفحهٔ هر سفارش است، یا از همین فهرست.
-          <Link href={panelPath(gate, '/orders/blocked')} className="jy-btn jy-btn--secondary">
-            شماره‌های مسدود
-          </Link>
+        {can(session, 'reviews.manage') || can(session, 'customers.block') ? (
+          <div className="ad-pagehead__btns">
+            {can(session, 'reviews.manage') ? (
+              // نظر مشتری‌ها (۱۲٫۳، سؤال ۲۱۳): فقط مالک؛ نظر تازه خبر پیشخوان هم دارد.
+              <Link href={panelPath(gate, '/orders/reviews')} className="jy-btn jy-btn--secondary">
+                نظر مشتری‌ها
+              </Link>
+            ) : null}
+            {can(session, 'customers.block') ? (
+              // شماره‌های مسدود (۱۲٫۲، سؤال ۳۱۹): مالک و متصدی؛ مسدود کردن خود از صفحهٔ هر سفارش است، یا از همین فهرست.
+              <Link href={panelPath(gate, '/orders/blocked')} className="jy-btn jy-btn--secondary">
+                شماره‌های مسدود
+              </Link>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <form className="ad-search" role="search" action={base} method="get">

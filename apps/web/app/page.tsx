@@ -2,12 +2,14 @@ import { ClosureBar } from '../components/ClosureBar';
 import { Faq, faqItems } from '../components/Faq';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
+import { Reviews } from '../components/Reviews';
 import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
 import { acceptOf } from '../lib/fileRules';
 import { siteClosure } from '../lib/server/closure';
 import { siteFiles } from '../lib/server/fileRules';
+import { siteReviews } from '../lib/server/reviews';
 import { siteTariff } from '../lib/server/tariff';
 import { TARIFF_ELEMENT_ID, tariffJson } from '../lib/tariff';
 
@@ -39,10 +41,10 @@ const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})
  *
  * تعرفه و روز کاری تحویل به پست از پایگاه داده‌اند (برش ۴٫۴): در جدول تعرفه، سؤال‌ها و «روز کاری»ها، و به JSON درون HTML
  * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است. از ۱۰٫۱ وقتی همهٔ
- * چاپخانه‌ها تعطیل‌اند، نوار کوچکی بالای همه (`ClosureBar`).
+ * چاپخانه‌ها تعطیل‌اند، نوار کوچکی بالای همه (`ClosureBar`)، و از ۱۲٫۳ نظرهایی که مالک روی سایت گذاشت پس از تعرفه (`Reviews`).
  */
 export default async function HomePage() {
-  const [tariff, files, closure] = await Promise.all([siteTariff(), siteFiles(), siteClosure()]);
+  const [tariff, files, closure, reviews] = await Promise.all([siteTariff(), siteFiles(), siteClosure(), siteReviews()]);
   const faq = faqItems(tariff, files);
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -142,6 +144,7 @@ export default async function HomePage() {
             <>
               <HowItWorks slaDays={tariff.slaDays} />
               <Tariff priceList={tariff.priceList} paused={tariff.paused} />
+              <Reviews reviews={reviews} />
             </>
           }
         >

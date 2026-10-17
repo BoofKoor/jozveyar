@@ -1265,6 +1265,58 @@ export const orderNotes = pgTable(
 );
 
 /**
+ * نظر مشتری دربارهٔ سفارش (برش ۱۲٫۳، ADR-064، سؤال ۲۱۳): صاحب سفارش پس از «تحویل پست شد» یک بار، نمرهٔ ۱ تا ۵ و متن اختیاری. هیچ نظری
+ * پیش از تأیید مالک عمومی نیست؛ روی صفحهٔ اصلی فقط تأییدشدهٔ متن‌دار، با نام کوچک و شهری که مشتری زیر فرم دید (`public_name` و
+ * `public_place`، هنگام فرستادن از خود سفارش و منجمد).
+ *
+ * - **وضعیت:** `pending` تازه است؛ `approved` روی سایت (فقط با متن)، `hidden` نه؛ و `deleted` یعنی مالک پاکش کرد: نمره و متن برای همیشه
+ *   می‌روند و ردیف خالی می‌ماند تا همان سفارش دوباره فرم نگیرد. محافظ‌ها در `0052`.
+ * - `decided_by` بی کلید خارجی، مثل `mobile_blocks.blocked_by`: ادمین پاک‌نشدنی است. با پاک شدن سفارش (تست‌ها) می‌رود، و جز آن هرگز.
+ */
+export const orderReviews = pgTable(
+  'order_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    /** ۱ تا ۵؛ پاک‌شده خالی. */
+    rating: smallint('rating'),
+    /** اختیاری، هر خط فارسی‌نرمال (`tidyInputLinesFa`)، تا ۵۰۰ نویسه؛ پاک‌شده خالی. */
+    body: text('body'),
+    /** «سارا»: نام کوچک گیرنده (`firstNameOf` سایت)؛ نام خانوادگی هرگز. */
+    publicName: text('public_name').notNull(),
+    /** «مشهد»، یا «استان …» اگر شهر در فهرست نبود. */
+    publicPlace: text('public_place').notNull(),
+    status: text('status').$type<'pending' | 'approved' | 'hidden' | 'deleted'>().notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** آخرین تصمیم مالک (روی سایت، پنهان، پاک) و کسی که گرفت. */
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedBy: uuid('decided_by'),
+  },
+  (t) => [
+    uniqueIndex('order_reviews_order').on(t.orderId),
+    index('order_reviews_status').on(t.status, t.createdAt),
+    check('order_reviews_status', sql`${t.status} IN ('pending', 'approved', 'hidden', 'deleted')`),
+    check('order_reviews_content', sql`(${t.status} = 'deleted') = (${t.rating} IS NULL) AND (${t.status} <> 'deleted' OR ${t.body} IS NULL)`),
+    check('order_reviews_rating', sql`${t.rating} IS NULL OR ${t.rating} BETWEEN 1 AND 5`),
+    check(
+      'order_reviews_body',
+      sql`${t.body} IS NULL OR (length(${t.body}) <= 500 AND btrim(${t.body}, E' \\n') <> '' AND ${t.body} = btrim(${t.body}, E' \\n'))`,
+    ),
+    check('order_reviews_approved_body', sql`${t.status} <> 'approved' OR ${t.body} IS NOT NULL`),
+    check(
+      'order_reviews_public',
+      sql`btrim(${t.publicName}) <> '' AND length(${t.publicName}) <= 100 AND btrim(${t.publicPlace}) <> '' AND length(${t.publicPlace}) <= 80`,
+    ),
+    check(
+      'order_reviews_decided',
+      sql`(${t.status} = 'pending') = (${t.decidedAt} IS NULL) AND (${t.decidedAt} IS NULL) = (${t.decidedBy} IS NULL) AND (${t.decidedAt} IS NULL OR ${t.decidedAt} >= ${t.createdAt})`,
+    ),
+  ],
+);
+
+/**
  * هر تلاش پرداخت. سفارشی که پرداختش ناموفق شد، تلاش تازه می‌گیرد با همان مبلغ منجمد؛ تلاش قبلی
  * می‌ماند. کلید خارجی به سفارش cascade ندارد: سابقهٔ پول بی‌صدا پاک نمی‌شود.
  */

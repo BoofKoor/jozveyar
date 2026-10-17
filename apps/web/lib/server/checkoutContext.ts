@@ -22,6 +22,7 @@ import {
   createAuthStore,
   createCheckoutPreviewStore,
   createOrderStore,
+  createReviewStore,
   createSecretStore,
   createSmsLog,
   createSmsOutbox,
@@ -37,6 +38,7 @@ import {
   type CheckoutPreviewStore,
   type CheckoutReadiness,
   type OrderStore,
+  type ReviewStore,
   type SecretStore,
 } from '@jozveyar/db';
 import { mockGateway, PaymentError, type PaymentGateway } from '@jozveyar/payments';
@@ -61,6 +63,7 @@ import {
 } from './checkoutMode';
 import { noStore, respond } from './context';
 import type { Result } from './result';
+import { submitReview } from './reviews';
 import { readSetting } from './settings';
 
 /** کوکی نشست بعد از کد پیامکی (ADR-033)، جدا از `jy_sid` که مالک فایل‌هاست. */
@@ -149,6 +152,7 @@ export async function previewOpenable(): Promise<boolean> {
 interface Stores {
   orders: OrderStore;
   auth: AuthStore;
+  reviews: ReviewStore;
 }
 
 let stores: Stores | undefined;
@@ -156,7 +160,7 @@ let stores: Stores | undefined;
 function storesOf(): Stores {
   if (stores) return stores;
   const db = getDb();
-  stores = { orders: createOrderStore(db), auth: createAuthStore(db) };
+  stores = { orders: createOrderStore(db), auth: createAuthStore(db), reviews: createReviewStore(db) };
   return stores;
 }
 
@@ -365,6 +369,24 @@ export async function orderViewFor(request: NextRequest, token: string): Promise
     return view ? respond(view) : notFound();
   } catch (error) {
     console.error('✗ خطای صفحهٔ سفارش:', error);
+    return unavailable();
+  }
+}
+
+/**
+ * نظر صاحب سفارش (برش ۱۲٫۳، ADR-064، `POST /api/orders/<توکن>/review`): مثل صفحهٔ سفارش پایگاه داده کافی است و مسیر خرید نه؛ نشست
+ * صاحب سفارش و وضعیت را `submitReview` می‌سنجد.
+ */
+export async function orderReviewFor(request: NextRequest, token: string): Promise<NextResponse> {
+  if (!process.env.DATABASE_URL) return notFound();
+  try {
+    const { orders, auth, reviews } = storesOf();
+    const at = new Date();
+    const user = await sessionUser(auth, authTokenOf(request), at);
+    const input: unknown = await request.json().catch(() => null);
+    return respond(await submitReview({ orders, reviews }, token, user, input, at));
+  } catch (error) {
+    console.error('✗ خطای نظر سفارش:', error);
     return unavailable();
   }
 }

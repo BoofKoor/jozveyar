@@ -82,7 +82,7 @@ export default async function Dashboard({
 }) {
   const { gate } = await params;
   const query = await searchParams;
-  const { orders, settings } = requirePanel(gate);
+  const { orders, settings, reviews } = requirePanel(gate);
   const session = await requireSession(gate);
   const now = new Date();
   const head = (
@@ -100,7 +100,8 @@ export default async function Dashboard({
   if (!result.ok) return head;
   const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked, partners: board, assignment } = result.value;
   // هشدارهای پیامک (۷٫۱) و وضعیت مسیر خرید روی سایت (۷٫۵): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
-  const [sms, checkout] = await Promise.all([settings.smsAlerts(session), settings.checkoutStatus(session)]);
+  // نظرهای تازه (۱۲٫۳): فقط مالک (`reviews.manage`)؛ برای بقیه null.
+  const [sms, checkout, pendingReviews] = await Promise.all([settings.smsAlerts(session), settings.checkoutStatus(session), reviews.pendingCount(session)]);
   const live = liveAlert(checkout, now);
   // درگاه آماده نیست (کد ۱۱۵ یا کد پذیرنده) و سایت `live` آماده است: مشتری تازه «موقتاً متوقف» می‌بیند (سؤال‌های ۱۳۹ و ۱۶۶).
   const pausedByGateway = checkout?.readiness.ready === true;
@@ -199,6 +200,7 @@ export default async function Dashboard({
       alerts.unrefunded.length > 0 ||
       alerts.refunding.length > 0 ||
       untracked.length > 0 ||
+      (pendingReviews ?? 0) > 0 ||
       cap ||
       low ? (
         // ترتیب (سؤال ۱۴۰): اول آنچه پول یا مسیر خرید همه را می‌بندد (خطا)، بعد آنچه کار مالک یا متصدی می‌خواهد (هشدار)، بعد خبر.
@@ -540,6 +542,18 @@ export default async function Dashboard({
                     پرداخت‌شده.
                   </>
                 ) : null}
+              </span>
+            </p>
+          ) : null}
+          {pendingReviews ? (
+            // نظر مشتری (۱۲٫۳، سؤال ۲۱۳): خبر است، نه هشدار؛ تا مالک تأیید نکند هیچ نظری روی سایت نمی‌رود.
+            <p className="jy-note jy-note--info" data-alert="reviews">
+              <span className="jy-icon jy-icon-info" aria-hidden="true" />
+              <span>
+                <Link className="jy-link" href={panelPath(gate, '/orders/reviews')}>
+                  <span className="num">{formatNumber(pendingReviews)}</span> نظر تازهٔ مشتری
+                </Link>{' '}
+                منتظر توست؛ تا روی سایت نگذاری، کسی نمی‌بیندش.
               </span>
             </p>
           ) : null}

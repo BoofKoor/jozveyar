@@ -432,6 +432,7 @@ describe('رویدادها', () => {
       'گزارش‌ها',
       'تخفیف‌ها',
       'مشتری‌ها',
+      'نظرها',
     ]);
     expect(EVENT_KINDS.map((k) => k.kind)).toEqual([
       '',
@@ -446,6 +447,7 @@ describe('رویدادها', () => {
       'reports',
       'discounts',
       'customers',
+      'reviews',
     ]);
   });
 
@@ -645,7 +647,7 @@ describe('رویدادها', () => {
       true,
       false,
     ]);
-    expect(EVENT_KINDS.at(-2)).toEqual({ kind: 'discounts', label: 'تخفیف‌ها' });
+    expect(EVENT_KINDS.at(-3)).toEqual({ kind: 'discounts', label: 'تخفیف‌ها' });
   });
 
   it('مسدودی موبایل (۱۲٫۲، سؤال ۳۲۰): شمارهٔ پوشیده جدا از جمله، با سفارشی که از صفحه‌اش آمد؛ بی دلیل؛ چیپ «مشتری‌ها»', () => {
@@ -665,7 +667,29 @@ describe('رویدادها', () => {
       true,
       false,
     ]);
-    expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'customers', label: 'مشتری‌ها' });
+    expect(EVENT_KINDS.at(-2)).toEqual({ kind: 'customers', label: 'مشتری‌ها' });
+  });
+
+  it('نظر مشتری (۱۲٫۳، سؤال ۲۱۳): شماره و نمره جدا از جمله، متن نظر هرگز؛ چیپ «نظرها»', () => {
+    const review = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'order_review', detail });
+    const lines = eventLines([
+      review('reviews.approve', { orderNumber: 10027, rating: 5 }),
+      review('reviews.hide', { orderNumber: 10027, rating: 5 }),
+      review('reviews.delete', { orderNumber: 10031, rating: 1 }),
+      review('reviews.delete', { orderNumber: 10032 }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['نظر سفارش ', { ltr: '10027' }, ' (', { ltr: '5' }, ' از ', { ltr: '5' }, ') روی سایت رفت'],
+      ['نظر سفارش ', { ltr: '10027' }, ' (', { ltr: '5' }, ' از ', { ltr: '5' }, ') پنهان شد'],
+      ['نظر سفارش ', { ltr: '10031' }, ' (', { ltr: '1' }, ' از ', { ltr: '5' }, ') پاک شد'],
+      ['نظر سفارش ', { ltr: '10032' }, ' پاک شد'],
+    ]);
+    expect([inEventKind('reviews.approve', 'reviews'), inEventKind('reviews.delete', 'orders'), inEventKind('reviews.hide', 'customers')]).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'reviews', label: 'نظرها' });
   });
 });
 

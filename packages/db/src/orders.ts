@@ -23,6 +23,7 @@ import { assignAtPayment, partnerCandidateOf, type PartnerHours } from './assign
 import { discountForCheckout, discountRefusalOf, discountRoomForOrder, type DiscountRefusal } from './discounts.js';
 import type { DocumentRow } from './documents.js';
 import type { Database } from './index.js';
+import type { OrderReviewRow } from './reviews.js';
 import {
   adminEvents,
   documents,
@@ -30,6 +31,7 @@ import {
   mobileBlocks,
   orderItemSections,
   orderItems,
+  orderReviews,
   orderStatusEvents,
   orders,
   payments,
@@ -184,6 +186,8 @@ export interface OrderDetails {
   parcels: { barcode: string; createdAt: Date; sms: ShipmentSms | null }[];
   /** بازپرداخت‌های سفارش لغوشده (برش ۷٫۳، ADR-051)، تازه‌ترین اول. */
   refunds: (typeof refunds.$inferSelect)[];
+  /** نظر صاحب سفارش (برش ۱۲٫۳، ADR-064)؛ پاک‌شده هم، بی نمره و متن، تا همان سفارش دوباره فرم نگیرد. */
+  review: OrderReviewRow | null;
 }
 
 /** آنچه این بار از درگاه دانستیم (`payments.gateway_*`، برش ۷٫۲): وضعیت (یا همان قبلی، اگر جوابی نیامد)، علت بی جوابی، و زمان. */
@@ -653,7 +657,7 @@ export function createOrderStore({ db }: Database): OrderStore {
       if (!order) return null;
       const itemRows = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id)).orderBy(orderItems.seq);
       const itemIds = itemRows.map((item) => item.id);
-      const [sectionRows, ruleRows, paymentRows, parcelRows, refundRows] = await Promise.all([
+      const [sectionRows, ruleRows, paymentRows, parcelRows, refundRows, reviewRows] = await Promise.all([
         itemIds.length === 0
           ? []
           : db
@@ -685,6 +689,7 @@ export function createOrderStore({ db }: Database): OrderStore {
           .where(and(eq(shipments.orderId, order.id), isNull(shipments.voidedAt)))
           .orderBy(asc(shipments.createdAt), asc(shipments.rowNo)),
         db.select().from(refunds).where(eq(refunds.orderId, order.id)).orderBy(desc(refunds.createdAt), desc(refunds.id)),
+        db.select().from(orderReviews).where(eq(orderReviews.orderId, order.id)).limit(1),
       ]);
       return {
         order,
@@ -698,6 +703,7 @@ export function createOrderStore({ db }: Database): OrderStore {
         payments: paymentRows,
         parcels: parcelRows.map(({ barcode, createdAt, ...sms }) => ({ barcode, createdAt, sms: shipmentSmsOf(sms) })),
         refunds: refundRows,
+        review: reviewRows[0] ?? null,
       };
     },
 
