@@ -196,7 +196,11 @@ export type AdminErrorCode =
   | 'discount_not_found'
   | 'discount_changed'
   | 'discount_terms_frozen'
-  | 'discount_code_required';
+  | 'discount_code_required'
+  /** مسدودی موبایل مشتری (۱۲٫۲). */
+  | 'invalid_block_mobile'
+  | 'mobile_already_blocked'
+  | 'block_not_found';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

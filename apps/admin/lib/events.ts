@@ -613,6 +613,20 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         text: ['کد تخفیف ', ltrOf(detail.code), ` ویرایش شد: ${fields.join('، ')}${toggled ? `؛ و ${toggled}` : ''}`],
       };
     }
+    case 'customers.block':
+    case 'customers.unblock': {
+      // مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰): شمارهٔ پوشیده و سفارشی که مسدودی از صفحه‌اش آمد؛ دلیل در فهرست «شماره‌های مسدود» است، نه
+      // در رویداد.
+      const from = typeof detail.orderNumber === 'number' ? [' (از سفارش ', ...orderRef(detail), ')'] : [];
+      return {
+        badge: null,
+        text: merged(
+          event.action === 'customers.block'
+            ? ['شمارهٔ ', ltrOf(detail.mobile), ' مسدود شد', ...from]
+            : ['مسدودی شمارهٔ ', ltrOf(detail.mobile), ' برداشته شد', ...from],
+        ),
+      };
+    }
     default:
       return { badge: null, text: [event.action] };
   }
@@ -662,7 +676,7 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش و از ۷٫۶ «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه کار روی
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
- * سؤال ۲۷۹) زیر «گزارش‌ها»، و کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، آخر.
+ * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، و مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، آخر.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
@@ -676,4 +690,5 @@ export const EVENT_KINDS = [
   { kind: 'admins', label: 'ادمین‌ها' },
   { kind: 'reports', label: 'گزارش‌ها' },
   { kind: 'discounts', label: 'تخفیف‌ها' },
+  { kind: 'customers', label: 'مشتری‌ها' },
 ] as const;

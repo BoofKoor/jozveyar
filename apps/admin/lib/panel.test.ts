@@ -431,6 +431,7 @@ describe('رویدادها', () => {
       'ادمین‌ها',
       'گزارش‌ها',
       'تخفیف‌ها',
+      'مشتری‌ها',
     ]);
     expect(EVENT_KINDS.map((k) => k.kind)).toEqual([
       '',
@@ -444,6 +445,7 @@ describe('رویدادها', () => {
       'admins',
       'reports',
       'discounts',
+      'customers',
     ]);
   });
 
@@ -643,7 +645,27 @@ describe('رویدادها', () => {
       true,
       false,
     ]);
-    expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'discounts', label: 'تخفیف‌ها' });
+    expect(EVENT_KINDS.at(-2)).toEqual({ kind: 'discounts', label: 'تخفیف‌ها' });
+  });
+
+  it('مسدودی موبایل (۱۲٫۲، سؤال ۳۲۰): شمارهٔ پوشیده جدا از جمله، با سفارشی که از صفحه‌اش آمد؛ بی دلیل؛ چیپ «مشتری‌ها»', () => {
+    const block = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'mobile_block', detail });
+    const lines = eventLines([
+      block('customers.block', { mobile: '0912 ••• 4567', orderNumber: 10027 }),
+      block('customers.block', { mobile: '0935 ••• 1234' }),
+      block('customers.unblock', { mobile: '0912 ••• 4567', orderNumber: 10027 }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['شمارهٔ ', { ltr: '0912 ••• 4567' }, ' مسدود شد (از سفارش ', { ltr: '10027' }, ')'],
+      ['شمارهٔ ', { ltr: '0935 ••• 1234' }, ' مسدود شد'],
+      ['مسدودی شمارهٔ ', { ltr: '0912 ••• 4567' }, ' برداشته شد (از سفارش ', { ltr: '10027' }, ')'],
+    ]);
+    expect([inEventKind('customers.block', 'customers'), inEventKind('customers.unblock', 'customers'), inEventKind('customers.block', 'orders')]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'customers', label: 'مشتری‌ها' });
   });
 });
 

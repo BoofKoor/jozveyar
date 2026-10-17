@@ -11,6 +11,10 @@ export function keyUnavailableText(service: string): string {
 }
 
 export const MESSAGES: Record<AdminErrorCode, string> = {
+  // مسدودی موبایل مشتری (۱۲٫۲)
+  invalid_block_mobile: 'شمارهٔ موبایل درست نیست؛ 11 رقم است و با 09 شروع می‌شود.',
+  mobile_already_blocked: 'این شماره همین حالا مسدود است؛ دلیل و کسی که مسدودش کرد در فهرست «شماره‌های مسدود» است.',
+  block_not_found: 'این مسدودی پیدا نشد.',
   // کدهای تخفیف (۱۱٫۴)
   discount_code_invalid: 'کد 3 تا 20 حرف و رقم لاتین است، بی فاصله؛ مثلاً MEHR1405.',
   discount_code_taken: 'کدی با همین متن هست؛ متن دیگری بنویس.',

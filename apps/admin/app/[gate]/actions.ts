@@ -1348,3 +1348,41 @@ export async function disableDiscountAction(form: FormData): Promise<void> {
   const home = panelPath(gate, '/discounts');
   redirect(result.ok ? `${home}?done=disable&${target}&${doneMark()}` : `${home}?e=${result.error}&${target}&${doneMark()}`);
 }
+
+export interface BlockState {
+  error?: AdminErrorCode;
+  /** نوشته‌های فرم پس از خطا (دلیل و از فهرست شماره)؛ راز نیست. */
+  values?: { reason: string; mobile: string };
+}
+
+/**
+ * «مسدود کردن» موبایل مشتری (۱۲٫۲، سؤال ۲۱۲): از صفحهٔ سفارش (`number`، موبایل صاحب همان سفارش) یا از فهرست «شماره‌های مسدود» (`mobile`)،
+ * بی کد تازه. خطای دلیل و شماره همین‌جا با نوشته‌ها می‌ماند؛ موفق، یا شماره‌ای که همین حالا جای دیگری مسدود شد، به همان صفحه با پیام.
+ */
+export async function blockMobileAction(_state: BlockState, form: FormData): Promise<BlockState> {
+  const gate = field(form, 'gate');
+  const { blocks } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const number = form.get('number');
+  const reason = field(form, 'reason');
+  const mobile = field(form, 'mobile');
+  const input = typeof number === 'string' ? { number, reason } : { mobile, reason };
+  const result = await blocks.block(session, input, await requestIp());
+  const back = typeof number === 'string' ? panelPath(gate, `/orders/${encodeURIComponent(number)}`) : panelPath(gate, '/orders/blocked');
+  if (result.ok) redirect(`${back}?done=${result.value.already ? 'block_again' : 'block'}&${doneMark()}`);
+  if (result.error === 'reason_required' || result.error === 'reason_too_long' || result.error === 'invalid_block_mobile') {
+    return { error: result.error, values: { reason: reason.slice(0, 2000), mobile: mobile.slice(0, 40) } };
+  }
+  redirect(`${back}?e=${result.error}&${doneMark()}`);
+}
+
+/** «رفع مسدودی» (۱۲٫۲): از صفحهٔ سفارش (`number`) یا از فهرست؛ برگشت به همان صفحه با پیام، یا با دلیل اینکه چرا نشد. */
+export async function unblockMobileAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { blocks } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await blocks.unblock(session, field(form, 'id'), await requestIp());
+  const number = field(form, 'number');
+  const back = /^[1-9]\d{0,8}$/.test(number) ? panelPath(gate, `/orders/${number}`) : panelPath(gate, '/orders/blocked');
+  redirect(result.ok ? `${back}?done=unblock&${doneMark()}` : `${back}?e=${result.error}&${doneMark()}`);
+}
