@@ -451,6 +451,39 @@
     }
   }
 
+  /* نظر مشتری‌ها (برش ۱۲٫۳): کارت‌ها در دو ستون، در گوشی یک ستون؛ متن همان خط‌های مشتری */
+  .home-reviews {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-block-start: 32px;
+  }
+  @media (max-width: 640px) {
+    .home-reviews {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .home-review {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    margin: 0;
+  }
+  .home-review__rating {
+    font-weight: 600;
+  }
+  .home-review__body {
+    margin: 0;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .home-review__who {
+    margin-block-start: auto;
+    color: var(--color-muted);
+    font-size: var(--text-small);
+  }
+
   /*
    * ===== پس از فایل (۴ب) =====
    * همه با نشانهٔ `data-jozve` جزیرهٔ سفارش و `:has()`، بی JS؛ زمینهٔ green-50 کل صفحه در globals.css.
@@ -472,8 +505,8 @@
   :where([data-restoring] > body) .home-hero__text {
     padding: 0;
   }
-  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff),
-  :where([data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff) {
+  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff, #reviews),
+  :where([data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff, #reviews) {
     display: none;
   }
   :where(body:has([data-jozve])) .home-title,

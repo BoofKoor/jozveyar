@@ -12,6 +12,7 @@ import type {
   CheckoutStatus,
   MockDecision,
   OrderView,
+  OrderViewReview,
   Place,
   PlacedOrder,
 } from '@jozveyar/contracts/checkout';
@@ -76,6 +77,9 @@ export function checkoutApi(fetchImpl: Fetch) {
     payAgain: (token: string) => call<PlacedOrder>(fetchImpl, `/api/checkout/orders/${encodeURIComponent(token)}/pay`, 'POST'),
     /** صفحهٔ سفارش به JSON، برای «در حال بررسی» (برش ۷٫۲): پشت حالت مسیر خرید نیست. */
     order: (token: string) => call<OrderView>(fetchImpl, `/api/orders/${encodeURIComponent(token)}`),
+    /** «از جزوه راضی بودی؟» صفحهٔ سفارش (برش ۱۲٫۳): مثل `order` پشت حالت مسیر خرید نیست. */
+    review: (token: string, review: { rating: number; body: string }) =>
+      call<OrderViewReview>(fetchImpl, `/api/orders/${encodeURIComponent(token)}/review`, 'POST', review),
     mockDecision: (authority: string, decision: MockDecision) =>
       call<{ redirectUrl: string }>(fetchImpl, `/api/checkout/mock-gateway/${encodeURIComponent(authority)}`, 'POST', {
         decision,

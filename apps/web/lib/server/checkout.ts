@@ -24,6 +24,8 @@ import {
   type OrderSummary,
   type OrderView,
   type OrderViewRefund,
+  type OrderViewReview,
+  type OrderViewReviewForm,
   type Place,
   type PlacedOrder,
   type Recipient,
@@ -66,6 +68,7 @@ import { checkRecipient, normalizeDiscountCode } from '@jozveyar/text/input';
 
 import { randomBytes, randomUUID } from 'node:crypto';
 
+import { firstNameOf } from '../review';
 import type { AuthUser } from './auth';
 import { fail, ok, type Result } from './result';
 import { readSetting } from './settings';
@@ -90,7 +93,8 @@ const AUTO_INQUIRY_BATCH = 20;
 /** ریز قیمت مرورگر فقط برای سنجیدن اختلاف است؛ بزرگ‌تر از این نمی‌پذیریم. */
 export const MAX_QUOTE_SNAPSHOT_BYTES = 64 * 1024;
 
-const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** توکن عمومی سفارش (`/order/<توکن>`)؛ نظر سفارش (`reviews.ts`، ۱۲٫۳) هم همین را می‌سنجد. */
+export const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTHORITY = /^[A-Za-z0-9_-]{8,64}$/;
 
 export interface CheckoutDeps {
@@ -272,8 +276,28 @@ export async function orderView(
     },
     parcels,
     refund: order.status === 'cancelled' && succeeded ? refundView(found.refunds.find((r) => r.paymentId === succeeded.id), succeeded.cardMask) : null,
+    review: reviewView(found.review),
+    // «از جزوه راضی بودی؟» (۱۲٫۳): «تحویل پست شد» و هنوز هیچ نظری؛ پاک‌شده هم یعنی داشت.
+    reviewForm: order.status === 'handed_to_post' && found.review === null ? reviewAttribution(order) : null,
   };
   return ok(view);
+}
+
+/**
+ * نام و شهری که نظر صاحب سفارش با آن روی صفحهٔ اصلی می‌آید (برش ۱۲٫۳، سؤال ۲۱۳): نام کوچک (`firstNameOf`) و شهر گیرنده، یا استانش اگر
+ * شهر در فهرست نیست. فرم همین را زیر فیلد نشان می‌دهد و `submitReview` همین را روی نظر منجمد می‌کند (`public_name` و `public_place`)، پس
+ * صفحهٔ اصلی همان را دارد که مشتری پیش از «بفرست» دید.
+ */
+export function reviewAttribution(order: { recipientName: string; cityId: number | null; provinceId: number }): OrderViewReviewForm {
+  const city = order.cityId === null ? undefined : findCity(order.cityId);
+  const province = findProvince(order.provinceId);
+  return { publicName: firstNameOf(order.recipientName), publicPlace: city?.name ?? (province ? `استان ${province.name}` : '') };
+}
+
+/** نظر صاحب سفارش برای خودش (برش ۱۲٫۳، ADR-064): منتظر و پنهان یکی («رسید»)، پاک‌شده هیچ: نمره ندارد (`order_reviews_content`). */
+function reviewView(review: OrderDetails['review']): OrderViewReview | null {
+  if (!review || review.rating === null) return null;
+  return { rating: review.rating, body: review.body, published: review.status === 'approved' };
 }
 
 /**
