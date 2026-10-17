@@ -55,13 +55,16 @@ export interface PlaceOrderBody {
   checkoutKey: string;
   expectedTotalRials: number;
   quoteSnapshot: unknown;
+  /** کدی که مرور با آن قیمت گرفت (برش ۱۱٫۴)؛ null یعنی بی کد. */
+  discountCode: string | null;
 }
 
 export function checkoutApi(fetchImpl: Fetch) {
   return {
     status: () => call<CheckoutStatus>(fetchImpl, '/api/checkout'),
-    quote: (items: CheckoutItem[], place: Place | null) =>
-      call<CheckoutQuote>(fetchImpl, '/api/checkout/quote', 'POST', { items, place }),
+    /** کد تخفیف (برش ۱۱٫۴) فقط در مرور و با نشست؛ سرور یکدستش می‌کند. */
+    quote: (items: CheckoutItem[], place: Place | null, discountCode: string | null = null) =>
+      call<CheckoutQuote>(fetchImpl, '/api/checkout/quote', 'POST', { items, place, discountCode }),
     requestCode: (mobile: string) =>
       call<{ mobile: string; expiresInSeconds: number; resendInSeconds: number }>(fetchImpl, '/api/checkout/otp', 'POST', {
         mobile,

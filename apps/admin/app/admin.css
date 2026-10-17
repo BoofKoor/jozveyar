@@ -163,6 +163,16 @@
       display: block;
     }
   }
+  /* گوشی ۳۲۰ پیکسلی: چهار زبانهٔ حسابدار (۱۱٫۴: «پیشخوان»، «سفارش‌ها»، «گزارش‌ها»، «تخفیف‌ها») با فاصلهٔ ۱۰ چهار پیکسل جا کم داشتند */
+  @media (max-width: 360px) {
+    .ad-nav a,
+    .ad-more summary {
+      padding-inline: 8px;
+    }
+    .ad-nav > a:first-child {
+      margin-inline-start: -8px;
+    }
+  }
 
   /* ===== صفحه ===== */
   .ad-page {
@@ -263,6 +273,51 @@
   .ad-availability-form:has(.ad-av-closed:checked) .jy-field.ad-if-away,
   .ad-availability-form:has(.ad-av-busy:checked) .jy-field.ad-if-away {
     display: flex;
+  }
+  /* کد تخفیف (۱۱٫۴): درصد و سقفش فقط با «درصد»، مبلغ فقط با «مبلغ ثابت»، بی JS */
+  .jy-field.ad-if-percent,
+  .jy-field.ad-if-fixed {
+    display: none;
+  }
+  .ad-discount-form:has(.ad-kind-percent:checked) .jy-field.ad-if-percent,
+  .ad-discount-form:has(.ad-kind-fixed:checked) .jy-field.ad-if-fixed {
+    display: flex;
+  }
+  /* روز اول و آخر، و دو سقف، کنار هم در دسکتاپ و زیر هم در گوشی */
+  .ad-discount-days {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 16px;
+  }
+  @media (max-width: 520px) {
+    .ad-discount-days {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .ad-discount-terms {
+    font-weight: 600;
+  }
+  /* فیلد پول یا درصد با واحدش پس از آن */
+  .ad-unit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ad-unit .jy-input {
+    min-width: 0;
+  }
+  .ad-unit__label {
+    flex: none;
+    color: var(--color-muted);
+  }
+  /* سفارش‌های یک کد: روز زیر شماره */
+  .ad-discount-orders th .ad-meta {
+    display: block;
+  }
+  /* متن کد تخفیف: لاتین، چپ‌به‌راست، پررنگ */
+  .ad-code {
+    font-weight: 600;
+    letter-spacing: 0.02em;
   }
   .ad-form fieldset {
     border: 0;

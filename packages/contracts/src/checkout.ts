@@ -62,10 +62,18 @@ export const placeSchema = z.object({
 });
 export type Place = z.infer<typeof placeSchema>;
 
+/**
+ * کد تخفیفی که مشتری در مرور تایپ کرده (برش ۱۱٫۴، سؤال ۲۹۹)، همان‌طور که تایپ شد؛ سرور یکدستش می‌کند (`normalizeDiscountCode`) و فقط
+ * برای نشست تأییدشده می‌سنجد (سقف هر مشتری موبایل می‌خواهد).
+ */
+const discountCodeInputSchema = z.string().max(60);
+
 /** قیمت سرور، برای قدم شهر و مرور. بی جای ارسال، کرایه null است. */
 export const checkoutQuoteRequestSchema = z.object({
   items: checkoutItemsSchema,
   place: placeSchema.nullable().default(null),
+  /** فقط مرور، پس از هویت (برش ۱۱٫۴). */
+  discountCode: discountCodeInputSchema.nullable().default(null),
 });
 export type CheckoutQuoteRequest = z.infer<typeof checkoutQuoteRequestSchema>;
 
@@ -94,8 +102,16 @@ export const placeOrderRequestSchema = z.object({
   checkoutKey: z.uuid(),
   expectedTotalRials: z.number().int().positive(),
   quoteSnapshot: z.unknown().optional(),
+  /** کدی که مرور با آن قیمت گرفت (برش ۱۱٫۴)؛ سرور دوباره می‌سنجد و فقط اگر روی همین قیمت نشست، روی سفارش می‌گذارد. */
+  discountCode: discountCodeInputSchema.nullable().default(null),
 });
 export type PlaceOrderRequest = z.infer<typeof placeOrderRequestSchema>;
+
+/**
+ * چرا کد تخفیف به این سفارش نخورد (برش ۱۱٫۴، سؤال ۲۹۹)، همراه `discount_code_invalid` و `discount_unavailable`: نیست (یا شکل کد نیست)، خاموش
+ * است، روزش نرسیده یا گذشته، ظرفیتش پر است، یا این مشتری سهمش را برده؛ همان `DiscountRefusal` پایگاه داده.
+ */
+export type DiscountCodeReason = 'unknown' | 'disabled' | 'not_started' | 'ended' | 'used_up' | 'used_by_you';
 
 /** درخواست کد پیامکی. شماره هر شکلی می‌تواند باشد؛ سرور نرمالش می‌کند (`normalizeIranMobile`). */
 export const otpRequestSchema = z.object({ mobile: z.string().min(1).max(40) });
@@ -209,6 +225,13 @@ export type CheckoutErrorCode =
   | 'payment_checking'
   /** مالک مسیر خرید را «متوقف» کرده (برش ۷٫۵، ADR-052، سؤال ۱۶۵): قیمت، کد، سفارش تازه و «دوباره پرداخت کن» ۵۰۳؛ برگشت و استعلام نه. */
   | 'checkout_paused'
+  /** کد تخفیفی که مرور یا «پرداخت» فرستاد به این سفارش نمی‌خورد (برش ۱۱٫۴)؛ همراه `reason` (`DiscountCodeReason`). */
+  | 'discount_code_invalid'
+  /**
+   * کد تخفیف سفارشی که هست دیگر جا ندارد (برش ۱۱٫۴، سؤال ۳۰۱): «دوباره پرداخت کن» این سفارش نمی‌شود، چون قیمتش با همان کد منجمد است؛ همراه
+   * `reason` و `order`.
+   */
+  | 'discount_unavailable'
   | 'unavailable';
 
 /** یک بخش جزوه در صفحهٔ سفارش: نام فایل و صفحه‌هایی که سرور شمرد. */

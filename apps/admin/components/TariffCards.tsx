@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
-import { rateRows, restRows, weightLabel, ZONES } from '../lib/tariff';
+import { rateRows, restRows, tierRows, weightLabel, ZONES } from '../lib/tariff';
 import { Segments } from './Segments';
 
 /** «A4»، با جهت خودش. */
@@ -206,6 +206,27 @@ export function TariffCards({ list, reportHref }: { list: PriceList; reportHref?
           ) : null}
         </section>
       ) : null}
+
+      <section className="jy-card" aria-labelledby="t-tiers" data-tariff="tiers">
+        <h2 id="t-tiers" className="jy-card__title">
+          تخفیف سفارش بزرگ
+        </h2>
+        <table className="ad-table">
+          <tbody>
+            {tierRows(list).map((row, i) => (
+              <tr key={i}>
+                <th scope="row">
+                  <Segments segs={row.label} />
+                </th>
+                <td>
+                  <Segments segs={row.value} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="ad-hint">روی جمع چاپ، کاغذ و صحافی، پیش از کرایه؛ فقط بالاترین پله‌ای که سفارش به آن رسیده، و با کد تخفیف جمع نمی‌شود.</p>
+      </section>
 
       <section className="jy-card" aria-labelledby="t-rest" data-tariff="rest">
         <h2 id="t-rest" className="jy-card__title">

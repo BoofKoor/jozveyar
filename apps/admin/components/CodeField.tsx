@@ -1,8 +1,8 @@
 /**
  * «کد برنامهٔ تأیید تو» برای کار حساس، با خطای خودش (سه نشانه: لبه، آیکون، پیام). راهنما پیش‌فرض همان کد تازه است؛ بازپرداخت (۷٫۳)
- * می‌گوید چرا: «پول جابه‌جا می‌شود».
+ * می‌گوید چرا: «پول جابه‌جا می‌شود». ویرایش کد تخفیف (۱۱٫۴) خالی‌اش را هم می‌فرستد، چون خاموش کردن تنها کد تازه نمی‌خواهد و سرور می‌سنجد.
  */
-export function CodeField({ error, hint }: { error: string | null; hint?: string }) {
+export function CodeField({ error, hint, required = true }: { error: string | null; hint?: string; required?: boolean }) {
   return (
     <div className="jy-field">
       <label className="jy-label" htmlFor="step-code">
@@ -15,7 +15,7 @@ export function CodeField({ error, hint }: { error: string | null; hint?: string
         inputMode="numeric"
         autoComplete="one-time-code"
         maxLength={6}
-        required
+        required={required}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? 'step-code-error step-code-hint' : 'step-code-hint'}
       />

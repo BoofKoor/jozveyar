@@ -106,6 +106,13 @@ export const ADMIN_PERMISSIONS = {
    * حسابدار همهٔ چاپخانه‌ها و با مبلغ؛ کاربر چاپخانه فقط سفارش‌های خودش (محدوده) و بی مبلغ (`orders.money` ندارد). متصدی نه (سؤال ۲۰۱).
    */
   'reports.production': 'گزارش تولید',
+  /**
+   * کدهای تخفیف (برش ۱۱٫۴، ADR-062، سؤال ۳۰۲): ساختن، عوض کردن شرط‌ها و روز و سقف‌ها، و روشن و خاموش؛ فقط مالک. پلهٔ تخفیف سفارش بزرگ
+   * جزو تعرفه است (`tariff.edit`).
+   */
+  'discounts.manage': 'ساختن و عوض کردن کد تخفیف',
+  /** دیدن کدهای تخفیف با شمار استفاده و سفارش‌هایشان (سؤال ۳۰۲): مالک و حسابدار. */
+  'discounts.read': 'دیدن کدهای تخفیف',
   'admins.manage': 'ادمین‌ها',
   'events.read': 'رویدادها',
 } as const;
@@ -124,7 +131,7 @@ const ALL_PERMISSIONS = Object.keys(ADMIN_PERMISSIONS) as AdminPermission[];
  * که امروز به چاپخانهٔ خودش سپرده شده‌اند (`admin_user_roles.print_partner_id`)؛ بی مبلغ، بی لغو و بی ویرایش. از ۶٫۲ فایل پست
  * خودش را هم وارد می‌کند، فقط برای همان سفارش‌ها؛ صف تأیید نه (تأیید کد به مشتری می‌فرستد، ADR-046). از ۱۰٫۱ «شلوغ» و «تعطیل» خودش
  * را هم می‌گذارد (سؤال ۲۰۰)، و از ۱۰٫۲ گزارش تولید خودش را می‌بیند، بی مبلغ (سؤال ۲۰۱).
- * از ۱۰٫۲ حسابدار گزارش تولید همهٔ چاپخانه‌ها را هم دارد، با مبلغ.
+ * از ۱۰٫۲ حسابدار گزارش تولید همهٔ چاپخانه‌ها را هم دارد، با مبلغ، و از ۱۱٫۴ کدهای تخفیف را می‌بیند (نه می‌سازد).
  *
  * هر ادمین یک نقش دارد (فرم «افزودن ادمین» و «عوض کردن نقش»)، هرچند جدول چند ردیف را برای نقش‌های بی محدوده می‌پذیرد.
  */
@@ -150,7 +157,15 @@ export const ADMIN_ROLES = {
   },
   accountant: {
     nameFa: 'حسابدار',
-    permissions: ['orders.read', 'orders.money', 'orders.refund', 'orders.notes', 'reports.read', 'reports.production'] as AdminPermission[],
+    permissions: [
+      'orders.read',
+      'orders.money',
+      'orders.refund',
+      'orders.notes',
+      'reports.read',
+      'reports.production',
+      'discounts.read',
+    ] as AdminPermission[],
   },
   print_partner: {
     nameFa: 'چاپخانه',

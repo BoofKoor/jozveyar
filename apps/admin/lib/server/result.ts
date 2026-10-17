@@ -179,7 +179,24 @@ export type AdminErrorCode =
   | 'preview_order_unpaid'
   | 'preview_files_deleted'
   /** پیکربندی سرور (مثلاً `SECRETS_KEY` عوض شده). */
-  | 'unavailable';
+  | 'unavailable'
+  /** کدهای تخفیف (۱۱٫۴). */
+  | 'discount_code_invalid'
+  | 'discount_code_taken'
+  | 'discount_kind'
+  | 'discount_percent'
+  | 'discount_max'
+  | 'discount_amount'
+  | 'discount_min_order'
+  | 'discount_from'
+  | 'discount_until'
+  | 'discount_total_limit'
+  | 'discount_per_customer'
+  | 'discount_note'
+  | 'discount_not_found'
+  | 'discount_changed'
+  | 'discount_terms_frozen'
+  | 'discount_code_required';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

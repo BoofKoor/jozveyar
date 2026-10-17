@@ -32,6 +32,20 @@ const statusOf = (value: unknown) => (typeof value === 'string' && value in STAT
 /** نام فیلدهای گیرنده در رویداد ویرایش. */
 const RECIPIENT: Record<string, string> = { recipientName: 'نام', addressText: 'نشانی', postalCode: 'کد پستی' };
 
+/** نام شرط‌های کد تخفیف در رویداد ویرایش (۱۱٫۴)؛ روشن و خاموش جدا، با حال تازه. */
+const DISCOUNT_FIELDS: Record<string, string> = {
+  kind: 'نوع',
+  percent: 'درصد',
+  maxDiscountRials: 'سقف تخفیف',
+  amountRials: 'مبلغ',
+  minOrderRials: 'حداقل سفارش',
+  validFrom: 'روز اول',
+  validUntil: 'روز آخر',
+  totalLimit: 'سقف کل استفاده',
+  perCustomerLimit: 'سقف هر مشتری',
+  note: 'یادداشت',
+};
+
 /** تکهٔ متن؛ `{ ltr }` نام کاربری لاتین است و صفحه آن را جدا از جملهٔ فارسی نشان می‌دهد. */
 export type Segment = string | { ltr: string };
 
@@ -586,6 +600,19 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       const done = detail.format === 'pdf' ? `خروجی PDF ${report} خواسته شد` : `خروجی اکسل ${report} دانلود شد`;
       return { badge: null, text: [range ? `${done}: ${range}` : done] };
     }
+    case 'discounts.create':
+      // کد تخفیف (۱۱٫۴، سؤال ۳۰۴): متن کد، بی مبلغ؛ شرط‌ها در صفحهٔ همان کد است.
+      return { badge: null, text: ['کد تخفیف ', ltrOf(detail.code), ' ساخته شد'] };
+    case 'discounts.update': {
+      const changed = Array.isArray(detail.changed) ? detail.changed.map(String) : [];
+      const toggled = changed.includes('enabled') ? (detail.enabled === false ? 'خاموش شد' : 'روشن شد') : null;
+      const fields = changed.filter((key) => key !== 'enabled').map((key) => DISCOUNT_FIELDS[key] ?? key);
+      if (fields.length === 0) return { badge: null, text: ['کد تخفیف ', ltrOf(detail.code), ` ${toggled ?? 'ویرایش شد'}`] };
+      return {
+        badge: null,
+        text: ['کد تخفیف ', ltrOf(detail.code), ` ویرایش شد: ${fields.join('، ')}${toggled ? `؛ و ${toggled}` : ''}`],
+      };
+    }
     default:
       return { badge: null, text: [event.action] };
   }
@@ -635,7 +662,7 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش و از ۷٫۶ «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه کار روی
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
- * سؤال ۲۷۹) زیر «گزارش‌ها»، آخر.
+ * سؤال ۲۷۹) زیر «گزارش‌ها»، و کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، آخر.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
@@ -648,4 +675,5 @@ export const EVENT_KINDS = [
   { kind: 'partners', label: 'چاپخانه‌ها' },
   { kind: 'admins', label: 'ادمین‌ها' },
   { kind: 'reports', label: 'گزارش‌ها' },
+  { kind: 'discounts', label: 'تخفیف‌ها' },
 ] as const;

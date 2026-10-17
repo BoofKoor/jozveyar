@@ -11,6 +11,7 @@ import {
   REFUND_AUTO_EVERY_MS,
   createAdminStore,
   createCheckoutPreviewStore,
+  createDiscountStore,
   createOrderStore,
   createPanelOrderStore,
   createPartnerStore,
@@ -39,6 +40,7 @@ import { panelPath } from '../gate';
 import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
 import { adminConfig, panelMockGateway, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
+import { createPanelDiscounts, type PanelDiscounts } from './discounts';
 import { createPanelExports, type PanelExports } from './exports';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
@@ -62,6 +64,7 @@ interface Panel {
   production: PanelProduction;
   exports: PanelExports;
   templates: PanelTemplates;
+  discounts: PanelDiscounts;
 }
 
 let cached: Panel | null | undefined;
@@ -150,6 +153,8 @@ function build(config: AdminConfig): Panel {
     exports: createPanelExports({ store: createReportExportStore(getDb()), events: admins, production, report, secret: config.secret }),
     // قالب برگه‌ها (۹٫۲، ADR-057): فقط مالک؛ فعال کردن با همان کد تازهٔ ورود. پیش‌نمایش را کارگر می‌سازد و پنل فقط فایلش را می‌خواند.
     templates: createPanelTemplates({ store: createTicketTemplateStore(getDb()), storage, stepUp: auth.stepUp, secret: config.secret }),
+    // کدهای تخفیف (۱۱٫۴، ADR-062): دیدن مالک و حسابدار، ساختن و عوض کردن فقط مالک با همان کد تازهٔ ورود؛ خاموش کردن تنها بی کد.
+    discounts: createPanelDiscounts({ store: createDiscountStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
   };
 }
 

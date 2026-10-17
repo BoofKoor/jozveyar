@@ -9,7 +9,13 @@ import { randomUUID } from 'node:crypto';
 
 import {
   choosePartner,
+  dayRefusal,
+  DiscountRefusedError,
+  PAYMENT_ATTEMPT_TTL_MS,
+  termsOf,
   type AssignmentRule,
+  type DiscountCodeRow,
+  type DiscountRefusal,
   type AuthStore,
   type CheckoutDocument,
   type DocumentJob,
@@ -256,6 +262,30 @@ export interface MemoryAssignment {
   smsMessageId: number | null;
 }
 
+/** یک کد تخفیف برای ذخیره‌گاه حافظه‌ای (برش ۱۱٫۴)، با پیش‌فرض‌های جدول: درصد ۱۰، روشن، بی روز و بی سقف کل، یک بار برای هر مشتری. */
+export function memoryDiscountCode(over: Partial<DiscountCodeRow> = {}): DiscountCodeRow {
+  const at = new Date('2026-01-01T00:00:00Z');
+  return {
+    id: randomUUID(),
+    code: 'WELCOME',
+    kind: 'percent',
+    percent: 10,
+    maxDiscountRials: null,
+    amountRials: null,
+    minOrderRials: 0,
+    validFrom: null,
+    validUntil: null,
+    totalLimit: null,
+    perCustomerLimit: 1,
+    enabled: true,
+    note: null,
+    createdBy: randomUUID(),
+    createdAt: at,
+    updatedAt: at,
+    ...over,
+  };
+}
+
 /** همان اولین چاپخانهٔ دادهٔ پایه (`seedReferenceData`): «چاپخانهٔ جزوه‌یار» در شهر تهران، پیش‌فرض. */
 export const FIRST_MEMORY_PARTNER: MemoryPartner = {
   id: 'partner-jozveyar',
@@ -297,6 +327,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   smsOutbox: SmsOutbox;
   /** رویدادهای سیستم «درگاه شروع را رد کرد» (برش ۷٫۲)، مثل `payments.gateway_rejected`. */
   rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[];
+  /** کدهای تخفیف (برش ۱۱٫۴)؛ پنل می‌سازدشان، اینجا تست (`memoryDiscountCode`). */
+  discountCodes: DiscountCodeRow[];
 } {
   const rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[] = [];
   const parcels = new Map<string, OrderDetails['parcels']>();
@@ -315,6 +347,31 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   const priceLists = new Map<number, PriceList>([[options.priceList.version, options.priceList]]);
   let active = options.priceList;
   let nextNumber = 10_001;
+  const discountCodes: DiscountCodeRow[] = [];
+
+  /**
+   * همان `discount_code_taken` و `discount_code_room` (0048): سفارش‌های دیگرِ این کد که پرداخت شده‌اند (هر وضعیت پس از پرداخت)، یا در انتظار
+   * پرداخت با رزرو زنده (خودش یا تلاشی در راهش در مهلت یک تلاش).
+   */
+  function discountRefusal(codeId: string, userId: string, exceptOrder: string | null, reserved = true): DiscountRefusal | null {
+    const code = discountCodes.find((c) => c.id === codeId);
+    if (!code) return 'disabled';
+    const since = options.now().getTime() - PAYMENT_ATTEMPT_TTL_MS;
+    const taken = orders.filter(
+      (o) =>
+        o.discountCodeId === codeId &&
+        o.id !== exceptOrder &&
+        (o.status !== 'awaiting_payment' && o.status !== 'expired'
+          ? true
+          : reserved &&
+            o.status === 'awaiting_payment' &&
+            (o.createdAt.getTime() > since ||
+              payments.some((p) => p.orderId === o.id && p.status === 'pending' && p.createdAt.getTime() > since))),
+    );
+    if (code.totalLimit !== null && taken.length >= code.totalLimit) return 'used_up';
+    if (taken.filter((o) => o.userId === userId).length >= code.perCustomerLimit) return 'used_by_you';
+    return null;
+  }
 
   /** همان محافظ معوق `order_items_cover_pages` (0006). */
   function coverPages(item: NewOrder['items'][number]) {
@@ -387,6 +444,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     refunds,
     sms,
     rejections,
+    discountCodes,
     // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامکی که زنده است: پیامک پرداختی که سفارشش لغو نشده، و پیامک
     // چاپخانه‌ای که تخصیصش امروزِ سفارشی است که هنوز «در صف چاپ» همان چاپخانه است (سؤال ۱۷۴).
     smsOutbox: {
@@ -451,6 +509,16 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       input.items.forEach(coverPages);
       const b = input.breakdown;
       const at = options.now();
+      // همان `orders_discount_code`، `orders_discount_code_valid` و `orders_discount_code_room` (0047 و 0048).
+      const codeId = input.discountCodeId ?? null;
+      const breakdownCode = b.discount?.source === 'code' ? b.discount.codeId : null;
+      if (codeId !== breakdownCode || (codeId !== null && b.discountRials <= 0)) throw new Error('orders_discount_code');
+      if (codeId) {
+        const code = discountCodes.find((c) => c.id === codeId);
+        if (!code || dayRefusal(code, at)) throw new DiscountRefusedError('disabled');
+        const refused = discountRefusal(codeId, input.userId, null);
+        if (refused) throw new DiscountRefusedError(refused);
+      }
       const order: OrderRow = {
         id: randomUUID(),
         orderNumber: nextNumber++,
@@ -463,6 +531,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         quoteSnapshot: input.quoteSnapshot ?? null,
         subtotalRials: b.subtotalRials,
         discountRials: b.discountRials,
+        discountCodeId: codeId,
         shippingRials: b.shippingRials!,
         vatRials: b.vatRials,
         roundingRials: b.roundingRials,
@@ -508,6 +577,18 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       const order = orders.find((o) => o.publicToken === publicToken);
       return order ? detailsOf(order) : null;
     },
+    async discountForCheckout({ code, userId, at }) {
+      const row = discountCodes.find((c) => c.code === code);
+      if (!row) return { ok: false, reason: 'unknown' };
+      const day = dayRefusal(row, at);
+      if (day) return { ok: false, reason: day };
+      const refused = discountRefusal(row.id, userId, null);
+      return refused ? { ok: false, reason: refused } : { ok: true, terms: termsOf(row) };
+    },
+    async discountRoom(orderId) {
+      const order = orders.find((o) => o.id === orderId);
+      return order?.discountCodeId ? discountRefusal(order.discountCodeId, order.userId, orderId) : null;
+    },
     async insertPayment(payment) {
       if (payments.some((p) => p.provider === payment.provider && p.authority === payment.authority)) {
         throw new Error('payments_provider_authority');
@@ -515,6 +596,11 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       const order = orders.find((o) => o.id === payment.orderId);
       // همان `payments_amount_is_total` (0030).
       if (!order || order.totalRials !== payment.amountRials) throw new Error('payments_amount_is_total');
+      // همان `payments_discount_code_room` (0048).
+      if (order.discountCodeId) {
+        const refused = discountRefusal(order.discountCodeId, order.userId, order.id);
+        if (refused) throw new DiscountRefusedError(refused);
+      }
       const row: PaymentRow = {
         id: payment.id ?? randomUUID(),
         orderId: payment.orderId,
@@ -568,7 +654,8 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
       if (!payment) return null;
       const order = orders.find((o) => o.id === payment.orderId)!;
       if (payment.status !== 'pending') return { payment: { ...payment }, order: { ...order }, settled: false, smsId: null, partnerSmsId: null };
-      const outcome = await decide({ payment: { ...payment }, order: { ...order } });
+      const discountRoom = order.discountCodeId ? discountRefusal(order.discountCodeId, order.userId, order.id) === null : true;
+      const outcome = await decide({ payment: { ...payment }, order: { ...order }, discountRoom });
       if (settleOptions.returned && !payment.returnedAt) payment.returnedAt = settleOptions.returned;
       const check = 'check' in outcome && outcome.check ? outcome.check : null;
       if (check) Object.assign(payment, { gatewayStatus: check.status, gatewayError: check.error, gatewayCheckedAt: check.at });

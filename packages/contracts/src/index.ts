@@ -285,6 +285,25 @@ export const pricingSettingsSchema = z.object({
 });
 export type PricingSettings = z.infer<typeof pricingSettingsSchema>;
 
+/** سقف پله‌های تخفیف سفارش بزرگ یک نسخه (برش ۱۱٫۴، سؤال ۲۹۵). */
+export const DISCOUNT_TIERS_MAX = 5;
+/** بیشترین درصد یک پله (سؤال ۲۹۵): تخفیف بیشتر کار کد تخفیف است، نه تعرفه. */
+export const TIER_PERCENT_MAX = 50;
+
+/**
+ * پلهٔ تخفیف سفارش بزرگ (برش ۱۱٫۴، سؤال‌های ۲۱۰ و ۲۹۵): از `fromRials` جمع چاپ، کاغذ و صحافی (پیش از کرایه، مثل حداقل سفارش)،
+ * `percent` درصد تخفیف روی همان جمع، و/یا ارسال رایگان. فقط بالاترین پله‌ای که جمع به آن رسیده می‌نشیند (پله‌ها روی هم جمع
+ * نمی‌شوند)، و با کد تخفیف هم جمع نمی‌شود: بزرگ‌تر می‌ماند (`quote()`). نسخه‌دار، با بقیهٔ تعرفه.
+ */
+export const discountTierSchema = z
+  .object({
+    fromRials: z.number().int().positive(),
+    percent: z.number().int().min(0).max(TIER_PERCENT_MAX),
+    freeShipping: z.boolean(),
+  })
+  .refine((tier) => tier.percent > 0 || tier.freeShipping, { message: 'پلهٔ تخفیف بی تخفیف است' });
+export type DiscountTier = z.infer<typeof discountTierSchema>;
+
 /**
  * ریال هر **رو** چاپ‌شده برای یک اندازه: یکرو و دورو، هر کدام سیاه‌سفید و رنگی (برش ۸٫۳، سؤال ۱۸۴). صفر نمی‌شود.
  */
@@ -306,8 +325,40 @@ export const priceListSchema = z.object({
   shippingMethods: z.record(z.string(), z.object({ nameFa: z.string(), enabled: z.boolean() })),
   shippingRates: z.array(shippingRateSchema),
   settings: pricingSettingsSchema,
+  /**
+   * پله‌های تخفیف سفارش بزرگ (برش ۱۱٫۴)، به ترتیب آستانه و هر آستانه یک بار. نبودنش یعنی هیچ پله: نسخه‌های پیش از ۱۱٫۴ همین‌اند.
+   * موتور قیمت هم نبودنش را هیچ می‌خواند، چون تعرفهٔ درون HTML زبانه‌ای که پیش از استقرار باز بود با zod خوانده نمی‌شود.
+   */
+  discountTiers: z
+    .array(discountTierSchema)
+    .max(DISCOUNT_TIERS_MAX)
+    .refine((tiers) => tiers.every((tier, i) => i === 0 || tier.fromRials > tiers[i - 1]!.fromRials), {
+      message: 'پله‌های تخفیف به ترتیب آستانه و بی تکرار',
+    })
+    .default([]),
 });
 export type PriceList = z.infer<typeof priceListSchema>;
+
+/**
+ * شرط‌های کد تخفیفی که سرور پیدا و سنجیده (برش ۱۱٫۴، سؤال‌های ۲۰۹ و ۲۹۸): موتور فقط مبلغش را حساب و با پلهٔ سفارش بزرگ مقایسه
+ * می‌کند. روشن بودن، روز اعتبار و سقف استفاده کار سرور و پایگاه داده است، چون موتور تاریخ و I/O ندارد. کد روی جمع چاپ، کاغذ و صحافی
+ * است، نه کرایه.
+ */
+export type DiscountCodeTerms = {
+  id: string;
+  /** متن کد، با حرف بزرگ (`WELCOME`). */
+  code: string;
+  /** حداقل جمع چاپ، کاغذ و صحافی، ریال؛ ۰ یعنی هیچ. */
+  minOrderRials: number;
+} & (
+  | {
+      kind: 'percent';
+      percent: number;
+      /** سقف تخفیف یک سفارش، ریال؛ null یعنی بی سقف. */
+      maxRials: number | null;
+    }
+  | { kind: 'fixed'; amountRials: number }
+);
 
 /* ────────────────────────── ریز قیمت ────────────────────────── */
 
@@ -351,12 +402,46 @@ export interface ItemBreakdown {
   totalRials: number;
 }
 
+/**
+ * تخفیفی که روی یک قیمت نشست (برش ۱۱٫۴): پلهٔ سفارش بزرگ یا کد، هرگز هر دو (سؤال ۲۱۰). `discountRials` ریز قیمت مبلغ همین روی جمع
+ * چاپ، کاغذ و صحافی است؛ ارسال رایگان کرایه را صفر می‌کند (`shippingRials`) و کرایهٔ بخشیده اینجا می‌ماند (سؤال ۲۹۶).
+ */
+export type BreakdownDiscount =
+  | {
+      source: 'tier';
+      /** آستانهٔ همان پله، ریال. */
+      fromRials: number;
+      percent: number;
+      freeShipping: boolean;
+      /** کرایه‌ای که ارسال رایگان بخشید، ریال؛ null بی ارسال رایگان، یا تا شهر معلوم نیست. */
+      waivedShippingRials: number | null;
+    }
+  | {
+      source: 'code';
+      codeId: string;
+      code: string;
+      /** درصد کد؛ null برای مبلغ ثابت. */
+      percent: number | null;
+    };
+
+/**
+ * کدی که با یک قیمت سنجیده شد (برش ۱۱٫۴، سؤال ۳۰۰): نشست (`applied`)، کمتر یا برابر پلهٔ سفارش بزرگ بود و به کار نرفت (`smaller`)،
+ * یا جمع چاپ، کاغذ و صحافی هنوز به حداقل خودش نرسیده (`below_minimum`، با مانده).
+ */
+export type CodeOutcome =
+  | { code: string; status: 'applied' | 'smaller' }
+  | { code: string; status: 'below_minimum'; minOrderRials: number; gapRials: number };
+
 export interface Breakdown {
   priceListVersion: number;
   items: ItemBreakdown[];
   subtotalRials: number;
   discountRials: number;
-  /** null تا وقتی شهر انتخاب نشده. */
+  /** تخفیف این قیمت (برش ۱۱٫۴)؛ null یعنی هیچ. ریز قیمت سفارش‌های پیش از ۱۱٫۴ ندارندش، یعنی هیچ. */
+  discount?: BreakdownDiscount | null;
+  /** کدی که با این قیمت سنجیده شد؛ فقط وقتی کدی داده شد (برش ۱۱٫۴). */
+  code?: CodeOutcome | null;
+  /** null تا وقتی شهر انتخاب نشده؛ با ارسال رایگان صفر. */
   shippingRials: number | null;
   /**
    * کف واقعی کرایه برای این وزن، روی همهٔ مناطق.

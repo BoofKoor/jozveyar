@@ -430,8 +430,21 @@ describe('رویدادها', () => {
       'چاپخانه‌ها',
       'ادمین‌ها',
       'گزارش‌ها',
+      'تخفیف‌ها',
     ]);
-    expect(EVENT_KINDS.map((k) => k.kind)).toEqual(['', 'auth', 'orders', 'payments', 'shipments', 'tariff', 'settings', 'partners', 'admins', 'reports']);
+    expect(EVENT_KINDS.map((k) => k.kind)).toEqual([
+      '',
+      'auth',
+      'orders',
+      'payments',
+      'shipments',
+      'tariff',
+      'settings',
+      'partners',
+      'admins',
+      'reports',
+      'discounts',
+    ]);
   });
 
   it('ارسال (۶٫۱): بارگذاری، ثبت با شمارها و سفارش‌هایی که تحویل پست شدند، دور انداختن، و برگرداندن با دلیل', () => {
@@ -606,6 +619,31 @@ describe('رویدادها', () => {
       ['خروجی PDF گزارش ارسال خواسته شد'],
     ]);
     expect([inEventKind('reports.export', 'reports'), inEventKind('reports.export', 'orders')]).toEqual([true, false]);
+  });
+
+  it('کد تخفیف (۱۱٫۴، سؤال ۳۰۴): ساخته شد، خاموش و روشن شد، و ویرایش با نام شرط‌ها؛ متن کد جدا و بی مبلغ؛ چیپ «تخفیف‌ها»', () => {
+    const discount = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'discount', detail });
+    expect(
+      eventLines([
+        discount('discounts.create', { code: 'MEHR1405' }),
+        discount('discounts.update', { code: 'MEHR1405', enabled: false, changed: ['enabled'] }),
+        discount('discounts.update', { code: 'MEHR1405', enabled: true, changed: ['enabled'] }),
+        discount('discounts.update', { code: 'MEHR1405', enabled: true, changed: ['validUntil', 'totalLimit', 'note'] }),
+        discount('discounts.update', { code: 'MEHR1405', enabled: false, changed: ['perCustomerLimit', 'enabled'] }),
+      ]).map((line) => line.text),
+    ).toEqual([
+      ['کد تخفیف ', { ltr: 'MEHR1405' }, ' ساخته شد'],
+      ['کد تخفیف ', { ltr: 'MEHR1405' }, ' خاموش شد'],
+      ['کد تخفیف ', { ltr: 'MEHR1405' }, ' روشن شد'],
+      ['کد تخفیف ', { ltr: 'MEHR1405' }, ' ویرایش شد: روز آخر، سقف کل استفاده، یادداشت'],
+      ['کد تخفیف ', { ltr: 'MEHR1405' }, ' ویرایش شد: سقف هر مشتری؛ و خاموش شد'],
+    ]);
+    expect([inEventKind('discounts.create', 'discounts'), inEventKind('discounts.update', 'discounts'), inEventKind('discounts.update', 'tariff')]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'discounts', label: 'تخفیف‌ها' });
   });
 });
 

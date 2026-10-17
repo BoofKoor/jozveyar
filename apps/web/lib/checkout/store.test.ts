@@ -118,12 +118,12 @@ describe('مسیر خرید در مرورگر', () => {
 
   it('«ادامه»: قیمت سرور بی ارسال؛ شهر: قیمت با همان جا', async () => {
     await store.start([ITEM]);
-    expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], null] });
+    expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], null, null] });
     expect(quoteOf(store.getState(), false)?.breakdown.shippingRials).toBeNull();
     expect(quoteOf(store.getState(), true)).toBeNull();
 
     await store.choosePlace(MASHHAD);
-    expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], MASHHAD] });
+    expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], MASHHAD, null] });
     expect(quoteOf(store.getState(), true)?.breakdown.shippingRials).toBe(1_377_500);
   });
 
@@ -429,6 +429,96 @@ describe('مسیر خرید در مرورگر', () => {
       expect(store.getState().payNotice).toMatchObject({ kind: 'failure', failure: { error: 'files_expiring' } });
       expect(store.getState().busy).toBeNull();
       expect(sent).toHaveLength(0);
+    });
+
+    describe('کد تخفیف (۱۱٫۴)', () => {
+      /** قیمت سرور با کد: «WELCOME» ۱۰٪، هر شکل تایپ‌شده‌ای که سرور یکدستش کند؛ کد دیگر «پر شد». */
+      const withCode = (code: string | null): CheckoutQuote => {
+        const base = quoteFor(MASHHAD);
+        if (code === null) return base;
+        return {
+          ...base,
+          breakdown: {
+            ...base.breakdown,
+            discountRials: 61_000,
+            discount: { source: 'code', codeId: 'c1', code: 'WELCOME', percent: 10 },
+            code: { code: 'WELCOME', status: 'applied' },
+            totalRials: base.breakdown.totalRials - 61_000,
+          },
+        };
+      };
+      beforeEach(() => {
+        net.replies.quote = async (_items: CheckoutItem[], place: Place | null, code: string | null) =>
+          code === null || code.toUpperCase().includes('WELCOME') ? ok(place ? withCode(code) : quoteFor(null)) : fail(422, 'discount_code_invalid', { reason: 'used_up' });
+      });
+
+      it('«اعمال»: قیمت مرور با کد یکدستِ سرور، و «پرداخت» همان کد و همان جمع را می‌فرستد؛ کلید با کد تازه می‌شود', async () => {
+        await store.pay();
+        expect(sent.at(-1)).toMatchObject({ discountCode: null, checkoutKey: 'key-1' });
+        store.resume();
+        store.openDiscount();
+        store.editDiscount(' welcome ');
+        await store.applyDiscount();
+        expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], MASHHAD, 'welcome'] });
+        const state = store.getState();
+        expect(state).toMatchObject({ discount: 'WELCOME', discountInput: 'WELCOME', discountError: null, busy: null });
+        expect(quoteOf(state, true)?.breakdown.discount).toMatchObject({ source: 'code', code: 'WELCOME' });
+        await store.pay();
+        expect(sent.at(-1)).toMatchObject({ discountCode: 'WELCOME', checkoutKey: 'key-2', expectedTotalRials: 610_000 + 1_377_500 - 61_000 });
+      });
+
+      it('کدی که نمی‌خورد دلیلش را زیر فیلد دارد و قیمت و کد قبلی همان می‌مانند؛ «حذف کد» قیمت بی کد', async () => {
+        store.editDiscount('WELCOME');
+        await store.applyDiscount();
+        store.editDiscount('FULL');
+        await store.applyDiscount();
+        expect(store.getState()).toMatchObject({ discount: 'WELCOME', discountError: 'used_up' });
+        expect(quoteOf(store.getState(), true)?.breakdown.code).toEqual({ code: 'WELCOME', status: 'applied' });
+        store.removeDiscount();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], MASHHAD, null] });
+        expect(store.getState()).toMatchObject({ discount: null, discountInput: '', discountError: null });
+        expect(quoteOf(store.getState(), true)?.breakdown.discount).toBeUndefined();
+      });
+
+      it('کدی که میان مرور و «پرداخت» پر شد: کنار می‌رود با دلیل، و قیمت تازهٔ بی کد؛ سفارشی ساخته نشده', async () => {
+        store.editDiscount('WELCOME');
+        await store.applyDiscount();
+        net.replies.placeOrder = async () => fail(422, 'discount_code_invalid', { reason: 'used_up' });
+        expect(await store.pay()).toBeNull();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(store.getState()).toMatchObject({ discount: null, discountError: 'used_up', discountOpen: true, payNotice: null });
+        expect(net.calls.at(-1)).toEqual({ name: 'quote', args: [[ITEM], MASHHAD, null] });
+        expect(visited).toEqual([]);
+      });
+
+      it('بعد از رفرش کد پذیرفته برمی‌گردد و دوباره سنجیده می‌شود؛ کدی که دیگر نمی‌خورد کنار می‌رود و قیمت بی کد می‌آید', async () => {
+        store.editDiscount('WELCOME');
+        await store.applyDiscount();
+        const draft = JSON.parse(JSON.stringify(store.draft()));
+        expect(draft.discount).toBe('WELCOME');
+        const fresh = () => {
+          const next = createCheckoutStore({ api: net.api, now: () => clock, navigate: (url) => visited.push(url), newKey: () => `key-${++keys}` });
+          next.hydrate(draft);
+          next.setAuth({ mobile: '09121234567' });
+          return next;
+        };
+        const again = fresh();
+        expect(again.getState()).toMatchObject({ discount: 'WELCOME', discountOpen: true });
+        await again.start([ITEM]);
+        again.enterPay();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(quoteOf(again.getState(), true)?.breakdown.code?.status).toBe('applied');
+
+        net.replies.quote = async (_items: CheckoutItem[], place: Place | null, code: string | null) =>
+          code === null ? ok(place ? withCode(null) : quoteFor(null)) : fail(422, 'discount_code_invalid', { reason: 'ended' });
+        const later = fresh();
+        await later.start([ITEM]);
+        later.enterPay();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(later.getState()).toMatchObject({ discount: null, discountError: 'ended', quoteCode: null });
+        expect(quoteOf(later.getState(), true)?.breakdown.totalRials).toBe(610_000 + 1_377_500);
+      });
     });
   });
 });

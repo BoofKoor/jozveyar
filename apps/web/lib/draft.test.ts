@@ -25,6 +25,7 @@ const CHECKOUT: CheckoutDraft = {
   otp: { mobile: '09123456789', resendAt: 1_000, expiresAt: 2_000, closed: null },
   pay: { payload: '[[],{},{},1]', key: KEY },
   order: ORDER,
+  discount: 'WELCOME',
 };
 
 const FILE: DraftFile = { name: 'جلسه 1.pdf', size: 1234, lastModified: 1_700_000_000_000, documentId: DOC };
@@ -257,5 +258,17 @@ describe('برگشت', () => {
     expect(await documentStatus(DOC, deps)).toEqual({ kind: 'partial' });
     replies.push(json({ error: 'storage_unavailable' }, 503), new TypeError('network'));
     expect(await documentStatus(DOC, deps)).toEqual({ kind: 'unknown' });
+  });
+});
+
+describe('کد تخفیف پیش‌نویس (۱۱٫۴)', () => {
+  const withDiscount = (discount: unknown) => JSON.stringify({ ...DRAFT, checkout: { ...CHECKOUT, discount } });
+  it('کد پذیرفته برمی‌گردد؛ پیش‌نویس بی کد (پیش از ۱۱٫۴) و کدی که شکلش نمی‌خواند بی کد، و بقیهٔ مسیر خرید همان', () => {
+    expect(parseDraft(withDiscount('WELCOME'))?.checkout?.discount).toBe('WELCOME');
+    const { discount: _omitted, ...old } = CHECKOUT;
+    expect(parseDraft(JSON.stringify({ ...DRAFT, checkout: old }))?.checkout).toEqual({ ...CHECKOUT, discount: null });
+    for (const bad of ['welcome', 'AB', 42, '<b>X</b>']) {
+      expect(parseDraft(withDiscount(bad))?.checkout).toEqual({ ...CHECKOUT, discount: null });
+    }
   });
 });

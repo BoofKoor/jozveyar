@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>سفارش‌های من و پشتیبانی — جزوه‌یار</title>
+<link rel="icon" href="../../brand/jozveyar-favicon.svg">
+<!--
+  طرح نمونهٔ ۱۲٫۱ در سایت (docs/UI.md، قدم ۱۱، «پیش از ۱۲٫۱»؛ سؤال ۲۱۱، ADR-053): «سفارش‌های من» با همان کد پیامکی و نشست مسیر خرید،
+  و پیام به پشتیبانی برای هر سفارش یا کلی. صندوق پشتیبانی در پنل است: admin.html، گروه «پشتیبانی (برش ۱۲)».
+  حالت‌ها (فهرست «طرح نمونه» گوشهٔ صفحه)، به ترتیب داستان مریم کاظمی:
+  - ورود — /orders بی نشست: موبایل و «ارسال کد»؛ پیوند «سفارش‌های من» سربرگ جاری است.
+  - کد پیامکی — کد فقط به شماره‌ای می‌رود که سفارش دارد، و پاسخ برای هر شماره یکی است؛ «پیامک نرسید؟» می‌گوید چرا.
+  - سفارش‌های من — دوشنبه 13 مهر، 11:20: «پاسخ تازه» بالای فهرست، چهار سفارش با کار بعدی هر کدام، و «پیام‌ها».
+  - صفحهٔ سفارش — یکشنبه 12 مهر، 21:10: صفحهٔ امروز سفارش، با کارت تازهٔ «سؤالی دربارهٔ این سفارش داری؟».
+  - پیام تازه — «دربارهٔ کدام سفارش؟» (همین سفارش از پیش)، متن و «فرستادن».
+  - پیام رفت — گفت‌وگو «منتظر پاسخ»، با «پیامت رسید».
+  - پاسخ آمد — دوشنبه 10:42 پشتیبانی پاسخ داد؛ پیامکش مریم را به اینجا آورد.
+  - گفت‌وگوی بسته — سؤال کلی 1 مهر، که پشتیبانی بست؛ پیام تازه بازش می‌کند.
+  - غریبه — همان سفارش در مرورگر دیگر: «این سفارش توست؟» با «ورود با موبایل»، که پس از ورود به همین سفارش برمی‌گردد.
+  عددها از تعرفهٔ پایه و همان سفارش‌های طرح پنل‌اند (10027 مریم کاظمی، مشهد). شماره‌ها نمونه‌اند؛ ساعت پاسخ‌گویی همان «تماس» امروز.
+  پیاده‌سازی به زبان سایت و با خود کیت است: packages/ui/src (base و components)، apps/web/app/home.css و checkout.css مستقیم بار
+  می‌شوند (صفحهٔ سفارش و کد پیامکی همان‌اند)، و توکن‌ها از docs/brand/jozveyar-colors.css؛ اینجا هیچ کد رنگی نیست. پوستهٔ سایت از
+  apps/web/app/globals.css رونویسی شده، چون آن فایل Tailwind را وارد می‌کند و مرورگر نمی‌خواندش. اجزای تازه پیشوند ac- (حساب مشتری) دارند.
+  دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/account.html
+-->
+<style>@layer base, components;</style>
+<link rel="stylesheet" href="../../brand/jozveyar-colors.css">
+<style>
+/*
+ * توکن‌های کیت (packages/ui/src/theme.css) از روی فایل برند، چون @theme مال Tailwind است و مرورگر
+ * نمی‌خواندش؛ همان بلوک checkout.html. رنگ فقط var(--jy-…)؛ سایه با color-mix از جوهر.
+ */
+@layer base {
+  :root {
+    --color-paper: var(--jy-paper);
+    --color-ink: var(--jy-ink);
+    --color-green-50: var(--jy-green-50);
+    --color-green-100: var(--jy-green-100);
+    --color-green-200: var(--jy-green-200);
+    --color-green-300: var(--jy-green-300);
+    --color-green-400: var(--jy-green-400);
+    --color-green-500: var(--jy-green-500);
+    --color-green-600: var(--jy-green-600);
+    --color-green-700: var(--jy-green-700);
+    --color-green-800: var(--jy-green-800);
+    --color-success-text: var(--jy-success-text);
+    --color-success-bg: var(--jy-success-bg);
+    --color-warning-text: var(--jy-warning-text);
+    --color-warning-bg: var(--jy-warning-bg);
+    --color-warning-border: var(--jy-warning-border);
+    --color-error-text: var(--jy-error-text);
+    --color-error-bg: var(--jy-error-bg);
+    --color-info-text: var(--jy-info-text);
+    --color-info-bg: var(--jy-info-bg);
+    --color-page: var(--color-paper);
+    --color-band: var(--color-green-50);
+    --color-card: var(--color-paper);
+    --color-line: var(--color-green-200);
+    --color-control: var(--color-green-500);
+    --color-accent: var(--color-green-600);
+    --color-muted: var(--color-green-700);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 2px color-mix(in srgb, var(--jy-ink) 6%, transparent), 0 1px 1px color-mix(in srgb, var(--jy-ink) 4%, transparent);
+    --shadow-md: 0 8px 24px color-mix(in srgb, var(--jy-ink) 10%, transparent), 0 2px 6px color-mix(in srgb, var(--jy-ink) 6%, transparent);
+    --font-sans: 'Vazirmatn', system-ui, 'Segoe UI', Tahoma, sans-serif;
+    --text-base: 16px;
+    --text-small: 13px;
+    --text-h4: 20px;
+    --text-h3: 25px;
+    --text-h2: 31px;
+    --text-h1: 39px;
+    --text-display: 49px;
+  }
+
+  /* کمینهٔ preflight Tailwind، که سایت دارد */
+  *, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
+  html { line-height: 1.5; }
+  h1, h2, h3 { font-size: inherit; font-weight: inherit; }
+  a { color: inherit; text-decoration: inherit; }
+  ol, ul { list-style: none; }
+  img, svg { display: block; vertical-align: middle; }
+  img { max-width: 100%; height: auto; }
+  button, input, textarea { font: inherit; color: inherit; border-radius: 0; background-color: transparent; }
+  ::placeholder { opacity: 1; }
+  b { font-weight: 600; }
+  hr { border: 0; }
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+}
+</style>
+<link rel="stylesheet" href="../../../packages/ui/src/base.css">
+<link rel="stylesheet" href="../../../packages/ui/src/components.css">
+<link rel="stylesheet" href="../../../apps/web/app/home.css">
+<link rel="stylesheet" href="../../../apps/web/app/checkout.css">
+<style>
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../../../apps/web/public/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../../../apps/web/public/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+
+@layer components {
+  /* ===== آیکون‌ها: فایل‌های برند (کیت با @utility می‌سازدشان که مرورگر نمی‌خواند) ===== */
+  .jy-icon-arrow { mask-image: url('../../brand/icons/arrow.svg'); }
+  .jy-icon-check { mask-image: url('../../brand/icons/check.svg'); }
+  .jy-icon-chevron { mask-image: url('../../brand/icons/chevron.svg'); }
+  .jy-icon-error { mask-image: url('../../brand/icons/error.svg'); }
+  .jy-icon-info { mask-image: url('../../brand/icons/info.svg'); }
+  .jy-icon-lock { mask-image: url('../../brand/icons/lock.svg'); }
+  .jy-icon-printer { mask-image: url('../../brand/icons/printer.svg'); }
+  .jy-icon-success { mask-image: url('../../brand/icons/success.svg'); }
+  .jy-icon-truck { mask-image: url('../../brand/icons/truck.svg'); }
+  .jy-icon-warning { mask-image: url('../../brand/icons/warning.svg'); }
+
+  /* Tailwindی که همین طرح به کار می‌برد */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* ===== پوستهٔ سایت: رونویس apps/web/app/globals.css (سربرگ، پاورقی، حالت سفارش)، همان content.html ===== */
+  .site { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+  .site-grow { flex: 1 0 auto; }
+  .site-wrap { max-width: calc(var(--jy-container) + 2 * var(--jy-gutter)); margin-inline: auto; padding-inline: var(--jy-gutter); }
+  .site-top { background: var(--color-band); }
+  .site-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px; }
+  .site-logo { display: block; padding: 6px; margin-inline-start: -6px; border-radius: var(--radius-md); }
+  .site-logo img { height: 64px; width: auto; }
+  .site-nav { display: flex; gap: 4px; }
+  .site-nav a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 14px; border-radius: var(--radius-md); color: var(--color-ink); text-decoration: none; white-space: nowrap; }
+  .site-nav a:hover { background: var(--color-green-100); }
+  /* فقط طرح نمونه: پیوند «سفارش‌های من» برچسب رادیوی حالت است، با ظاهر همان پیوند */
+  .site-nav label { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 14px; border-radius: var(--radius-md); color: var(--color-ink); white-space: nowrap; cursor: pointer; }
+  .site-ordering { display: none; }
+  .site-foot { margin-block-start: 32px; padding-block: 48px 24px; background: var(--color-band); border-block-start: 1px solid var(--color-line); }
+  .site-foot__brand img { height: 64px; width: auto; }
+  .site-foot__brand p { max-width: 24em; margin-block-start: 12px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .site-foot__top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 24px; }
+  .site-foot__nav { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 4px 48px; }
+  .site-foot__nav h2 { font-size: var(--text-small); font-weight: 600; line-height: 1.8; }
+  .site-foot__nav a { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; color: var(--color-muted); text-decoration: none; }
+  .site-foot__nav a:hover { color: var(--color-ink); text-decoration: underline; }
+  /* جای نشان اینماد، همان جعبهٔ ۹۶×۱۰۴ سایت؛ طرح نمونه منبع بیرونی بار نمی‌کند (مثل checkout.html) */
+  .site-foot__seal {
+    display: grid; place-items: center; width: 96px; height: 104px; padding: 8px;
+    border: 1px dashed var(--color-green-300); border-radius: var(--radius-md);
+    font-size: var(--text-small); line-height: 1.6; text-align: center; color: var(--color-muted);
+  }
+  .site-foot__legal {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 24px;
+    margin-block-start: 32px; padding-block-start: 16px; border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-small); color: var(--color-muted);
+  }
+  @media (max-width: 520px) {
+    .site-head { padding-block: 12px; }
+    .site-logo img { height: 56px; }
+    .site-nav .site-nav__how { display: none; }
+    .site-nav :is(a, label) { padding-inline: 10px; }
+    .site-foot { margin-block-start: 0; }
+    .site-foot__nav { column-gap: 32px; }
+  }
+
+  /*
+   * ===== تازه: «سفارش‌های من» در سربرگ (۱۲٫۱) =====
+   * چهارمین پیوند. در گوشی «چطور کار می‌کند» از پیش جا نداشت، و حالا «سؤال‌ها» هم نه (بخش سؤال‌ها با اسکرول صفحهٔ اصلی پیداست): می‌مانند
+   * «تعرفه» و «سفارش‌های من». پیوند جاری همان زمینهٔ hover را دارد.
+   */
+  .site-nav [aria-current] { background: var(--color-green-100); font-weight: 600; }
+  @media (max-width: 520px) { .site-nav .site-nav__faq { display: none; } }
+
+  /* حالت سفارش (صفحهٔ سفارش و نگاه غریبه): صفحه green-50، سربرگ فقط لوگو؛ سایت با نشانهٔ [data-jozve]، طرح با رادیوی همین حالت‌ها */
+  body:has(:is(#m-order, #m-guest):checked) { background: var(--color-band); }
+  body:has(:is(#m-order, #m-guest):checked) .site-idle { display: none; }
+  body:has(:is(#m-order, #m-guest):checked) .site-ordering { display: block; }
+  body:has(:is(#m-order, #m-guest):checked) .site-foot { margin-block-start: 0; }
+  /* شبکهٔ صفحهٔ سفارش: همان home-more حالت سفارش (home.css)، که اینجا با رادیو روشن می‌شود نه با [data-jozve] */
+  .ac-ordergrid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: 'desk side'; column-gap: 32px; align-items: start; padding-block: 8px 64px; }
+  @media (width <= 860px) { .ac-ordergrid { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'desk' 'side'; } }
+
+  /*
+   * ===== تازه: صفحه‌های حساب مشتری (۱۲٫۱)، پیشوند ac- =====
+   * ورود و کد یک کارت باریک‌اند (کار بعدی درون کارت، چون خلاصه‌ای کنارشان نیست)؛ فهرست و گفت‌وگو یک ستون تا ۷۲۰ پیکسل.
+   */
+  .ac-solo { max-width: calc(520px + 2 * var(--jy-gutter)); padding-block: 8px 64px; }
+  .ac-page { max-width: calc(720px + 2 * var(--jy-gutter)); padding-block: 8px 64px; }
+  /* کار بعدی درون کارت: در گوشی تمام‌عرض زیر شست، و بزرگ‌تر از آن به اندازهٔ خودش */
+  :is(.ac-solo, .ac-page) .ck-form > .jy-btn { align-self: flex-start; }
+  @media (max-width: 520px) { :is(.ac-solo, .ac-page) .ck-form > .jy-btn { align-self: stretch; } }
+  .ac-aside { margin-block-start: 16px; font-size: var(--text-small); line-height: 1.8; text-align: center; color: var(--color-muted); }
+
+  /* پیوند برگشت بالای صفحه: پیکان «به عقب» در راست‌به‌چپ رو به راست است */
+  .ac-back { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-block-end: 4px; color: var(--color-muted); font-weight: 600; text-decoration: none; cursor: pointer; }
+  .ac-back:hover { color: var(--color-ink); }
+  .ac-back .jy-icon { width: 18px; height: 18px; rotate: 180deg; }
+
+  .ac-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; margin-block-end: 16px; }
+  .ac-title { font-size: var(--text-h3); font-weight: 600; line-height: 1.4; }
+  .ac-who { display: flex; align-items: center; gap: 4px; font-size: var(--text-small); color: var(--color-muted); }
+  .ac-who .jy-btn { margin-inline-end: -12px; font-size: var(--text-small); }
+  .ac-page > .jy-note { margin-block-end: 16px; }
+
+  /* فهرست سفارش‌ها: کل کارت پیوند صفحهٔ سفارش است (پیوند کشیده)، و دکمه‌های درونش رویش می‌نشینند */
+  .ac-orders { display: flex; flex-direction: column; gap: 12px; }
+  .ac-order { position: relative; transition: border-color var(--jy-dur-fast) var(--jy-ease); }
+  .ac-order:hover { border-color: var(--color-green-400); }
+  .ac-order__head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .ac-order__title { flex: 1 1 auto; font-size: var(--text-h4); font-weight: 600; line-height: 1.5; }
+  .ac-order__link { color: inherit; text-decoration: none; cursor: pointer; }
+  .ac-order__link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+  .ac-order__link:focus-visible { outline: none; box-shadow: none; }
+  .ac-order:has(.ac-order__link:focus-visible) { outline: 2px solid var(--jy-focus-outer); outline-offset: 2px; box-shadow: 0 0 0 2px var(--jy-focus-inner); }
+  .ac-order__go { flex: none; width: 20px; height: 20px; color: var(--color-muted); rotate: 90deg; }
+  .ac-order__meta { margin-block-start: 2px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .ac-order__next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block-start: 12px; padding-block-start: 12px; border-block-start: 1px solid var(--color-green-100); }
+  .ac-order__line { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 15rem; min-width: 0; line-height: 1.7; }
+  .ac-order__line > .jy-icon { flex: none; margin-block-start: 3px; color: var(--color-muted); }
+  .ac-order__next :is(.jy-btn, .jy-barcode, .jy-link) { position: relative; z-index: 1; }
+  /* کد رهگیری: جمله یک ردیف، و کد با «رهگیری در سایت پست» ردیف بعد (در گوشی زیر هم) */
+  .ac-order__next--track .ac-order__line { flex-basis: 100%; }
+
+  /* «پیام‌ها»: یک ردیف برای هر گفت‌وگو، کل ردیف پیوند */
+  .ac-sec { margin-block-start: 32px; }
+  .ac-sec__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-block-end: 12px; }
+  .ac-h2 { font-size: var(--text-h4); font-weight: 600; line-height: 1.5; }
+  .ac-threads { padding-block: 4px; }
+  .ac-threads > li + li { border-block-start: 1px solid var(--color-green-100); }
+  .ac-thread { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; min-height: 64px; padding-block: 12px; color: inherit; text-decoration: none; cursor: pointer; }
+  .ac-thread__top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .ac-thread__top b { font-weight: 600; }
+  .ac-thread__snip { grid-column: 1; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac-thread > .jy-icon { grid-column: 2; grid-row: 1 / span 2; width: 20px; height: 20px; color: var(--color-muted); rotate: 90deg; }
+  .ac-thread:hover .ac-thread__top b { text-decoration: underline; text-underline-offset: 4px; }
+
+  /* گفت‌وگو: پیام‌ها زیر هم، نه حباب؛ پیام پشتیبانی زمینهٔ green-50 دارد، و نام ادمین به مشتری نمی‌رسد */
+  .ac-msgs { display: flex; flex-direction: column; gap: 12px; margin-block-start: 20px; }
+  .ac-msg { padding: 12px 16px; border: 1px solid var(--color-line); border-radius: var(--radius-md); }
+  .ac-msg--us { background: var(--color-green-50); border-color: var(--color-green-100); }
+  .ac-msg__who { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .ac-msg__who b { font-weight: 600; color: var(--color-ink); }
+  .ac-msg__body { margin-block-start: 4px; line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; }
+  .ac-msg__new { font-weight: 600; color: var(--color-green-700); }
+  .ac-sys { padding-inline: 16px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .ac-compose { display: flex; flex-direction: column; gap: 12px; margin-block-start: 20px; padding-block-start: 20px; border-block-start: 1px solid var(--color-line); }
+  .ac-compose > .jy-btn { align-self: flex-start; }
+  textarea.ac-text { min-height: 8rem; resize: vertical; line-height: 1.9; }
+  .ac-fs { min-width: 0; }
+  .ac-fs > legend { padding: 0; margin-block-end: 8px; }
+  .ac-hours { display: flex; align-items: flex-start; gap: 8px; margin-block-start: 16px; font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+  .ac-hours .jy-icon { flex: none; width: 18px; height: 18px; margin-block-start: 3px; }
+
+  /* کارت تازهٔ صفحهٔ سفارش، و «این سفارش توست؟» نگاه غریبه */
+  .ac-help__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block-start: 16px; }
+  .ac-claim { margin-block-start: 16px; padding-block-start: 16px; border-block-start: 1px solid var(--color-green-100); }
+  .ac-claim p { line-height: 1.8; }
+  .ac-claim .jy-btn { margin-block-start: 12px; }
+}
+
+/* ===== فقط طرح نمونه: حالت‌ها بی JS، با رادیوهای پنهان و :has() (همان content.html) ===== */
+.mock-radios { position: fixed; inset-block-start: 0; inset-inline-start: 0; opacity: 0; pointer-events: none; }
+.mock {
+  position: fixed; inset-block-end: 8px; inset-inline-end: 8px; z-index: 50; max-width: calc(100vw - 16px);
+  font-size: 13px; line-height: 1.6; color: var(--jy-paper);
+}
+.mock[open] .mock__list { position: absolute; inset-block-end: 100%; inset-inline-end: 0; margin-block: 0 4px; width: max-content; max-width: calc(100vw - 16px); }
+.mock summary { display: inline-block; padding: 4px 14px; border-radius: 999px; background: var(--jy-ink); cursor: pointer; list-style: none; }
+.mock summary::-webkit-details-marker { display: none; }
+.mock__list {
+  display: grid; grid-template-columns: repeat(2, auto); gap: 2px 4px; max-height: calc(100vh - 56px); margin-block-start: 4px; padding: 6px;
+  overflow-y: auto; border-radius: 12px; background: var(--jy-ink);
+}
+.mock__list label { padding: 2px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+
+.st { display: none; }
+body:has(#m-login:checked) .st-login,
+body:has(#m-code:checked) .st-code,
+body:has(#m-orders:checked) .st-orders,
+body:has(#m-order:checked) .st-order,
+body:has(#m-new:checked) .st-new,
+body:has(#m-sent:checked) :is(.st-thread27, .st-sent),
+body:has(#m-thread:checked) :is(.st-thread27, .st-replied),
+body:has(#m-closed:checked) .st-closed,
+body:has(#m-guest:checked) .st-guest { display: contents; }
+
+body:has(#m-login:checked) .mock [for='m-login'],
+body:has(#m-code:checked) .mock [for='m-code'],
+body:has(#m-orders:checked) .mock [for='m-orders'],
+body:has(#m-order:checked) .mock [for='m-order'],
+body:has(#m-new:checked) .mock [for='m-new'],
+body:has(#m-sent:checked) .mock [for='m-sent'],
+body:has(#m-thread:checked) .mock [for='m-thread'],
+body:has(#m-closed:checked) .mock [for='m-closed'],
+body:has(#m-guest:checked) .mock [for='m-guest'] { background: var(--jy-green-700); }
+</style>
+</head>
+<body class="site">
+<div class="mock-radios" aria-hidden="true"><input type="radio" name="m" id="m-login" checked tabindex="-1"><input type="radio" name="m" id="m-code" tabindex="-1"><input type="radio" name="m" id="m-orders" tabindex="-1"><input type="radio" name="m" id="m-order" tabindex="-1"><input type="radio" name="m" id="m-new" tabindex="-1"><input type="radio" name="m" id="m-sent" tabindex="-1"><input type="radio" name="m" id="m-thread" tabindex="-1"><input type="radio" name="m" id="m-closed" tabindex="-1"><input type="radio" name="m" id="m-guest" tabindex="-1"></div>
+<details class="mock">
+  <summary>طرح نمونه · حالت‌ها</summary>
+  <div class="mock__list"><label for="m-login">ورود</label><label for="m-code">کد پیامکی</label><label for="m-orders">سفارش‌های من</label><label for="m-order">صفحهٔ سفارش</label><label for="m-new">پیام تازه</label><label for="m-sent">پیام رفت</label><label for="m-thread">پاسخ آمد</label><label for="m-closed">گفت‌وگوی بسته</label><label for="m-guest">غریبه</label></div>
+</details>
+
+<div class="site-top">
+  <header class="site-wrap site-head">
+    <a class="site-logo site-idle" href="#" aria-label="جزوه‌یار، صفحهٔ اصلی"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></a>
+    <span class="site-logo site-ordering"><img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435"></span>
+    <!-- تازه: «سفارش‌های من»، چهارمین پیوند؛ در صفحه‌های حساب جاری است -->
+    <nav class="site-nav site-idle" aria-label="پیوندهای صفحه"><a class="site-nav__how" href="#how">چطور کار می‌کند</a><a href="#tariff">تعرفه</a><a class="site-nav__faq" href="#faq">سؤال‌ها</a><label for="m-orders" aria-current="page">سفارش‌های من</label></nav>
+  </header>
+</div>
+
+<main class="site-grow">
+
+  <!-- ===================== ورود: /orders بی نشست ===================== -->
+  <div class="st st-login">
+    <div class="site-wrap ac-solo">
+      <section class="jy-card" aria-labelledby="ac-login-t">
+        <h1 id="ac-login-t" class="jy-card__title">سفارش‌های من</h1>
+        <p class="ck-sub">با موبایلی که با آن سفارش دادی وارد شو. یک کد پیامک می‌کنیم؛ رمز و ثبت‌نام لازم نیست.</p>
+        <form class="ck-form" action="#" onsubmit="return false">
+          <div class="jy-field">
+            <label class="jy-label" for="ac-tel">شمارهٔ موبایل</label>
+            <input id="ac-tel" class="jy-input jy-input--ltr ck-short" type="tel" inputmode="numeric" autocomplete="tel-national" placeholder="09123456789" value="09152345678">
+          </div>
+          <label for="m-code" class="jy-btn jy-btn--primary jy-btn--lg">ارسال کد</label>
+        </form>
+      </section>
+      <p class="ac-aside">هنوز سفارشی نداری؟ <a class="jy-link" href="#">جزوه‌ات را بینداز</a> و قیمتش را همان لحظه ببین.</p>
+    </div>
+  </div>
+
+  <!-- ===================== کد پیامکی: همان قدم کد مسیر خرید، با «ورود» درون کارت ===================== -->
+  <div class="st st-code">
+    <div class="site-wrap ac-solo">
+      <section class="jy-card" aria-labelledby="ac-code-t">
+        <h1 id="ac-code-t" class="jy-card__title">کد تأیید</h1>
+        <p class="ck-sub">اگر با <span class="num nw">0915 234 5678</span> سفارشی ثبت شده، کدش را پیامک کردیم. <label for="m-login" class="jy-link">شماره را عوض کن</label></p>
+        <form class="ck-form" action="#" onsubmit="return false">
+          <div class="jy-field">
+            <label class="jy-label" for="ac-otp">کد پیامک</label>
+            <input id="ac-otp" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="5" value="48213" aria-describedby="ac-otp-hint">
+            <p id="ac-otp-hint" class="jy-hint">هر کد <span class="num">2</span> دقیقه اعتبار دارد.</p>
+          </div>
+          <label for="m-orders" class="jy-btn jy-btn--primary jy-btn--lg">ورود</label>
+        </form>
+        <div class="ck-late">
+          <p class="ck-late__title">پیامک نرسید؟</p>
+          <p class="ck-late__text">گاهی پیامک تا یک دقیقه دیر می‌رسد. اگر هنوز نیامده:</p>
+          <div class="ck-late__actions"><button type="button" class="jy-btn jy-btn--secondary">ارسال دوباره</button></div>
+          <p class="ck-late__text">کد فقط به شماره‌ای می‌رود که با آن سفارشی ثبت شده؛ شاید با شمارهٔ دیگری سفارش داده‌ای. <label for="m-login" class="jy-link">شماره را عوض کن</label>.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== سفارش‌های من: دوشنبه 13 مهر، 11:20 ===================== -->
+  <div class="st st-orders">
+    <div class="site-wrap ac-page">
+      <div class="ac-head">
+        <h1 class="ac-title">سفارش‌های من</h1>
+        <p class="ac-who"><span class="num nw">0915 234 5678</span><button type="button" class="jy-btn jy-btn--text">خروج</button></p>
+      </div>
+      <p class="jy-note jy-note--info" role="status"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>پشتیبانی به پیامت دربارهٔ سفارش <span class="num">10027</span> پاسخ داد. <label for="m-thread" class="jy-link">دیدن پاسخ</label></span></p>
+      <ol class="ac-orders" aria-label="سفارش‌ها، تازه‌ترین اول">
+        <li class="jy-card ac-order">
+          <div class="ac-order__head">
+            <h2 class="ac-order__title"><label for="m-order" class="ac-order__link">سفارش <span class="num">10036</span></label></h2>
+            <span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>در انتظار پرداخت</span>
+            <span class="jy-icon jy-icon-chevron ac-order__go" aria-hidden="true"></span>
+          </div>
+          <p class="ac-order__meta">امروز <span class="num">11:02</span> · <span class="num">1</span> فایل، <span class="num">46</span> صفحه · <span class="num">128,600</span> تومان</p>
+          <div class="ac-order__next">
+            <p class="ac-order__line"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>پرداخت نشده؛ سفارشت با همین قیمت نگه داشته شده.</span></p>
+            <label for="m-order" class="jy-btn jy-btn--primary">پرداخت</label>
+          </div>
+        </li>
+        <li class="jy-card ac-order">
+          <div class="ac-order__head">
+            <h2 class="ac-order__title"><label for="m-order" class="ac-order__link">سفارش <span class="num">10027</span></label></h2>
+            <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>پرداخت شد</span>
+            <span class="jy-icon jy-icon-chevron ac-order__go" aria-hidden="true"></span>
+          </div>
+          <p class="ac-order__meta">شنبه <span class="num">11</span> مهر · <span class="num">3</span> فایل، <span class="num">120</span> صفحه · <span class="num">374,750</span> تومان</p>
+          <div class="ac-order__next">
+            <p class="ac-order__line"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span><span>در صف چاپ؛ تحویل به پست تا امروز، دوشنبه <span class="num">13</span> مهر.</span></p>
+          </div>
+        </li>
+        <li class="jy-card ac-order">
+          <div class="ac-order__head">
+            <h2 class="ac-order__title"><label for="m-order" class="ac-order__link">سفارش <span class="num">10008</span></label></h2>
+            <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span>تحویل پست شد</span>
+            <span class="jy-icon jy-icon-chevron ac-order__go" aria-hidden="true"></span>
+          </div>
+          <p class="ac-order__meta">چهارشنبه <span class="num">1</span> مهر · <span class="num">1</span> فایل، <span class="num">64</span> صفحه · <span class="num">210,400</span> تومان</p>
+          <div class="ac-order__next ac-order__next--track">
+            <p class="ac-order__line"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span><span>شنبه <span class="num">4</span> مهر تحویل پست شد.</span></p>
+            <span class="jy-barcode"><span>1188</span><span>0000</span><span>0000</span><span>0000</span><span>0000</span><span>0087</span></span>
+            <a class="jy-btn jy-btn--secondary" href="#" target="_blank" rel="noopener noreferrer">رهگیری در سایت پست<span class="sr-only"> (زبانهٔ تازه)</span></a>
+          </div>
+        </li>
+        <li class="jy-card ac-order">
+          <div class="ac-order__head">
+            <h2 class="ac-order__title"><label for="m-order" class="ac-order__link">سفارش <span class="num">10002</span></label></h2>
+            <span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>لغو شد</span>
+            <span class="jy-icon jy-icon-chevron ac-order__go" aria-hidden="true"></span>
+          </div>
+          <p class="ac-order__meta">شنبه <span class="num">28</span> شهریور · <span class="num">1</span> فایل، <span class="num">210</span> صفحه · <span class="num">412,000</span> تومان</p>
+          <div class="ac-order__next">
+            <p class="ac-order__line"><span class="jy-icon jy-icon-success" aria-hidden="true"></span><span><span class="num">412,000</span> تومان دوشنبه <span class="num">30</span> شهریور برگشت داده شد.</span></p>
+          </div>
+        </li>
+      </ol>
+
+      <section class="ac-sec" aria-labelledby="ac-msgs-t">
+        <div class="ac-sec__head">
+          <h2 id="ac-msgs-t" class="ac-h2">پیام‌ها</h2>
+          <label for="m-new" class="jy-btn jy-btn--secondary">پیام به پشتیبانی</label>
+        </div>
+        <ul class="jy-card ac-threads">
+          <li><label for="m-thread" class="ac-thread"><span class="ac-thread__top"><b>دربارهٔ سفارش <span class="num">10027</span></b><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>پاسخ تازه</span></span><span class="ac-thread__snip">پشتیبانی، امروز <span class="num">10:42</span>: سلام. جزوه‌ات امروز چاپ و تحویل پست می‌شود…</span><span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></label></li>
+          <li><label for="m-closed" class="ac-thread"><span class="ac-thread__top"><b>سؤال کلی</b><span class="jy-badge jy-badge--neutral">بسته</span></span><span class="ac-thread__snip">پشتیبانی، چهارشنبه <span class="num">1</span> مهر: سلام. فعلاً صورت‌حساب رسمی صادر نمی‌کنیم…</span><span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></label></li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== پیام تازه: از کارت صفحهٔ سفارش، پس همان سفارش از پیش (یکشنبه 12 مهر، 21:12) ===================== -->
+  <div class="st st-new">
+    <div class="site-wrap ac-page">
+      <label for="m-order" class="ac-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>سفارش <span class="num">10027</span></label>
+      <section class="jy-card" aria-labelledby="ac-new-t">
+        <h1 id="ac-new-t" class="jy-card__title">پیام به پشتیبانی</h1>
+        <p class="ck-sub">پاسخ را در «سفارش‌های من» می‌بینی، و به <span class="num nw">0915 234 5678</span> هم پیامک می‌کنیم.</p>
+        <form class="ck-form" action="#" onsubmit="return false">
+          <fieldset class="ac-fs">
+            <legend class="jy-label">دربارهٔ کدام سفارش؟</legend>
+            <div class="jy-tiles">
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="ac-about" checked><span class="jy-tile__title">سفارش <span class="num">10027</span></span><span class="jy-tile__note">پرداخت شد · شنبه <span class="num">11</span> مهر</span></label>
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="ac-about"><span class="jy-tile__title">سفارش <span class="num">10008</span></span><span class="jy-tile__note">تحویل پست شد · <span class="num">4</span> مهر</span></label>
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="ac-about"><span class="jy-tile__title">سفارش <span class="num">10002</span></span><span class="jy-tile__note">لغو شد · <span class="num">28</span> شهریور</span></label>
+              <label class="jy-tile"><input class="jy-radio" type="radio" name="ac-about"><span class="jy-tile__title">سؤال کلی</span><span class="jy-tile__note">دربارهٔ هیچ سفارشی نیست</span></label>
+            </div>
+          </fieldset>
+          <div class="jy-field">
+            <label class="jy-label" for="ac-text">پیامت</label>
+            <textarea id="ac-text" class="jy-input ac-text" rows="5" maxlength="1000" aria-describedby="ac-text-hint">سلام. پنجشنبه امتحان دارم و جزوه را برای همان می‌خواهم. تا چهارشنبه به مشهد می‌رسد؟ اگر راه سریع‌تری هست، هزینه‌اش را می‌دهم.</textarea>
+            <p id="ac-text-hint" class="jy-hint">تا <span class="num">1,000</span> نویسه. عکس و فایل فعلاً فرستاده نمی‌شود؛ اگر لازم شد، در پاسخ می‌گوییم چطور.</p>
+          </div>
+          <label for="m-sent" class="jy-btn jy-btn--primary jy-btn--lg">فرستادن</label>
+        </form>
+        <p class="ac-hours"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>پاسخ‌گویی شنبه تا چهارشنبه، ساعت <span class="num">9</span> تا <span class="num">18</span>، جز تعطیلی‌های رسمی؛ معمولاً همان روز.</span></p>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== گفت‌وگوی سفارش 10027: «پیام رفت» (یکشنبه 21:14) و «پاسخ آمد» (دوشنبه 10:42) ===================== -->
+  <div class="st st-thread27">
+    <div class="site-wrap ac-page">
+      <label for="m-orders" class="ac-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>سفارش‌های من</label>
+      <section class="jy-card" aria-labelledby="ac-t27">
+        <div class="jy-card__head">
+          <h1 id="ac-t27" class="jy-card__title">پیام دربارهٔ سفارش <span class="num">10027</span></h1>
+          <div class="st st-sent"><span class="jy-badge jy-badge--neutral">منتظر پاسخ</span></div>
+          <div class="st st-replied"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>پاسخ داده شد</span></div>
+        </div>
+        <p class="ck-sub"><label for="m-order" class="jy-link">دیدن سفارش <span class="num">10027</span></label> · پرداخت شد، در صف چاپ</p>
+        <div class="st st-sent">
+          <p class="jy-note jy-note--success ck-card-note" role="status"><span class="jy-icon jy-icon-success" aria-hidden="true"></span><span><b>پیامت رسید.</b> پاسخ را همین‌جا می‌بینی و به <span class="num nw">0915 234 5678</span> هم پیامک می‌کنیم. پاسخ‌گویی شنبه تا چهارشنبه، ساعت <span class="num">9</span> تا <span class="num">18</span> است.</span></p>
+        </div>
+        <ol class="ac-msgs">
+          <li class="ac-msg"><p class="ac-msg__who"><b>تو</b><span>یکشنبه <span class="num">12</span> مهر، <span class="num">21:14</span></span></p><p class="ac-msg__body">سلام. پنجشنبه امتحان دارم و جزوه را برای همان می‌خواهم. تا چهارشنبه به مشهد می‌رسد؟ اگر راه سریع‌تری هست، هزینه‌اش را می‌دهم.</p></li>
+          <li class="st st-replied"><div class="ac-msg ac-msg--us"><p class="ac-msg__who"><b>پشتیبانی جزوه‌یار</b><span>امروز، <span class="num">10:42</span></span><span class="ac-msg__new">تازه</span></p><p class="ac-msg__body">سلام. جزوه‌ات امروز چاپ و تحویل پست می‌شود. پست پیشتاز به مشهد معمولاً یک تا دو روز کاری در راه است، پس به احتمال زیاد سه‌شنبه یا چهارشنبه می‌رسد. کد رهگیری را همان موقع پیامک می‌کنیم تا مسیرش را ببینی.
+فعلاً ارسالی سریع‌تر از پیشتاز نداریم.</p></div></li>
+        </ol>
+        <form class="ac-compose" action="#" onsubmit="return false">
+          <div class="jy-field">
+            <label class="jy-label" for="ac-more"><span class="st st-sent">چیزی جا ماند؟</span><span class="st st-replied">پاسخ تو</span></label>
+            <textarea id="ac-more" class="jy-input ac-text" rows="3" maxlength="1000" aria-describedby="ac-more-hint"></textarea>
+            <p id="ac-more-hint" class="jy-hint">تا <span class="num">1,000</span> نویسه؛ به همین گفت‌وگو می‌رود.</p>
+          </div>
+          <button type="button" class="jy-btn jy-btn--secondary">فرستادن</button>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== گفت‌وگوی بسته: سؤال کلی، چهارشنبه 1 مهر ===================== -->
+  <div class="st st-closed">
+    <div class="site-wrap ac-page">
+      <label for="m-orders" class="ac-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>سفارش‌های من</label>
+      <section class="jy-card" aria-labelledby="ac-tg">
+        <div class="jy-card__head">
+          <h1 id="ac-tg" class="jy-card__title">سؤال کلی</h1>
+          <span class="jy-badge jy-badge--neutral">بسته</span>
+        </div>
+        <ol class="ac-msgs">
+          <li class="ac-msg"><p class="ac-msg__who"><b>تو</b><span>چهارشنبه <span class="num">1</span> مهر، <span class="num">12:30</span></span></p><p class="ac-msg__body">سلام. برای تسویه با دانشگاه فاکتور رسمی لازم دارم؛ می‌دهید؟</p></li>
+          <li class="ac-msg ac-msg--us"><p class="ac-msg__who"><b>پشتیبانی جزوه‌یار</b><span>چهارشنبه <span class="num">1</span> مهر، <span class="num">15:05</span></span></p><p class="ac-msg__body">سلام. فعلاً صورت‌حساب رسمی صادر نمی‌کنیم. صفحهٔ هر سفارش مبلغ پرداخت‌شده و کد پیگیری بانک را دارد. اگر صادر کردیم، همین‌جا خبر می‌دهیم.</p></li>
+          <li class="ac-sys">پشتیبانی این گفت‌وگو را بست · چهارشنبه <span class="num">1</span> مهر، <span class="num">15:06</span></li>
+        </ol>
+        <form class="ac-compose" action="#" onsubmit="return false">
+          <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>این گفت‌وگو بسته شده. هنوز سؤالی داری؟ بنویس؛ دوباره باز می‌شود.</span></p>
+          <div class="jy-field">
+            <label class="jy-label" for="ac-reopen">پیامت</label>
+            <textarea id="ac-reopen" class="jy-input ac-text" rows="3" maxlength="1000" aria-describedby="ac-reopen-hint"></textarea>
+            <p id="ac-reopen-hint" class="jy-hint">تا <span class="num">1,000</span> نویسه.</p>
+          </div>
+          <button type="button" class="jy-btn jy-btn--secondary">فرستادن</button>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== صفحهٔ سفارش (حالت سفارش): همان امروز، با کارت تازهٔ پیام (یکشنبه 12 مهر، 21:10) ===================== -->
+  <div class="st st-order">
+    <div class="site-wrap ac-ordergrid">
+      <div class="home-desk">
+        <section class="jy-card" aria-labelledby="ac-o-t">
+          <span class="jy-icon jy-icon-success ck-done__icon" aria-hidden="true"></span>
+          <h1 id="ac-o-t" class="ck-done__title">سفارش ثبت شد</h1>
+          <p class="ck-sub">سفارش <span class="num">10027</span> · <span class="num">374,750</span> تومان پرداخت شد. شمارهٔ سفارش را به <span class="num nw">0915 234 5678</span> هم پیامک کردیم.</p>
+          <ol class="ck-steps">
+            <li class="is-done"><span class="ck-steps__dot"><span class="jy-icon jy-icon-check" aria-hidden="true"></span></span><b>پرداخت</b><span class="ck-steps__t">کد پیگیری بانک <span class="num">803114</span></span></li>
+            <li class="is-now" aria-current="step"><span class="ck-steps__dot"></span><b>چاپ و صحافی</b><span class="ck-steps__t">جزوه‌ات در صف چاپ است.</span></li>
+            <li><span class="ck-steps__dot"></span><b>تحویل به پست تا دوشنبه <span class="num">13</span> مهر</b><span class="ck-steps__t">حداکثر <span class="num">2</span> روز کاری بعد از پرداخت.</span></li>
+            <li><span class="ck-steps__dot"></span><b>کد رهگیری پست</b><span class="ck-steps__t">با پیامک می‌آید؛ مسیر بسته را با آن می‌بینی.</span></li>
+          </ol>
+          <a class="jy-btn jy-btn--secondary" href="#">جزوهٔ دیگری داری؟ بینداز</a>
+        </section>
+        <!-- تازه: پیام دربارهٔ همین سفارش؛ با گفت‌وگوی موجود، حالش و «دیدن پیام‌ها» -->
+        <section class="jy-card" aria-labelledby="ac-help-t">
+          <h2 id="ac-help-t" class="jy-card__title">سؤالی دربارهٔ این سفارش داری؟</h2>
+          <p class="ck-sub">پیام بده؛ پاسخ را در «سفارش‌های من» می‌بینی و پیامکش هم می‌آید.</p>
+          <div class="ac-help__actions">
+            <label for="m-new" class="jy-btn jy-btn--secondary">پیام به پشتیبانی</label>
+            <label for="m-orders" class="jy-btn jy-btn--text">همهٔ سفارش‌هایم</label>
+          </div>
+        </section>
+      </div>
+      <aside class="home-side" aria-labelledby="ac-sum-t">
+        <div class="jy-card home-sum">
+          <h2 id="ac-sum-t" class="jy-card__title">خلاصهٔ سفارش</h2>
+          <dl class="home-sum__lines">
+            <div><dt><span class="num">3</span> فایل، <span class="num">120</span> صفحه · سیاه‌سفید، دورو</dt><dd class="num">192,000</dd></div>
+            <div><dt>طلق و سیم · <span class="num">1</span> نسخه</dt><dd class="num">45,000</dd></div>
+            <div><dt>پست پیشتاز به مشهد</dt><dd class="num">137,750</dd></div>
+          </dl>
+          <div class="home-sum__total"><span class="home-sum__label">پرداخت شد</span><span class="home-sum__value"><span class="num">374,750</span><small>تومان</small></span></div>
+          <p class="home-sum__ship"><span class="jy-icon jy-icon-truck" aria-hidden="true"></span><span>تحویل به پست تا دوشنبه <span class="num">13</span> مهر.</span></p>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ===================== غریبه: همان سفارش در مرورگر دیگر (حالت سفارش) ===================== -->
+  <div class="st st-guest">
+    <div class="site-wrap ck-solo">
+      <section class="jy-card" aria-labelledby="ac-g-t">
+        <div class="jy-card__head">
+          <h1 id="ac-g-t" class="jy-card__title">سفارش <span class="num">10027</span></h1>
+          <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>پرداخت شد</span>
+        </div>
+        <p class="ck-sub">تحویل به پست تا دوشنبه <span class="num">13</span> مهر.</p>
+        <!-- تازه، جای «جزئیات این سفارش فقط با همان گوشی و مرورگری دیده می‌شود…» -->
+        <div class="ac-claim">
+          <p><b>این سفارش توست؟</b> با موبایلی که با آن سفارش دادی وارد شو تا جزئیات و پیام‌هایش را ببینی.</p>
+          <label for="m-login" class="jy-btn jy-btn--secondary">ورود با موبایل</label>
+        </div>
+      </section>
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-foot">
+  <div class="site-wrap">
+    <div class="site-foot__top">
+      <div class="site-foot__brand">
+        <img src="../../brand/jozveyar-logo-no-tagline.svg" alt="جزوه‌یار" width="395" height="435" loading="lazy">
+        <p>چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
+      </div>
+      <nav class="site-foot__nav" aria-label="پیوندهای پاورقی">
+        <!-- تازه: «سفارش‌های من» در گروه «جزوه‌یار» -->
+        <div><h2>جزوه‌یار</h2><ul><li class="site-idle"><a href="#orders">سفارش‌های من</a></li><li class="site-ordering"><a href="#orders" target="_blank" rel="noopener">سفارش‌های من</a></li><li class="site-idle"><a href="#about">دربارهٔ ما</a></li><li class="site-ordering"><a href="#about" target="_blank" rel="noopener">دربارهٔ ما</a></li><li class="site-idle"><a href="#contact">تماس</a></li><li class="site-ordering"><a href="#contact" target="_blank" rel="noopener">تماس</a></li></ul></div>
+        <div><h2>قوانین</h2><ul><li class="site-idle"><a href="#terms">قوانین و مقررات</a></li><li class="site-ordering"><a href="#terms" target="_blank" rel="noopener">قوانین و مقررات</a></li><li class="site-idle"><a href="#privacy">حریم خصوصی</a></li><li class="site-ordering"><a href="#privacy" target="_blank" rel="noopener">حریم خصوصی</a></li></ul></div>
+      </nav>
+      <div class="site-foot__seal">جای نشان اینماد</div>
+    </div>
+    <div class="site-foot__legal"><p>مسئولیت محتوای فایل ارسالی بر عهدهٔ سفارش‌دهنده است.</p><p>© <span class="num">1405</span> جزوه‌یار</p></div>
+  </div>
+</footer>
+</body>
+</html>

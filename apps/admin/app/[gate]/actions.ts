@@ -1285,3 +1285,66 @@ export async function activateTemplateAction(_state: FormState, form: FormData):
   }
   return failure(result);
 }
+
+/* ───────────────────────── تخفیف‌ها (۱۱٫۴) ───────────────────────── */
+
+/** فیلدهای فرم کد تخفیف که پس از خطا می‌مانند؛ هرگز کد برنامهٔ تأیید. */
+const DISCOUNT_VALUE_FIELDS = ['discount', 'kind', 'percent', 'max', 'amount', 'minOrder', 'from', 'until', 'total', 'perCustomer', 'note'] as const;
+
+export interface DiscountState {
+  error?: AdminErrorCode;
+  /** فیلدی که خطا دارد؛ `code` کد برنامهٔ تأیید است. */
+  field?: (typeof DISCOUNT_VALUE_FIELDS)[number] | 'code';
+  /** پایان قفل، «11:35». */
+  until?: string;
+  values?: Partial<Record<(typeof DISCOUNT_VALUE_FIELDS)[number], string>> & { enabled?: boolean };
+}
+
+/**
+ * «کد تازه» و ویرایش کد تخفیف (۱۱٫۴، سؤال ۳۰۲): خطای هر فیلد و کد برنامهٔ تأیید همین‌جا با نوشته‌ها؛ کدی که همین حالا جای دیگری عوض
+ * شد به همان صفحه با شرط‌های تازه (`discount_changed`)؛ موفق به «تخفیف‌ها» با پیام. ساختن و هر تغییر کد تازه می‌خواهد، جز خاموش کردن تنها.
+ */
+export async function saveDiscountAction(_state: DiscountState, form: FormData): Promise<DiscountState> {
+  const gate = field(form, 'gate');
+  const { discounts } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const entries = [...form.entries()].filter(([key]) => key !== 'code' && key !== 'gate' && key !== 'id' && key !== 'seen');
+  const input = { entries, code: form.get('code'), seen: field(form, 'seen') };
+  const ip = await requestIp();
+  const result = id ? await discounts.update(session, id, input, ip) : await discounts.create(session, input, ip);
+  const home = panelPath(gate, '/discounts');
+  if (result.ok) {
+    const target = id || ('id' in result.value ? result.value.id : '');
+    const changed = 'changed' in result.value ? result.value.changed : true;
+    redirect(`${home}?done=${id ? (changed ? 'update' : 'same') : 'create'}&d=${encodeURIComponent(target)}&${doneMark()}`);
+  }
+  if (result.error === 'discount_changed') redirect(`${panelPath(gate, `/discounts/${encodeURIComponent(id)}`)}?e=discount_changed&${doneMark()}`);
+  if (result.error === 'discount_not_found' || result.error === 'forbidden') redirect(`${home}?e=${result.error}&${doneMark()}`);
+  const values: NonNullable<DiscountState['values']> = { enabled: form.get('enabled') !== null };
+  for (const key of DISCOUNT_VALUE_FIELDS) values[key] = field(form, key).slice(0, key === 'note' ? 1000 : 100);
+  const at = typeof result.field === 'string' && (DISCOUNT_VALUE_FIELDS as readonly string[]).includes(result.field) ? result.field : undefined;
+  const codeError = result.error === 'wrong_code' || result.error === 'code_used' || result.error === 'discount_code_required';
+  const until = result.lockedUntil instanceof Date ? formatTehranTime(result.lockedUntil) : undefined;
+  return {
+    error: result.error,
+    ...(at ? { field: at as DiscountState['field'] } : codeError ? { field: 'code' as const } : {}),
+    ...(until ? { until } : {}),
+    values,
+  };
+}
+
+/**
+ * «خاموش کن» از فهرست «تخفیف‌ها» (۱۱٫۴، سؤال ۳۰۲): بی کد تازه، از همان که دیده شد؛ برگشت به فهرست با پیام، یا با دلیل اینکه چرا نشد.
+ * روشن کردن دوباره از صفحهٔ همان کد است، با کد تازه.
+ */
+export async function disableDiscountAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { discounts } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const result = await discounts.disable(session, id, field(form, 'seen'), await requestIp());
+  const target = `d=${encodeURIComponent(id.slice(0, 64))}`;
+  const home = panelPath(gate, '/discounts');
+  redirect(result.ok ? `${home}?done=disable&${target}&${doneMark()}` : `${home}?e=${result.error}&${target}&${doneMark()}`);
+}

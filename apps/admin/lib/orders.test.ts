@@ -58,6 +58,7 @@ import {
   staleSections,
   statsSegs,
   sumLines,
+  discountLabel,
   ticketView,
   timelineWhen,
   transitionOf,
@@ -497,6 +498,29 @@ describe('جزئیات سفارش', () => {
       ['مالیات بر ارزش افزوده', 50_000],
       ['گرد کردن', -500],
     ]);
+  });
+
+  it('تخفیف (۱۱٫۴): پلهٔ سفارش بزرگ با درصد و آستانه، ارسال رایگان با کرایهٔ بخشیده، و کد با درصد یا بی آن', () => {
+    const tier = {
+      ...BREAKDOWN,
+      shippingRials: 0,
+      discountRials: 120_000,
+      discount: { source: 'tier' as const, fromRials: 10_000_000, percent: 5, freeShipping: true, waivedShippingRials: 1_377_500 },
+    };
+    const tierLines = sumLines(details({ order: { priceBreakdown: tier, shippingRials: 0, discountRials: 120_000 } }));
+    expect(tierLines.slice(2).map((l) => [text(l.label), l.rials])).toEqual([
+      ['پست پیشتاز، بقیهٔ کشور · رایگان با تخفیف سفارش بزرگ (کرایه 137,750 تومان)', 0],
+      ['تخفیف سفارش بزرگ (5٪، از 1,000,000 تومان)', -120_000],
+    ]);
+    const code = { ...BREAKDOWN, discountRials: 50_000, discount: { source: 'code' as const, codeId: 'c1', code: 'MEHR1405', percent: 20 } };
+    const codeLines = sumLines(details({ order: { priceBreakdown: code, discountRials: 50_000 } }));
+    expect(codeLines.slice(2).map((l) => [text(l.label), l.rials])).toEqual([
+      ['پست پیشتاز، بقیهٔ کشور', 1_377_500],
+      ['تخفیف کد MEHR1405 (20٪)', -50_000],
+    ]);
+    expect(discountLabel({ source: 'code', codeId: 'c1', code: 'WELCOME', percent: null })).toEqual(['تخفیف کد ', { ltr: 'WELCOME' }]);
+    // سفارش پیش از ۱۱٫۴ ریز تخفیف ندارد.
+    expect(discountLabel(null)).toEqual(['تخفیف']);
   });
 
   it('فایل‌های مشتری تا کی: زودترین پاک شدن؛ پاک‌شده یا گذشته یعنی دیگر نیست', () => {

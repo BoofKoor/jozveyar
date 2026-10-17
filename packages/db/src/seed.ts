@@ -15,6 +15,7 @@ import { priceListToRows, rowsToPriceList, type PriceListRows } from './price-li
 import {
   bindingRateBands,
   bindingTypes,
+  discountTiers,
   paperRates,
   paperTypes,
   priceLists,
@@ -42,6 +43,7 @@ export async function insertPriceListRows(db: Db, rows: PriceListRows): Promise<
   if (rows.bindingRateBands.length > 0) await db.insert(bindingRateBands).values(rows.bindingRateBands);
   if (rows.shippingMethods.length > 0) await db.insert(shippingMethods).values(rows.shippingMethods);
   if (rows.shippingRates.length > 0) await db.insert(shippingRates).values(rows.shippingRates);
+  if (rows.discountTiers.length > 0) await db.insert(discountTiers).values(rows.discountTiers);
 }
 
 export async function seedPriceList(
@@ -103,7 +105,7 @@ export async function readPriceList(db: Db, version: number): Promise<PriceList 
   const byVersion = <T extends { priceListVersion: unknown }>(t: T) =>
     eq(t.priceListVersion as never, version);
 
-  const [prints, papers, sheetRates, bindings, bands, methods, rates] = await Promise.all([
+  const [prints, papers, sheetRates, bindings, bands, methods, rates, tiers] = await Promise.all([
     db.select().from(printRates).where(byVersion(printRates)),
     db.select().from(paperTypes).where(byVersion(paperTypes)).orderBy(asc(paperTypes.id)),
     db.select().from(paperRates).where(byVersion(paperRates)),
@@ -111,6 +113,7 @@ export async function readPriceList(db: Db, version: number): Promise<PriceList 
     db.select().from(bindingRateBands).where(byVersion(bindingRateBands)),
     db.select().from(shippingMethods).where(byVersion(shippingMethods)).orderBy(asc(shippingMethods.id)),
     db.select().from(shippingRates).where(byVersion(shippingRates)),
+    db.select().from(discountTiers).where(byVersion(discountTiers)),
   ]);
 
   return rowsToPriceList({
@@ -122,6 +125,7 @@ export async function readPriceList(db: Db, version: number): Promise<PriceList 
     bindingRateBands: bands,
     shippingMethods: methods,
     shippingRates: rates,
+    discountTiers: tiers,
   });
 }
 

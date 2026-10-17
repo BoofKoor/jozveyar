@@ -427,6 +427,88 @@ test('دو جزوه: هر کدام تنظیمات خودش، قیمت سرور �
   await context.close();
 });
 
+/**
+ * کد تخفیف (برش ۱۱٫۴، سؤال‌های ۲۹۸ تا ۳۰۱): در مرور، پس از کد پیامکی؛ متن یکدست (حرف کوچک و خط تیره همان کد است)، «اعمال شد» با ردیف
+ * تخفیف و جمع سرور، و سفارش منجمد با کد. کدی که نیست، و همان مشتری با کد یک‌بارمصرفش در سفارش دوم، پیام روشن زیر فیلد. تعرفهٔ پایه پله
+ * ندارد، پس کد همیشه می‌نشیند؛ پله در `tariff.spec.ts`.
+ */
+test('کد تخفیف: یکدست، «اعمال شد» با ردیف تخفیف، سفارش منجمد با کد؛ کد ناشناس و «پیش‌تر به کار برده‌ای»', async ({ browser }) => {
+  const code = `E2E${randomInt(36 ** 6).toString(36).toUpperCase().padStart(6, '0')}`;
+  // ۲۰٪ تا 5,000 تومان: ۲۰٪ ده صفحه 12,200 تومان است، پس سقف می‌خورد.
+  const [row] = await sql()`
+    insert into discount_codes (code, kind, percent, max_discount_rials, created_by)
+    values (${code}, 'percent', 20, 50000, gen_random_uuid()) returning id`;
+  const terms = { id: row!.id as string, code, minOrderRials: 0, kind: 'percent' as const, percent: 20, maxRials: 50_000 };
+  const withCode = quote(
+    {
+      items: [
+        {
+          sections: [{ documentId: 'test', pageCount: 10 }],
+          rules: wholeDocumentRule(10, 'bw', DEFAULT_PAPER_TYPE_ID),
+          copies: 1,
+          sidesMode: 'double',
+          paperSize: 'a4',
+          bindingTypeId: DEFAULT_BINDING_TYPE_ID,
+        },
+      ],
+      shipping: { methodId: DEFAULT_SHIPPING_METHOD_ID, zoneId: 'other' },
+    },
+    SEED_PRICE_LIST,
+    { code: terms },
+  );
+  expect([withCode.discountRials, withCode.totalRials]).toEqual([50_000, TEN.other.totalRials - 50_000]);
+
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  const discountLine = page.getByTestId('summary-discount').filter({ visible: true });
+  const apply = page.getByRole('button', { name: 'اعمال', exact: true });
+  await dropReady(page);
+  await toPay(page);
+  await signIn(page, newMobile());
+
+  await page.getByTestId('discount-open').click();
+  await page.getByLabel('کد تخفیف').fill('NOPE404');
+  await apply.click();
+  await expect(page.getByTestId('ck-discount-code-error')).toHaveText('این کد را نمی‌شناسیم؛ همان را که داری دوباره تایپ کن.');
+  await expect(page.getByLabel('کد تخفیف')).toHaveAttribute('aria-invalid', 'true');
+  await expect(discountLine).toHaveCount(0);
+
+  await page.getByLabel('کد تخفیف').fill(` ${code.slice(0, 3).toLowerCase()}-${code.slice(3).toLowerCase()} `);
+  await apply.click();
+  await expect(page.getByTestId('discount-applied')).toContainText(`کد ${code} اعمال شد.`);
+  await expect(discountLine).toHaveText(`تخفیف کد ${code}−5,000`);
+  await expect(page.getByTestId('summary-total')).toHaveText(toman(withCode.totalRials));
+  await plainNumbers(page, 8);
+
+  const number = await payAt(page, 'پرداخت موفق', withCode.totalRials);
+  await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
+  await expect(discountLine).toHaveText(`تخفیف کد ${code}−5,000`);
+  const [order] = await sql()`
+    select discount_code_id, discount_rials::text as discount, total_rials::text as total, price_breakdown->'discount' as discount_json
+      from orders where order_number = ${number}`;
+  expect(order).toEqual({
+    discount_code_id: terms.id,
+    discount: '50000',
+    total: String(withCode.totalRials),
+    discount_json: { source: 'code', codeId: terms.id, code, percent: 20 },
+  });
+
+  // همین مشتری، سفارش دوم: سقف هر مشتری ۱ است و سفارش اول پرداخت شد.
+  await dropReady(page, 'image-scan-6.pdf');
+  await visibleButton(page, 'ادامه — آدرس و تحویل').click();
+  await page.getByRole('button', { name: 'تهران' }).click();
+  await page.getByLabel('نشانی', { exact: true }).fill('تهران، خیابان ولیعصر، پلاک ۱۲');
+  await page.getByLabel('نام گیرنده').fill('رضا کریمی');
+  await page.getByLabel('نام گیرنده').press('Enter');
+  await expect(page.getByRole('heading', { level: 1, name: 'مرور و پرداخت' })).toBeVisible();
+  await page.getByTestId('discount-open').click();
+  await page.getByLabel('کد تخفیف').fill(code);
+  await apply.click();
+  await expect(page.getByTestId('ck-discount-code-error')).toHaveText('این کد را پیش‌تر برای سفارش دیگری به کار برده‌ای.');
+  await expect(discountLine).toHaveCount(0);
+  await context.close();
+});
+
 test.describe('قدم‌ها', () => {
   test('«برگشت» گوشی قدم قبل را می‌آورد و «جلو» همان قدم را، با همان نشانی', async ({ browser }) => {
     const context = await newContext(browser);

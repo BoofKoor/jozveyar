@@ -54,8 +54,9 @@ const OPERATOR_PERMISSIONS = [
 ];
 // از ۱۰٫۲ گزارش تولید خودش، بی مبلغ.
 const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status', 'partners.availability', 'reports.production', 'shipments.import'];
-// حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، و از ۱۰٫۲ گزارش تولید؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
-const ACCOUNTANT_PERMISSIONS = ['orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read'];
+// حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، از ۱۰٫۲ گزارش تولید، و از ۱۱٫۴ دیدن کدهای تخفیف؛ بی
+// وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
+const ACCOUNTANT_PERMISSIONS = ['discounts.read', 'orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read'];
 
 /** argon2 جدا در `password.test.ts`؛ اینجا همان قرارداد، سریع، با شمارش صدازدن‌ها. */
 function fakePasswords() {
@@ -670,7 +671,7 @@ describe('ورود پنل و ادمین‌ها', () => {
     });
     const roleEvents = () => store.events.filter((e) => e.action === 'admins.role');
 
-    it('افزودن حسابدار با کد تازه: نشست بی محدوده و فقط پنج مجوز؛ ادمین‌ها، رویدادها و نقش نه', async () => {
+    it('افزودن حسابدار با کد تازه: نشست بی محدوده و فقط مجوزهای حسابدار؛ ادمین‌ها، رویدادها و نقش نه', async () => {
       const sara = await enroll('sara');
       later(STEP);
       const invited = await auth.inviteAdmin(

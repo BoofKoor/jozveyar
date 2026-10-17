@@ -7,7 +7,7 @@ import { formatCardMask, formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
 import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
 import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
-import { FlowNav, JozveLines, SummaryLines, jozveSpecLabel, printLabel } from '../../../components/checkout/parts';
+import { FlowNav, JozveLines, SummaryLines, discountLineOf, jozveSpecLabel, printLabel, shippingLineOf } from '../../../components/checkout/parts';
 import { SumValue, Tomans } from '../../../components/checkout/sum';
 import {
   JozveBrief,
@@ -588,8 +588,9 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
     bindingName: jozve.bindingName,
     copies: jozve.copies,
   }));
-  const shippingLine =
-    breakdown.shippingRials !== null ? { label: `ارسال ${details.shipping.methodName} به ${place}`, rials: breakdown.shippingRials } : null;
+  const shippingLine = shippingLineOf(breakdown, `ارسال ${details.shipping.methodName} به ${place}`);
+  /** تخفیف منجمد سفارش (۱۱٫۴)؛ سفارش‌های پیش از ۱۱٫۴ ندارندش. */
+  const discount = discountLineOf(breakdown);
   const last = details.lastPayment;
   const checking = !paid && details.checking !== null;
 
@@ -691,6 +692,7 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
                         ]
                       : [];
                   })}
+                  discount={discount}
                   shipping={shippingLine}
                   rounding={breakdown.roundingRials}
                 />
@@ -698,7 +700,14 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
             ) : (
               <>
                 <JozveBrief files={files} pageCount={item.pageCount} />
-                <SummaryLines item={lineItem} print={print} bindingName={item.bindingName} shipping={shippingLine} rounding={breakdown.roundingRials} />
+                <SummaryLines
+                  item={lineItem}
+                  print={print}
+                  bindingName={item.bindingName}
+                  discount={discount}
+                  shipping={shippingLine}
+                  rounding={breakdown.roundingRials}
+                />
               </>
             )}
             <div className="home-sum__total">

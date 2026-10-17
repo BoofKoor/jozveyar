@@ -101,6 +101,9 @@ export const SEED_PRICE_LIST: PriceList = {
     vatPercent: 0,
     packagingWeightGrams: 100,
   },
+
+  // تخفیف سفارش بزرگ (برش ۱۱٫۴): تعرفهٔ پایه هیچ پله‌ای ندارد؛ مالک از پنل می‌افزاید.
+  discountTiers: [],
 };
 
 /**

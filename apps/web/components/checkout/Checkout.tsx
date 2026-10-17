@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PriceList } from '@jozveyar/contracts';
-import type { CheckoutItem, CheckoutQuote, Place } from '@jozveyar/contracts/checkout';
+import type { CheckoutItem, CheckoutQuote, DiscountCodeReason, Place } from '@jozveyar/contracts/checkout';
 import { PROVINCES, findCity, findProvince, placeIsValid, popularCities, searchCities, type City } from '@jozveyar/geo';
 import { DEFAULT_PAPER_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
@@ -20,7 +20,7 @@ import {
 import { publishDockHeight } from '../../lib/dock';
 import type { JozvePart } from '../../lib/jozveView';
 import { Note, SizeNames } from '../AnalysisCard';
-import { FlowNav, JozveLines, SummaryLines, jozveSpecLabel, printLabel } from './parts';
+import { FlowNav, JozveLines, SummaryLines, discountLineOf, jozveSpecLabel, printLabel, shippingLineOf } from './parts';
 import { SumValue, Tomans } from './sum';
 import {
   JozveBrief,
@@ -309,7 +309,10 @@ function CityStep({ state, quote, onChosen }: { state: CheckoutState; quote: Che
         به کدام شهر بفرستیم؟
       </h1>
       <p className="ck-sub" data-testid="zone-rates">
-        {tehran?.shippingRials != null && other?.shippingRials != null ? (
+        {tehran?.shippingRials === 0 && other?.shippingRials === 0 ? (
+          // ارسال رایگان پلهٔ سفارش بزرگ (۱۱٫۴، سؤال ۲۹۶)
+          'ارسال این سفارش به همهٔ شهرها رایگان است.'
+        ) : tehran?.shippingRials != null && other?.shippingRials != null ? (
           <>
             کرایهٔ پست پیشتاز در {tehran.name} <Tomans rials={tehran.shippingRials} /> و {other.name}{' '}
             <Tomans rials={other.shippingRials} /> تومان
@@ -942,7 +945,112 @@ function ReviewStep({
           { label: 'تحویل', value: <RecapDelivery method={method} slaDays={slaDays} /> },
         ]}
       />
+      <DiscountCode state={state} />
     </section>
+  );
+}
+
+/** چرا کد تخفیف نخورد (برش ۱۱٫۴، سؤال ۲۹۹)، زیر فیلد. */
+const DISCOUNT_REASON: Record<DiscountCodeReason, string> = {
+  unknown: 'این کد را نمی‌شناسیم؛ همان را که داری دوباره تایپ کن.',
+  disabled: 'این کد دیگر فعال نیست.',
+  not_started: 'این کد هنوز شروع نشده.',
+  ended: 'مهلت این کد تمام شده.',
+  used_up: 'ظرفیت این کد تمام شده.',
+  used_by_you: 'این کد را پیش‌تر برای سفارش دیگری به کار برده‌ای.',
+};
+
+/**
+ * کد تخفیف در مرور (برش ۱۱٫۴، سؤال ۲۹۹): «کد تخفیف داری؟»، بعد فیلد و «اعمال»؛ پذیرفته، «کد … اعمال شد» با «حذف کد». کدی که از پلهٔ سفارش
+ * بزرگ کمتر است یا جمع به حداقلش نرسیده، با یادداشت؛ مبلغ و جمع در خلاصه، از همان قیمت سرور.
+ */
+function DiscountCode({ state }: { state: CheckoutState }) {
+  const store = checkoutStore();
+  const quote = quoteOf(state, true);
+  const outcome = quote?.breakdown.code ?? null;
+  const applied = state.discount;
+  const busy = state.busy === 'discount';
+  const error = state.discountError ? DISCOUNT_REASON[state.discountError] : null;
+
+  if (!state.discountOpen && !applied) {
+    return (
+      <p className="ck-discount">
+        <button type="button" className="jy-link ck-edit" onClick={() => store.openDiscount()} data-testid="discount-open">
+          کد تخفیف داری؟
+        </button>
+      </p>
+    );
+  }
+  return (
+    <div className="ck-discount" data-testid="discount">
+      {applied && outcome?.code === applied ? (
+        <p className="ck-discount__applied" data-testid="discount-applied">
+          <span className="jy-icon jy-icon-check" aria-hidden="true" />
+          <span>
+            کد <bdi dir="ltr">{applied}</bdi>{' '}
+            {outcome.status === 'applied' ? 'اعمال شد.' : outcome.status === 'smaller' ? 'به کار نرفت.' : 'هنوز نمی‌خورد.'}
+          </span>
+          <button type="button" className="jy-link ck-edit" disabled={busy || state.busy === 'quote'} onClick={() => store.removeDiscount()}>
+            حذف کد
+          </button>
+        </p>
+      ) : (
+        <form
+          id="ck-discount"
+          className="ck-discount__form"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            void store.applyDiscount();
+          }}
+        >
+          <label className="jy-label" htmlFor="ck-discount-code">
+            کد تخفیف
+          </label>
+          <div className="ck-discount__row">
+            <input
+              id="ck-discount-code"
+              className="jy-input"
+              dir="ltr"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              maxLength={40}
+              value={state.discountInput}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={noteOf('ck-discount-code', Boolean(error))}
+              onChange={(event) => store.editDiscount(event.target.value)}
+            />
+            <button type="submit" className={`jy-btn jy-btn--secondary${busy ? ' is-loading' : ''}`} disabled={busy} aria-busy={busy || undefined}>
+              اعمال
+            </button>
+          </div>
+          {error ? (
+            <p id="ck-discount-code-note" className="jy-error" data-testid="ck-discount-code-error">
+              <span className="jy-icon jy-icon-error" aria-hidden="true" />
+              <span>{error}</span>
+            </p>
+          ) : null}
+        </form>
+      )}
+      {applied && outcome?.code === applied && outcome.status === 'smaller' ? (
+        <Note tone="info" testId="discount-smaller">
+          تخفیف سفارش بزرگ این سفارش بیشتر است، پس همان می‌ماند و کد <bdi dir="ltr">{applied}</bdi> مصرف نمی‌شود.
+        </Note>
+      ) : null}
+      {applied && outcome?.code === applied && outcome.status === 'below_minimum' ? (
+        <Note tone="info" testId="discount-below-minimum">
+          این کد برای سفارش از <Tomans rials={outcome.minOrderRials} /> تومان است، پیش از ارسال؛{' '}
+          <Tomans rials={Math.ceil(outcome.gapRials / 10) * 10} /> تومان مانده.
+        </Note>
+      ) : null}
+      {applied && error ? (
+        <p className="jy-error" role="alert">
+          <span className="jy-icon jy-icon-error" aria-hidden="true" />
+          <span>{error}</span>
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -1074,7 +1182,11 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
     copies: part.config.copies,
   }));
   const shipped = withPlace && breakdown?.shippingRials != null && dest ? breakdown.shippingRials : null;
-  const shippingLine = shipped !== null && dest ? { label: `ارسال ${method} به ${placeName(dest)}`, rials: shipped } : null;
+  const shippingLine = shipped !== null && dest && breakdown ? shippingLineOf(breakdown, `ارسال ${method} به ${placeName(dest)}`) : null;
+  /** تخفیف همان ریز قیمت (۱۱٫۴): پلهٔ سفارش بزرگ از قدم شهر، و کد فقط در مرور. */
+  const discount = breakdown ? discountLineOf(breakdown) : null;
+  /** ارسال رایگان پلهٔ سفارش بزرگ (۱۱٫۴): جای «+ ارسال از X». */
+  const freeShipping = breakdown?.discount?.source === 'tier' && breakdown.discount.freeShipping;
   /**
    * گرد کردن (۸٫۴): فقط وقتی ریز قیمت همان جمعی است که زیر ردیف‌هاست (با ارسال بعد از شهر، بی ارسال پیش از آن)؛ قیمت با شهر قبلی
    * در قدم شهر جمع بی ارسال را نشان می‌دهد، که گرد کردن خودش را دارد.
@@ -1236,11 +1348,12 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
                     ]
                   : [];
               })}
+              discount={discount}
               shipping={shippingLine}
               rounding={rounding}
             />
           ) : item ? (
-            <SummaryLines item={item} print={print} bindingName={bindingName} shipping={shippingLine} rounding={rounding} />
+            <SummaryLines item={item} print={print} bindingName={bindingName} discount={discount} shipping={shippingLine} rounding={rounding} />
           ) : null}
           <div className="home-sum__total">
             <span className="home-sum__label">جمع</span>
@@ -1255,6 +1368,11 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
               <span>
                 تحویل به پست تا <span className="num">{formatNumber(slaDays)}</span> روز کاری بعد از پرداخت.
               </span>
+            </p>
+          ) : freeShipping ? (
+            <p className="home-sum__ship" data-testid="shipping-free">
+              <span className="jy-icon jy-icon-truck" aria-hidden="true" />
+              <span>ارسال رایگان، به هر شهری.</span>
             </p>
           ) : breakdown?.shippingFromRials != null ? (
             <p className="home-sum__ship" data-testid="shipping-from">
@@ -1299,6 +1417,8 @@ export function Checkout({ step, go, items, jozves, priceList, slaDays, auth, on
             <span className="home-dock__ship">
               {withPlace && dest ? (
                 `${method} به ${placeName(dest)}`
+              ) : freeShipping ? (
+                'ارسال رایگان'
               ) : breakdown?.shippingFromRials != null ? (
                 <>
                   + ارسال از <Tomans rials={breakdown.shippingFromRials} /> تومان

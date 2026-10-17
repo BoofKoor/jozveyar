@@ -529,11 +529,27 @@ export function sumLines(details: PanelOrderDetails): SumLine[] {
       rials: priced.bindingRials,
     });
   });
-  lines.push({ label: [shippingText(details)], rials: details.order.shippingRials });
-  if (details.order.discountRials > 0) lines.push({ label: ['تخفیف'], rials: -details.order.discountRials });
+  // تخفیف (۱۱٫۴): پلهٔ سفارش بزرگ با درصد و آستانه‌اش، یا کد؛ ارسال رایگان پله کرایهٔ بخشیده را کنار «رایگان» نشان می‌دهد. سفارش پیش از
+  // ۱۱٫۴ `discount` ندارد و همان «تخفیف» ساده.
+  const discount = breakdown.discount ?? null;
+  const waived = discount?.source === 'tier' && discount.freeShipping ? discount.waivedShippingRials : null;
+  lines.push({
+    label: [shippingText(details), ...(waived !== null ? [' · رایگان با تخفیف سفارش بزرگ (کرایه ', { num: formatTomans(waived, false) }, ' تومان)'] : [])],
+    rials: details.order.shippingRials,
+  });
+  if (details.order.discountRials > 0) lines.push({ label: discountLabel(discount), rials: -details.order.discountRials });
   if (details.order.vatRials > 0) lines.push({ label: ['مالیات بر ارزش افزوده'], rials: details.order.vatRials });
   if (details.order.roundingRials !== 0) lines.push({ label: ['گرد کردن'], rials: details.order.roundingRials });
   return lines;
+}
+
+/** «تخفیف سفارش بزرگ (5٪، از 1,000,000 تومان)»، «تخفیف کد WELCOME (20٪)» یا «تخفیف کد WELCOME»؛ سفارش پیش از ۱۱٫۴ «تخفیف». */
+export function discountLabel(discount: Breakdown['discount'] | null): Seg[] {
+  if (!discount) return ['تخفیف'];
+  if (discount.source === 'tier') {
+    return ['تخفیف سفارش بزرگ (', num(discount.percent), '٪، از ', { num: formatTomans(discount.fromRials, false) }, ' تومان)'];
+  }
+  return ['تخفیف کد ', { ltr: discount.code }, ...(discount.percent !== null ? [' (', num(discount.percent), '٪)'] : [])];
 }
 
 /** «پست پیشتاز، بقیهٔ کشور». */

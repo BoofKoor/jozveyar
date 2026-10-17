@@ -46,6 +46,8 @@ const isUuid = (value: unknown): value is string => typeof value === 'string' &&
 /** سقف طول‌ها همان سقف اسکیمای سرور است (`@jozveyar/contracts/checkout`)؛ بیشتر یعنی پیش‌نویس ما نیست. */
 const MAX = { fileName: 1000, name: 200, address: 2000, postal: 40, mobile: 40, payload: 20_000 } as const;
 const OTP_CLOSED: ReadonlySet<unknown> = new Set([null, 'expired', 'locked', 'missing']);
+/** همان `DISCOUNT_CODE_PATTERN` (`@jozveyar/text/input`)، اینجا تا آن ماژول به تکهٔ برگرداندن نیاید. */
+const DISCOUNT_CODE = /^[A-Z0-9]{3,20}$/;
 
 function fileOf(value: unknown): DraftFile | null {
   if (!isObject(value)) return null;
@@ -100,6 +102,8 @@ function checkoutOf(value: unknown): CheckoutDraft | null {
   const payOk = pay === null || (isObject(pay) && isText(pay.payload, MAX.payload) && isUuid(pay.key));
   if ((value.place !== null && !place) || !recipient || (value.otp !== null && !otp) || !payOk) return null;
   if (!isText(value.mobile, MAX.mobile) || (value.order !== null && !isUuid(value.order))) return null;
+  // کد تخفیف پذیرفته (برش ۱۱٫۴)، به همان شکل یکدست سرور؛ پیش‌نویس پیش از ۱۱٫۴ ندارد. کدی که شکلش نمی‌خواند فقط خودش کنار می‌رود.
+  const discount = typeof value.discount === 'string' && DISCOUNT_CODE.test(value.discount) ? value.discount : null;
   return {
     place,
     recipient,
@@ -107,6 +111,7 @@ function checkoutOf(value: unknown): CheckoutDraft | null {
     otp,
     pay: pay === null ? null : { payload: (pay as Json).payload as string, key: (pay as Json).key as string },
     order: value.order,
+    discount,
   };
 }
 

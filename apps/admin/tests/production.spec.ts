@@ -318,7 +318,8 @@ test.describe.serial('گزارش تولید و خروجی‌ها (۱۰٫۲)', ()
   test('حسابدار: «گزارش‌ها» در ردیف، با مبلغ و چیپ گزارش ارسال که زبانه را جاری نگه می‌دارد؛ خروجی مالک برایش «پیدا نشد»', async () => {
     const { page, problems } = who.accountant;
     await page.goto(at('/'));
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'گزارش‌ها']);
+    // از ۱۱٫۴ «تخفیف‌ها» هم (فقط دیدن).
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'گزارش‌ها', 'تخفیف‌ها']);
     await nav(page).filter({ hasText: 'گزارش‌ها' }).click();
     await expect(page.getByRole('heading', { name: 'گزارش تولید', level: 1 })).toBeVisible();
     await page.goto(at(`/reports?${range}`));
@@ -373,7 +374,7 @@ test.describe.serial('گزارش تولید و خروجی‌ها (۱۰٫۲)', ()
     await expect(nav(page).filter({ hasText: 'گزارش‌ها' })).toHaveCount(0);
     await page.goto(at(`/reports?${range}`));
     await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
-    await expect(page.locator('main')).toContainText('و گزارش‌ها با مالک و حسابدار.');
+    await expect(page.locator('main')).toContainText('و گزارش‌ها و کدهای تخفیف با مالک و حسابدار.');
     const xlsx = await page.request.get(at(`/reports/xlsx?${range}`), { maxRedirects: 0 });
     expect(xlsx.status()).not.toBe(200);
     expect(xlsx.headers()['content-type'] ?? '').not.toContain('spreadsheet');

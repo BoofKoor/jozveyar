@@ -182,7 +182,7 @@ test.describe.serial('حسابدار و عوض کردن نقش (۹٫۴)', () => 
     who.accountant = { context, page, problems };
     accountantId = (await sql<{ id: string }[]>`SELECT id FROM admin_users WHERE username = ${accountant}`)[0]!.id;
     await expect(page.locator('.ad-user')).toContainText(`${ACCOUNTANT} · حسابدار`);
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'گزارش‌ها']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'گزارش‌ها', 'تخفیف‌ها']);
     await expect(page.locator('.ad-more')).toHaveCount(0);
 
     // پیشخوان: پول سفارش لغوشده (کار حسابدار)، و صف تحویل با مبلغ.
