@@ -27,6 +27,7 @@ import {
   adminEvents,
   documents,
   jobs,
+  mobileBlocks,
   orderItemSections,
   orderItems,
   orderStatusEvents,
@@ -277,8 +278,16 @@ export interface OrderStore {
    * سفارش کامل در یک تراکنش. اگر سفارشی با همین `checkoutKey` هست (دو کلیک، تلاش دوبارهٔ شبکه)، همان
    * برمی‌گردد با `created: false`؛ سرویس صاحبش را می‌سنجد.
    */
-  /** کد تخفیفی که همین حالا جا نداشت یا دیگر به کار نمی‌رفت (برش ۱۱٫۴) `DiscountRefusedError` است. */
+  /**
+   * کد تخفیفی که همین حالا جا نداشت یا دیگر به کار نمی‌رفت (برش ۱۱٫۴) `DiscountRefusedError` است، و موبایلی که همین حالا مسدود شد (برش ۱۲٫۲)
+   * `MobileBlockedError`.
+   */
   createOrder(order: NewOrder): Promise<{ order: OrderRow; created: boolean }>;
+  /**
+   * این موبایل مسدودی زنده دارد (برش ۱۲٫۲، ADR-063)؟ بی قفل، برای پیام روشن پیش از ساختن سفارش و تلاش پرداخت؛ حکم آخر با محافظ‌های
+   * `orders_mobile_blocked` و `payments_mobile_blocked`.
+   */
+  mobileBlocked(mobile: string): Promise<boolean>;
   /**
    * کد تخفیف مسیر خرید برای این مشتری، همین لحظه (برش ۱۱٫۴): متن یکدست، روشن، در روز اعتبار، و با جا؛ بی قفل، برای پیام روشن. حکم آخر با
    * محافظ ساختن سفارش.
@@ -289,6 +298,7 @@ export interface OrderStore {
   /** جا برای یک تلاش پرداخت تازهٔ این سفارش (برش ۱۱٫۴)، بی قفل؛ null یعنی هست، یا سفارش کدی ندارد. */
   discountRoom(orderId: string): Promise<DiscountRefusal | null>;
   details(publicToken: string): Promise<OrderDetails | null>;
+  /** تلاش پرداخت تازه؛ کد تخفیف بی جا `DiscountRefusedError` است و موبایل مسدود `MobileBlockedError`. */
   insertPayment(payment: {
     /** شناسهٔ تلاش، اگر پیش از درگاه ساخته شد (پسوند `gateway_order_id`). */
     id?: string;
@@ -363,6 +373,19 @@ export class DiscountRefusedError extends Error {
     this.name = 'DiscountRefusedError';
   }
 }
+
+/**
+ * محافظ مسدودی سفارش تازه یا تلاش پرداخت تازه را رد کرد (برش ۱۲٫۲، `orders_mobile_blocked` و `payments_mobile_blocked`): موبایل صاحب سفارش
+ * همین حالا مسدود شد. سرویس مسیر خرید پیش از هر دو همین را بی قفل می‌سنجد (`mobileBlocked`).
+ */
+export class MobileBlockedError extends Error {
+  constructor() {
+    super('mobile_blocked');
+    this.name = 'MobileBlockedError';
+  }
+}
+
+const MOBILE_BLOCKED_CONSTRAINTS = new Set(['orders_mobile_blocked', 'payments_mobile_blocked']);
 
 /** نام محدودیتی که پستگرس رد کرد؛ drizzle خطای درایور را در `cause` می‌پیچد. */
 export function constraintOf(error: unknown): string | undefined {
@@ -611,8 +634,18 @@ export function createOrderStore({ db }: Database): OrderStore {
         // کد تخفیف همین حالا جا نداشت یا دیگر به کار نمی‌رفت (برش ۱۱٫۴): محافظ زیر قفل ردیف کد.
         const refused = discountRefusalOf(constraintOf(error));
         if (refused) throw new DiscountRefusedError(refused);
+        if (MOBILE_BLOCKED_CONSTRAINTS.has(constraintOf(error) ?? '')) throw new MobileBlockedError();
         throw error;
       }
+    },
+
+    async mobileBlocked(mobile) {
+      const [row] = await db
+        .select({ id: mobileBlocks.id })
+        .from(mobileBlocks)
+        .where(and(eq(mobileBlocks.mobile, mobile), isNull(mobileBlocks.unblockedAt)))
+        .limit(1);
+      return row !== undefined;
     },
 
     async details(publicToken) {
@@ -688,7 +721,8 @@ export function createOrderStore({ db }: Database): OrderStore {
         .returning()
         .catch((error: unknown) => {
           const refused = discountRefusalOf(constraintOf(error));
-          throw refused ? new DiscountRefusedError(refused) : error;
+          if (refused) throw new DiscountRefusedError(refused);
+          throw MOBILE_BLOCKED_CONSTRAINTS.has(constraintOf(error) ?? '') ? new MobileBlockedError() : error;
         });
       return row!;
     },

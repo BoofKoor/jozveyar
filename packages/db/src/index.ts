@@ -20,6 +20,7 @@ export * from './reference.js';
 export * from './auth.js';
 export * from './orders.js';
 export * from './discounts.js';
+export * from './blocks.js';
 export * from './payments.js';
 export * from './refunds.js';
 export * from './sms.js';

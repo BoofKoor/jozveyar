@@ -662,6 +662,41 @@ export const users = pgTable(
 );
 
 /**
+ * مسدودی موبایل مشتری (برش ۱۲٫۲، ADR-063، سؤال ۲۱۲). مالک و متصدی از صفحهٔ سفارش، با دلیلی که فقط پنل می‌بیند. اثرش: کد پیامکی به این
+ * شماره نمی‌رود (`issueOtp`)، و سفارش تازه و تلاش پرداخت تازه ساخته نمی‌شود (`orders_mobile_blocked` و `payments_mobile_blocked`، 0050).
+ * سفارش پرداخت‌شده همان‌طور چاپ و ارسال می‌شود، و تلاشی که پیش از مسدودی شروع شد همان‌طور به نتیجه می‌رسد.
+ *
+ * - هر مسدودی یک ردیف است و «رفع مسدودی» همان ردیف را می‌بندد (چه کسی و کی)؛ مسدودی دوباره ردیف تازه است. تاریخچه می‌ماند: ردیف پاک
+ *   نمی‌شود و جز همان بستن یک‌باره عوض نمی‌شود (`mobile_blocks_guard`، 0050).
+ * - برای هر شماره یک مسدودی زنده (`mobile_blocks_live`).
+ * - شمارهٔ سفارشی که مسدودی از صفحه‌اش آمد فقط برای نمایش است، بی کلید خارجی: پاک شدن سفارش (تست‌ها) ردیف را عوض نمی‌کند.
+ * - `blocked_by` و `unblocked_by` بی کلید خارجی، مثل `discount_codes.created_by`: ادمین پاک‌نشدنی است.
+ */
+export const mobileBlocks = pgTable(
+  'mobile_blocks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    mobile: text('mobile').notNull(),
+    /** فقط پنل؛ مشتری هرگز نمی‌بیند. یک خط تا ۵۰۰ نویسه، فارسی‌نرمال (`tidyInputFa`)، مثل دلیل لغو (`REASON_MAX`). */
+    reason: text('reason').notNull(),
+    orderNumber: integer('order_number'),
+    blockedBy: uuid('blocked_by').notNull(),
+    blockedAt: timestamp('blocked_at', { withTimezone: true }).notNull().defaultNow(),
+    unblockedBy: uuid('unblocked_by'),
+    unblockedAt: timestamp('unblocked_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('mobile_blocks_live').on(t.mobile).where(sql`${t.unblockedAt} IS NULL`),
+    check('mobile_blocks_mobile', sql`${t.mobile} ~ '^09[0-9]{9}$'`),
+    check('mobile_blocks_reason', sql`length(${t.reason}) <= 500 AND btrim(${t.reason}) <> '' AND ${t.reason} = btrim(${t.reason})`),
+    check(
+      'mobile_blocks_unblocked',
+      sql`(${t.unblockedAt} IS NULL) = (${t.unblockedBy} IS NULL) AND (${t.unblockedAt} IS NULL OR ${t.unblockedAt} >= ${t.blockedAt})`,
+    ),
+  ],
+);
+
+/**
  * هر کد پیامکی که فرستاده شد. سقف‌های ارسال (هر شماره، هر IP، کل سایت) از شمردن همین ردیف‌ها در
  * پنجرهٔ زمانی می‌آیند، نه از Redis (تصمیم ۱۴۰۵/۰۷/۰۴، ADR-033).
  *

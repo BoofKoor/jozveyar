@@ -20,7 +20,9 @@ import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { createDb, type Database } from './index.js';
 import { createDiscountStore, termsOf } from './discounts.js';
-import { DiscountRefusedError } from './orders.js';
+import { DiscountRefusedError, MobileBlockedError } from './orders.js';
+import { createBlockStore } from './blocks.js';
+import { mobileBlocks } from './schema.js';
 import { discountCodes, discountTiers } from './schema.js';
 import { DISCOUNT_TIERS_MAX, TIER_PERCENT_MAX } from '@jozveyar/contracts';
 import { runMigrations } from './migrate.js';
@@ -161,8 +163,9 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 /** سفارش‌ها و هر چه به آنها بسته است؛ پرداخت cascade ندارد (سابقهٔ پول بی‌صدا پاک نمی‌شود). */
 async function clearOrders({ db }: Database) {
-  // بازپرداخت پاک‌نشدنی است (0032)؛ TRUNCATE تریگر ردیفی ندارد.
+  // بازپرداخت پاک‌نشدنی است (0032)، و مسدودی موبایل هم (0050)؛ TRUNCATE تریگر ردیفی ندارد.
   await db.execute(sql`TRUNCATE refunds`);
+  await db.execute(sql`TRUNCATE mobile_blocks`);
   await db.delete(payments);
   await db.delete(orders);
   await db.delete(sessions);
@@ -944,6 +947,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         siteDay: 5,
         siteDayOldest: at(20 * 60),
         ready: true,
+        blocked: false,
       });
     });
 
@@ -2231,6 +2235,188 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect((await discounts.list()).map((c) => c.code)).toContain('MEHR1405');
       });
     });
+
+    describe('مسدودی موبایل روی پستگرس (برش ۱۲٫۲)', () => {
+      const BLOCKED = '09127770001';
+      let adminA: string;
+      let adminB: string;
+
+      beforeAll(async () => {
+        const rows = await conn.db
+          .insert(adminUsers)
+          .values([
+            { username: `blk-a-${randomUUID().slice(0, 8)}`, displayName: 'سارا' },
+            { username: `blk-b-${randomUUID().slice(0, 8)}`, displayName: 'رضا' },
+          ])
+          .returning();
+        [adminA, adminB] = rows.map((row) => row.id) as [string, string];
+      });
+
+      afterEach(async () => {
+        // مسدودی پاک‌نشدنی است (`mobile_blocks_append_only`)؛ TRUNCATE تریگر ردیفی ندارد.
+        await conn.db.execute(sql`TRUNCATE mobile_blocks`);
+      });
+
+      afterAll(async () => {
+        await clearOrders(conn);
+      });
+
+      const blockRow = (over: Partial<typeof mobileBlocks.$inferInsert> = {}) =>
+        conn.db.insert(mobileBlocks).values({ mobile: BLOCKED, reason: 'سفارش‌های پرداخت‌نشدهٔ پشت‌سرهم', blockedBy: adminA, ...over }).returning();
+
+      it('محافظ‌های 0049 و 0050: یک زنده برای هر شماره، تازه زنده، پاک‌نشدنی، و فقط یک بار رفع', async () => {
+        const [first] = await blockRow();
+        expect(await rejectedConstraint(blockRow({ reason: 'دوباره' }))).toBe('mobile_blocks_live');
+        expect(await rejectedConstraint(blockRow({ mobile: '0912777000' }))).toBe('mobile_blocks_mobile');
+        expect(await rejectedConstraint(blockRow({ mobile: '09127770002', reason: '  ' }))).toBe('mobile_blocks_reason');
+        expect(await rejectedConstraint(blockRow({ mobile: '09127770002', reason: ' دلیل' }))).toBe('mobile_blocks_reason');
+        expect(await rejectedConstraint(blockRow({ mobile: '09127770002', reason: 'د'.repeat(501) }))).toBe('mobile_blocks_reason');
+        expect(await blockRow({ mobile: '09127770002', reason: 'د'.repeat(500) })).toHaveLength(1);
+        expect(
+          await rejectedConstraint(blockRow({ mobile: '09127770003', unblockedAt: new Date(), unblockedBy: adminA })),
+        ).toBe('mobile_blocks_insert_state');
+        expect(await rejectedConstraint(blockRow({ mobile: '09127770003', unblockedBy: adminA }))).toBe('mobile_blocks_insert_state');
+
+        const where = eq(mobileBlocks.id, first!.id);
+        expect(await rejectedConstraint(conn.db.delete(mobileBlocks).where(where))).toBe('mobile_blocks_append_only');
+        expect(await rejectedConstraint(conn.db.update(mobileBlocks).set({ reason: 'دلیل دیگر' }).where(where))).toBe('mobile_blocks_frozen');
+        expect(await rejectedConstraint(conn.db.update(mobileBlocks).set({ orderNumber: 10001 }).where(where))).toBe('mobile_blocks_frozen');
+        expect(await rejectedConstraint(conn.db.update(mobileBlocks).set({ unblockedAt: new Date() }).where(where))).toBe('mobile_blocks_unblocked');
+        expect(
+          await rejectedConstraint(conn.db.update(mobileBlocks).set({ unblockedAt: new Date(first!.blockedAt.getTime() - 1_000), unblockedBy: adminB }).where(where)),
+        ).toBe('mobile_blocks_unblocked');
+        const unblockedAt = new Date(first!.blockedAt.getTime() + 60_000);
+        expect(await conn.db.update(mobileBlocks).set({ unblockedAt, unblockedBy: adminB }).where(where).returning()).toHaveLength(1);
+        // رفع‌شده دیگر عوض نمی‌شود، حتی رفع دوباره؛ و مسدودی دوباره ردیف تازه است.
+        expect(
+          await rejectedConstraint(conn.db.update(mobileBlocks).set({ unblockedAt: new Date(unblockedAt.getTime() + 1_000) }).where(where)),
+        ).toBe('mobile_blocks_frozen');
+        expect(await rejectedConstraint(conn.db.update(mobileBlocks).set({ unblockedBy: adminA }).where(where))).toBe('mobile_blocks_frozen');
+        expect(await blockRow({ reason: 'دوباره' })).toHaveLength(1);
+      });
+
+      it('کد پیامکی: شمارهٔ مسدود `blocked` است، شمارهٔ دیگر نه، و پس از رفع دیگر نه', async () => {
+        const auth = createAuthStore(conn);
+        const blockedOf = async (mobile: string) => {
+          let seen: boolean | undefined;
+          await auth.issueOtp({ mobile, ipHash: 'ip-blk', sessionHash: SESSION, ...windowAt(new Date()) }, (counts) => {
+            seen = counts.blocked;
+            return null;
+          });
+          return seen;
+        };
+        expect(await blockedOf(BLOCKED)).toBe(false);
+        const [row] = await blockRow();
+        expect([await blockedOf(BLOCKED), await blockedOf('09127770009')]).toEqual([true, false]);
+        await conn.db.update(mobileBlocks).set({ unblockedAt: new Date(), unblockedBy: adminA }).where(eq(mobileBlocks.id, row!.id));
+        expect(await blockedOf(BLOCKED)).toBe(false);
+      });
+
+      it('سفارش و تلاش پرداخت تازه نه؛ تلاشی که پیش از مسدودی ساخته شد پرداخت می‌شود؛ پس از رفع دوباره باز', async () => {
+        const store = createOrderStore(conn);
+        const mine = async () => {
+          const input = await newOrder();
+          const [user] = await conn.db
+            .insert(users)
+            .values({ mobile: BLOCKED })
+            .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+            .returning();
+          return { ...input, userId: user!.id, recipientPhone: BLOCKED };
+        };
+        const before = (await store.createOrder(await mine())).order;
+        const authority = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+        await store.insertPayment({ orderId: before.id, provider: 'mock', amountRials: before.totalRials, authority, raw: null });
+        expect(await store.mobileBlocked(BLOCKED)).toBe(false);
+
+        const [row] = await blockRow({ orderNumber: before.orderNumber });
+        expect([await store.mobileBlocked(BLOCKED), await store.mobileBlocked(MOBILE)]).toEqual([true, false]);
+        await expect(store.createOrder(await mine())).rejects.toBeInstanceOf(MobileBlockedError);
+        await expect(
+          store.insertPayment({ orderId: before.id, provider: 'mock', amountRials: before.totalRials, authority: `${authority}2`, raw: null }),
+        ).rejects.toBeInstanceOf(MobileBlockedError);
+        // دیوار خود پایگاه داده، با نامش: بی سرویس هم.
+        const [payment] = await conn.db.select().from(payments).where(eq(payments.authority, authority));
+        expect(
+          await rejectedConstraint(conn.db.insert(payments).values({ orderId: before.id, provider: 'mock', amountRials: before.totalRials, authority: `${authority}3` })),
+        ).toBe('payments_mobile_blocked');
+        // سفارش دیگران دست نمی‌خورد.
+        const other = (await store.createOrder(await newOrder())).order;
+        expect(await store.insertPayment({ orderId: other.id, provider: 'mock', amountRials: other.totalRials, authority: `${authority}4`, raw: null })).toMatchObject({ status: 'pending' });
+
+        // تلاشی که پیش از مسدودی ساخته شد همان‌طور پرداخت می‌شود: پول مشتری گرفته شده.
+        const paidAt = new Date();
+        const settled = await store.settlePayment('mock', authority, async ({ payment: p }) => ({
+          kind: 'succeeded',
+          verifiedAmountRials: p.amountRials,
+          refId: '803115',
+          cardMask: null,
+          raw: { decision: 'success' },
+          paidAt,
+          postHandoffDueAt: new Date(paidAt.getTime() + 2 * 86_400_000),
+        }));
+        expect(settled).toMatchObject({ settled: true, payment: { id: payment!.id, status: 'succeeded' }, order: { status: 'paid' } });
+
+        await conn.db.update(mobileBlocks).set({ unblockedAt: new Date(), unblockedBy: adminB }).where(eq(mobileBlocks.id, row!.id));
+        expect(await store.mobileBlocked(BLOCKED)).toBe(false);
+        expect((await store.createOrder(await mine())).created).toBe(true);
+      });
+
+      it('ذخیره‌گاه پنل: صاحب سفارش در محدوده، مسدود با رویداد، دو کلیک یکی، دلیل دیگر رد، رفع با رویداد، و فهرست', async () => {
+        const blocks = createBlockStore(conn);
+        const store = createOrderStore(conn);
+        const order = (await store.createOrder(await newOrder())).order;
+        expect(await blocks.orderOwner(ALL_ORDERS, order.orderNumber)).toEqual({ orderId: order.id, orderNumber: order.orderNumber, mobile: MOBILE });
+        // سفارشی که پیش هیچ چاپخانه‌ای نیست، بیرون از محدودهٔ هر چاپخانه است.
+        expect(await blocks.orderOwner({ kind: 'partner', partnerId: randomUUID() }, order.orderNumber)).toBeNull();
+        expect(await blocks.orderOwner(ALL_ORDERS, 999_999)).toBeNull();
+
+        const at = new Date();
+        const event = (adminUserId: string, action = 'customers.block') => ({ adminUserId, action, at, detail: { mobile: '0912 ••• 4567' } });
+        const reason = 'سفارش‌های پرداخت‌نشدهٔ پشت‌سرهم';
+        const blocked = await blocks.block({ mobile: MOBILE, reason, orderNumber: order.orderNumber, event: event(adminA) });
+        expect(blocked).toMatchObject({ ok: true, already: false, block: { mobile: MOBILE, reason, orderNumber: order.orderNumber, blockedByName: 'سارا', unblockedAt: null } });
+        if (!blocked.ok) throw new Error('مسدود نشد');
+        const logged = () => conn.db.select().from(adminEvents).where(and(eq(adminEvents.targetType, 'mobile_block'), eq(adminEvents.targetId, blocked.block.id))).orderBy(asc(adminEvents.id));
+        expect(await logged()).toEqual([expect.objectContaining({ action: 'customers.block', adminUserId: adminA, detail: { mobile: '0912 ••• 4567' } })]);
+
+        // دو کلیک: همان مسدودی، بی رویداد دوم. دلیل دیگر یا ادمین دیگر: رد، با مسدودی زنده.
+        expect(await blocks.block({ mobile: MOBILE, reason, orderNumber: order.orderNumber, event: event(adminA) })).toMatchObject({ ok: true, already: true, block: { id: blocked.block.id } });
+        expect(await blocks.block({ mobile: MOBILE, reason: 'دلیل دیگر', orderNumber: null, event: event(adminA) })).toMatchObject({ ok: false, reason: 'already_blocked', block: { id: blocked.block.id } });
+        expect(await blocks.block({ mobile: MOBILE, reason, orderNumber: null, event: event(adminB) })).toMatchObject({ ok: false, reason: 'already_blocked' });
+        expect(await logged()).toHaveLength(1);
+        // دو مسدود کردن هم‌زمان یک شماره: یکی ساخته می‌شود و دیگری همان را می‌بیند.
+        const twin = await Promise.all([
+          blocks.block({ mobile: '09127770005', reason, orderNumber: null, event: event(adminA) }),
+          blocks.block({ mobile: '09127770005', reason, orderNumber: null, event: event(adminA) }),
+        ]);
+        expect(twin.map((result) => result.ok && result.already).sort()).toEqual([false, true]);
+
+        expect([...(await blocks.live([MOBILE, '09127770005', '09127770006'])).keys()].sort()).toEqual([MOBILE, '09127770005']);
+        expect(await blocks.live([])).toEqual(new Map());
+
+        const unblocked = await blocks.unblock({ id: blocked.block.id, event: event(adminB, 'customers.unblock') });
+        expect(unblocked).toMatchObject({ ok: true, already: false, block: { unblockedByName: 'رضا', blockedByName: 'سارا' } });
+        expect(await blocks.unblock({ id: blocked.block.id, event: event(adminA, 'customers.unblock') })).toMatchObject({ ok: true, already: true, block: { unblockedByName: 'رضا' } });
+        expect(await blocks.unblock({ id: randomUUID(), event: event(adminA, 'customers.unblock') })).toEqual({ ok: false, reason: 'not_found' });
+        expect((await logged()).map((e) => [e.action, e.adminUserId])).toEqual([
+          ['customers.block', adminA],
+          ['customers.unblock', adminB],
+        ]);
+        expect(await blocks.get(blocked.block.id)).toMatchObject({ id: blocked.block.id, unblockedByName: 'رضا' });
+        expect(await blocks.get(randomUUID())).toBeNull();
+
+        // مسدودی دوباره ردیف تازه است؛ فهرست زنده‌ها تازه‌ترین اول، و رفع‌شده‌ها جدا با سقف.
+        const again = await blocks.block({ mobile: MOBILE, reason: 'دوباره', orderNumber: null, event: { ...event(adminB), at: new Date(at.getTime() + 1_000) } });
+        expect(again).toMatchObject({ ok: true, already: false });
+        const list = await blocks.list(10);
+        expect(list.live.map((b) => [b.mobile, b.reason])).toEqual([
+          [MOBILE, 'دوباره'],
+          ['09127770005', reason],
+        ]);
+        expect(list.past.map((b) => b.id)).toEqual([blocked.block.id]);
+        expect((await blocks.list(0)).past).toEqual([]);
+      });
+    });
   });
   describe('پنل ادمین روی پستگرس (برش ۴٫۱)', () => {
     const at = new Date('2026-10-05T07:50:00Z');
@@ -2300,10 +2486,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است.
       expect(await read('owner')).toContain('reports.read');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
-      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی و از ۱۰٫۱ در دسترس بودن چاپخانه‌ها؛ چاپخانه فقط دیدن، وضعیت و دانلود (ADR-042)، از ۶٫۲
-      // ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی مبلغ). هیچ‌کدام گزارش ارسال نه؛
-      // متصدی گزارش تولید هم نه (سؤال ۲۰۱). صریح، نه از کد.
+      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها و از ۱۲٫۲ مسدود کردن موبایل مشتری؛ چاپخانه فقط دیدن،
+      // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی
+      // مبلغ). هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید هم نه (سؤال ۲۰۱). صریح، نه از کد.
       expect(await read('operator')).toEqual([
+        'customers.block',
         'files.download',
         'orders.address',
         'orders.assign',
@@ -2410,6 +2597,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const session = await store.findSession(sessionHash);
       expect(session).toMatchObject({ revokedAt: null, roles: ['operator'] });
       expect(session!.permissions).toEqual([
+        'customers.block',
         'files.download',
         'orders.address',
         'orders.assign',
