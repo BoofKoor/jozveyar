@@ -41,6 +41,7 @@ describe('کد پیامکی و نشست', () => {
   let siteDayLimit: number;
   let ready: boolean;
   let readyAsked: { session: string; until: Date }[];
+  let blocked: Set<string>;
   let codes: string[];
   let service: ReturnType<typeof createAuthService>;
   const logs: string[] = [];
@@ -62,11 +63,13 @@ describe('کد پیامکی و نشست', () => {
     clock = new Date('2026-09-26T08:00:00Z');
     ready = true;
     readyAsked = [];
+    blocked = new Set();
     store = memoryAuthStore({
       ready: (session, until) => {
         readyAsked.push({ session, until });
         return ready;
       },
+      blocked: (mobile) => blocked.has(mobile),
     });
     sms = memorySmsLog();
     siteLimit = 300;
@@ -171,6 +174,27 @@ describe('کد پیامکی و نشست', () => {
     // شاهد: همان درخواست با جزوهٔ روی سرور.
     ready = true;
     expect((await sendCode('48213')).ok).toBe(true);
+  });
+
+  it('شمارهٔ مسدود (برش ۱۲٫۲): کد نمی‌گیرد، ۴۰۳ بی شمارش و بی پیامک؛ دروازهٔ جزوه پیش از آن، و «ارسال دوباره» پس از آن', async () => {
+    blocked.add(MOBILE);
+    expect(await sendCode('48213')).toEqual({ ok: false, status: 403, error: 'mobile_blocked' });
+    expect(sms.messages).toEqual([]);
+    expect(store.otps).toEqual([]);
+    // بی جزوه، همان دروازهٔ جزوه: ربات بی جزوه نمی‌پرسد کدام شماره مسدود است.
+    ready = false;
+    expect(await sendCode('48213')).toMatchObject({ status: 409, error: 'otp_no_documents' });
+    ready = true;
+    // شمارهٔ دیگر، و همین شماره پس از رفع مسدودی.
+    expect((await sendCode('48213', { mobile: '09351234567' })).ok).toBe(true);
+    blocked.delete(MOBILE);
+    expect((await sendCode('48214')).ok).toBe(true);
+    // کد تازه‌ای که هنوز «ارسال دوباره» نمی‌خورد: مسدودی بعدی ۴۰۳ است، نه «چند ثانیهٔ دیگر».
+    later(10_000);
+    blocked.add(MOBILE);
+    expect(await sendCode('48215')).toMatchObject({ status: 403, error: 'mobile_blocked' });
+    blocked.delete(MOBILE);
+    expect(await sendCode('48215')).toMatchObject({ status: 429, error: 'resend_too_soon' });
   });
 
   it('سقف ۵ کد در ساعت برای هر مرورگر (برش ۷)، روی شماره‌ها و IPهای مختلف', async () => {

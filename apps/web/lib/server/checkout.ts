@@ -35,6 +35,7 @@ import {
   GATEWAY_NOT_READY_RESULTS,
   HELD_WATCH_MS,
   IRAN_POST,
+  MobileBlockedError,
   PAYMENT_ATTEMPT_TTL_MS,
   isChecking,
   isPaidStatus,
@@ -453,8 +454,10 @@ export function createCheckoutService(deps: CheckoutDeps) {
         raw: started.raw ?? null,
       });
     } catch (error) {
-      // درخواست هم‌زمانی آخرین جای کد را میان سنجش بالا و درج گرفت؛ تلاش درگاه بی ردیف رها می‌شود و خودش منقضی می‌شود.
+      // درخواست هم‌زمانی آخرین جای کد را میان سنجش بالا و درج گرفت؛ تلاش درگاه بی ردیف رها می‌شود و خودش منقضی می‌شود. موبایلی که همین
+      // حالا، میان سنجش و درج، مسدود شد هم همین (برش ۱۲٫۲).
       if (error instanceof DiscountRefusedError) return fail(409, 'discount_unavailable', { reason: error.reason, order: summary(order) });
+      if (error instanceof MobileBlockedError) return fail(403, 'mobile_blocked', { order: summary(order) });
       throw error;
     }
     return ok({ redirectUrl: started.redirectUrl });
@@ -478,6 +481,8 @@ export function createCheckoutService(deps: CheckoutDeps) {
       await deps.orders.expireOrder(order.id, at);
       return fail(409, 'order_expired', { order: { ...summary(order), status: 'expired' } });
     }
+    // موبایل مسدود (برش ۱۲٫۲، سؤال ۲۱۲): تلاش پرداخت تازه نه، پیش از درگاه؛ سفارش پرداخت‌شده بالاتر همان‌طور دیده می‌شود.
+    if (await deps.orders.mobileBlocked(user.mobile)) return fail(403, 'mobile_blocked', { order: summary(order) });
     const payment = await startPayment(order);
     if (!payment.ok) return payment;
     return ok({ order: summary(order), payment: payment.value });
@@ -535,6 +540,8 @@ export function createCheckoutService(deps: CheckoutDeps) {
         return payExisting(existing.publicToken, user);
       }
 
+      // موبایل مسدود (برش ۱۲٫۲، سؤال ۲۱۲): سفارش تازه نه، پیش از هر حساب. حکم آخر با محافظ ساختن سفارش.
+      if (await deps.orders.mobileBlocked(user.mobile)) return fail(403, 'mobile_blocked');
       const code = await discountOf(input.discountCode, user);
       if (!code.ok) return code;
       const result = await priced(sessionHash, input.items, input.place, code.value);
@@ -583,8 +590,9 @@ export function createCheckoutService(deps: CheckoutDeps) {
           })),
         });
       } catch (error) {
-        // کد همین حالا، میان سنجش و ساختن، جا نداشت یا خاموش شد (محافظ زیر قفل ردیف کد).
+        // کد همین حالا، میان سنجش و ساختن، جا نداشت یا خاموش شد (محافظ زیر قفل ردیف کد)؛ یا موبایل همین حالا مسدود شد.
         if (error instanceof DiscountRefusedError) return fail(409, 'discount_code_invalid', { reason: error.reason });
+        if (error instanceof MobileBlockedError) return fail(403, 'mobile_blocked');
         throw error;
       }
       const { order, created } = placed;

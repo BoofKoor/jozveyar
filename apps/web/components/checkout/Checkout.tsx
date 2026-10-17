@@ -20,6 +20,7 @@ import {
 import { publishDockHeight } from '../../lib/dock';
 import type { JozvePart } from '../../lib/jozveView';
 import { Note, SizeNames } from '../AnalysisCard';
+import { MobileBlocked } from './blocked';
 import { FlowNav, JozveLines, SummaryLines, discountLineOf, jozveSpecLabel, printLabel, shippingLineOf } from './parts';
 import { SumValue, Tomans } from './sum';
 import {
@@ -146,6 +147,9 @@ function failureText(failure: ApiFailure, retry: string): ReactNode {
       );
     case 'otp_no_documents':
       return 'کد نفرستادیم: فایل‌های این جزوه دیگر روی سرور نمی‌مانند. جزوه را دوباره بینداز تا با فایل تازه سفارش بدهی.';
+    case 'mobile_blocked':
+      // موبایل مسدود (برش ۱۲٫۲، سؤال ۲۱۲): راه جلو «تماس».
+      return <MobileBlocked />;
     case 'sms_unavailable':
       return 'پیامک فرستاده نشد. چند دقیقهٔ دیگر دوباره امتحان کن.';
     case 'shipping_unavailable':
