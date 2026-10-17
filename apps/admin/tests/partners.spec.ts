@@ -209,7 +209,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await operatorPage.goto(at('/partners'));
     await expect(operatorPage.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
-      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها و برگرداندن ورود فایل پست با مالک پنل است، و گزارش‌ها و کدهای تخفیف با مالک و حسابدار.',
+      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، نظر مشتری‌ها و برگرداندن ورود فایل پست با مالک پنل است، و گزارش‌ها و کدهای تخفیف با مالک و حسابدار.',
     );
     await operatorPage.goto(at('/partners/new'));
     await expect(operatorPage.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();

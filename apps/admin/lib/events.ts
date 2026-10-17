@@ -627,6 +627,14 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         ),
       };
     }
+    case 'reviews.approve':
+    case 'reviews.hide':
+    case 'reviews.delete': {
+      // نظر مشتری (۱۲٫۳، سؤال ۲۱۳): شمارهٔ سفارش و نمرهٔ پیش از تصمیم؛ متن نظر هرگز، پاک‌شده هم نه.
+      const done = event.action === 'reviews.approve' ? ' روی سایت رفت' : event.action === 'reviews.hide' ? ' پنهان شد' : ' پاک شد';
+      const rating = typeof detail.rating === 'number' ? [' (', { ltr: String(detail.rating) }, ' از ', { ltr: '5' }, ')'] : [];
+      return { badge: null, text: merged(['نظر سفارش ', ...orderRef(detail), ...rating, done]) };
+    }
     default:
       return { badge: null, text: [event.action] };
   }
@@ -676,7 +684,8 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش و از ۷٫۶ «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه کار روی
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
- * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، و مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، آخر.
+ * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
+ * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
@@ -691,4 +700,5 @@ export const EVENT_KINDS = [
   { kind: 'reports', label: 'گزارش‌ها' },
   { kind: 'discounts', label: 'تخفیف‌ها' },
   { kind: 'customers', label: 'مشتری‌ها' },
+  { kind: 'reviews', label: 'نظرها' },
 ] as const;

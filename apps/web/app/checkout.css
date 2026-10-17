@@ -361,6 +361,69 @@
     font-weight: 600;
     line-height: 1.5;
   }
+
+  /*
+   * نظر سفارش (برش ۱۲٫۳): پنج نمره، هر کدام رادیوی واقعی (کلید جهت میانشان می‌رود) روی مربع ۴۴ پیکسلی؛ سر و ته مقیاس زیرشان، و نام نمرهٔ
+   * انتخاب‌شده. «نظرت» پس از فرستادن همان نمره و متن مشتری را دارد، با خط‌های خودش.
+   */
+  .ck-rate {
+    display: flex;
+    gap: 8px;
+    margin-block-start: 8px;
+  }
+  .ck-rate__opt {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-green-200);
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .ck-rate__opt:hover {
+    border-color: var(--color-green-400);
+  }
+  .ck-rate__opt:has(.ck-rate__radio:checked) {
+    background: var(--color-green-50);
+    border: 2px solid var(--color-green-600);
+  }
+  .ck-rate__opt:has(.ck-rate__radio:focus-visible) {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--jy-focus-inner);
+  }
+  .ck-rate__radio {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .ck-rate__scale {
+    display: flex;
+    justify-content: space-between;
+    width: calc(5 * 44px + 4 * 8px);
+    margin-block-start: 6px;
+    color: var(--color-muted);
+    font-size: var(--text-small);
+  }
+  .ck-rate__picked {
+    margin-block-start: 4px;
+    font-weight: 600;
+  }
+  .ck-review__rating {
+    margin-block-start: 12px;
+    font-weight: 600;
+  }
+  .ck-review__body {
+    margin-block-start: 8px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
   .ck-steps {
     margin-block: 24px;
   }

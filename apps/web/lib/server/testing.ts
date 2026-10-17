@@ -25,12 +25,14 @@ import {
   type NewOrder,
   type NewUploadDocument,
   type OrderDetails,
+  type OrderReviewRow,
   type OrderRow,
   type OrderStore,
   type OtpRow,
   type PartnerCandidate,
   type PaymentRow,
   type PrintRuleRow,
+  type ReviewStore,
   type SmsLog,
   type SmsRecord,
   type StoredAnalysis,
@@ -334,8 +336,13 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
   discountCodes: DiscountCodeRow[];
   /** موبایل‌های مسدود (برش ۱۲٫۲)؛ پنل مسدودشان می‌کند، اینجا تست. */
   blockedMobiles: Set<string>;
+  /** نظر هر سفارش (برش ۱۲٫۳)، کلید شناسهٔ سفارش؛ `reviewStore` می‌نویسدشان، و پنل تصمیمش را (اینجا تست). */
+  reviews: Map<string, OrderReviewRow>;
+  /** همان `ReviewStore.submit`: فقط «تحویل پست شد» (`order_reviews_delivered`)، و یکی برای هر سفارش. */
+  reviewStore: Pick<ReviewStore, 'submit'>;
 } {
   const blockedMobiles = new Set<string>();
+  const reviews = new Map<string, OrderReviewRow>();
   const rejections: { orderId: string; orderNumber: number; provider: string; result: number; at: Date }[] = [];
   const parcels = new Map<string, OrderDetails['parcels']>();
   const refunds = new Map<string, OrderDetails['refunds']>();
@@ -432,6 +439,7 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
         .map((p) => ({ ...p })),
       parcels: [...(parcels.get(order.id) ?? [])],
       refunds: [...(refunds.get(order.id) ?? [])],
+      review: reviews.has(order.id) ? { ...reviews.get(order.id)! } : null,
     };
   }
 
@@ -452,6 +460,27 @@ export function memoryOrderStore(options: { priceList: PriceList; now: () => Dat
     rejections,
     discountCodes,
     blockedMobiles,
+    reviews,
+    reviewStore: {
+      async submit({ orderId, rating, body, publicName, publicPlace, at }) {
+        if (reviews.has(orderId)) return { ok: false, reason: 'exists' };
+        if (orders.find((o) => o.id === orderId)?.status !== 'handed_to_post') return { ok: false, reason: 'not_delivered' };
+        const review: OrderReviewRow = {
+          id: randomUUID(),
+          orderId,
+          rating,
+          body,
+          publicName,
+          publicPlace,
+          status: 'pending',
+          createdAt: at,
+          decidedAt: null,
+          decidedBy: null,
+        };
+        reviews.set(orderId, review);
+        return { ok: true, review: { ...review } };
+      },
+    },
     // همان `createSmsOutbox`: «در حال فرستادن» فقط یک بار، و فقط برای پیامکی که زنده است: پیامک پرداختی که سفارشش لغو نشده، و پیامک
     // چاپخانه‌ای که تخصیصش امروزِ سفارشی است که هنوز «در صف چاپ» همان چاپخانه است (سؤال ۱۷۴).
     smsOutbox: {

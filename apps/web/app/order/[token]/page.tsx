@@ -2,11 +2,12 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
-import type { OrderView, OrderViewDetails } from '@jozveyar/contracts/checkout';
+import type { OrderView, OrderViewDetails, OrderViewReview } from '@jozveyar/contracts/checkout';
 import { formatCardMask, formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
 import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
 import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
+import { ReviewForm } from '../../../components/checkout/ReviewForm';
 import { FlowNav, JozveLines, SummaryLines, discountLineOf, jozveSpecLabel, printLabel, shippingLineOf } from '../../../components/checkout/parts';
 import { SumValue, Tomans } from '../../../components/checkout/sum';
 import {
@@ -20,6 +21,7 @@ import {
   type RecapJozve,
 } from '../../../components/checkout/recap';
 import { formatMobile } from '../../../lib/checkout/format';
+import { ratingLabel } from '../../../lib/review';
 import { AUTH_COOKIE, authTokenFrom, orderViewOf } from '../../../lib/server/checkoutContext';
 import { configuredMode } from '../../../lib/server/checkoutMode';
 
@@ -53,6 +55,8 @@ export const metadata: Metadata = {
  * - **غریبه** (نه صاحب سفارش، ADR-033): فقط شماره، وضعیت و روز تحویل به پست؛ از ۶٫۳ اینکه کد رهگیری پیامک شد، بی خود کد.
  * - **کد رهگیری** (برش ۶٫۳، ADR-047، طرح `m-c-shipped`): صاحب سفارش گام «کد رهگیری پست» را انجام‌شده می‌بیند، با کد هر بستهٔ زنده و
  *   «رهگیری در سایت پست» (فقط `<a>` در زبانهٔ تازه با `noopener noreferrer`؛ چیزی از سایت پست بار نمی‌شود، قاعدهٔ ۸).
+ * - **نظر** (برش ۱۲٫۳، ADR-064، سؤال ۲۱۳): پس از «تحویل پست شد» صاحب سفارش «از جزوه راضی بودی؟» دارد (جزیرهٔ `ReviewForm`)، و پس از
+ *   فرستادن «نظرت» با همان نمره و متن؛ پاک‌شده به دست مالک هیچ.
  *
  * پشت حالت مسیر خرید نیست: سفارش پرداخت‌شده با خاموش شدن خرید گم نمی‌شود.
  */
@@ -414,6 +418,25 @@ function PaidCard({ view, details }: { view: OrderView; details: OrderViewDetail
   );
 }
 
+/** «نظرت» (برش ۱۲٫۳): همان که صاحب سفارش فرستاد؛ «روی صفحهٔ اصلی است» فقط وقتی مالک گذاشته، و منتظر و پنهان یکی. */
+function ReviewCard({ review }: { review: OrderViewReview }) {
+  return (
+    <section className="jy-card" aria-labelledby="review-title" data-testid="review-sent">
+      <h2 id="review-title" className="jy-card__title">
+        نظرت
+      </h2>
+      <p className="ck-review__rating">
+        <span className="num">{review.rating}</span> از <span className="num">5</span> · {ratingLabel(review.rating)}
+      </p>
+      {review.body ? <p className="ck-review__body">{review.body}</p> : null}
+      <p className="jy-note jy-note--success ck-card-note" role="status">
+        <span className="jy-icon jy-icon-success" aria-hidden="true" />
+        <span>نظرت رسید؛ ممنون.{review.published ? ' روی صفحهٔ اصلی است.' : null}</span>
+      </p>
+    </section>
+  );
+}
+
 /** خط کنار جمع: روز تحویل به پست، روزی که رسید، یا پیش از پرداخت چند روز کاری. لغوشده هیچ. */
 function ShipLine({ view }: { view: OrderView }) {
   if (view.status === 'cancelled') return null;
@@ -609,6 +632,11 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
                 <ExtraPaymentNote key={i} payment={payment} />
               ))}
               <PaidCard view={view} details={details} />
+              {details.reviewForm ? (
+                <ReviewForm token={token} publicName={details.reviewForm.publicName} place={details.reviewForm.publicPlace} />
+              ) : details.review ? (
+                <ReviewCard review={details.review} />
+              ) : null}
             </>
           ) : checking ? (
             <CheckingCard token={token} view={view} details={details} />

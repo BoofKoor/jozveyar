@@ -668,6 +668,66 @@ test('موبایل مسدود (۱۲٫۲، سؤال ۲۱۲): کد نمی‌رود
   await context.close();
 });
 
+test('نظر (۱۲٫۳، سؤال ۲۱۳): پس از «تحویل پست شد» صاحب سفارش نمره و چند کلمه می‌دهد، یک بار؛ غریبه نه؛ «روی صفحهٔ اصلی است» پس از تأیید', async ({ browser }) => {
+  const context = await newContext(browser);
+  const page = await context.newPage();
+  await dropReady(page);
+  await toPay(page);
+  await signIn(page, newMobile());
+  await payAt(page, 'پرداخت موفق', TEN.other.totalRials);
+  const orderUrl = page.url();
+  const token = new URL(orderUrl).pathname.split('/').at(-1)!;
+  const reviewOf = () => sql()`select r.rating, r.body, r.status from order_reviews r join orders o on o.id = r.order_id where o.public_token = ${token}`;
+  await expect(page.getByRole('heading', { level: 1, name: 'سفارش ثبت شد' })).toBeVisible();
+  await expect(page.getByTestId('review-form')).toHaveCount(0);
+
+  // پنل همین گذارها را می‌زند (`orders_status_flow`)؛ اینجا با SQL.
+  await sql()`update orders set status = 'printing' where public_token = ${token}`;
+  await sql()`update orders set status = 'handed_to_post', handed_to_post_at = now() where public_token = ${token}`;
+  await page.reload();
+  const form = page.getByTestId('review-form');
+  await expect(form.getByRole('heading', { level: 2, name: 'از جزوه راضی بودی؟' })).toBeVisible();
+  await expect(form.locator('#review-body-hint')).toHaveText(
+    'اگر چیزی بنویسی و تأییدش کنیم، با نام «سارا» از مشهد روی صفحهٔ اصلی می‌آید؛ نام خانوادگی و موبایلت هرگز.',
+  );
+
+  // بی نمره: خطا همان‌جا، بی درخواست.
+  await form.getByRole('button', { name: 'بفرست' }).click();
+  await expect(form.locator('#review-rating-error')).toHaveText('یک نمره انتخاب کن.');
+  expect(await reviewOf()).toHaveLength(0);
+
+  await form.getByRole('radio', { name: '4، خوب' }).check();
+  await expect(form.getByTestId('review-picked')).toHaveText('خوب');
+  await expect(form.locator('#review-rating-error')).toHaveCount(0);
+  await form.getByLabel('چند کلمه، اگر خواستی').fill('  صحافي محكم بود\n\n  ممنون  ');
+  await form.getByRole('button', { name: 'بفرست' }).click();
+  const sent = page.getByTestId('review-sent');
+  await expect(sent.locator('.ck-review__rating')).toHaveText('4 از 5 · خوب');
+  await expect(sent.locator('.ck-review__body')).toContainText('صحافی محکم بود');
+  await expect(sent.locator('[role="status"]')).toHaveText('نظرت رسید؛ ممنون.');
+  await expect(page.getByTestId('review-form')).toHaveCount(0);
+  expect(await reviewOf()).toEqual([{ rating: 4, body: 'صحافی محکم بود\nممنون', status: 'pending' }]);
+
+  // مالک روی سایت گذاشت (پنل همین را با رویدادش می‌نویسد).
+  await sql()`update order_reviews r set status = 'approved', decided_at = now(), decided_by = gen_random_uuid()
+              from orders o where o.id = r.order_id and o.public_token = ${token}`;
+  await page.reload();
+  await expect(page.getByTestId('review-sent').locator('[role="status"]')).toHaveText('نظرت رسید؛ ممنون. روی صفحهٔ اصلی است.');
+
+  // غریبه نه فرم دارد و نه نظر را می‌بیند، و نوشتنش همان سفارش ناموجود؛ صاحب سفارش هم دوباره نه.
+  const stranger = await newContext(browser);
+  const other = await stranger.newPage();
+  await other.goto(orderUrl);
+  await expect(other.getByTestId('order-stranger')).toBeVisible();
+  await expect(other.getByTestId('review-form')).toHaveCount(0);
+  await expect(other.getByTestId('review-sent')).toHaveCount(0);
+  expect((await other.request.post(`/api/orders/${token}/review`, { data: { rating: 1 } })).status()).toBe(404);
+  await stranger.close();
+  const again = await page.request.post(`/api/orders/${token}/review`, { data: { rating: 1 } });
+  expect([again.status(), (await again.json()).error]).toEqual([409, 'review_exists']);
+  await context.close();
+});
+
 test.describe('پرداخت', () => {
   test('پرداخت ناموفق: علت از درگاه (کارت، لغو)، همان قیمت منجمد، و «دوباره پرداخت کن» تا «ثبت شد»', async ({ browser }) => {
     const context = await newContext(browser);

@@ -33,6 +33,7 @@ import {
   setSessionCookie,
 } from '../../lib/server/context';
 import type { AdminErrorCode, Failure } from '../../lib/server/result';
+import { filterOf } from '../../lib/server/reviews';
 
 export interface FormState {
   error?: AdminErrorCode;
@@ -1385,4 +1386,17 @@ export async function unblockMobileAction(form: FormData): Promise<void> {
   const number = field(form, 'number');
   const back = /^[1-9]\d{0,8}$/.test(number) ? panelPath(gate, `/orders/${number}`) : panelPath(gate, '/orders/blocked');
   redirect(result.ok ? `${back}?done=unblock&${doneMark()}` : `${back}?e=${result.error}&${doneMark()}`);
+}
+
+/**
+ * تصمیم مالک روی نظر مشتری (برش ۱۲٫۳، ADR-064): روی سایت، پنهان، یا پاک (پس از تأیید صفحه)؛ بی کد تازه. از همان وضعیتی که صفحه نشان داد
+ * (`seen`)، و برگشت به همان چیپ «نظرها».
+ */
+export async function decideReviewAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { reviews } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await reviews.decide(session, { id: field(form, 'id'), seen: field(form, 'seen'), action: field(form, 'action') }, await requestIp());
+  const back = `${panelPath(gate, '/orders/reviews')}?f=${filterOf(field(form, 'f'))}`;
+  redirect(result.ok ? `${back}&done=${result.value.action}&${doneMark()}` : `${back}&e=${result.error}&${doneMark()}`);
 }

@@ -21,6 +21,7 @@ import { MOCK_AUTHORITY, PaymentError, mockGateway, type PaymentGateway } from '
 
 import type { AuthUser } from './auth';
 import { PAYMENT_ATTEMPT_TTL_MS, RETURN_KEY, createCheckoutService } from './checkout';
+import { submitReview } from './reviews';
 import { memoryDiscountCode, memoryOrderStore } from './testing';
 
 const ME = 'a'.repeat(64);
@@ -1171,6 +1172,83 @@ describe('مسیر خرید روی سرور', () => {
         ],
         shipping: { methodName: 'پست پیشتاز', provinceName: 'تهران', cityName: 'تهران' },
         recipient: { name: 'سارا احمدی', phone: SARA.mobile, postalCode: '9189914365' },
+      });
+    });
+
+    it('نظر (۱۲٫۳، سؤال ۲۱۳): فقط صاحب سفارش «تحویل پست شد»، یک بار، نمرهٔ ۱ تا ۵ و متن فارسی‌نرمال تا ۵۰۰؛ صفحهٔ سفارش «نظرت» را دارد، منتظر و پنهان یکی، پاک‌شده هیچ', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      const row = orders.orders[0]!;
+      const deps = { orders, reviews: orders.reviewStore };
+      const send = (user: AuthUser | null, input: unknown) => submitReview(deps, order.token, user, input, clock);
+      const details = async () => {
+        const result = await service.orderView(order.token, SARA);
+        if (!result.ok) throw new Error(result.error);
+        return result.value.details!;
+      };
+
+      // پیش از رسیدن به پست: نه فرم، نه نوشتن.
+      expect(await details()).toMatchObject({ reviewForm: null, review: null });
+      expect(await send(SARA, { rating: 5 })).toMatchObject({ status: 409, error: 'review_not_open' });
+      // اول اینکه فرم باز است، بعد ورودی: سفارشی که نظر نمی‌گیرد با نمرهٔ نادرست هم همان ۴۰۹.
+      expect(await send(SARA, { rating: 0 })).toMatchObject({ status: 409, error: 'review_not_open' });
+      Object.assign(row, { status: 'handed_to_post', handedToPostAt: new Date('2026-09-28T10:00:00.000Z') });
+      // فرم نام کوچک و شهر را زیر فیلد نشان می‌دهد؛ همان روی نظر منجمد می‌شود.
+      expect(await details()).toMatchObject({ reviewForm: { publicName: 'سارا', publicPlace: 'تهران' }, review: null });
+
+      // غریبه، بی نشست و توکن بدشکل همان سفارش ناموجود؛ غریبه در صفحهٔ سفارش هم چیزی از نظر نمی‌بیند.
+      expect(await send(REZA, { rating: 5 })).toMatchObject({ status: 404, error: 'not_found' });
+      expect(await send(null, { rating: 5 })).toMatchObject({ status: 404, error: 'not_found' });
+      expect(await submitReview(deps, 'not-a-token', SARA, { rating: 5 }, clock)).toMatchObject({ status: 404 });
+      expect(await service.orderView(order.token, REZA)).toMatchObject({ value: { details: null } });
+
+      for (const rating of [0, 6, 4.5, '5', null]) {
+        expect(await send(SARA, { rating })).toMatchObject({ status: 400, error: 'invalid_rating' });
+      }
+      expect(await send(SARA, null)).toMatchObject({ status: 400, error: 'invalid_rating' });
+      expect(await send(SARA, { rating: 4, body: 'ن'.repeat(501) })).toMatchObject({ status: 400, error: 'review_too_long', max: 500 });
+      expect(orders.reviews.size).toBe(0);
+
+      // متن هر خط فارسی‌نرمال، خط خالی رفته؛ ۵۰۰ نویسه پس از نرمال‌سازی.
+      expect(await send(SARA, { rating: 4, body: '  صحافي محكم بود\n\n\n  ممنون  ' })).toEqual({
+        ok: true,
+        value: { rating: 4, body: 'صحافی محکم بود\nممنون', published: false },
+      });
+      expect(orders.reviews.get(row.id)).toMatchObject({
+        rating: 4,
+        body: 'صحافی محکم بود\nممنون',
+        publicName: 'سارا',
+        publicPlace: 'تهران',
+        status: 'pending',
+        createdAt: clock,
+      });
+      expect(await send(SARA, { rating: 1 })).toMatchObject({ status: 409, error: 'review_exists' });
+      expect(await send(SARA, { rating: 0 })).toMatchObject({ status: 409, error: 'review_exists' });
+      expect(await details()).toMatchObject({ reviewForm: null, review: { rating: 4, body: 'صحافی محکم بود\nممنون', published: false } });
+
+      // مالک روی سایت گذاشت، پنهان کرد، پاک کرد: مشتری «روی صفحهٔ اصلی است» را فقط برای اولی می‌بیند، و پس از پاک هیچ، حتی فرم.
+      const review = orders.reviews.get(row.id)!;
+      Object.assign(review, { status: 'approved' });
+      expect((await details()).review).toMatchObject({ published: true });
+      Object.assign(review, { status: 'hidden' });
+      expect((await details()).review).toMatchObject({ published: false });
+      Object.assign(review, { status: 'deleted', rating: null, body: null });
+      expect(await details()).toMatchObject({ reviewForm: null, review: null });
+      expect(await send(SARA, { rating: 5 })).toMatchObject({ status: 409, error: 'review_exists' });
+    });
+
+    it('نظر بی متن هم نظر است؛ هم‌زمان با نظر دیگر یا برگشت وضعیت، همان ۴۰۹ پایگاه داده', async () => {
+      const { order, payment } = await placed([doc(10)]);
+      await pay(payment!.redirectUrl, 'success');
+      const row = orders.orders[0]!;
+      Object.assign(row, { status: 'handed_to_post', handedToPostAt: new Date('2026-09-28T10:00:00.000Z') });
+      const raced = (reason: 'exists' | 'not_delivered') =>
+        submitReview({ orders, reviews: { submit: async () => ({ ok: false, reason }) } }, order.token, SARA, { rating: 5 }, clock);
+      expect(await raced('exists')).toMatchObject({ status: 409, error: 'review_exists' });
+      expect(await raced('not_delivered')).toMatchObject({ status: 409, error: 'review_not_open' });
+      expect(await submitReview({ orders, reviews: orders.reviewStore }, order.token, SARA, { rating: 3, body: ' \n ' }, clock)).toEqual({
+        ok: true,
+        value: { rating: 3, body: null, published: false },
       });
     });
 
