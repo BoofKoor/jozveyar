@@ -602,7 +602,8 @@ test.describe.serial('تعرفه از پایگاه داده', () => {
     await expect(shop.getByTestId('tariff-print').locator('dt')).toHaveText(['سیاه‌سفید', 'رنگی']);
     await expect(shop.locator('.jy-drop__format')).toHaveText(['PDF', 'پاورپوینت', 'عکس']);
     expect(await shop.locator('#jozve-file').getAttribute('accept')).toBe('.pdf,.pptx,.ppt,.jpg,.jpeg,.png,.webp,.heic');
-    await expect(shop.locator('#faq')).toContainText('PDF، پاورپوینت و عکس اسکن‌شده.');
+    // سؤال فرمت‌ها از ۱۱٫۱ جای‌نگهدار `{فرمت‌ها}` است، همان شکل «سه قدم»: «… یا عکس».
+    await expect(shop.locator('#faq')).toContainText('PDF، پاورپوینت یا عکس اسکن‌شده.');
 
     // میز: کاشی A5 خاموش با «موقتاً در دسترس نیست»؛ طلق و سیم بالای حداقل.
     await shop.setInputFiles('#jozve-file', fixture('plain-bw-10.pdf'));
