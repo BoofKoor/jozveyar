@@ -37,6 +37,7 @@ export * from './production.js';
 export * from './exports.js';
 export * from './tariff.js';
 export * from './templates.js';
+export * from './content.js';
 export * from './settings.js';
 export * from './checkout.js';
 export * from './secrets.js';

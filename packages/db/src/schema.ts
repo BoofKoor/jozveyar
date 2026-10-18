@@ -2146,3 +2146,72 @@ export const reportExports = pgTable(
     ),
   ],
 );
+
+/* ──────────────────────────── متن‌های سایت (برش ۱۱٫۱) ──────────────────────────── */
+
+/** شش متنی که مالک از پنل عوض می‌کند (ADR-065، سؤال ۲۸۳)؛ همان `CONTENT_KINDS` در `@jozveyar/content`. */
+export const siteContentKind = pgEnum('site_content_kind', ['home', 'faq', 'terms', 'privacy', 'about', 'contact']);
+
+/** بزرگ‌ترین JSON یک متن؛ متن صفحه تا ۲۰٬۰۰۰ نویسه است (`fieldsOf`)، یعنی حدود ۴۰ کیلوبایت. */
+export const SITE_CONTENT_MAX_BYTES = 128 * 1024;
+
+/**
+ * نسخه‌های منتشرشدهٔ متن‌های سایت (برش ۱۱٫۱، ADR-065، سؤال ۲۸۸): هر انتشار یک ردیف، و آخرین نسخهٔ هر نوع همان است که سایت نشان می‌دهد.
+ * `content` خالی یعنی «متن پیش‌فرض» (برگشت به آن)، که با به‌روزرسانی سایت به‌روز می‌شود. «برگرداندن» نسخه‌ای تازه با همان متن است
+ * (`restored_from`). هیچ نسخه‌ای عوض یا پاک نمی‌شود، و شماره‌ها در هر نوع پشت‌سرهم‌اند (تریگر `site_content_versions_guard`، 0054).
+ */
+export const siteContentVersions = pgTable(
+  'site_content_versions',
+  {
+    id: serial('id').primaryKey(),
+    kind: siteContentKind('kind').notNull(),
+    /** شمارهٔ نسخه در همان نوع، از ۱ و پشت‌سرهم (`site_content_versions_sequence`، 0054). */
+    version: integer('version').notNull(),
+    /** متن (`ContentByKind` در `@jozveyar/content`)؛ null یعنی برگشت به متن پیش‌فرض. */
+    content: jsonb('content'),
+    /** نسخه‌ای که «برگرداندن» از آن آمد؛ ۰ یعنی متن پیش‌فرض، null یعنی انتشار پیش‌نویس. */
+    restoredFrom: integer('restored_from'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('site_content_versions_version').on(t.kind, t.version),
+    check(
+      'site_content_versions_content',
+      sql`${t.content} IS NULL OR (jsonb_typeof(${t.content}) = 'object' AND octet_length(${t.content}::text) <= ${sql.raw(String(SITE_CONTENT_MAX_BYTES))})`,
+    ),
+    /** شمارهٔ نسخه یا ۰؛ اینکه نسخهٔ پیش‌تری از همان نوع با همان متن است را تریگر می‌سنجد (`site_content_versions_restored_same`). */
+    check('site_content_versions_restored', sql`${t.restoredFrom} IS NULL OR ${t.restoredFrom} >= 0`),
+    /** متن خالی فقط و فقط برگشت به متن پیش‌فرض؛ `IS NOT DISTINCT FROM`، چون CHECKی که NULL شود پذیرفته است. */
+    check('site_content_versions_default', sql`(${t.content} IS NULL) = (${t.restoredFrom} IS NOT DISTINCT FROM 0)`),
+  ],
+);
+
+/**
+ * پیش‌نویس هر متن (سؤال ۲۸۶): یکی برای هر نوع، تا انتشار یا «دور انداختن»؛ روی سایت نیست و هر چه بخواهد عوض می‌شود. «ذخیره و پیش‌نمایش»
+ * با خطا هم ذخیره می‌کند؛ انتشار فقط بی خطاست (سرویس پنل). `base_version` نسخهٔ روی سایت هنگام ساختن پیش‌نویس است، تا صفحهٔ انتشار
+ * بگوید اگر نسخهٔ دیگری پس از آن منتشر شده.
+ */
+export const siteContentDrafts = pgTable(
+  'site_content_drafts',
+  {
+    kind: siteContentKind('kind').primaryKey(),
+    content: jsonb('content').notNull(),
+    /** نسخهٔ روی سایت هنگام ساختن؛ ۰ یعنی متن پیش‌فرض بی هیچ نسخه. */
+    baseVersion: integer('base_version').notNull(),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'site_content_drafts_content',
+      sql`jsonb_typeof(${t.content}) = 'object' AND octet_length(${t.content}::text) <= ${sql.raw(String(SITE_CONTENT_MAX_BYTES))}`,
+    ),
+    check('site_content_drafts_times', sql`${t.updatedAt} >= ${t.createdAt}`),
+  ],
+);
