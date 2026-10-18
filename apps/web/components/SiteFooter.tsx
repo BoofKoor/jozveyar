@@ -1,3 +1,4 @@
+import { TextContent } from '@jozveyar/content/render';
 import { jalaliYear } from '@jozveyar/text';
 import { Logo } from '@jozveyar/ui';
 
@@ -35,17 +36,17 @@ function EnamadSeal() {
 }
 
 /**
- * پیوند صفحه‌های ثابت در دو گروه طرح (برش ۷٫۴، قدم ۵؛ «تماس» فقط با اطلاعات تماس واقعی، `lib/staticPages.ts`).
+ * پیوند صفحه‌های ثابت در دو گروه طرح (برش ۷٫۴، قدم ۵؛ «تماس» فقط وقتی راهی برای تماس هست، `lib/staticPages.ts`).
  *
  * در حالت سفارش (جزوه‌ای در کار، در صفحهٔ اصلی یا صفحهٔ سفارش) پیوند در زبانهٔ تازه باز می‌شود تا جزوهٔ نیمه‌کاره و صفحهٔ
  * سفارش پاک نشوند؛ بی جزوه همان زبانه. `target` را CSS عوض نمی‌کند، پس هر پیوند دو بار هست و همان `site-idle` و
  * `site-ordering` سربرگ یکی را نشان می‌دهند (globals.css). `display: none` از درخت دسترسی هم بیرون است، پس صفحه‌خوان هر
  * پیوند را یک بار می‌خواند. بی JS.
  */
-function FooterNav() {
+function FooterNav({ contact }: { contact: boolean }) {
   return (
     <nav className="site-foot__nav" aria-label="پیوندهای پاورقی">
-      {footerGroups().map(({ heading, pages }) => (
+      {footerGroups(contact).map(({ heading, pages }) => (
         <div key={heading}>
           <h2>{heading}</h2>
           <ul>
@@ -69,23 +70,30 @@ function FooterNav() {
 /**
  * پاورقی سایت، از طرح ز (docs/UI.md، قدم ۳). کامپوننت سرور، بی JS.
  *
- * معرفی، پیوند صفحه‌های ثابت (قدم ۵، برش ۷٫۴) و نشان اینماد. سال شمسی موقع ساخت صفحه حساب می‌شود؛ صفحه‌ها ایستا ساخته
- * می‌شوند، پس «©» تا استقرار بعدی همان سال ساخت را دارد.
+ * معرفی، پیوند صفحه‌های ثابت (قدم ۵، برش ۷٫۴) و نشان اینماد. معرفی و جملهٔ پایین از ۱۱٫۱ از «تماس و پاورقی» پنل‌اند (سؤال ۲۸۳؛ جملهٔ
+ * پایین خالی یعنی نیامدن)، و پیوند «تماس» فقط وقتی راهی برای تماس هست. سال شمسی موقع ساخت صفحه حساب می‌شود؛ صفحه‌ها با ISR ساخته
+ * می‌شوند، پس «©» با بازسازی صفحه سال تازه را می‌گیرد.
  */
-export function SiteFooter() {
+export function SiteFooter({ intro, legal, contact }: { intro: string; legal: string; contact: boolean }) {
   return (
     <footer className="site-foot">
       <div className="site-wrap">
         <div className="site-foot__top">
           <div className="site-foot__brand">
             <Logo height={64} loading="lazy" />
-            <p>چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران. فایل را بینداز، قیمت را همان لحظه ببین.</p>
+            <p>
+              <TextContent text={intro} />
+            </p>
           </div>
-          <FooterNav />
+          <FooterNav contact={contact} />
           <EnamadSeal />
         </div>
         <div className="site-foot__legal">
-          <p>مسئولیت محتوای فایل ارسالی بر عهدهٔ سفارش‌دهنده است.</p>
+          {legal ? (
+            <p>
+              <TextContent text={legal} />
+            </p>
+          ) : null}
           <p>
             © <span className="num">{jalaliYear(new Date())}</span> جزوه‌یار
           </p>

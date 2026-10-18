@@ -1,73 +1,13 @@
-import { formatTomans } from '@jozveyar/text';
-import { formatNames } from '../lib/fileRules';
-import type { SiteFiles } from '../lib/server/fileRules';
-import type { SiteTariff } from '../lib/tariff';
-import { Inline } from './Inline';
-
-export interface FaqItem {
-  q: string;
-  a: string;
-}
+import type { FaqItem, PlaceholderValues } from '@jozveyar/content';
+import { InlineText, TextContent } from '@jozveyar/content/render';
 
 /**
- * سؤال‌های پرتکرار؛ همین متن در JSON-LD صفحه (`FAQPage`) هم هست. نرخ چاپ و روز کاری تحویل به پست از تعرفهٔ صفحه
- * (پایگاه داده و `settings`، برش ۴٫۴).
+ * سؤال‌ها، مقصد «سؤال‌ها» در سربرگ: فهرست `details` کیت (`jy-faq`)، که بی JS باز و بسته می‌شود و متنش در HTML می‌ماند. کامپوننت سرور. پس از
+ * فایل کارتی در ستون سفارش می‌شود (home.css)، پس پیوند پاسخ در زبانهٔ تازه باز می‌شود تا جزوهٔ نیمه‌کاره نرود. از ۱۱٫۱ سؤال‌ها از پنل‌اند (سؤال
+ * ۲۸۹): پرسش متن ساده، و پاسخ یک بند با پررنگ، پیوند و عدد امروز جای‌نگهدارها؛ همان در JSON-LD صفحه (`FAQPage`)، بی قالب.
  */
-/** «سیاه‌سفید 1,600 تومان»، و وقتی یکرو نرخ دیگری دارد «سیاه‌سفید 1,600 تومان در دورو و 1,800 تومان در یکرو» (A4، ۸٫۳). */
-function rateText(priceList: SiteTariff['priceList'], color: 'bw' | 'color'): string {
-  const rates = priceList.printRates.a4!;
-  const [double, single] = [rates.double[color], rates.single[color]];
-  return double === single ? formatTomans(double) : `${formatTomans(double)} در دورو و ${formatTomans(single)} در یکرو`;
-}
-
-/** «دو روز»، «یک روز» یا «5 روز»: روزهای ماندن فایل آپلود (`file.retention_days`). */
-function daysText(days: number): string {
-  return days === 1 ? 'یک روز' : days === 2 ? 'دو روز' : `${days} روز`;
-}
-
-/**
- * فرمت‌ها (سؤال سوم) فقط خانواده‌های روشن‌اند (برش ۸٫۴، `file.formats`)، و روزهای ماندن فایل (سؤال چهارم) همان که سرور آپلود و قوانین
- * می‌گویند.
- */
-export function faqItems({ priceList, slaDays }: SiteTariff, { rules, uploadDays }: SiteFiles): FaqItem[] {
-  const families = Object.values(rules.formats).filter(Boolean).length;
-  return [
-    {
-      q: 'قیمت چاپ جزوه چطور حساب می‌شود؟',
-      a: `به‌ازای هر صفحهٔ چاپ‌شده: سیاه‌سفید ${rateText(priceList, 'bw')} و رنگی ${rateText(priceList, 'color')}. هزینهٔ صحافی جدا و بر اساس تعداد برگ محاسبه می‌شود. قیمت نهایی را قبل از هر ثبت‌نامی روی صفحه می‌بینید.`,
-    },
-    {
-      q: 'باید تعداد صفحات را خودم بشمارم؟',
-      a: 'نه. فایل را که انداختید، سایت خودش تعداد صفحات، اندازهٔ کاغذ و صفحات رنگی را تشخیص می‌دهد و قیمت را نشان می‌دهد.',
-    },
-    {
-      q: 'چه فایل‌هایی را می‌توانم بفرستم؟',
-      a: `${rules.formats.image ? formatNames(rules.formats).replace(/عکس$/, 'عکس اسکن‌شده') : formatNames(rules.formats)}. ${
-        families > 0
-          ? 'فایل PDF همان لحظه در مرورگر خوانده می‌شود و بقیه سمت سرور تبدیل می‌شوند.'
-          : 'فایل PDF همان لحظه در مرورگر خوانده می‌شود.'
-      } چند فایل را هم می‌شود با هم انداخت: به ترتیبی که می‌خواهید پشت‌سرهم در یک جزوه صحافی می‌شوند و فقط یک بار هزینهٔ صحافی می‌گیرند.`,
-    },
-    {
-      q: 'فایلم کجا می‌رود و چقدر نگه داشته می‌شود؟',
-      a: `قیمت را خود مرورگرتان حساب می‌کند. بعد از آن، فایل برای چاپ به سرور جزوه‌یار فرستاده می‌شود — اگر اینترنت قطع شد، از همان‌جا ادامه می‌دهد. فایل ${daysText(uploadDays)} بعد خودکار پاک می‌شود و هیچ‌جای دیگری نمی‌رود.`,
-    },
-    {
-      q: 'ارسال چقدر طول می‌کشد؟',
-      a: `تعهد ما این است که سفارش حداکثر ${slaDays} روز کاری پس از پرداخت به پست تحویل داده شود. بعد از آن کد رهگیری پستی برایتان ارسال می‌شود تا خودتان مسیر مرسوله را ببینید.`,
-    },
-    {
-      q: 'برای گرفتن قیمت باید ثبت‌نام کنم؟',
-      a: 'نه. قیمت قبل از هر ثبت‌نامی نشان داده می‌شود. شماره موبایل فقط در لحظهٔ پرداخت گرفته می‌شود، با کد پیامکی و بدون رمز.',
-    },
-  ];
-}
-
-/**
- * سؤال‌ها، مقصد «سؤال‌ها» در سربرگ: فهرست `details` کیت (`jy-faq`)، که بی JS باز و بسته می‌شود و
- * متنش در HTML می‌ماند. کامپوننت سرور. پس از فایل کارتی در ستون سفارش می‌شود (home.css).
- */
-export function Faq({ items }: { items: readonly FaqItem[] }) {
+export function Faq({ items, values }: { items: readonly FaqItem[]; values: PlaceholderValues }) {
+  const options = { values, newTab: true };
   return (
     <section id="faq" className="home-sec home-faq" aria-labelledby="faq-title">
       <div>
@@ -77,14 +17,14 @@ export function Faq({ items }: { items: readonly FaqItem[] }) {
         <p className="home-sec__sub">دربارهٔ قیمت، فایل و ارسال.</p>
       </div>
       <div className="jy-faq">
-        {items.map((item) => (
-          <details key={item.q}>
+        {items.map((item, i) => (
+          <details key={i}>
             <summary>
-              {item.q}
+              <TextContent text={item.q} />
               <span className="jy-icon jy-icon-chevron" aria-hidden="true" />
             </summary>
             <p>
-              <Inline text={item.a} />
+              <InlineText text={item.a} format="paragraph" options={options} />
             </p>
           </details>
         ))}

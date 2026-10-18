@@ -1,41 +1,32 @@
+import type { HomeStep, PlaceholderValues } from '@jozveyar/content';
+import { InlineText } from '@jozveyar/content/render';
+
 /**
- * «سه قدم تا جزوهٔ چاپ‌شده»، مقصد «چطور کار می‌کند» در سربرگ؛ از طرح ز (docs/UI.md، ۴الف).
- * کامپوننت سرور. رقم دایره‌ها با `--jy-digit-rise` دقیق وسط است (home.css، و tests/digits.spec.ts). روز کاری تحویل به پست
- * از `settings` (`order.sla_days`، برش ۴٫۴).
+ * «سه قدم تا جزوهٔ چاپ‌شده»، مقصد «چطور کار می‌کند» در سربرگ؛ از طرح ز (docs/UI.md، ۴الف). کامپوننت سرور. رقم دایره‌ها با `--jy-digit-rise`
+ * دقیق وسط است (home.css، و tests/digits.spec.ts). از ۱۱٫۱ تیتر و هر قدم از «صفحهٔ اصلی» پنل (سؤال ۲۸۳)، با عدد امروز جای‌نگهدارها؛ پیوند
+ * متن قدم در زبانهٔ تازه، مثل سؤال‌ها.
  */
-export function HowItWorks({ slaDays }: { slaDays: number }) {
+export function HowItWorks({ title, steps, values }: { title: string; steps: readonly HomeStep[]; values: PlaceholderValues }) {
+  const options = { values, newTab: true };
   return (
     <section id="how" className="home-sec" aria-labelledby="how-title">
       <h2 id="how-title" className="home-sec__title">
-        سه قدم تا جزوهٔ چاپ‌شده
+        <InlineText text={title} format="line" options={options} />
       </h2>
       <ol className="home-how">
-        <li>
-          <span className="home-how__n num">1</span>
-          <div>
-            <h3>فایل را بینداز</h3>
-            <p>
-              <bdi>PDF</bdi>، <bdi>Word</bdi>، پاورپوینت یا عکس؛ چند فایل هم در یک جزوه، به همان ترتیبی که می‌خواهی.
-            </p>
-          </div>
-        </li>
-        <li>
-          <span className="home-how__n num">2</span>
-          <div>
-            <h3>قیمت را همان لحظه ببین</h3>
-            <p>صفحه‌ها و صفحه‌های رنگی را خودمان می‌شماریم. رنگ، دورو و تعداد را خودت انتخاب می‌کنی.</p>
-          </div>
-        </li>
-        <li>
-          <span className="home-how__n num">3</span>
-          <div>
-            <h3>آدرس بده و پرداخت کن</h3>
-            <p>
-              شمارهٔ موبایل فقط همین‌جا لازم است. تا <span className="num">{slaDays}</span> روز کاری بعد، جزوه تحویل پست
-              می‌شود.
-            </p>
-          </div>
-        </li>
+        {steps.map((step, i) => (
+          <li key={i}>
+            <span className="home-how__n num">{i + 1}</span>
+            <div>
+              <h3>
+                <InlineText text={step.title} format="line" options={options} />
+              </h3>
+              <p>
+                <InlineText text={step.body} format="paragraph" options={options} />
+              </p>
+            </div>
+          </li>
+        ))}
       </ol>
     </section>
   );

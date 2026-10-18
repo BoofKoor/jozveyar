@@ -1,13 +1,14 @@
 /**
  * واقعیت‌های صفحه‌های ثابت (برش ۷٫۴): در build و بی پایگاه داده پیش‌فرض‌ها؛ با پایگاه داده همان تنظیم‌هایی که سایت (آپلود)،
  * کارگر (نگهداری فایل‌های سفارش) و مسیر خرید (روز کاری) با آن کار می‌کنند؛ خطای پایگاه داده بالا می‌رود تا ISR صفحهٔ قبلی را
- * نگه دارد. پایگاه داده ساختگی است؛ خود `settingsChangedAt` در تست یکپارچگی `packages/db`.
+ * نگه دارد. پایگاه داده ساختگی است؛ خود `settingsChangedAt` در تست یکپارچگی `packages/db`. از ۱۱٫۱ «به‌روز شده» فقط تنظیم‌هایی را
+ * می‌پرسد که متن صفحه به کار برده (`siteChangedAt`).
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '@jozveyar/db';
 
-import { DEFAULT_FACTS, FACT_SETTINGS, loadFacts, siteFacts } from './siteFacts';
+import { DEFAULT_FACTS, loadFacts, siteChangedAt, siteFacts } from './siteFacts';
 import { DEFAULT_RETENTION_DAYS } from './uploads';
 
 const DB = 'postgresql://jozveyar@127.0.0.1:5432/jozveyar';
@@ -33,7 +34,6 @@ describe('واقعیت‌های صفحه‌های ثابت', () => {
       slaDays: DEFAULT_SETTINGS['order.sla_days'],
       uploadDays: DEFAULT_RETENTION_DAYS,
       orderFilesDays: DEFAULT_SETTINGS['order.files_retention_days'],
-      changedAt: null,
     });
     expect([DEFAULT_FACTS.slaDays, DEFAULT_FACTS.uploadDays, DEFAULT_FACTS.orderFilesDays]).toEqual([2, 2, 30]);
   });
@@ -52,16 +52,30 @@ describe('واقعیت‌های صفحه‌های ثابت', () => {
     expect(db.setting).not.toHaveBeenCalled();
   });
 
-  it('با پایگاه داده: هر سه عدد از settings، و آخرین تغییر همان سه کلید', async () => {
+  it('با پایگاه داده: هر سه عدد از settings', async () => {
     const db = source({ 'order.sla_days': 3, 'order.files_retention_days': 60, 'file.retention_days': 4 }, CHANGED);
     expect(await siteFacts({ DATABASE_URL: DB, NEXT_PHASE: 'phase-production-server' }, () => db)).toEqual({
       slaDays: 3,
       uploadDays: 4,
       orderFilesDays: 60,
-      changedAt: CHANGED,
     });
-    expect(FACT_SETTINGS).toEqual(['order.sla_days', 'order.files_retention_days', 'file.retention_days']);
-    expect(db.changedAt).toHaveBeenCalledWith(FACT_SETTINGS);
+    expect(db.changedAt).not.toHaveBeenCalled();
+  });
+
+  it('آخرین تغییر تنظیم‌هایی که متن صفحه به کار برده (۱۱٫۱)؛ build، بی پایگاه داده و بی کلید هیچ', async () => {
+    const db = source({ 'order.sla_days': 3 }, CHANGED);
+    const env = { DATABASE_URL: DB };
+    expect(await siteChangedAt(['order.sla_days', 'file.formats'], env, () => db)).toBe(CHANGED);
+    expect(db.changedAt).toHaveBeenCalledWith(['order.sla_days', 'file.formats']);
+    db.changedAt.mockClear();
+    expect(await siteChangedAt([], env, () => db)).toBeNull();
+    expect(await siteChangedAt(['order.sla_days'], {}, () => db)).toBeNull();
+    expect(await siteChangedAt(['order.sla_days'], { ...env, NEXT_PHASE: 'phase-production-build' }, () => db)).toBeNull();
+    expect(db.changedAt).not.toHaveBeenCalled();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const down = new Error('down');
+    await expect(siteChangedAt(['order.sla_days'], env, () => source({}, down))).rejects.toBe(down);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('صفحه‌های ثابت'), down);
   });
 
   it('تنظیم نبود: پیش‌فرض؛ خراب: همان پیش‌فرض، و روز کاری و نگهداری بلند در لاگ (readSetting)', async () => {
@@ -95,7 +109,8 @@ describe('واقعیت‌های صفحه‌های ثابت', () => {
   it('خطای پایگاه داده بالا می‌رود، بلند در لاگ؛ پیش‌فرض‌ها نه', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const down = new Error('connect ECONNREFUSED 127.0.0.1:5432');
-    await expect(siteFacts({ DATABASE_URL: DB }, () => source({ 'order.sla_days': 3 }, down))).rejects.toBe(down);
+    const broken = { ...source(), setting: vi.fn(async () => Promise.reject(down)) };
+    await expect(siteFacts({ DATABASE_URL: DB }, () => broken)).rejects.toBe(down);
     expect(error).toHaveBeenCalledWith(expect.stringContaining('صفحه‌های ثابت'), down);
   });
 });

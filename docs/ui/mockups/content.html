@@ -18,7 +18,7 @@
   - قوانین — صفحهٔ ثابت با نوار. متن از Markdown محدود پنل است، با همان ظاهر امروز.
   - تماس — همهٔ راه‌ها، با تلفن، تلگرام و اینستاگرام تازه، و پاورقی ویرایش‌شده. نوار در این حالت خاموش است.
   عددها از تعرفهٔ پایه‌اند. شماره‌ها و شناسه‌ها نمونه‌اند؛ ایمیل، ساعت و نشانی همان سایت امروز است.
-  پیاده‌سازی به زبان سایت و با خود کیت است: packages/ui/src (base و components)، apps/web/app/home.css و pages.css مستقیم بار
+  پیاده‌سازی به زبان سایت و با خود کیت است: packages/ui/src (base و components)، apps/web/app/home.css و packages/ui/src/pages.css مستقیم بار
   می‌شوند، و توکن‌ها از docs/brand/jozveyar-colors.css می‌آیند؛ اینجا هیچ کد رنگی نیست. پوستهٔ سایت از apps/web/app/globals.css
   رونویسی شده، چون آن فایل Tailwind را وارد می‌کند و مرورگر نمی‌خواندش. تنها جزء تازه خود نوار است (site-bar، با پیشوند پوستهٔ سایت).
   دیدن: از ریشهٔ مخزن python3 -m http.server 8765 --bind 127.0.0.1 و بعد /docs/ui/mockups/content.html
@@ -93,7 +93,7 @@
 <link rel="stylesheet" href="../../../packages/ui/src/base.css">
 <link rel="stylesheet" href="../../../packages/ui/src/components.css">
 <link rel="stylesheet" href="../../../apps/web/app/home.css">
-<link rel="stylesheet" href="../../../apps/web/app/pages.css">
+<link rel="stylesheet" href="../../../packages/ui/src/pages.css">
 <style>
 @font-face {
   font-family: 'Vazirmatn';

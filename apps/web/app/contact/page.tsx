@@ -1,12 +1,17 @@
 import { notFound } from 'next/navigation';
 
+import { contactLead, contactRows, hasContact, type ContactRow } from '@jozveyar/content';
+
 import { StaticPage } from '../../components/StaticPage';
-import { CONTACT, contactLead, contactRows, type ContactRow } from '../../lib/contact';
-import { STATIC_PAGES, pageMetadata } from '../../lib/staticPages';
+import { liveText, sitePublished } from '../../lib/server/content';
+import { pageMetadata } from '../../lib/server/pageMetadata';
 
-export const generateMetadata = pageMetadata(STATIC_PAGES.contact);
+/** ISR ۶۰ ثانیه، مثل صفحه‌های دیگر: راه‌های تماس از «تماس و پاورقی» پنل (۱۱٫۱). */
+export const revalidate = 60;
 
-/** مقدار یک ردیف: شماره و ایمیل چپ‌به‌راست و پیوند، و از نشانی فقط کد پستی عدد. */
+export const generateMetadata = pageMetadata('contact');
+
+/** مقدار یک ردیف: شماره، ایمیل و شناسه چپ‌به‌راست و پیوند، و از نشانی فقط کد پستی عدد. */
 function Value({ row }: { row: ContactRow }) {
   if (row.kind === 'text') {
     return (
@@ -20,23 +25,26 @@ function Value({ row }: { row: ContactRow }) {
       </>
     );
   }
+  // تلگرام و اینستاگرام تنها پیوندهای بیرونی سایت‌اند (سؤال ۲۹۰)، با نشانی‌ای که سایت از شناسه ساخت؛ در زبانهٔ تازه.
+  const external = row.kind === 'social' ? { target: '_blank', rel: 'noopener noreferrer' } : {};
   return (
-    <a className="jy-link" href={row.href}>
+    <a className="jy-link" href={row.href} {...external}>
       {row.kind === 'tel' ? <span className="num">{row.value}</span> : <bdi>{row.value}</bdi>}
     </a>
   );
 }
 
 /**
- * تماس (برش ۷٫۴، طرح قدم ۵؛ اطلاعات واقعی در مرحلهٔ آخر): هر راه یک ردیف. اطلاعات ساختگی روی سایت زنده نمی‌رود، پس بی
- * `CONTACT` این صفحه ۴۰۴ است و در پاورقی و نقشهٔ سایت نیست (`lib/staticPages.ts`).
+ * تماس (برش ۷٫۴، طرح قدم ۵؛ از ۱۱٫۱ از پنل، سؤال ۲۹۰): هر راهی که مالک گذاشته یک ردیف، به ترتیب طرح. اطلاعات ساختگی روی سایت زنده نمی‌رود،
+ * پس بی هیچ راه تماسی این صفحه ۴۰۴ است و در پاورقی و نقشهٔ سایت نیست (`hasContact`).
  */
-export default function ContactPage() {
-  if (!CONTACT) notFound();
+export default async function ContactPage() {
+  const contact = liveText('contact', await sitePublished()).content;
+  if (!hasContact(contact)) notFound();
   return (
-    <StaticPage id="contact-title" title="تماس با جزوه‌یار" lead={contactLead(CONTACT)}>
+    <StaticPage id="contact-title" title="تماس با جزوه‌یار" lead={contactLead(contact)}>
       <dl className="pg-contact">
-        {contactRows(CONTACT).map((row) => (
+        {contactRows(contact).map((row) => (
           <div key={row.label}>
             <dt>{row.label}</dt>
             <dd>
