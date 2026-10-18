@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@jozveyar/analysis": "workspace:*",
+    "@jozveyar/content": "workspace:*",
     "@jozveyar/contracts": "workspace:*",
     "@jozveyar/db": "workspace:*",
     "@jozveyar/geo": "workspace:*",

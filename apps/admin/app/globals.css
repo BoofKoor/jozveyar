@@ -4,6 +4,8 @@
  * رنگ خارج از برند نه اینجا مجاز است، نه در کد (تست نگهبان رنگ در packages/ui).
  */
 @import '@jozveyar/ui/styles.css';
+/* صفحه‌های ثابت سایت، برای پیش‌نمایش متن‌های سایت (۱۱٫۱): همان ظاهر سایت. */
+@import '@jozveyar/ui/pages.css';
 /* پوستهٔ پنل و صفحه‌هایش، از طرح نمونهٔ تأییدشده (docs/ui/mockups/admin.html، ۱۴۰۵/۰۷/۰۴). */
 @import './admin.css';
 

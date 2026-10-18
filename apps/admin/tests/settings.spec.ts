@@ -162,7 +162,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await page.goto(at());
     const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
     // «تعرفه»ی مالک از ۶٫۱ با بخش‌های مالک: در دسکتاپ کنارشان، در گوشی زیر «بیشتر» (طرح برش ۶).
-    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' }).click();
     await expect(page.getByRole('heading', { name: 'تنظیمات', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' })).toHaveAttribute('aria-current', 'page');

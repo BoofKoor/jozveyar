@@ -8,6 +8,7 @@
  *   (`bdi`) نشانش می‌دهد.
  */
 
+import { KIND_NAMES, type ContentKind } from '@jozveyar/content';
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
 import { formatDeadlineDay, formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
@@ -627,6 +628,17 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
         ),
       };
     }
+    case 'content.publish': {
+      // متن‌های سایت (۱۱٫۱، سؤال ۲۸۶): نام متن و نسخه، بی خود متن؛ برگرداندن با نسخه‌ای که برگشت. انتشار همیشه با کد تازه است.
+      const title = `متن «${KIND_NAMES[detail.kind as ContentKind] ?? str(detail.kind)}»`;
+      const done: Segment[] =
+        detail.restored === 0
+          ? [`${title} به متن پیش‌فرض برگشت`]
+          : typeof detail.restored === 'number'
+            ? [`${title} به نسخهٔ `, { ltr: String(detail.restored) }, ' برگشت']
+            : [`${title} منتشر شد`];
+      return { badge: null, text: merged([...done, '، نسخهٔ ', { ltr: String(detail.version) }, '، با کد تازه']) };
+    }
     case 'reviews.approve':
     case 'reviews.hide':
     case 'reviews.delete': {
@@ -685,7 +697,7 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
  * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
- * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر.
+ * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱) زیر «محتوای سایت»، پس از «تعرفه»، به ترتیب طرح.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
@@ -694,6 +706,7 @@ export const EVENT_KINDS = [
   { kind: 'payments', label: 'پرداخت و بازپرداخت' },
   { kind: 'shipments', label: 'ارسال' },
   { kind: 'tariff', label: 'تعرفه' },
+  { kind: 'content', label: 'محتوای سایت' },
   { kind: 'settings', label: 'تنظیمات و کلیدها' },
   { kind: 'partners', label: 'چاپخانه‌ها' },
   { kind: 'admins', label: 'ادمین‌ها' },

@@ -147,7 +147,7 @@ test.describe.serial('کدهای تخفیف (۱۱٫۴)', () => {
     const { page, problems } = who.owner;
     await page.goto(at('/'));
     const wide = page.getByRole('navigation', { name: 'بخش‌های پنل' }).locator('.ad-nav__wide');
-    await expect(wide).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(wide).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await wide.filter({ hasText: 'تخفیف‌ها' }).click();
     await expect(page.getByRole('heading', { name: 'تخفیف‌ها', level: 1 })).toBeVisible();
     await expect(wide.filter({ hasText: 'تخفیف‌ها' })).toHaveAttribute('aria-current', 'page');

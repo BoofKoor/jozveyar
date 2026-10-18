@@ -13,19 +13,22 @@ export function StatusButton({
   name,
   value,
   formNoValidate,
+  disabled = false,
 }: {
   className: string;
   children: React.ReactNode;
   name?: string;
   value?: string;
   formNoValidate?: boolean;
+  /** بسته از پیش، مثل «انتشار…» متن سایت با پیش‌نویس خطادار (۱۱٫۱). */
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       className={`${className}${pending ? ' is-loading' : ''}`}
-      disabled={pending}
+      disabled={pending || disabled}
       name={name}
       value={value}
       formNoValidate={formNoValidate}

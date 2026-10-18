@@ -426,6 +426,7 @@ describe('رویدادها', () => {
       'پرداخت و بازپرداخت',
       'ارسال',
       'تعرفه',
+      'محتوای سایت',
       'تنظیمات و کلیدها',
       'چاپخانه‌ها',
       'ادمین‌ها',
@@ -441,6 +442,7 @@ describe('رویدادها', () => {
       'payments',
       'shipments',
       'tariff',
+      'content',
       'settings',
       'partners',
       'admins',
@@ -690,6 +692,22 @@ describe('رویدادها', () => {
       false,
     ]);
     expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'reviews', label: 'نظرها' });
+  });
+
+  it('متن‌های سایت (۱۱٫۱، سؤال ۲۸۶): نام متن و شمارهٔ نسخه جدا از جمله، برگرداندن با نسخه‌ای که برگشت، خود متن هرگز؛ چیپ «محتوای سایت»', () => {
+    const publish = (detail: Record<string, unknown>) => event('content.publish', { targetType: 'site_content', targetId: String(detail.kind), detail });
+    const lines = eventLines([
+      publish({ kind: 'terms', version: 3, restored: null }),
+      publish({ kind: 'faq', version: 4, restored: 2 }),
+      publish({ kind: 'contact', version: 2, restored: 0 }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['متن «قوانین» منتشر شد، نسخهٔ ', { ltr: '3' }, '، با کد تازه'],
+      ['متن «سؤال‌های پرتکرار» به نسخهٔ ', { ltr: '2' }, ' برگشت، نسخهٔ ', { ltr: '4' }, '، با کد تازه'],
+      ['متن «تماس و پاورقی» به متن پیش‌فرض برگشت، نسخهٔ ', { ltr: '2' }, '، با کد تازه'],
+    ]);
+    expect([inEventKind('content.publish', 'content'), inEventKind('content.publish', 'settings')]).toEqual([true, false]);
+    expect(EVENT_KINDS.find((kind) => kind.kind === 'content')).toEqual({ kind: 'content', label: 'محتوای سایت' });
   });
 });
 

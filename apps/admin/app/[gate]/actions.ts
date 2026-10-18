@@ -34,6 +34,7 @@ import {
 } from '../../lib/server/context';
 import type { AdminErrorCode, Failure } from '../../lib/server/result';
 import { filterOf } from '../../lib/server/reviews';
+import { faqOpOf } from '../../lib/server/content';
 
 export interface FormState {
   error?: AdminErrorCode;
@@ -1399,4 +1400,69 @@ export async function decideReviewAction(form: FormData): Promise<void> {
   const result = await reviews.decide(session, { id: field(form, 'id'), seen: field(form, 'seen'), action: field(form, 'action') }, await requestIp());
   const back = `${panelPath(gate, '/orders/reviews')}?f=${filterOf(field(form, 'f'))}`;
   redirect(result.ok ? `${back}&done=${result.value.action}&${doneMark()}` : `${back}&e=${result.error}&${doneMark()}`);
+}
+
+/* ───────────────────────── متن‌های سایت (۱۱٫۱) ───────────────────────── */
+
+/**
+ * نشانی ویرایشگر یک متن، با پیامش؛ `open` سؤالی را که کار فهرست جابه‌جا یا افزود باز نگه می‌دارد. بی `#`: هدایت کار سرور نکست تکهٔ پس از
+ * `#` را می‌اندازد.
+ */
+function contentEditor(gate: string, kind: string, query: string, open: number | null = null): string {
+  const base = panelPath(gate, `/content/${encodeURIComponent(kind)}`);
+  return `${base}?${query}&${doneMark()}${open === null ? '' : `&open=${open}`}`;
+}
+
+/**
+ * «ذخیره و پیش‌نمایش» و «انتشار…» یک متن (۱۱٫۱، سؤال ۲۸۶)، و کار فهرست سؤال‌ها: افزودن، حذف، بالاتر و پایین‌تر (سؤال ۲۸۹، بی JS). پیش‌نویس با
+ * خطا هم ذخیره می‌شود و ویرایشگر خطاها را با خط و راه درست کردن نشان می‌دهد؛ «انتشار…» بی خطا به صفحهٔ انتشار می‌رود. بی کد تازه: پیش‌نویس
+ * روی سایت نیست.
+ */
+export async function saveContentAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { content } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const kind = field(form, 'kind');
+  const op = faqOpOf(field(form, 'op'));
+  const faqCount = Number(field(form, 'faqCount')) || 0;
+  const result = await content.save(session, kind, { field: (name) => field(form, name), faqCount, op }, await requestIp());
+  if (!result.ok) redirect(contentEditor(gate, kind, `e=${result.error}`));
+  if (!result.value.draft) redirect(contentEditor(gate, kind, 'same=1'));
+  if (field(form, 'intent') === 'publish' && !op && result.value.issues.length === 0) {
+    redirect(panelPath(gate, `/content/${encodeURIComponent(kind)}/publish`));
+  }
+  const open = !op ? null : op.op === 'add' ? faqCount : op.op === 'up' ? op.index - 1 : op.op === 'down' ? op.index + 1 : null;
+  redirect(contentEditor(gate, kind, 'saved=1', open));
+}
+
+/** «دور انداختن پیش‌نویس» (۱۱٫۱)، پس از تأیید ویرایشگر؛ روی سایت همان می‌ماند. */
+export async function discardContentAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { content } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const kind = field(form, 'kind');
+  const result = await content.discard(session, kind);
+  redirect(contentEditor(gate, kind, result.ok ? 'discarded=1' : `e=${result.error}`));
+}
+
+/** خطاهایی که «منتشر کن» با برگشت به همان صفحه می‌گوید، تا «چه عوض می‌شود» تازه را از نو نشان دهد. */
+const CONTENT_PAGE_ERRORS: AdminErrorCode[] = ['content_changed', 'content_unchanged', 'content_invalid', 'content_no_draft', 'content_not_found', 'forbidden'];
+
+/**
+ * انتشار یک متن، یا برگرداندن نسخه‌ای قبلی یا متن پیش‌فرض، با کد تازه (۱۱٫۱، سؤال ۲۸۷): خطای کد همین‌جا؛ متنی که همین حالا عوض شد به همان
+ * صفحه با پیامش. موفق به «نسخه‌ها»ی همان متن با شمارهٔ نسخهٔ تازه.
+ */
+export async function publishContentAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { content } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const kind = field(form, 'kind');
+  const from = field(form, 'from');
+  const result = await content.publish(session, kind, { from, live: field(form, 'live'), seen: field(form, 'seen'), code: form.get('code') }, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, `/content/${encodeURIComponent(kind)}/versions`)}?done=${result.value.version}`);
+  if (CONTENT_PAGE_ERRORS.includes(result.error)) {
+    const query = from && from !== 'draft' ? `from=${encodeURIComponent(from)}&` : '';
+    redirect(`${panelPath(gate, `/content/${encodeURIComponent(kind)}/publish`)}?${query}e=${result.error}`);
+  }
+  return failure(result);
 }

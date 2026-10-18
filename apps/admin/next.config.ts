@@ -19,6 +19,7 @@ const config: NextConfig = {
   // پکیج‌های workspace به‌صورت TypeScript خام مصرف می‌شوند؛ geo و contracts از راه db، استوریج برای دانلود PDF جزوه
   // (۴٫۲)، و موتور قیمت برای پیش‌نمایش پیش‌نویس تعرفه (۴٫۵).
   transpilePackages: [
+    '@jozveyar/content',
     '@jozveyar/contracts',
     '@jozveyar/db',
     '@jozveyar/geo',
