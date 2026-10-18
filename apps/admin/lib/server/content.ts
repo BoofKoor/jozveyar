@@ -43,6 +43,7 @@ import {
 } from '@jozveyar/content';
 import {
   FILES_RETENTION_SETTING,
+  SITE_CONTENT_MAX_BYTES,
   SLA_DAYS_SETTING,
   UPLOAD_RETENTION_SETTING,
   readSetting,
@@ -291,6 +292,9 @@ export function createPanelContent(deps: PanelContentDeps) {
         await store.discardDraft(kind.value);
         return ok({ draft: null, issues: [] });
       }
+      // متنی که سقف هر فیلدش را دارد بسیار کوچک‌تر از سقف پایگاه داده است (`site_content_drafts_content`)؛ بزرگ‌ترش از سقف فیلدی خیلی گذشته، و
+      // ذخیره‌اش به جای خطای سقف خطای خام پایگاه داده بود. حاشیهٔ یک کیلوبایتی برای فاصله‌های JSON پستگرس است.
+      if (Buffer.byteLength(JSON.stringify(content)) > SITE_CONTENT_MAX_BYTES - 1024) return fail(413, 'content_too_large');
       const draft = await store.saveDraft({ kind: kind.value, content, actor: { adminUserId: session.userId, ipHash: ipHashOf(deps.secret, ip) }, at: now() });
       return ok({ draft, issues: checkContent(kind.value, content) });
     },

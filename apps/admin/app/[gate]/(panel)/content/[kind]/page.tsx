@@ -37,7 +37,16 @@ import { discardContentAction, saveContentAction } from '../../../actions';
 type Query = Record<string, string | string[] | undefined>;
 const one = (query: Query, key: string) => (typeof query[key] === 'string' ? (query[key] as string) : '');
 
-const ERRORS = new Set(['forbidden', 'content_not_found', 'content_faq_full', 'content_no_draft', 'content_invalid', 'content_unchanged', 'content_changed']);
+const ERRORS = new Set([
+  'forbidden',
+  'content_not_found',
+  'content_faq_full',
+  'content_too_large',
+  'content_no_draft',
+  'content_invalid',
+  'content_unchanged',
+  'content_changed',
+]);
 
 export async function generateMetadata({ params }: { params: Promise<{ kind: string }> }): Promise<Metadata> {
   const { kind } = await params;

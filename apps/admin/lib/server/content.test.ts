@@ -220,6 +220,20 @@ describe('ویرایشگر و پیش‌نویس', () => {
     expect(drafts.get('terms')).toMatchObject({ baseVersion: 0, createdAt: NOW });
   });
 
+  it('متن بلندتر از سقف فیلد با خطای سقف ذخیره می‌شود؛ بزرگ‌تر از سقف پایگاه داده نه، با پیام خودش', async () => {
+    const { content, drafts, calls } = setup();
+    const long = await content.save(OWNER, 'terms', formOf('terms', TERMS, { body: 'ب'.repeat(20_001) }), IP);
+    if (!long.ok) throw new Error(long.error);
+    expect(long.value.issues.map((issue) => [issue.field, issue.code])).toEqual([['body', 'too_long']]);
+    drafts.clear();
+    calls.length = 0;
+    // ۶۶٬۰۰۰ نویسهٔ فارسی ۱۳۲ هزار بایت است، بیش از سقف ۱۲۸ کیلوبایتی `site_content_drafts_content`.
+    const huge = await content.save(OWNER, 'terms', formOf('terms', TERMS, { body: 'ب'.repeat(66_000) }), IP);
+    expect(huge).toMatchObject({ ok: false, status: 413, error: 'content_too_large' });
+    expect(calls).not.toContain('saveDraft');
+    expect(drafts.has('terms')).toBe(false);
+  });
+
   it('متنی که همان روی سایت است پیش‌نویس نمی‌ماند، پیش‌نویسی هم که بود دور انداخته می‌شود', async () => {
     const { content, drafts, calls } = setup();
     await content.save(OWNER, 'terms', formOf('terms', TERMS, { lead: 'جملهٔ تازه.' }), IP);
