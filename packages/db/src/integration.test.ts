@@ -23,6 +23,9 @@ import { createDiscountStore, termsOf } from './discounts.js';
 import { DiscountRefusedError, MobileBlockedError } from './orders.js';
 import { createBlockStore } from './blocks.js';
 import { createReviewStore } from './reviews.js';
+import { createSupportStore, SUPPORT_TARGET, type InboxPage, type SupportTarget } from './support.js';
+import { checkingPaymentSql, createAccountStore } from './account.js';
+import { supportMessages, supportThreads } from './schema.js';
 import { CONTENT_TARGET, createSiteContentStore } from './content.js';
 import { BUILD_SITE_IMAGE_JOB, SITE_IMAGE_TARGET, createSiteImageStore } from './siteImages.js';
 import { siteImageFiles, siteImages } from './schema.js';
@@ -70,8 +73,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { createAuthStore } from './auth.js';
 import { PREPARE_ORDER_JOB, PREPARE_TICKET_JOB, createOrderStore, type NewOrder, type OrderStatus } from './orders.js';
-import { createSmsLog, createSmsOutbox, createSmsStats, liveSms } from './sms.js';
-import { consoleTransport, deliverQueued, orderPaidText, partnerOrderText, SMS_STUCK_MS, trackingText, type SmsTransport } from '@jozveyar/sms';
+import { createSmsLog, createSmsOutbox, createSmsStats, liveSms, queuedPartnerSms, queuedSupportSms } from './sms.js';
+import { consoleTransport, deliverQueued, orderPaidText, partnerOrderText, SMS_STUCK_MS, supportReplyText, trackingText, type SmsTransport } from '@jozveyar/sms';
 import { formatDeadlineDay } from '@jozveyar/text';
 import { ADMIN_PERMISSIONS, ADMIN_ROLES, createAdminStore, type AdminEventInput, type AdminRole, type NewInvite } from './admin.js';
 import {
@@ -118,7 +121,7 @@ import { createZibalMock, type ZibalMock } from '@jozveyar/payments/mock';
 import { mockGateway, PaymentError, type PaymentGateway } from '@jozveyar/payments';
 import { zibalGateway } from '@jozveyar/payments/zibal';
 import { PAYMENT_ATTEMPT_TTL_MS } from './orders.js';
-import { providersOf, settleWith, watchHeld } from './payments.js';
+import { isChecking, providersOf, settleWith, watchHeld } from './payments.js';
 import {
   REFUND_AUTO_EVERY_MS,
   REFUND_AUTO_WINDOW_MS,
@@ -169,9 +172,10 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 /** سفارش‌ها و هر چه به آنها بسته است؛ پرداخت cascade ندارد (سابقهٔ پول بی‌صدا پاک نمی‌شود). */
 async function clearOrders({ db }: Database) {
-  // بازپرداخت پاک‌نشدنی است (0032)، و مسدودی موبایل هم (0050)؛ TRUNCATE تریگر ردیفی ندارد.
+  // بازپرداخت پاک‌نشدنی است (0032)، مسدودی موبایل هم (0050)، و گفت‌وگوی پشتیبانی و پیام‌هایش هم (0058)؛ TRUNCATE تریگر ردیفی ندارد.
   await db.execute(sql`TRUNCATE refunds`);
   await db.execute(sql`TRUNCATE mobile_blocks`);
+  await db.execute(sql`TRUNCATE support_messages, support_threads`);
   await db.delete(payments);
   await db.delete(orders);
   await db.delete(sessions);
@@ -900,7 +904,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     const windowAt = (at: Date) => ({
       hourSince: new Date(at.getTime() - 3_600_000),
       daySince: new Date(at.getTime() - 86_400_000),
-      readyUntil: new Date(at.getTime() + 3_600_000),
+      gate: { kind: 'documents' as const, readyUntil: new Date(at.getTime() + 3_600_000) },
     });
 
     it('صدور کد زیر قفل: ده درخواست هم‌زمان برای یک شماره، فقط پنج کد', async () => {
@@ -924,8 +928,9 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000);
       const OTHER = 'c'.repeat(64);
       const issue = (mobile: string, ipHash: string, createdAt: Date, sessionHash = SESSION) =>
-        auth.issueOtp({ mobile, ipHash, sessionHash, hourSince: new Date(0), daySince: new Date(0), readyUntil: new Date(0) }, () =>
-          otpAt(createdAt),
+        auth.issueOtp(
+          { mobile, ipHash, sessionHash, hourSince: new Date(0), daySince: new Date(0), gate: { kind: 'documents', readyUntil: new Date(0) } },
+          () => otpAt(createdAt),
         );
       await issue(MOBILE, 'ip-a', at(25 * 60)); // بیرون از پنجرهٔ ۲۴ ساعته
       await issue(MOBILE, 'ip-a', at(20 * 60), OTHER); // در ۲۴ ساعت، بیرون از ساعت
@@ -962,7 +967,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const readyOf = async (sessionHash: string, readyUntil: Date) => {
         let ready: boolean | undefined;
         await auth.issueOtp(
-          { mobile: MOBILE, ipHash: 'ip-g', sessionHash, hourSince: new Date(), daySince: new Date(), readyUntil },
+          { mobile: MOBILE, ipHash: 'ip-g', sessionHash, hourSince: new Date(), daySince: new Date(), gate: { kind: 'documents', readyUntil } },
           (counts) => {
             ready = counts.ready;
             return null;
@@ -2595,6 +2600,656 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         expect(await reviews.get(randomUUID())).toBeNull();
       });
     });
+
+    describe('پشتیبانی و «سفارش‌های من» روی پستگرس (برش ۱۲٫۱)', () => {
+      const OTHER_MOBILE = '09153334455';
+      let ali: string;
+      /** ساعت صحنه: هر کار کمی پس از قبلی (محافظ ترتیب پیام‌ها). */
+      let clock = Date.now();
+      const tick = (ms = 1_000) => new Date((clock += ms));
+
+      beforeAll(async () => {
+        const [row] = await conn.db
+          .insert(adminUsers)
+          .values({ username: `sup-${randomUUID().slice(0, 8)}`, displayName: 'علی' })
+          .returning();
+        ali = row!.id;
+      });
+
+      // گفت‌وگو و پیام پاک‌نشدنی‌اند جز با سفارش، و «سؤال کلی» هرگز (0058)؛ `clearOrders` با TRUNCATE.
+      beforeEach(async () => {
+        await clearOrders(conn);
+        clock = Date.now();
+      });
+
+      afterAll(async () => {
+        await clearOrders(conn);
+      });
+
+      const customerOf = async (mobile: string) => {
+        const [user] = await conn.db
+          .insert(users)
+          .values({ mobile })
+          .onConflictDoUpdate({ target: users.mobile, set: { lastLoginAt: new Date() } })
+          .returning();
+        return user!.id;
+      };
+
+      /** سفارش در انتظار پرداخت برای این موبایل. */
+      const orderFor = async (mobile = MOBILE, over: Partial<NewOrder> = {}) => {
+        const userId = await customerOf(mobile);
+        return (await createOrderStore(conn).createOrder(await newOrder({ userId, recipientPhone: mobile, ...over }))).order;
+      };
+
+      const threadRow = (over: Partial<typeof supportThreads.$inferInsert> & { userId: string }) => {
+        const at = over.createdAt ?? tick();
+        return conn.db.insert(supportThreads).values({ status: 'open', createdAt: at, lastMessageAt: at, waitingSince: at, ...over }).returning();
+      };
+
+      const messageRow = (threadId: number, over: Partial<typeof supportMessages.$inferInsert> = {}) =>
+        conn.db
+          .insert(supportMessages)
+          .values({ threadId, kind: 'customer', body: 'سلام. جزوه کی می‌رسد؟', requestId: randomUUID(), createdAt: tick(), ...over })
+          .returning();
+
+      const threadOf = async (id: number) => (await conn.db.select().from(supportThreads).where(eq(supportThreads.id, id)))[0]!;
+
+      it('محافظ‌های گفت‌وگو (0057 و 0058): تازه «باز»، صاحب سفارش، سؤال کلی فقط با سفارش، یکی برای هر سفارش، منجمد، حال فقط با پیام، «دیده شد» جلو، و پاک فقط با سفارش', async () => {
+        const order = await orderFor();
+        const userId = order.userId;
+        const stranger = await customerOf(OTHER_MOBILE);
+        const at = tick();
+        expect(await rejectedConstraint(threadRow({ userId, orderId: order.id, status: 'answered', createdAt: at, lastMessageAt: at, waitingSince: null }))).toBe(
+          'support_threads_insert_state',
+        );
+        // فقط حال: محافظ پیش از CHECK `support_threads_waiting` و با نام خودش.
+        expect(await rejectedConstraint(threadRow({ userId, orderId: order.id, status: 'answered', createdAt: at, lastMessageAt: at, waitingSince: at }))).toBe(
+          'support_threads_insert_state',
+        );
+        const later = new Date(at.getTime() + 1);
+        expect(await rejectedConstraint(threadRow({ userId, orderId: order.id, createdAt: at, lastMessageAt: later, waitingSince: later }))).toBe(
+          'support_threads_insert_state',
+        );
+        expect(await rejectedConstraint(threadRow({ userId, orderId: order.id, createdAt: at, customerSeenAt: new Date(at.getTime() - 1) }))).toBe(
+          'support_threads_insert_state',
+        );
+        expect(await rejectedConstraint(threadRow({ userId: stranger, orderId: order.id }))).toBe('support_threads_owner');
+        // «سؤال کلی» فقط برای مشتری‌ای که سفارشی دارد (سؤال ۳۰۶).
+        expect(await rejectedConstraint(threadRow({ userId: stranger }))).toBe('support_threads_customer');
+
+        const [thread] = await threadRow({ userId, orderId: order.id });
+        expect(await rejectedConstraint(threadRow({ userId, orderId: order.id }))).toBe('support_threads_order');
+        const [general] = await threadRow({ userId });
+        expect(await rejectedConstraint(threadRow({ userId }))).toBe('support_threads_general');
+        // شاهد: سؤال کلی مشتری دیگری که سفارش دارد.
+        await orderFor(OTHER_MOBILE);
+        expect(await rejectedConstraint(threadRow({ userId: stranger }))).toBeUndefined();
+
+        const byId = eq(supportThreads.id, thread!.id);
+        const set = (patch: Partial<typeof supportThreads.$inferInsert>) => rejectedConstraint(conn.db.update(supportThreads).set(patch).where(byId));
+        const other = await orderFor();
+        expect(await set({ orderId: other.id })).toBe('support_threads_frozen');
+        expect(await set({ userId: stranger })).toBe('support_threads_frozen');
+        expect(await set({ createdAt: tick() })).toBe('support_threads_frozen');
+        // حال فقط با پیام (تریگر `support_messages_apply`)، نه مستقیم.
+        expect(await set({ status: 'answered', waitingSince: null })).toBe('support_threads_state');
+        expect(await set({ lastMessageAt: tick() })).toBe('support_threads_state');
+        expect(await set({ waitingSince: thread!.createdAt, lastMessageAt: tick() })).toBe('support_threads_state');
+        const seen = tick();
+        expect(await set({ customerSeenAt: seen })).toBeUndefined();
+        expect(await set({ customerSeenAt: new Date(seen.getTime() - 1) })).toBe('support_threads_seen');
+        expect(await set({ customerSeenAt: null })).toBe('support_threads_seen');
+        expect(await set({ customerSeenAt: tick() })).toBeUndefined();
+
+        // دیوار دوم: CHECKهای حال، با محافظ خاموش در تراکنشی که برمی‌گردد.
+        const checks = await conn.db
+          .transaction(async (tx) => {
+            await tx.execute(sql`ALTER TABLE support_threads DISABLE TRIGGER support_threads_guard`);
+            const check = (patch: Partial<typeof supportThreads.$inferInsert>) =>
+              rejectedConstraint(tx.transaction((inner) => inner.update(supportThreads).set(patch).where(byId)));
+            const found = [
+              await check({ status: 'pending' as never }),
+              await check({ status: 'answered' }),
+              await check({ waitingSince: null }),
+              await check({ lastMessageAt: new Date(thread!.createdAt.getTime() - 1) }),
+              await check({ waitingSince: new Date(thread!.createdAt.getTime() - 1) }),
+            ];
+            throw Object.assign(new Error('rollback'), { found });
+          })
+          .catch((error: { found?: (string | undefined)[] }) => error.found);
+        expect(checks).toEqual(['support_threads_status', 'support_threads_waiting', 'support_threads_waiting', 'support_threads_times', 'support_threads_times']);
+        expect((await threadOf(thread!.id)).status).toBe('open');
+
+        expect(await rejectedConstraint(conn.db.delete(supportThreads).where(byId))).toBe('support_threads_kept');
+        expect(await rejectedConstraint(conn.db.delete(supportThreads).where(eq(supportThreads.id, general!.id)))).toBe('support_threads_kept');
+        // گفت‌وگوی سفارش و پیام‌هایش فقط با خود سفارش می‌روند (cascade).
+        await messageRow(thread!.id);
+        await conn.db.delete(orders).where(eq(orders.id, order.id));
+        expect(await conn.db.select().from(supportThreads).where(byId)).toEqual([]);
+        expect(await conn.db.select().from(supportMessages).where(eq(supportMessages.threadId, thread!.id))).toEqual([]);
+        expect(await conn.db.select().from(supportThreads).where(eq(supportThreads.id, general!.id))).toHaveLength(1);
+      });
+
+      it('محافظ‌های پیام (0057 و 0058): شکل، فقط افزودنی، ترتیب، بستن یک بار، و حال گفت‌وگو پس از هر پیام', async () => {
+        const order = await orderFor();
+        const t0 = tick();
+        const [thread] = await threadRow({ userId: order.userId, orderId: order.id, createdAt: t0, customerSeenAt: t0 });
+        const id = thread!.id;
+        // پستگرس CHECKها را به ترتیب نام می‌سنجد؛ نوع ناشناس با نویسنده و متنی که برای خودش درست است.
+        expect(await rejectedConstraint(messageRow(id, { kind: 'note' as never, adminUserId: ali }))).toBe('support_messages_kind');
+        expect(await rejectedConstraint(messageRow(id, { adminUserId: ali }))).toBe('support_messages_author');
+        expect(await rejectedConstraint(messageRow(id, { kind: 'staff' }))).toBe('support_messages_author');
+        expect(await rejectedConstraint(messageRow(id, { body: ' \n ' }))).toBe('support_messages_body');
+        expect(await rejectedConstraint(messageRow(id, { body: 'سلام\n' }))).toBe('support_messages_body');
+        expect(await rejectedConstraint(messageRow(id, { body: null }))).toBe('support_messages_body');
+        expect(await rejectedConstraint(messageRow(id, { body: 'ن'.repeat(1001) }))).toBe('support_messages_body');
+        expect(await rejectedConstraint(messageRow(id, { kind: 'staff', adminUserId: ali, body: 'ن'.repeat(2001) }))).toBe('support_messages_body');
+        expect(await rejectedConstraint(messageRow(id, { kind: 'closed', adminUserId: ali }))).toBe('support_messages_body');
+        expect((await threadOf(id)).lastMessageAt).toEqual(t0);
+
+        const [first] = await messageRow(id, { body: 'ن'.repeat(1000) });
+        // پیام مشتری در گفت‌وگوی باز: انتظار همان قبلی.
+        expect(await threadOf(id)).toMatchObject({ status: 'open', waitingSince: t0, lastMessageAt: first!.createdAt });
+        expect(await rejectedConstraint(messageRow(id, { createdAt: new Date(first!.createdAt.getTime() - 1) }))).toBe('support_messages_order');
+        expect(await rejectedConstraint(messageRow(id, { requestId: first!.requestId }))).toBe('support_messages_request');
+
+        const [reply] = await messageRow(id, { kind: 'staff', adminUserId: ali, body: 'ن'.repeat(2000) });
+        expect(await threadOf(id)).toMatchObject({ status: 'answered', waitingSince: null, lastMessageAt: reply!.createdAt });
+        const [again] = await messageRow(id);
+        expect(await threadOf(id)).toMatchObject({ status: 'open', waitingSince: again!.createdAt, lastMessageAt: again!.createdAt });
+        const [closed] = await messageRow(id, { kind: 'closed', adminUserId: ali, body: null });
+        expect(await threadOf(id)).toMatchObject({ status: 'closed', waitingSince: null, lastMessageAt: again!.createdAt });
+        expect(await rejectedConstraint(messageRow(id, { kind: 'closed', adminUserId: ali, body: null }))).toBe('support_messages_close_once');
+        // پاسخ ما گفت‌وگوی بسته را «پاسخ داده شد» می‌کند، و بعد بستن دوباره ممکن است.
+        await messageRow(id, { kind: 'staff', adminUserId: ali, body: 'یک نکتهٔ دیگر.' });
+        expect((await threadOf(id)).status).toBe('answered');
+        expect(await rejectedConstraint(messageRow(id, { kind: 'closed', adminUserId: ali, body: null }))).toBeUndefined();
+
+        const byId = eq(supportMessages.id, first!.id);
+        expect(await rejectedConstraint(conn.db.update(supportMessages).set({ body: 'متن دیگر' }).where(byId))).toBe('support_messages_append_only');
+        expect(await rejectedConstraint(conn.db.update(supportMessages).set({ createdAt: tick() }).where(eq(supportMessages.id, closed!.id)))).toBe(
+          'support_messages_append_only',
+        );
+        expect(await rejectedConstraint(conn.db.delete(supportMessages).where(byId))).toBe('support_messages_append_only');
+        expect(await conn.db.select().from(supportMessages).where(eq(supportMessages.threadId, id))).toHaveLength(6);
+      });
+
+      it('پیامک پاسخ (0058): فقط ردیف تازهٔ همین هدف به موبایل همین مشتری با موضوع همین گفت‌وگو؛ و «در حال فرستادن» فقط تا مشتری پاسخ را ندیده', async () => {
+        const order = await orderFor();
+        const t0 = tick();
+        const [thread] = await threadRow({ userId: order.userId, orderId: order.id, createdAt: t0, customerSeenAt: t0 });
+        const id = thread!.id;
+        const queue = (toMobile = MOBILE, orderNumber: number | null = order.orderNumber) => queuedSupportSms(conn.db, { toMobile, orderNumber, at: tick() });
+        const staff = async (smsMessageId: number) =>
+          rejectedConstraint(messageRow(id, { kind: 'staff', adminUserId: ali, body: 'پاسخ', smsMessageId }));
+        expect(await staff(await queue(OTHER_MOBILE))).toBe('support_messages_sms');
+        expect(await staff(await queue(MOBILE, null))).toBe('support_messages_sms');
+        expect(await staff(await queue(MOBILE, order.orderNumber + 1))).toBe('support_messages_sms');
+        const partner = await queuedPartnerSms(conn.db, { toMobile: MOBILE, orderNumber: order.orderNumber, handoffDay: 'دوشنبه 13 مهر', at: tick() });
+        expect(await staff(partner)).toBe('support_messages_sms');
+        const [logged] = await conn.db
+          .insert(smsMessages)
+          .values({ provider: 'console', toMobile: MOBILE, purpose: 'support_reply', body: supportReplyText(order.orderNumber), params: [`سفارش ${order.orderNumber}`], status: 'logged', sentAt: new Date() })
+          .returning();
+        expect(await staff(logged!.id)).toBe('support_messages_sms');
+        const [tried] = await conn.db
+          .insert(smsMessages)
+          .values({ provider: 'queued', toMobile: MOBILE, purpose: 'support_reply', body: supportReplyText(order.orderNumber), params: [`سفارش ${order.orderNumber}`], status: 'pending', attempts: 1 })
+          .returning();
+        expect(await staff(tried!.id)).toBe('support_messages_sms');
+        // پیامک فقط روی پاسخ، نه پیام مشتری.
+        expect(await rejectedConstraint(messageRow(id, { smsMessageId: await queue() }))).toBe('support_messages_sms_staff');
+
+        const good = await queue();
+        expect(await staff(good)).toBeUndefined();
+        const [reply] = await conn.db.select().from(supportMessages).where(eq(supportMessages.smsMessageId, good));
+        expect(await rejectedConstraint(messageRow(id, { kind: 'staff', adminUserId: ali, body: 'دوباره', smsMessageId: good }))).toBe('support_messages_sms');
+
+        // «در حال فرستادن» تا مشتری پاسخ را ندیده؛ بعد نه، همان شرط `liveSms`.
+        const isLive = async () => (await conn.db.select({ id: smsMessages.id }).from(smsMessages).where(and(eq(smsMessages.id, good), liveSms))).length === 1;
+        expect(await isLive()).toBe(true);
+        const take = () =>
+          rejectedConstraint(
+            conn.db
+              .update(smsMessages)
+              .set({ status: 'sending', attempts: sql`${smsMessages.attempts} + 1`, attemptedAt: new Date() })
+              .where(eq(smsMessages.id, good)),
+          );
+        expect(await take()).toBeUndefined();
+        await conn.db.update(smsMessages).set({ status: 'failed', error: 'unavailable' }).where(eq(smsMessages.id, good));
+        await conn.db.update(supportThreads).set({ customerSeenAt: new Date(reply!.createdAt.getTime() + 1) }).where(eq(supportThreads.id, id));
+        expect(await isLive()).toBe(false);
+        expect(await take()).toBe('sms_messages_live');
+        // شاهد: مشتری درست هم‌زمان با پاسخ (نه پس از آن) هنوز ندیده است.
+        expect(await rejectedConstraint(conn.db.update(supportThreads).set({ customerSeenAt: reply!.createdAt }).where(eq(supportThreads.id, id)))).toBe(
+          'support_threads_seen',
+        );
+      });
+
+      it('سقف هر مشتری زیر قفل (0058): سه گفت‌وگوی باز، ۱۰ پیام در ساعت، و پیام‌های هم‌زمان', async () => {
+        const support = createSupportStore(conn);
+        const mine = [await orderFor(), await orderFor(), await orderFor()];
+        const userId = mine[0]!.userId;
+        const post = (target: SupportTarget, at = tick()) => support.post({ userId, target, body: 'سلام', requestId: randomUUID(), at });
+        const a = await post({ kind: 'order', orderId: mine[0]!.id });
+        const b = await post({ kind: 'order', orderId: mine[1]!.id });
+        const general = await post({ kind: 'general' });
+        expect([a.ok, b.ok, general.ok]).toEqual([true, true, true]);
+        if (!a.ok || !general.ok) throw new Error('گفت‌وگو ساخته نشد');
+        // چهارمی نه، و گفت‌وگویی هم نمی‌ماند.
+        expect(await post({ kind: 'order', orderId: mine[2]!.id })).toEqual({ ok: false, reason: 'open_threads' });
+        expect(await conn.db.select().from(supportThreads).where(eq(supportThreads.orderId, mine[2]!.id))).toEqual([]);
+        // شاهد: پیام به گفت‌وگوی باز.
+        expect(await post({ kind: 'general' })).toMatchObject({ ok: true, threadId: general.threadId });
+        // پاسخ ما یکی را از «باز» بیرون می‌برد؛ حالا چهارمی جا دارد، و باز کردن دوبارهٔ پاسخ‌داده چهارمی است.
+        expect(await support.reply({ threadId: a.threadId, adminUserId: ali, body: 'پاسخ', requestId: randomUUID(), at: tick(), event: { adminUserId: ali } })).toMatchObject({ ok: true });
+        expect(await post({ kind: 'order', orderId: mine[2]!.id })).toMatchObject({ ok: true });
+        expect(await post({ kind: 'thread', threadId: a.threadId })).toEqual({ ok: false, reason: 'open_threads' });
+        expect((await threadOf(a.threadId)).status).toBe('answered');
+
+        // ۱۰ پیام در یک ساعت، مشتری دیگر؛ یازدهمی نه، و یک ساعت پس از اولی دوباره.
+        const theirs = await orderFor(OTHER_MOBILE);
+        const start = tick();
+        const send = (minutes: number) =>
+          support.post({ userId: theirs.userId, target: { kind: 'order', orderId: theirs.id }, body: `پیام ${minutes}`, requestId: randomUUID(), at: new Date(start.getTime() + minutes * 60_000) });
+        for (let i = 0; i < 10; i += 1) expect((await send(i)).ok).toBe(true);
+        expect(await send(10)).toEqual({ ok: false, reason: 'rate' });
+        expect(await send(59.99)).toEqual({ ok: false, reason: 'rate' });
+        expect((await send(60.01)).ok).toBe(true);
+        clock = start.getTime() + 61 * 60_000;
+
+        // هم‌زمان: دوازده پیام یک مشتری با یک زمان؛ ده تا، و یک گفت‌وگو.
+        const third = await orderFor('09131234567');
+        const at = tick();
+        const results = await Promise.all(
+          Array.from({ length: 12 }, (_, i) =>
+            support.post({ userId: third.userId, target: { kind: 'order', orderId: third.id }, body: `هم‌زمان ${i}`, requestId: randomUUID(), at }),
+          ),
+        );
+        expect(results.filter((r) => r.ok)).toHaveLength(10);
+        expect(results.flatMap((r) => (r.ok ? [] : [r.reason]))).toEqual(['rate', 'rate']);
+        expect(await conn.db.select().from(supportThreads).where(eq(supportThreads.userId, third.userId))).toHaveLength(1);
+      });
+
+      it('قفل مشورتی در خود محافظ (0058): پیام مستقیم مشتری، بی ذخیره‌گاه، پشت پیام هم‌زمانش در گفت‌وگوی دیگر می‌ماند', async () => {
+        // دو گفت‌وگوی باز و دو پاسخ‌داده؛ هر پیام تازه در یکی از پاسخ‌داده‌ها گفت‌وگوی سوم را باز می‌کند.
+        const userId = (await orderFor()).userId;
+        const threads: number[] = [];
+        for (let i = 0; i < 4; i += 1) {
+          const [thread] = await threadRow({ userId, orderId: (await orderFor()).id });
+          await messageRow(thread!.id);
+          if (i >= 2) await messageRow(thread!.id, { kind: 'staff', adminUserId: ali, body: 'پاسخ' });
+          threads.push(thread!.id);
+        }
+        const codeOf = (error: unknown) => (error as { cause?: { code?: string } }).cause?.code ?? (error as { code?: string }).code;
+        // اولی در تراکنشی باز می‌ماند؛ دومی، از اتصال دیگر، تا ۳۰۰ میلی‌ثانیه پشت قفل همان مشتری صبر می‌کند و نمی‌رسد. بی قفل، هر دو سومی
+        // را باز می‌دیدند و چهار گفت‌وگوی باز می‌ماند.
+        const second = await conn.db
+          .transaction(async (tx) => {
+            await tx.insert(supportMessages).values({ threadId: threads[2]!, kind: 'customer', body: 'یک چیز دیگر', requestId: randomUUID(), createdAt: tick() });
+            const outcome = await conn.db
+              .transaction(async (other) => {
+                await other.execute(sql`SET LOCAL lock_timeout = '300ms'`);
+                await other.insert(supportMessages).values({ threadId: threads[3]!, kind: 'customer', body: 'من هم', requestId: randomUUID(), createdAt: tick() });
+                return 'inserted';
+              })
+              .catch(codeOf);
+            throw Object.assign(new Error('rollback'), { outcome });
+          })
+          .catch((error: { outcome?: string }) => error.outcome);
+        expect(second).toBe('55P03');
+        expect((await conn.db.select().from(supportThreads).where(eq(supportThreads.userId, userId))).map((t) => t.status).sort()).toEqual([
+          'answered',
+          'answered',
+          'open',
+          'open',
+        ]);
+      });
+
+      it('ذخیره‌گاه: پیام مشتری، دو کلیک و فرم کهنه، نمای مشتری بی نام ادمین، پاسخ با پیامک و رویداد بی متن، یک خبر برای پاسخ‌های پشت‌سرهم، و بستن از همان که دیده شد', async () => {
+        const support = createSupportStore(conn);
+        const order = await orderFor();
+        const userId = order.userId;
+        const theirs = await orderFor(OTHER_MOBILE);
+        const body = 'سلام. پنجشنبه امتحان دارم؛ تا چهارشنبه به مشهد می‌رسد؟';
+        const requestId = randomUUID();
+        const t1 = tick();
+        const target = { kind: 'order', orderId: order.id } as const;
+        const sent = await support.post({ userId, target, body, requestId, at: t1 });
+        if (!sent.ok) throw new Error('پیام ثبت نشد');
+        expect(sent.duplicate).toBe(false);
+        expect(await threadOf(sent.threadId)).toMatchObject({ status: 'open', createdAt: t1, waitingSince: t1, customerSeenAt: t1 });
+        expect(await support.post({ userId, target, body, requestId, at: tick() })).toEqual({ ok: true, threadId: sent.threadId, messageId: sent.messageId, duplicate: true });
+        expect(await support.post({ userId, target, body: 'متن دیگر', requestId, at: tick() })).toEqual({ ok: false, reason: 'stale' });
+        expect(await support.post({ userId: theirs.userId, target: { kind: 'general' }, body, requestId, at: tick() })).toEqual({ ok: false, reason: 'stale' });
+        expect(await support.post({ userId, target: { kind: 'order', orderId: theirs.id }, body, requestId: randomUUID(), at: tick() })).toEqual({ ok: false, reason: 'not_found' });
+        expect(await support.post({ userId: theirs.userId, target: { kind: 'thread', threadId: sent.threadId }, body, requestId: randomUUID(), at: tick() })).toEqual({
+          ok: false,
+          reason: 'not_found',
+        });
+        // مشتری بی هیچ سفارشی «سؤال کلی» ندارد (سؤال ۳۰۶).
+        const lonely = await customerOf('09141234567');
+        expect(await support.post({ userId: lonely, target: { kind: 'general' }, body, requestId: randomUUID(), at: tick() })).toEqual({ ok: false, reason: 'no_orders' });
+
+        expect(await support.customerThreads(userId)).toEqual([
+          { id: sent.threadId, orderNumber: order.orderNumber, status: 'open', lastMessageAt: t1, last: { kind: 'customer', body, at: t1 }, unseen: false },
+        ]);
+        expect(await support.customerOrderThread(userId, order.id)).toEqual({ id: sent.threadId, status: 'open', unseen: false });
+        expect(await support.customerOrderThread(theirs.userId, order.id)).toBeNull();
+        expect(await support.customerThread(theirs.userId, sent.threadId)).toBeNull();
+
+        const reply = (text: string, over: { requestId?: string } = {}) =>
+          support.reply({ threadId: sent.threadId, adminUserId: ali, body: text, requestId: over.requestId ?? randomUUID(), at: tick(), event: { adminUserId: ali, ipHash: 'ip' } });
+        const answer = 'سلام. جزوه‌ات امروز چاپ و تحویل پست می‌شود و تا چهارشنبه به مشهد می‌رسد.';
+        const firstRequest = randomUUID();
+        const r1 = await reply(answer, { requestId: firstRequest });
+        if (!r1.ok || r1.smsId === null) throw new Error('پاسخ یا پیامکش ثبت نشد');
+        expect(r1).toMatchObject({ duplicate: false, orderNumber: order.orderNumber });
+        const [sms1] = await conn.db.select().from(smsMessages).where(eq(smsMessages.id, r1.smsId));
+        expect(sms1).toMatchObject({ purpose: 'support_reply', toMobile: MOBILE, status: 'pending', attempts: 0, params: [`سفارش ${order.orderNumber}`] });
+        expect(sms1!.body).toBe(supportReplyText(order.orderNumber));
+        expect(await reply(answer, { requestId: firstRequest })).toEqual({ ok: true, messageId: r1.messageId, smsId: r1.smsId, duplicate: true, orderNumber: order.orderNumber });
+        expect(await reply('متن دیگر', { requestId: firstRequest })).toEqual({ ok: false, reason: 'stale' });
+        expect(await support.customerThreads(userId)).toMatchObject([{ status: 'answered', unseen: true, last: { kind: 'staff', body: answer } }]);
+        expect(await support.customerOrderThread(userId, order.id)).toMatchObject({ status: 'answered', unseen: true });
+
+        // پاسخ دوم پیش از آنکه مشتری ببیند: همان خبر کافی است.
+        const r2 = await reply('یک نکتهٔ دیگر هم بگویم.');
+        expect(r2).toMatchObject({ ok: true, smsId: null });
+        // مشتری دید: پیامک قبلی دیگر زنده نیست، و پاسخ بعدی خبر تازه می‌گیرد.
+        await support.markSeen(userId, sent.threadId, tick());
+        await support.markSeen(theirs.userId, sent.threadId, tick(60_000));
+        expect((await threadOf(sent.threadId)).customerSeenAt!.getTime()).toBeLessThan(clock);
+        expect(await support.customerThreads(userId)).toMatchObject([{ unseen: false }]);
+        expect((await conn.db.select({ id: smsMessages.id }).from(smsMessages).where(and(eq(smsMessages.id, r1.smsId), liveSms))).length).toBe(0);
+        const r3 = await reply('پیگیری: امروز تحویل پست شد.');
+        if (!r3.ok || r3.smsId === null) throw new Error('پیامک تازه ساخته نشد');
+        // پیامکی که نرفت خبری نبود: پاسخ بعدی پیامک تازه می‌گیرد.
+        await conn.db.update(smsMessages).set({ status: 'sending', attempts: 1, attemptedAt: tick() }).where(eq(smsMessages.id, r3.smsId));
+        await conn.db.update(smsMessages).set({ status: 'failed', error: 'unavailable' }).where(eq(smsMessages.id, r3.smsId));
+        // هشدار پیشخوان (سؤال ۳۱۲): پیامک آخرین پاسخ نرفت و مشتری آن پاسخ را ندیده؛ پاسخ پیش از `since` نه.
+        const since = new Date(t1.getTime() - 1);
+        const failure = { threadId: sent.threadId, orderNumber: order.orderNumber, customer: 'سارا احمدی' };
+        expect(await support.replySmsFailed({ since, stuckBefore: tick() })).toEqual([failure]);
+        expect(await support.replySmsFailed({ since: tick(), stuckBefore: tick() })).toEqual([]);
+        const r4 = await reply('کد رهگیری را هم پیامک کردیم.');
+        if (!r4.ok || r4.smsId === null) throw new Error('پیامک پس از شکست ساخته نشد');
+        expect(await support.replySms(r4.messageId)).toMatchObject({
+          threadId: sent.threadId,
+          messageId: r4.messageId,
+          orderNumber: order.orderNumber,
+          newer: false,
+          sms: { id: r4.smsId, status: 'pending' },
+        });
+        // پیامک پاسخ تازه‌تر همان خبر است: پیامک r3 دیگر «دوباره» نمی‌رود و هشدار فقط پیامک آخرین پاسخ را می‌سنجد، که هنوز «منتظر» است و نمانده.
+        expect(await support.replySms(r3.messageId)).toMatchObject({ newer: true, sms: { id: r3.smsId, status: 'failed' } });
+        expect(await support.replySmsFailed({ since, stuckBefore: new Date(clock - 60_000) })).toEqual([]);
+        expect(await support.replySmsFailed({ since, stuckBefore: tick() })).toEqual([failure]);
+        expect(await support.replySms(sent.messageId)).toBeNull();
+        expect(await support.replySms(r2.ok ? r2.messageId : 0)).toBeNull();
+
+        const logged = await conn.db
+          .select()
+          .from(adminEvents)
+          .where(and(eq(adminEvents.targetType, SUPPORT_TARGET), eq(adminEvents.targetId, String(sent.threadId))))
+          .orderBy(asc(adminEvents.id));
+        expect(logged.map((e) => [e.action, e.adminUserId, e.ipHash, (e.detail as { sms: string }).sms])).toEqual([
+          ['support.reply', ali, 'ip', 'queued'],
+          ['support.reply', ali, 'ip', 'skipped'],
+          ['support.reply', ali, 'ip', 'queued'],
+          ['support.reply', ali, 'ip', 'queued'],
+        ]);
+        expect(logged[0]!.detail).toEqual({ thread: sent.threadId, orderNumber: order.orderNumber, customer: null, message: r1.messageId, sms: 'queued' });
+        expect(JSON.stringify(logged)).not.toContain('چاپ');
+
+        // بستن فقط از آخرین پیامی که ادمین دید.
+        const close = (seenMessageId: number | null, closeRequest = randomUUID()) =>
+          support.close({ threadId: sent.threadId, adminUserId: ali, requestId: closeRequest, seenMessageId, at: tick(), event: { adminUserId: ali, ipHash: 'ip' } });
+        expect(await close(r3.messageId)).toEqual({ ok: false, reason: 'stale' });
+        expect(await close(null)).toEqual({ ok: false, reason: 'stale' });
+        const closeRequest = randomUUID();
+        expect(await close(r4.messageId, closeRequest)).toEqual({ ok: true, duplicate: false, orderNumber: order.orderNumber });
+        expect(await close(r4.messageId, closeRequest)).toEqual({ ok: true, duplicate: true, orderNumber: order.orderNumber });
+        expect(await close(r4.messageId)).toEqual({ ok: false, reason: 'closed' });
+        expect(await support.close({ threadId: 999_999_999, adminUserId: ali, requestId: randomUUID(), seenMessageId: null, at: tick(), event: { adminUserId: ali } })).toEqual({
+          ok: false,
+          reason: 'not_found',
+        });
+        expect((await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'support.close'), eq(adminEvents.targetId, String(sent.threadId))))).map((e) => e.detail)).toEqual([
+          { thread: sent.threadId, orderNumber: order.orderNumber, customer: null },
+        ]);
+        // مشتری دوباره می‌نویسد: باز، با انتظار از همان پیام.
+        const reopenAt = tick();
+        expect(await support.post({ userId, target: { kind: 'thread', threadId: sent.threadId }, body: 'ممنون. رسید.', requestId: randomUUID(), at: reopenAt })).toMatchObject({ ok: true });
+        expect(await threadOf(sent.threadId)).toMatchObject({ status: 'open', waitingSince: reopenAt });
+        const view = await support.customerThread(userId, sent.threadId);
+        expect(view).toMatchObject({ id: sent.threadId, orderNumber: order.orderNumber, orderToken: order.publicToken, orderStatus: 'awaiting_payment', status: 'open' });
+        expect(view!.messages.map((m) => m.kind)).toEqual(['customer', 'staff', 'staff', 'staff', 'staff', 'closed', 'customer']);
+        expect(view!.messages[5]!.body).toBeNull();
+        expect(JSON.stringify(view)).not.toContain('علی');
+        // مشتری پاسخ‌ها را دید: پیامکی که نرفت دیگر هشدار نیست.
+        await support.markSeen(userId, sent.threadId, tick());
+        expect(await support.replySmsFailed({ since, stuckBefore: tick() })).toEqual([]);
+      });
+
+      it('صندوق پنل: چیپ‌ها و شمارها، «باز» قدیمی‌ترین انتظار اول، جست‌وجو، گفت‌وگو با مشتری و سفارش و تاریخچه، و کارت سفارش', async () => {
+        const support = createSupportStore(conn);
+        const sara = await orderFor();
+        const maryam = await orderFor(OTHER_MOBILE, { recipientName: 'مریم کاظمی' });
+        const post = (userId: string, target: SupportTarget, text: string) => support.post({ userId, target, body: text, requestId: randomUUID(), at: tick(60_000) });
+        const a = await post(sara.userId, { kind: 'order', orderId: sara.id }, 'جزوه‌ام کی می‌رسد؟');
+        const b = await post(maryam.userId, { kind: 'general' }, 'صورت‌حساب رسمی می‌دهید؟');
+        const c = await post(sara.userId, { kind: 'general' }, 'صحافی فنری هم دارید؟');
+        const d = await post(maryam.userId, { kind: 'order', orderId: maryam.id }, 'نشانی را عوض کنم؟');
+        if (!a.ok || !b.ok || !c.ok || !d.ok) throw new Error('گفت‌وگوها ساخته نشدند');
+        const replied = await support.reply({ threadId: c.threadId, adminUserId: ali, body: 'فعلاً فقط طلق و سیم.', requestId: randomUUID(), at: tick(60_000), event: { adminUserId: ali } });
+        if (!replied.ok) throw new Error('پاسخ ثبت نشد');
+        const dMessages = await conn.db.select().from(supportMessages).where(eq(supportMessages.threadId, d.threadId));
+        expect(await support.close({ threadId: d.threadId, adminUserId: ali, requestId: randomUUID(), seenMessageId: dMessages[0]!.id, at: tick(60_000), event: { adminUserId: ali } })).toMatchObject({
+          ok: true,
+        });
+
+        const ids = (page: InboxPage) => page.lines.map((line) => line.id);
+        const all = await support.inbox({ bucket: 'all', search: null, limit: 20, offset: 0 });
+        expect(all.counts).toEqual({ open: 2, answered: 1, closed: 1, all: 4 });
+        // «همه» تازه‌ترین پیام اول؛ بستن پیام نیست.
+        expect(ids(all)).toEqual([c.threadId, d.threadId, b.threadId, a.threadId]);
+        const open = await support.inbox({ bucket: 'open', search: null, limit: 20, offset: 0 });
+        expect(ids(open)).toEqual([a.threadId, b.threadId]);
+        expect(open.lines[0]).toMatchObject({
+          status: 'open',
+          orderNumber: sara.orderNumber,
+          orderStatus: 'awaiting_payment',
+          customer: { userId: sara.userId, mobile: MOBILE, name: 'سارا احمدی', provinceId: 8, cityId: 394, place: 'تهران' },
+          last: { kind: 'customer', body: 'جزوه‌ام کی می‌رسد؟' },
+        });
+        // «سؤال کلی» نام و شهر را از تازه‌ترین سفارش مشتری دارد.
+        expect(open.lines[1]).toMatchObject({ orderNumber: null, orderStatus: null, customer: { mobile: OTHER_MOBILE, name: 'مریم کاظمی' } });
+        expect(ids(await support.inbox({ bucket: 'open', search: null, limit: 1, offset: 1 }))).toEqual([b.threadId]);
+        expect(ids(await support.inbox({ bucket: 'answered', search: null, limit: 20, offset: 0 }))).toEqual([c.threadId]);
+        expect(ids(await support.inbox({ bucket: 'closed', search: null, limit: 20, offset: 0 }))).toEqual([d.threadId]);
+
+        const byMobile = await support.inbox({ bucket: 'all', search: { kind: 'mobile', mobile: OTHER_MOBILE }, limit: 20, offset: 0 });
+        expect([ids(byMobile), byMobile.counts]).toEqual([[d.threadId, b.threadId], { open: 1, answered: 0, closed: 1, all: 2 }]);
+        expect(ids(await support.inbox({ bucket: 'all', search: { kind: 'digits', orderNumber: sara.orderNumber, phoneSuffix: null }, limit: 20, offset: 0 }))).toEqual([a.threadId]);
+        expect(ids(await support.inbox({ bucket: 'all', search: { kind: 'digits', orderNumber: null, phoneSuffix: '4455' }, limit: 20, offset: 0 }))).toEqual([d.threadId, b.threadId]);
+        expect(ids(await support.inbox({ bucket: 'all', search: { kind: 'name', text: 'مریم' }, limit: 20, offset: 0 }))).toEqual([d.threadId, b.threadId]);
+        expect(ids(await support.inbox({ bucket: 'all', search: { kind: 'name', text: '%' }, limit: 20, offset: 0 }))).toEqual([]);
+
+        expect(await support.openSummary()).toEqual({ count: 2, oldestWaiting: (await threadOf(a.threadId)).waitingSince });
+
+        const thread = await support.panelThread(c.threadId);
+        expect(thread).toMatchObject({
+          id: c.threadId,
+          status: 'answered',
+          waitingSince: null,
+          customer: { mobile: MOBILE, name: 'سارا احمدی' },
+          order: null,
+          history: { orders: 1, paid: 0, others: [{ id: a.threadId, orderNumber: sara.orderNumber, status: 'open' }] },
+        });
+        expect(thread!.messages.map((m) => [m.kind, m.adminName, m.sms?.status ?? null])).toEqual([
+          ['customer', null, null],
+          ['staff', 'علی', 'pending'],
+        ]);
+        expect(await support.panelThread(a.threadId)).toMatchObject({ order: { id: sara.id, number: sara.orderNumber, status: 'awaiting_payment', partnerName: null } });
+        expect(await support.panelThread(999_999_999)).toBeNull();
+
+        expect(await support.orderThread(sara.id)).toEqual({ id: a.threadId, status: 'open', messages: 1, last: { kind: 'customer', adminName: null, at: expect.any(Date) } });
+        expect(await support.orderThread(maryam.id)).toMatchObject({ id: d.threadId, status: 'closed', messages: 1, last: { kind: 'closed', adminName: 'علی' } });
+        expect(await support.orderThread((await orderFor()).id)).toBeNull();
+      });
+
+      it('دروازهٔ «سفارش‌های من» (سؤال ۳۰۶): فقط شماره‌ای که سفارشی دارد، در هر وضعیتی', async () => {
+        const auth = createAuthStore(conn);
+        const readyOf = async (mobile: string) => {
+          let ready: boolean | undefined;
+          await auth.issueOtp(
+            { mobile, ipHash: 'ip-o', sessionHash: 'f'.repeat(64), hourSince: new Date(), daySince: new Date(), gate: { kind: 'orders' } },
+            (counts) => {
+              ready = counts.ready;
+              return null;
+            },
+          );
+          return ready;
+        };
+        expect(await readyOf(OTHER_MOBILE)).toBe(false);
+        // کاربری که از مسیر خرید وارد شد ولی سفارشی نداد هم نه.
+        await customerOf(OTHER_MOBILE);
+        expect(await readyOf(OTHER_MOBILE)).toBe(false);
+        const order = await orderFor(OTHER_MOBILE);
+        expect(await readyOf(OTHER_MOBILE)).toBe(true);
+        // شاهد: شمارهٔ دیگر، حالا که سفارشی در پایگاه داده هست، هنوز نه.
+        expect(await readyOf('09121112233')).toBe(false);
+        await conn.db.update(orders).set({ status: 'expired' }).where(eq(orders.id, order.id));
+        expect(await readyOf(OTHER_MOBILE)).toBe(true);
+        // دروازهٔ جزوه همان شماره را بی سند همین مرورگر نمی‌پذیرد (شاهد جدایی دو دروازه).
+        let documentsReady: boolean | undefined;
+        await auth.issueOtp(
+          { mobile: OTHER_MOBILE, ipHash: 'ip-o', sessionHash: 'f'.repeat(64), hourSince: new Date(), daySince: new Date(), gate: { kind: 'documents', readyUntil: new Date() } },
+          (counts) => {
+            documentsReady = counts.ready;
+            return null;
+          },
+        );
+        expect(documentsReady).toBe(false);
+      });
+
+      it('«سفارش‌های من»: همین مشتری تازه‌ترین اول، بی منقضی و پرداخت‌نشدنی (جز در حال بررسی)، با فایل و صفحه و پرداخت و بازپرداخت، و صفحه‌بندی', async () => {
+        const account = createAccountStore(conn);
+        const store = createOrderStore(conn);
+        const first = await orderFor();
+        const expired = await orderFor();
+        const checking = await orderFor();
+        const cancelled = await orderFor();
+        const last = await orderFor();
+        await orderFor(OTHER_MOBILE);
+        const userId = first.userId;
+        await conn.db.update(orders).set({ status: 'expired' }).where(eq(orders.id, expired.id));
+        // پرداختی که درگاه گفت «پرداخت‌شده» و هنوز نهایی نیست.
+        const held = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+        await store.insertPayment({ orderId: checking.id, provider: 'mock', amountRials: checking.totalRials, authority: held, raw: null });
+        await conn.db.update(payments).set({ gatewayStatus: 1 }).where(eq(payments.authority, held));
+        // پرداخت‌شده‌ای که لغو شد و پولش دستی برگشت.
+        const paid = `MOCK${randomUUID().replace(/-/g, '').toUpperCase()}`;
+        await store.insertPayment({ orderId: cancelled.id, provider: 'mock', amountRials: cancelled.totalRials, authority: paid, raw: null });
+        const paidAt = new Date();
+        await store.settlePayment('mock', paid, async ({ payment }) => ({
+          kind: 'succeeded',
+          verifiedAmountRials: payment.amountRials,
+          refId: '803117',
+          cardMask: null,
+          raw: { decision: 'success' },
+          paidAt,
+          postHandoffDueAt: new Date(paidAt.getTime() + 2 * 86_400_000),
+        }));
+        await conn.db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, cancelled.id));
+        const [payment] = await conn.db.select().from(payments).where(eq(payments.authority, paid));
+        await conn.db.insert(refunds).values({
+          orderId: cancelled.id,
+          paymentId: payment!.id,
+          amountRials: cancelled.totalRials,
+          method: 'manual',
+          status: 'succeeded',
+          reference: '552190',
+          refundedOn: new Date(),
+          adminUserId: ali,
+          createdAt: new Date(),
+          finishedAt: new Date(),
+        });
+
+        const now = new Date();
+        const listed = await account.customerOrders(userId, { at: now, limit: 20, offset: 0 });
+        expect(listed.total).toBe(4);
+        expect(listed.rows.map((row) => row.order.orderNumber)).toEqual([last.orderNumber, cancelled.orderNumber, checking.orderNumber, first.orderNumber]);
+        const byNumber = new Map(listed.rows.map((row) => [row.order.orderNumber, row]));
+        expect(byNumber.get(first.orderNumber)).toMatchObject({
+          order: { id: first.id, publicToken: first.publicToken, status: 'awaiting_payment', totalRials: first.totalRials, paidAt: null },
+          fileCount: 2,
+          pageCount: 102,
+          payments: [],
+          parcels: [],
+          refunds: [],
+        });
+        expect(byNumber.get(checking.orderNumber)!.payments.map((p) => p.authority)).toEqual([held]);
+        expect(byNumber.get(cancelled.orderNumber)).toMatchObject({ order: { status: 'cancelled', paidAt }, refunds: [{ method: 'manual', status: 'succeeded' }] });
+        expect(byNumber.get(cancelled.orderNumber)!.payments.map((p) => p.status)).toEqual(['succeeded']);
+
+        // فایل‌ها تا یک ساعت دیگر می‌روند: در انتظار پرداختِ بی بررسی دیگر نیست، و در حال بررسی می‌ماند.
+        const soonest = Math.min(...(await conn.db.select().from(documents).where(inArray(documents.id, docIds))).map((d) => d.fileExpiresAt!.getTime()));
+        const late = await account.customerOrders(userId, { at: new Date(soonest - 30 * 60_000), limit: 20, offset: 0 });
+        expect(late.rows.map((row) => row.order.orderNumber)).toEqual([cancelled.orderNumber, checking.orderNumber]);
+        const early = await account.customerOrders(userId, { at: new Date(soonest - 61 * 60_000), limit: 20, offset: 0 });
+        expect(early.total).toBe(4);
+        expect(early.rows[0]!.filesLiveUntil!.getTime()).toBe(soonest);
+        // فایلی که پاک شد: همان.
+        await conn.db.update(documents).set({ fileDeletedAt: new Date() }).where(eq(documents.id, docIds[1]!));
+        try {
+          const gone = await account.customerOrders(userId, { at: now, limit: 20, offset: 0 });
+          expect(gone.rows.map((row) => [row.order.orderNumber, row.filesLiveUntil])).toEqual([
+            [cancelled.orderNumber, null],
+            [checking.orderNumber, null],
+          ]);
+        } finally {
+          await conn.db.update(documents).set({ fileDeletedAt: null }).where(eq(documents.id, docIds[1]!));
+        }
+
+        // صفحه‌بندی و شمار کل، صفحهٔ بعد از آخر هم.
+        const second = await account.customerOrders(userId, { at: now, limit: 3, offset: 3 });
+        expect([second.total, second.rows.map((row) => row.order.orderNumber)]).toEqual([4, [first.orderNumber]]);
+        expect(await account.customerOrders(userId, { at: now, limit: 3, offset: 9 })).toEqual({ rows: [], total: 4 });
+        expect(await account.customerOrders(await customerOf('09141234567'), { at: now, limit: 20, offset: 0 })).toEqual({ rows: [], total: 0 });
+        expect((await account.customerOrder(userId, cancelled.orderNumber, now))?.order.id).toBe(cancelled.id);
+        expect(await account.customerOrder(userId, expired.orderNumber, now)).toBeNull();
+        expect(await account.customerOrder(await customerOf(OTHER_MOBILE), first.orderNumber, now)).toBeNull();
+        // پیام دربارهٔ سفارش: هر سفارش همین مشتری، منقضی هم، و سفارش دیگری هرگز.
+        expect(await account.ownedOrderId(userId, expired.orderNumber)).toBe(expired.id);
+        expect(await account.ownedOrderId(await customerOf(OTHER_MOBILE), first.orderNumber)).toBeNull();
+        expect(await account.ownedOrderId(userId, 99_999_999)).toBeNull();
+      });
+
+      it('«در حال بررسی» در SQL همان `isChecking` است، در همهٔ ترکیب‌ها', async () => {
+        const combos = [];
+        for (const status of ['pending', 'succeeded', 'failed'] as const) {
+          for (const gatewayStatus of [null, 1, 2, 3, 100, -1]) {
+            for (const returned of [false, true]) {
+              for (const gatewayError of [null, 'timeout']) combos.push({ status, gatewayStatus, returnedAt: returned ? new Date() : null, gatewayError });
+            }
+          }
+        }
+        const values = sql.join(
+          combos.map(
+            (c, i) => sql`(${i}::int, ${c.status}::text, ${c.gatewayStatus}::int, ${c.returnedAt?.toISOString() ?? null}::timestamptz, ${c.gatewayError}::text)`,
+          ),
+          sql`, `,
+        );
+        const rows = (await conn.db.execute(sql`
+          SELECT p.n, (${checkingPaymentSql}) AS checking
+            FROM (VALUES ${values}) AS p(n, status, gateway_status, returned_at, gateway_error)
+           ORDER BY p.n`)) as unknown as { n: number; checking: boolean }[];
+        expect(rows.map((row) => row.checking)).toEqual(combos.map((c) => isChecking(c)));
+        expect(rows.filter((row) => row.checking).length).toBeGreaterThan(0);
+      });
+    });
   });
   describe('پنل ادمین روی پستگرس (برش ۴٫۱)', () => {
     const at = new Date('2026-10-05T07:50:00Z');
@@ -2607,7 +3262,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -2667,7 +3322,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await read('owner')).toContain('reviews.manage');
       expect(await read('owner')).toContain('content.edit');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
-      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها، از ۱۲٫۲ مسدود کردن موبایل مشتری و از ۱۱٫۳ نوار اعلان؛ چاپخانه فقط دیدن،
+      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها، از ۱۲٫۲ مسدود کردن موبایل مشتری، از ۱۱٫۳ نوار اعلان و از
+      // ۱۲٫۱ پیام‌های پشتیبانی (سؤال ۳۱۳؛ حسابدار و چاپخانه نه)؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی
       // مبلغ). هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید هم نه (سؤال ۲۰۱). صریح، نه از کد.
       expect(await read('operator')).toEqual([
@@ -2684,6 +3340,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'partners.availability',
         'shipments.import',
         'shipments.review',
+        'support.reply',
         'tariff.pause',
         'tariff.read',
       ]);
@@ -2792,6 +3449,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'partners.availability',
         'shipments.import',
         'shipments.review',
+        'support.reply',
         'tariff.pause',
         'tariff.read',
       ]);
@@ -3113,7 +3771,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -3592,7 +4250,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -4643,7 +5301,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5027,7 +5685,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5507,7 +6165,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -6951,7 +7609,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7327,7 +7985,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7609,9 +8267,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'SMS_PAID_TEMPLATE',
         'SMS_TRACKING_TEMPLATE',
         'SMS_PARTNER_TEMPLATE',
+        'SMS_SUPPORT_TEMPLATE',
         'PAYMENT_MERCHANT_ID',
       ]);
-      // CHECK همان نام‌های کد است (از ۷٫۶ شش، با قالب چاپخانه)، نه بیشتر: نام تازه‌ای که کد نمی‌شناسد در پایگاه داده هم جا ندارد.
+      // CHECK همان نام‌های کد است (از ۷٫۶ شش، با قالب چاپخانه، و از ۱۲٫۱ هفت، با قالب پاسخ پشتیبانی)، نه بیشتر: نام تازه‌ای که کد
+      // نمی‌شناسد در پایگاه داده هم جا ندارد.
       const [check] = await conn.db.execute<{ def: string }>(
         sql`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'service_secrets_name'`,
       );
@@ -7844,7 +8504,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -9627,7 +10287,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
@@ -10105,7 +10765,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });

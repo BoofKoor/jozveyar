@@ -1637,3 +1637,51 @@ export async function bannerOffAction(form: FormData): Promise<void> {
   const back = panelPath(gate, field(form, 'back') === 'banner' ? '/content/banner' : '/content');
   redirect(`${back}?${result.ok ? `done=banner_${result.value.change}` : `e=${result.error}`}&${doneMark()}`);
 }
+
+/* ───────────────────────── پشتیبانی (۱۲٫۱) ───────────────────────── */
+
+export interface ReplyState {
+  error?: AdminErrorCode;
+  /** متنی که نوشته شد، تا پس از خطا بماند. */
+  body?: string;
+}
+
+/** گفت‌وگو با پیامش؛ هر بار با نشان تازه، تا فرم پاسخ از نو سوار شود. */
+const threadPath = (gate: string, id: number | string, query: string) =>
+  `${panelPath(gate, `/support/${encodeURIComponent(String(id))}`)}?${query}&${doneMark()}`;
+
+/**
+ * پاسخ پشتیبانی (۱۲٫۱، سؤال‌های ۳۱۱ و ۳۱۲): بی کد تازه. خطای متن همین‌جا با متن نوشته‌شده می‌ماند، و بقیه به گفت‌وگو با پیامش؛ پس از نوشتن همان
+ * گفت‌وگو با «پاسخ رفت» و حال پیامک پاسخ، و فرم تازه (شناسهٔ فرم تازه).
+ */
+export async function supportReplyAction(_state: ReplyState, form: FormData): Promise<ReplyState> {
+  const gate = field(form, 'gate');
+  const { support } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const thread = field(form, 'thread');
+  const body = field(form, 'body');
+  const result = await support.reply(session, { thread, body, request: field(form, 'request') }, await requestIp());
+  if (result.ok) redirect(threadPath(gate, result.value.threadId, `done=reply&sms=${result.value.sms}`));
+  if (result.error === 'support_empty' || result.error === 'support_too_long') return { error: result.error, body: body.slice(0, 5000) };
+  redirect(threadPath(gate, thread, `e=${result.error}`));
+}
+
+/** «بستن گفت‌وگو» (۱۲٫۱، سؤال ۳۱۱): بی کد تازه، از آخرین پیامی که صفحه نشان داد (`seen`)؛ برگشت به همان گفت‌وگو با پیام. */
+export async function supportCloseAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { support } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const thread = field(form, 'thread');
+  const result = await support.close(session, { thread, seen: field(form, 'seen'), request: field(form, 'request') }, await requestIp());
+  redirect(threadPath(gate, thread, result.ok ? 'done=close' : `e=${result.error}`));
+}
+
+/** «دوباره بفرست» پیامک پاسخ (۱۲٫۱، سؤال ۳۱۲): همان ردیف به همان شماره؛ برگشت به همان گفت‌وگو با نتیجه. */
+export async function supportResendSmsAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { support } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await support.resendSms(session, { message: field(form, 'message') }, await requestIp());
+  if (result.ok) redirect(threadPath(gate, result.value.threadId, `done=resend&sms=${result.value.outcome}`));
+  redirect(threadPath(gate, field(form, 'thread'), `e=${result.error}`));
+}

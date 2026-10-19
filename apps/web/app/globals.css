@@ -13,6 +13,8 @@
 @import '@jozveyar/ui/pages.css';
 /* نوار اعلان بالای سربرگ و پیام تعطیلی جای آن (۱۱٫۳)؛ در کیت، چون پیش‌نمایش پنل هم همان را دارد. */
 @import '@jozveyar/ui/bar.css';
+/* «سفارش‌های من» و پیام به پشتیبانی، از طرح docs/ui/mockups/account.html (۱۲٫۱). */
+@import './account.css';
 
 /*
  * وزیرمتن، فقط دو وزن، لوکال.
@@ -115,6 +117,14 @@
   }
   .site-nav a:hover {
     background: var(--color-green-100);
+  }
+  /*
+   * «سفارش‌های من» (۱۲٫۱) در صفحه‌های همان بخش جاری است، با همان زمینهٔ hover (طرح `account.html`). مثل `[data-jozve]` پایین، `:has()`
+   * بیرون `:is()` و `:where()` (۳د: کروم آن را درونشان ارزان باطل نمی‌کند).
+   */
+  body:has([data-account]) .site-nav__orders {
+    background: var(--color-green-100);
+    font-weight: 600;
   }
 
   /*
@@ -247,8 +257,10 @@
       height: auto;
       max-height: 56px;
     }
-    /* در موبایل فقط «تعرفه» و «سؤال‌ها»؛ «چطور کار می‌کند» جا ندارد */
-    .site-nav .site-nav__how {
+    /*
+     * در موبایل فقط «تعرفه» و «سفارش‌های من» (۱۲٫۱)؛ «چطور کار می‌کند» جا ندارد، و «سؤال‌ها» با اسکرول صفحهٔ اصلی پیداست
+     */
+    .site-nav :is(.site-nav__how, .site-nav__faq) {
       display: none;
     }
     .site-nav a {

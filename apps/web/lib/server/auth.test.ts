@@ -3,10 +3,15 @@
  *
  * هر محافظ جدا سنجیده می‌شود: شکل کد، اعتبار ۲ دقیقه، ۳ فرصت، ارسال دوباره پس از ۹۰ ثانیه، سقف هر
  * شماره و هر IP و کل سایت، «فقط همان مرورگر»، و اینکه کد و IP هیچ‌جا خام نمی‌نشینند. از برش ۷ (ADR-049): دروازهٔ جزوه،
- * سقف هر مرورگر، سقف ۲۴ ساعتهٔ هر شماره و کل سایت، و پارامتر قالب کد.
+ * سقف هر مرورگر، سقف ۲۴ ساعتهٔ هر شماره و کل سایت، و پارامتر قالب کد. از برش ۱۲٫۱ (ADR-068، سؤال ۳۰۶): کد «سفارش‌های من» با دروازهٔ
+ * سفارش و پاسخ یکسان برای هر شماره.
  */
 
+import { createHmac } from 'node:crypto';
+
 import { beforeEach, describe, expect, it } from 'vitest';
+
+import type { OtpGate } from '@jozveyar/db';
 
 import { consoleSms, type SmsMessage, type SmsProvider } from '@jozveyar/sms';
 
@@ -40,8 +45,10 @@ describe('کد پیامکی و نشست', () => {
   let siteLimit: number;
   let siteDayLimit: number;
   let ready: boolean;
-  let readyAsked: { session: string; until: Date }[];
+  let readyAsked: { session: string; gate: OtpGate; mobile: string }[];
   let blocked: Set<string>;
+  /** شماره‌هایی که سفارشی دارند (دروازهٔ «سفارش‌های من»). */
+  let ordered: Set<string>;
   let codes: string[];
   let service: ReturnType<typeof createAuthService>;
   const logs: string[] = [];
@@ -64,10 +71,11 @@ describe('کد پیامکی و نشست', () => {
     ready = true;
     readyAsked = [];
     blocked = new Set();
+    ordered = new Set([MOBILE]);
     store = memoryAuthStore({
-      ready: (session, until) => {
-        readyAsked.push({ session, until });
-        return ready;
+      ready: (session, gate, mobile) => {
+        readyAsked.push({ session, gate, mobile });
+        return gate.kind === 'documents' ? ready : ordered.has(mobile);
       },
       blocked: (mobile) => blocked.has(mobile),
     });
@@ -170,7 +178,7 @@ describe('کد پیامکی و نشست', () => {
     expect(sms.messages).toEqual([]);
     expect(store.otps).toEqual([]);
     // «زنده» یعنی دست‌کم یک ساعت دیگر، همان حاشیهٔ پرداخت؛ پرسش برای همین مرورگر است.
-    expect(readyAsked).toEqual([{ session: ME, until: new Date(clock.getTime() + HOUR) }]);
+    expect(readyAsked).toEqual([{ session: ME, gate: { kind: 'documents', readyUntil: new Date(clock.getTime() + HOUR) }, mobile: MOBILE }]);
     // شاهد: همان درخواست با جزوهٔ روی سرور.
     ready = true;
     expect((await sendCode('48213')).ok).toBe(true);
@@ -352,5 +360,114 @@ describe('کد پیامکی و نشست', () => {
       now: () => clock,
     });
     expect(await other.verifyCode(ME, { mobile: MOBILE, code: '48213' })).toMatchObject({ error: 'wrong_code' });
+  });
+  /* ─────────────── «سفارش‌های من» (برش ۱۲٫۱، سؤال ۳۰۶) ─────────────── */
+
+  const STRANGER = '09351234567';
+  /** پیامکی که بی منتظر ماندن فرستاده شد. */
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  async function accountCode(code: string, over: { mobile?: string; session?: string; ip?: string } = {}) {
+    codes.push(code);
+    const result = await service.requestAccountCode(over.session ?? ME, over.ip ?? '5.6.7.8', { mobile: over.mobile ?? MOBILE });
+    await settle();
+    return result;
+  }
+
+  it('«سفارش‌های من»: شماره‌ای که سفارش دارد کد واقعی می‌گیرد، بی جزوه هم؛ دروازه سفارش است، نه سند', async () => {
+    ready = false;
+    expect(await accountCode('48213')).toEqual({ ok: true, value: { mobile: MOBILE, expiresInSeconds: 120, resendInSeconds: 90 } });
+    expect(readyAsked).toEqual([{ session: ME, gate: { kind: 'orders' }, mobile: MOBILE }]);
+    expect(sms.messages).toEqual([expect.objectContaining({ toMobile: MOBILE, purpose: 'otp', status: 'logged' })]);
+    expect(sms.messages[0]!.body).toContain('48213');
+    const login = await service.verifyCode(ME, { mobile: MOBILE, code: '48213' });
+    expect(login.ok).toBe(true);
+    // شاهد: همان شماره از مسیر خرید بی جزوه کد نمی‌گیرد.
+    later(RESEND);
+    expect(await sendCode('11111')).toMatchObject({ status: 409, error: 'otp_no_documents' });
+  });
+
+  it('«سفارش‌های من»: شمارهٔ بی سفارش همان پاسخ را می‌گیرد، با کدی که هیچ‌وقت درست نیست و بی پیامک', async () => {
+    const real = await accountCode('48213');
+    const none = await accountCode('48213', { mobile: STRANGER, session: OTHER });
+    expect(none).toEqual({ ok: true, value: { mobile: STRANGER, expiresInSeconds: 120, resendInSeconds: 90 } });
+    expect({ ...(none.ok ? none.value : {}), mobile: MOBILE }).toEqual(real.ok ? real.value : null);
+    expect(sms.messages.map((m) => m.toMobile)).toEqual([MOBILE]);
+    // ردیفی هست، مثل کد واقعی، پس سقف‌ها و «ارسال دوباره» همان‌اند.
+    const phantom = store.otps.find((o) => o.mobile === STRANGER)!;
+    expect(phantom.codeHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(phantom.expiresAt.getTime() - phantom.createdAt.getTime()).toBe(TWO_MINUTES);
+    // هیچ کد ۵ رقمی‌ای با آن درست نمی‌شود (همان HMAC سرویس).
+    const hashOf = (code: string) => createHmac('sha256', SECRET).update(`otp\u0000${STRANGER}\u0000${code}`).digest('hex');
+    for (let n = 0; n < 10 ** 5; n += 1) {
+      if (hashOf(String(n).padStart(5, '0')) === phantom.codeHash) throw new Error(`کد ${n} درست بود`);
+    }
+    // شاهد: همان HMAC کد واقعی شمارهٔ دارای سفارش را می‌سازد.
+    const realHash = createHmac('sha256', SECRET).update(`otp\u0000${MOBILE}\u000048213`).digest('hex');
+    expect(store.otps.find((o) => o.mobile === MOBILE)!.codeHash).toBe(realHash);
+    // پاسخ کد نادرست هم همان است: «نادرست» با فرصت‌های باقی، تا قفل.
+    expect(await service.verifyCode(OTHER, { mobile: STRANGER, code: '48213' })).toMatchObject({ status: 400, error: 'wrong_code', attemptsLeft: 2 });
+    expect(await service.verifyCode(OTHER, { mobile: STRANGER, code: '00000' })).toMatchObject({ error: 'wrong_code', attemptsLeft: 1 });
+    expect(await service.verifyCode(OTHER, { mobile: STRANGER, code: '99999' })).toMatchObject({ error: 'wrong_code', attemptsLeft: 0 });
+    expect(await service.verifyCode(OTHER, { mobile: STRANGER, code: '48213' })).toMatchObject({ status: 410, error: 'code_locked' });
+    expect(store.sessions.size).toBe(0);
+  });
+
+  it('«سفارش‌های من»: شمارهٔ مسدود با سفارش هم کدی می‌گیرد که درست نیست، بی ۴۰۳ و بی پیامک', async () => {
+    blocked.add(MOBILE);
+    expect(await accountCode('48213')).toEqual({ ok: true, value: { mobile: MOBILE, expiresInSeconds: 120, resendInSeconds: 90 } });
+    expect(sms.messages).toEqual([]);
+    expect(await service.verifyCode(ME, { mobile: MOBILE, code: '48213' })).toMatchObject({ error: 'wrong_code' });
+    // شاهد: رفع مسدودی، پس از «ارسال دوباره»، کد واقعی.
+    blocked.delete(MOBILE);
+    later(RESEND);
+    expect((await accountCode('48214')).ok).toBe(true);
+    expect((await service.verifyCode(ME, { mobile: MOBILE, code: '48214' })).ok).toBe(true);
+  });
+
+  it('«سفارش‌های من»: سقف‌ها همان سقف‌های مسیر خریدند و کد بی سفارش هم شمرده می‌شود', async () => {
+    expect((await accountCode('12345', { mobile: STRANGER })).ok).toBe(true);
+    // «ارسال دوباره» برای شمارهٔ بی سفارش هم، پس از سایت معلوم نمی‌شود کدام شماره واقعی است.
+    expect(await accountCode('12345', { mobile: STRANGER, session: OTHER, ip: '9.9.9.9' })).toMatchObject({ status: 429, error: 'resend_too_soon' });
+    // هر مرورگر ۵ در ساعت، روی هر دو مسیر با هم.
+    later(RESEND);
+    for (let i = 0; i < PER_BROWSER - 1; i += 1) {
+      expect((await sendCode('12345', { mobile: `091211111${String(i).padStart(2, '0')}`, ip: `10.1.1.${i}` })).ok).toBe(true);
+    }
+    expect(await accountCode('12345', { mobile: '09129999999', ip: '10.9.9.9' })).toMatchObject({ status: 429, error: 'too_many_codes', scope: 'browser' });
+    // و ترمز کل سایت.
+    siteLimit = PER_BROWSER;
+    expect(await accountCode('12345', { mobile: '09129999999', ip: '10.9.9.9', session: browser(7) })).toMatchObject({ status: 429, scope: 'site' });
+  });
+
+  it('«سفارش‌های من»: پیامکی که نرفت پاسخ را عوض نمی‌کند (۵۰۳ می‌گفت این شماره سفارش دارد)، و لاگ می‌شود', async () => {
+    build({ name: 'broken', send: async () => Promise.reject(new Error('panel down')) });
+    expect(await accountCode('48213')).toEqual({ ok: true, value: { mobile: MOBILE, expiresInSeconds: 120, resendInSeconds: 90 } });
+    expect(logs.some((line) => line.includes('سفارش‌های من'))).toBe(true);
+    expect(store.otps).toHaveLength(1);
+    // شاهد: مسیر خرید با همان پنل ۵۰۳ روشن می‌دهد.
+    later(RESEND);
+    expect(await sendCode('48214')).toMatchObject({ status: 503, error: 'sms_unavailable' });
+  });
+
+  it('«سفارش‌های من»: پاسخ پیش از پیامک برمی‌گردد', async () => {
+    let release: () => void = () => undefined;
+    const sent: string[] = [];
+    build({
+      name: 'slow',
+      send: (message) =>
+        new Promise<void>((resolve) => {
+          release = () => {
+            sent.push(message.to);
+            resolve();
+          };
+        }),
+    });
+    codes.push('48213');
+    expect((await service.requestAccountCode(ME, '5.6.7.8', { mobile: MOBILE })).ok).toBe(true);
+    expect(sent).toEqual([]);
+    release();
+    await settle();
+    expect(sent).toEqual([MOBILE]);
   });
 });

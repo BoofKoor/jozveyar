@@ -32,6 +32,7 @@ import {
   createSiteImageStore,
   createSmsOutbox,
   createSmsStats,
+  createSupportStore,
   createTariffStore,
   createTicketTemplateStore,
   getDb,
@@ -62,6 +63,7 @@ import { createPanelReport, type PanelReport } from './report';
 import { createPanelReviews, type PanelReviews } from './reviews';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelShipments, type PanelShipments } from './shipments';
+import { createPanelSupport, type PanelSupport } from './support';
 import { createPanelTariff, type PanelTariff } from './tariff';
 import { createPanelTemplates, type PanelTemplates } from './templates';
 
@@ -82,6 +84,7 @@ interface Panel {
   reviews: PanelReviews;
   content: PanelContent;
   images: PanelImages;
+  support: PanelSupport;
 }
 
 let cached: Panel | null | undefined;
@@ -200,6 +203,8 @@ function build(config: AdminConfig): Panel {
       stepUp: auth.stepUp,
       secret: config.secret,
     }),
+    // پشتیبانی (۱۲٫۱، ADR-068): مالک و متصدی، بی کد تازه؛ پیامک پاسخ با همان آداپتور پنل، پس از commit پاسخ.
+    support: createPanelSupport({ store: createSupportStore(getDb()), sms, secret: config.secret }),
   };
 }
 

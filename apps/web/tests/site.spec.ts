@@ -32,16 +32,19 @@ const SECTIONS = [
   { link: 'تعرفه', id: 'tariff', heading: 'تعرفه، بی هزینهٔ پنهان' },
   { link: 'سؤال‌ها', id: 'faq', heading: 'سؤال‌های پرتکرار' },
 ];
+/** پیوند چهارم سربرگ (برش ۱۲٫۱، سؤال ۳۰۵): صفحهٔ خودش، نه بخشی از صفحهٔ اصلی. */
+const ACCOUNT = { link: 'سفارش‌های من', href: '/orders' };
 
 test.describe('سربرگ', () => {
-  test('لوگو پیوند صفحهٔ اصلی است با متن جایگزین؛ ناوبری سه بخش صفحه، هر کدام با مقصد', async ({ page }) => {
+  test('لوگو پیوند صفحهٔ اصلی است با متن جایگزین؛ ناوبری سه بخش صفحه، هر کدام با مقصد، و «سفارش‌های من»', async ({ page }) => {
     await page.goto('/');
     await expect(homeLink(page)).toHaveAttribute('href', '/');
     await expect(homeLink(page).getByRole('img', { name: 'جزوه‌یار' })).toBeVisible();
 
-    // پیوند فقط به جایی که وجود دارد: هر مقصد یک بخش با تیتر خودش است.
+    // پیوند فقط به جایی که وجود دارد: هر مقصد یک بخش با تیتر خودش است، و «سفارش‌های من» صفحهٔ خودش (بی پایگاه داده هم ۴۰۴ نیست).
     const links = nav(page).getByRole('link');
-    await expect(links).toHaveText(SECTIONS.map(({ link }) => link));
+    await expect(links).toHaveText([...SECTIONS.map(({ link }) => link), ACCOUNT.link]);
+    await expect(nav(page).getByRole('link', { name: ACCOUNT.link })).toHaveAttribute('href', ACCOUNT.href);
     for (const { link, id, heading } of SECTIONS) {
       await expect(nav(page).getByRole('link', { name: link })).toHaveAttribute('href', `/#${id}`);
       await expect(page.locator(`section#${id}`)).toHaveCount(1);
@@ -65,10 +68,11 @@ test.describe('سربرگ', () => {
   test.describe('موبایل', () => {
     test.use({ viewport: { width: 390, height: 844 } });
 
-    test('فقط «تعرفه» و «سؤال‌ها»، هر کدام دست‌کم ۴۴ پیکسل', async ({ page }) => {
+    test('فقط «تعرفه» و «سفارش‌های من» (سؤال ۳۰۵)، هر کدام دست‌کم ۴۴ پیکسل', async ({ page }) => {
       await page.goto('/');
       await expect(nav(page).getByRole('link', { name: 'چطور کار می‌کند' })).toBeHidden();
-      for (const name of ['تعرفه', 'سؤال‌ها']) {
+      await expect(nav(page).getByRole('link', { name: 'سؤال‌ها' })).toBeHidden();
+      for (const name of ['تعرفه', ACCOUNT.link]) {
         const box = (await nav(page).getByRole('link', { name }).boundingBox())!;
         expect(box.height, name).toBeGreaterThanOrEqual(44);
         expect(box.width, name).toBeGreaterThanOrEqual(44);
@@ -331,6 +335,8 @@ const STATIC_PAGES = [
   { path: '/privacy', label: 'حریم خصوصی', heading: 'حریم خصوصی' },
 ];
 const footerNav = (page: Page) => footer(page).getByRole('navigation', { name: 'پیوندهای پاورقی' });
+/** پیوندهای پاورقی: از ۱۲٫۱ «سفارش‌های من» اول گروه «جزوه‌یار» (سؤال ۳۰۵)، ولی نه در نقشهٔ سایت. */
+const FOOTER_LINKS = [{ path: '/orders', label: 'سفارش‌های من' }, ...STATIC_PAGES];
 
 test.describe('صفحه‌های ثابت', () => {
   for (const { path, label, heading } of STATIC_PAGES) {
@@ -430,8 +436,9 @@ test.describe('صفحه‌های ثابت', () => {
     await page.goto('/');
     await expect(footerNav(page).getByRole('heading', { level: 2 })).toHaveText(['جزوه‌یار', 'قوانین']);
     // هر پیوند یک بار در درخت دسترسی است، هرچند در HTML دو بار است (حالت عادی و حالت سفارش).
-    await expect(footerNav(page).getByRole('link')).toHaveText(STATIC_PAGES.map(({ label }) => label));
-    for (const { label } of STATIC_PAGES) {
+    await expect(footerNav(page).getByRole('link')).toHaveText(FOOTER_LINKS.map(({ label }) => label));
+    for (const { label, path } of FOOTER_LINKS) {
+      await expect(footerNav(page).getByRole('link', { name: label })).toHaveAttribute('href', path);
       await expect(footerNav(page).getByRole('link', { name: label })).not.toHaveAttribute('target', /.+/);
     }
 
@@ -446,8 +453,8 @@ test.describe('صفحه‌های ثابت', () => {
   test('در حالت سفارش پیوندها زبانهٔ تازه باز می‌کنند و جزوهٔ نیمه‌کاره سر جایش می‌ماند', async ({ page }) => {
     await page.goto('/');
     await dropFile(page);
-    await expect(footerNav(page).getByRole('link')).toHaveText(STATIC_PAGES.map(({ label }) => label));
-    for (const { label } of STATIC_PAGES) {
+    await expect(footerNav(page).getByRole('link')).toHaveText(FOOTER_LINKS.map(({ label }) => label));
+    for (const { label } of FOOTER_LINKS) {
       const link = footerNav(page).getByRole('link', { name: label });
       await expect(link).toHaveAttribute('target', '_blank');
       await expect(link).toHaveAttribute('rel', 'noopener');
@@ -469,7 +476,7 @@ test.describe('صفحه‌های ثابت', () => {
 
     test('پیوندهای پاورقی هر کدام دست‌کم ۴۴ پیکسل', async ({ page }) => {
       await page.goto('/terms');
-      for (const { label } of STATIC_PAGES) {
+      for (const { label } of FOOTER_LINKS) {
         const box = (await footerNav(page).getByRole('link', { name: label }).boundingBox())!;
         expect(box.height, label).toBeGreaterThanOrEqual(44);
         expect(box.width, label).toBeGreaterThanOrEqual(44);

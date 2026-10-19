@@ -26,6 +26,7 @@ import {
   createSecretStore,
   createSmsLog,
   createSmsOutbox,
+  createSupportStore,
   gatewayRejection,
   getDb,
   PREVIEW_TOKEN,
@@ -40,6 +41,7 @@ import {
   type OrderStore,
   type ReviewStore,
   type SecretStore,
+  type SupportStore,
 } from '@jozveyar/db';
 import { mockGateway, PaymentError, type PaymentGateway } from '@jozveyar/payments';
 import { zibalGateway } from '@jozveyar/payments/zibal';
@@ -153,6 +155,7 @@ interface Stores {
   orders: OrderStore;
   auth: AuthStore;
   reviews: ReviewStore;
+  support: SupportStore;
 }
 
 let stores: Stores | undefined;
@@ -160,7 +163,7 @@ let stores: Stores | undefined;
 function storesOf(): Stores {
   if (stores) return stores;
   const db = getDb();
-  stores = { orders: createOrderStore(db), auth: createAuthStore(db), reviews: createReviewStore(db) };
+  stores = { orders: createOrderStore(db), auth: createAuthStore(db), reviews: createReviewStore(db), support: createSupportStore(db) };
   return stores;
 }
 
@@ -249,6 +252,17 @@ function authServiceOf(): AuthService {
     siteDailyLimit: () => readSetting(setting, 'otp.site_daily_limit'),
   });
   return authService;
+}
+
+/**
+ * کد پیامکی و نشست برای «سفارش‌های من» (برش ۱۲٫۱، ADR-068): همان سرویس و همان نشست `jy_auth` مسیر خرید (سؤال ۳۰۵)، ولی بی دسترسی
+ * مسیر خرید؛ `accountContext.ts` پیش از آن پایگاه داده و `SESSION_SECRET` را سنجیده.
+ */
+export const accountAuthService = (): AuthService => authServiceOf();
+
+/** کاربر نشست `jy_auth`، یا null؛ صفحه‌های «سفارش‌های من» (برش ۱۲٫۱). */
+export async function sessionUserOf(token: string | null): Promise<AuthUser | null> {
+  return sessionUser(storesOf().auth, token, new Date());
 }
 
 function servicesFor(hosts: Hosts): Services {
@@ -357,10 +371,10 @@ export function mockCheckoutService(): CheckoutService {
  */
 export async function orderViewOf(token: string, authToken: string | null): Promise<Result<OrderView> | null> {
   if (!process.env.DATABASE_URL) return null;
-  const { orders, auth } = storesOf();
+  const { orders, auth, support } = storesOf();
   const at = new Date();
   const session = await sessionUser(auth, authToken, at);
-  return orderView(orders, token, session, at);
+  return orderView(orders, token, session, at, (userId, orderId) => support.customerOrderThread(userId, orderId));
 }
 
 export async function orderViewFor(request: NextRequest, token: string): Promise<NextResponse> {

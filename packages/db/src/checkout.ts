@@ -97,12 +97,13 @@ const KEY_SHAPE: Record<ServiceKeyName, (value: string) => boolean> = {
   SMS_PAID_TEMPLATE: isSmsIrTemplateId,
   SMS_TRACKING_TEMPLATE: isSmsIrTemplateId,
   SMS_PARTNER_TEMPLATE: isSmsIrTemplateId,
+  SMS_SUPPORT_TEMPLATE: isSmsIrTemplateId,
   PAYMENT_MERCHANT_ID: isZibalMerchant,
 };
 
 /**
- * کلیدهایی که آمادگی `live` می‌خواهد: همهٔ کلیدها جز قالب پیامک چاپخانه (برش ۷٫۶، سؤال ۱۲۶): پیامک چاپخانه پیش‌نیاز `live` نیست، و
- * قالب خالی‌اش فقط همان پیامک را «نرفت» می‌کند (سؤال ۱۷۵).
+ * کلیدهایی که آمادگی `live` می‌خواهد: همهٔ کلیدها جز قالب پیامک چاپخانه (برش ۷٫۶، سؤال ۱۲۶) و قالب پیامک پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۲):
+ * هیچ‌کدام پیش‌نیاز `live` نیست، و قالب خالی هر کدام فقط همان پیامک را «نرفت» می‌کند (سؤال ۱۷۵).
  */
 const READINESS_KEYS = SERVICE_KEYS.filter((name): name is ServiceKeyName & ReadinessPart => (READINESS_PARTS as readonly string[]).includes(name));
 

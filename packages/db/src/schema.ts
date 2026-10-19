@@ -1321,6 +1321,92 @@ export const orderReviews = pgTable(
 );
 
 /**
+ * گفت‌وگوی پشتیبانی (برش ۱۲٫۱، ADR-068؛ سؤال‌های ۲۱۱ و ۳۰۹ تا ۳۱۶): مشتری از «سفارش‌های من» دربارهٔ یک سفارش یا «سؤال کلی» پیام می‌دهد،
+ * و مالک و متصدی از «پشتیبانی» پنل پاسخ می‌دهند. یک گفت‌وگو برای هر سفارش (`support_threads_order`) و یک «سؤال کلی» برای هر مشتری
+ * (`support_threads_general`): پیام تازه به همان می‌رود و گفت‌وگوی بسته را دوباره باز می‌کند.
+ *
+ * - **حال** (`status`): `open` منتظر ما (برای مشتری «منتظر پاسخ»)، `answered` «پاسخ داده شد»، `closed` «بسته». فقط پیام‌ها حال را عوض
+ *   می‌کنند: تریگر `support_messages_apply` پس از هر پیام، و `support_threads_guard` هر تغییر دیگری را رد می‌کند، جز «دیده شد» مشتری (0058).
+ * - `waiting_since`: اولین پیام مشتری که هنوز پاسخ نگرفته، فقط در `open` (`support_threads_waiting`). صندوق «باز» قدیمی‌ترین انتظار را اول
+ *   می‌آورد، و پیشخوان «قدیمی‌ترین از …» را از همین می‌گوید.
+ * - `last_message_at`: آخرین پیام، از هر دو سو؛ ترتیب «تازه‌ترین پیام اول» و فهرست «پیام‌ها»ی مشتری.
+ * - `customer_seen_at`: آخرین باری که مشتری گفت‌وگو را دید؛ «پاسخ تازه»، و پیامک پاسخی که تا مشتری پاسخ قبلی را ندیده دوباره نمی‌رود
+ *   (سؤال ۳۱۲). فقط جلو می‌رود.
+ * - گفت‌وگوی سفارش فقط با خود سفارش پاک می‌شود (تست‌ها)، و «سؤال کلی» هرگز.
+ */
+export const supportThreads = pgTable(
+  'support_threads',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    /** null یعنی «سؤال کلی». */
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'cascade' }),
+    status: text('status').$type<'open' | 'answered' | 'closed'>().notNull().default('open'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastMessageAt: timestamp('last_message_at', { withTimezone: true }).notNull().defaultNow(),
+    waitingSince: timestamp('waiting_since', { withTimezone: true }),
+    customerSeenAt: timestamp('customer_seen_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('support_threads_order').on(t.orderId).where(sql`${t.orderId} IS NOT NULL`),
+    uniqueIndex('support_threads_general').on(t.userId).where(sql`${t.orderId} IS NULL`),
+    index('support_threads_user').on(t.userId, t.lastMessageAt),
+    index('support_threads_inbox').on(t.status, t.waitingSince),
+    check('support_threads_status', sql`${t.status} IN ('open', 'answered', 'closed')`),
+    check('support_threads_waiting', sql`(${t.status} = 'open') = (${t.waitingSince} IS NOT NULL)`),
+    check(
+      'support_threads_times',
+      sql`${t.lastMessageAt} >= ${t.createdAt} AND (${t.waitingSince} IS NULL OR (${t.waitingSince} >= ${t.createdAt} AND ${t.waitingSince} <= ${t.lastMessageAt}))`,
+    ),
+  ],
+);
+
+/**
+ * پیام‌های هر گفت‌وگوی پشتیبانی (برش ۱۲٫۱، ADR-068، سؤال‌های ۳۱۰ و ۳۱۴). فقط افزودنی، مثل یادداشت سفارش (`support_messages_guard`، 0058):
+ * پیام فرستاده‌شده عوض و پاک نمی‌شود، جز با پاک شدن خود گفت‌وگو.
+ *
+ * - **نوع** (`kind`): `customer` پیام مشتری (۱ تا ۱٬۰۰۰ نویسه)، `staff` پاسخ پشتیبانی (۱ تا ۲٬۰۰۰ نویسه، با ادمینی که نوشت؛ مشتری نامش را
+ *   نمی‌بیند و «پشتیبانی جزوه‌یار» می‌بیند)، و `closed` نشان «بستن گفت‌وگو» با ادمینی که بست، بی متن. متن هر خط فارسی‌نرمال است
+ *   (`tidyInputLinesFa`)، بی پیوست؛ پیوند درون متن فقط متن است.
+ * - `request_id` شناسهٔ فرمی که پیام را فرستاد: دو کلیک، یا فرستادن دوباره پس از پاسخی که نرسید، یک پیام است (`support_messages_request`).
+ * - `sms_message_id`: پیامک پاسخ همین پاسخ (سؤال ۳۱۲)، که در همان تراکنش «منتظر» نوشته شد؛ فقط پاسخ پشتیبانی، و نه هر پاسخی: پاسخی که
+ *   پیامک پاسخ قبلی‌اش رفته و مشتری هنوز ندیده، پیامک تازه نمی‌گیرد.
+ */
+export const supportMessages = pgTable(
+  'support_messages',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    threadId: bigint('thread_id', { mode: 'number' })
+      .notNull()
+      .references(() => supportThreads.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<'customer' | 'staff' | 'closed'>().notNull(),
+    adminUserId: uuid('admin_user_id').references(() => adminUsers.id),
+    body: text('body'),
+    requestId: uuid('request_id').notNull(),
+    smsMessageId: bigint('sms_message_id', { mode: 'number' }).references(() => smsMessages.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('support_messages_thread').on(t.threadId, t.id),
+    uniqueIndex('support_messages_request').on(t.requestId),
+    uniqueIndex('support_messages_sms').on(t.smsMessageId),
+    check('support_messages_kind', sql`${t.kind} IN ('customer', 'staff', 'closed')`),
+    check('support_messages_author', sql`(${t.kind} = 'customer') = (${t.adminUserId} IS NULL)`),
+    check(
+      'support_messages_body',
+      sql`CASE ${t.kind}
+        WHEN 'closed' THEN ${t.body} IS NULL
+        ELSE ${t.body} IS NOT NULL AND length(${t.body}) <= (CASE ${t.kind} WHEN 'staff' THEN 2000 ELSE 1000 END)
+          AND btrim(${t.body}, E' \\n') <> '' AND ${t.body} = btrim(${t.body}, E' \\n')
+      END`,
+    ),
+    check('support_messages_sms_staff', sql`${t.smsMessageId} IS NULL OR ${t.kind} = 'staff'`),
+  ],
+);
+
+/**
  * هر تلاش پرداخت. سفارشی که پرداختش ناموفق شد، تلاش تازه می‌گیرد با همان مبلغ منجمد؛ تلاش قبلی
  * می‌ماند. کلید خارجی به سفارش cascade ندارد: سابقهٔ پول بی‌صدا پاک نمی‌شود.
  */
@@ -1523,18 +1609,21 @@ export const smsMessages = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     provider: text('provider').notNull(),
     toMobile: text('to_mobile').notNull(),
-    /** `otp`، `order_paid`، از ۶٫۳ `tracking` (کد رهگیری هر مرسوله، ADR-047)، و از ۷٫۶ `partner_order` (سفارش تازهٔ چاپخانه). */
+    /**
+     * `otp`، `order_paid`، از ۶٫۳ `tracking` (کد رهگیری هر مرسوله، ADR-047)، از ۷٫۶ `partner_order` (سفارش تازهٔ چاپخانه)، و از ۱۲٫۱
+     * `support_reply` (پاسخ پشتیبانی، ADR-068).
+     */
     purpose: text('purpose').notNull(),
     body: text('body'),
     /**
-     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری، از برش ۷ پرداخت و از ۷٫۶ چاپخانه `pending` (در همان تراکنش مرسوله، پرداخت
-     * یا تخصیص نوشته شد و هنوز فرستاده نشده) و `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard` (0026، بازنویسی 0028 و
-     * 0036).
+     * `logged` (کنسولی)، `sent` یا `failed`؛ و فقط برای رهگیری، از برش ۷ پرداخت، از ۷٫۶ چاپخانه و از ۱۲٫۱ پاسخ پشتیبانی `pending` (در همان
+     * تراکنش مرسوله، پرداخت، تخصیص یا پاسخ نوشته شد و هنوز فرستاده نشده) و `sending` (فرستنده برداشتش). گذارها با تریگر `sms_messages_guard`
+     * (0026، بازنویسی 0028، 0036 و 0058).
      */
     status: text('status').notNull(),
     providerMessageId: text('provider_message_id'),
     error: text('error'),
-    /** پارامترهای قالب پنل پیامک (برش ۷)؛ رهگیری: شمارهٔ سفارش و بارکد؛ پرداخت و چاپخانه: شمارهٔ سفارش و روز تحویل. */
+    /** پارامترهای قالب پنل پیامک (برش ۷)؛ رهگیری: شمارهٔ سفارش و بارکد؛ پرداخت و چاپخانه: شمارهٔ سفارش و روز تحویل؛ پاسخ پشتیبانی: موضوع. */
     params: jsonb('params'),
     /** شمار تلاش‌های فرستادن پیامک از صف («دوباره بفرست» یکی بالا می‌برد)؛ کد ۰، چون یک بار و بی ردیف منتظر است. */
     attempts: integer('attempts').notNull().default(0),
@@ -1550,11 +1639,11 @@ export const smsMessages = pgTable(
   },
   (t) => [
     index('sms_messages_to').on(t.toMobile, t.createdAt),
-    check('sms_messages_purpose', sql`${t.purpose} IN ('otp', 'order_paid', 'tracking', 'partner_order')`),
+    check('sms_messages_purpose', sql`${t.purpose} IN ('otp', 'order_paid', 'tracking', 'partner_order', 'support_reply')`),
     check('sms_messages_status', sql`${t.status} IN ('logged', 'sent', 'failed', 'pending', 'sending')`),
     check(
       'sms_messages_queued',
-      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} IN ('tracking', 'order_paid', 'partner_order') AND ${t.body} IS NOT NULL)`,
+      sql`${t.status} NOT IN ('pending', 'sending') OR (${t.purpose} IN ('tracking', 'order_paid', 'partner_order', 'support_reply') AND ${t.body} IS NOT NULL)`,
     ),
     check('sms_messages_sent_at', sql`(${t.sentAt} IS NULL) OR ${t.status} IN ('logged', 'sent')`),
     /** کد تأیید زنده با پنل واقعی هرگز در پایگاه داده (ADR-033، ADR-049): نه متن و نه پارامترش؛ کنسولی متن را دارد تا تست بخواندش. */
@@ -1747,7 +1836,8 @@ export const adminEvents = pgTable(
  * - `sealed` مهروموم AES-256-GCM با `SECRETS_KEY` است (`sealed.ts`)، بسته به نام همین ردیف (AAD `service_secrets:<نام>`):
  *   نشت پایگاه داده یا پشتیبانش بی `.env` کلیدی لو نمی‌دهد، و مقدار یک کلید در ردیف کلید دیگر باز نمی‌شود. CHECK
  *   `service_secrets_sealed` فقط شکل مهروموم را می‌پذیرد، پس مقدار خام اینجا نمی‌نشیند، حتی با کد اشتباه.
- * - نام فقط همین شش (CHECK `service_secrets_name`؛ دو قالب تازه با 0027، برش ۷، و قالب چاپخانه با 0035، ۷٫۶): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
+ * - نام فقط همین هفت (CHECK `service_secrets_name`؛ دو قالب تازه با 0027، برش ۷، قالب چاپخانه با 0035، ۷٫۶، و قالب پاسخ پشتیبانی با 0057،
+ *   ۱۲٫۱): نه `CHECKOUT_MODE`، نه `SMS_PROVIDER` و
  *   `PAYMENT_PROVIDER`، نه رمزهای خود سرور. کلید تازه مهاجرت تازهٔ همین CHECK را می‌خواهد.
  * - `updated_by` بی کلید خارجی، مثل `price_lists.created_by`: ادمین پاک‌نشدنی است (`admin_users_no_delete`).
  */
@@ -1762,7 +1852,7 @@ export const serviceSecrets = pgTable(
   (t) => [
     check(
       'service_secrets_name',
-      sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'SMS_PARTNER_TEMPLATE', 'PAYMENT_MERCHANT_ID')`,
+      sql`${t.name} IN ('SMS_API_KEY', 'SMS_OTP_TEMPLATE', 'SMS_PAID_TEMPLATE', 'SMS_TRACKING_TEMPLATE', 'SMS_PARTNER_TEMPLATE', 'SMS_SUPPORT_TEMPLATE', 'PAYMENT_MERCHANT_ID')`,
     ),
     check('service_secrets_sealed', sql`${t.sealed} ~ '^v1[.][A-Za-z0-9_-]{16}[.][A-Za-z0-9_-]{22,}$'`),
   ],

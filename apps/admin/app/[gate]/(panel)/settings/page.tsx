@@ -535,6 +535,13 @@ export default async function SettingsPage({ params, searchParams }: { params: P
                         ) : null}
                       </p>
                       {template && info.purpose ? <TemplateText purpose={info.purpose} /> : null}
+                      {key.name === 'SMS_SUPPORT_TEMPLATE' && key.source === 'empty' ? (
+                        // پیامک پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۲؛ طرح «قالب پیامک پاسخ»): پاسخ بی پیامک هم می‌رود، و هشدار پیشخوان همین را می‌گوید.
+                        <p className="ad-keys__test" data-check="warn">
+                          <span className={CHECK_ICONS.warn} aria-hidden="true" />
+                          <span>تا شناسه وارد نشود، پاسخ‌ها می‌روند ولی پیامکشان «نرفت» است؛ هشدار پیشخوان همین را می‌گوید.</span>
+                        </p>
+                      ) : null}
                       {check ? (
                         <p className="ad-keys__test" data-check={check.tone}>
                           <span className={CHECK_ICONS[check.tone]} aria-hidden="true" />

@@ -11,28 +11,34 @@ import { formatJalaliNumeric } from '@jozveyar/text';
 
 import type { SitePublished } from './server/content';
 import { pageMetadata } from './server/pageMetadata';
-import { STATIC_PAGES, footerGroups, pageDate, sitemapPages } from './staticPages';
+import { ACCOUNT_PAGE, STATIC_PAGES, footerGroups, pageDate, sitemapPages } from './staticPages';
 
 const paths = (pages: readonly { path: string }[]) => pages.map(({ path }) => path);
 const KINDS = Object.keys(STATIC_PAGES) as (keyof typeof STATIC_PAGES)[];
 
 describe('صفحه‌های ثابت', () => {
-  it('پاورقی: دو گروه طرح؛ «تماس» فقط وقتی راهی برای تماس هست', () => {
+  it('پاورقی: دو گروه طرح؛ «سفارش‌های من» اول «جزوه‌یار» (۱۲٫۱)، و «تماس» فقط وقتی راهی برای تماس هست', () => {
     expect(footerGroups(false).map(({ heading, pages }) => [heading, paths(pages)])).toEqual([
-      ['جزوه‌یار', ['/about']],
+      ['جزوه‌یار', ['/orders', '/about']],
       ['قوانین', ['/terms', '/privacy']],
     ]);
     expect(footerGroups(true).map(({ heading, pages }) => [heading, paths(pages)])).toEqual([
-      ['جزوه‌یار', ['/about', '/contact']],
+      ['جزوه‌یار', ['/orders', '/about', '/contact']],
       ['قوانین', ['/terms', '/privacy']],
     ]);
-    expect(footerGroups(true).flatMap(({ pages }) => pages).map(({ label }) => label)).toEqual(['دربارهٔ ما', 'تماس', 'قوانین و مقررات', 'حریم خصوصی']);
+    expect(footerGroups(true).flatMap(({ pages }) => pages).map(({ label }) => label)).toEqual([
+      'سفارش‌های من',
+      'دربارهٔ ما',
+      'تماس',
+      'قوانین و مقررات',
+      'حریم خصوصی',
+    ]);
   });
 
-  it('نقشهٔ سایت همان صفحه‌های پاورقی است', () => {
+  it('نقشهٔ سایت همان صفحه‌های پاورقی است، جز «سفارش‌های من» که خصوصی هر مشتری است', () => {
     expect(paths(sitemapPages(false))).toEqual(['/about', '/terms', '/privacy']);
     expect(paths(sitemapPages(true))).toEqual(['/about', '/contact', '/terms', '/privacy']);
-    expect(sitemapPages(true)).toEqual(footerGroups(true).flatMap(({ pages }) => pages));
+    expect(sitemapPages(true)).toEqual(footerGroups(true).flatMap(({ pages }) => pages).filter(({ path }) => path !== ACCOUNT_PAGE.path));
   });
 
   it('متادیتا: عنوان و توضیح گوگل از متن صفحه، canonical خود صفحه، و openGraph پایهٔ سایت با تصویر بالادست', async () => {

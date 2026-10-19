@@ -6,7 +6,17 @@ import { randomUUID } from 'node:crypto';
 
 import { Fragment } from 'react';
 
-import { FILE_MARGIN_MS, IRAN_POST, isChecking, isPaidStatus, voidKept, type PanelOrderDetails, type PanelOrderItem, type VoidKept } from '@jozveyar/db';
+import {
+  FILE_MARGIN_MS,
+  IRAN_POST,
+  isChecking,
+  isPaidStatus,
+  voidKept,
+  type OrderThreadCard,
+  type PanelOrderDetails,
+  type PanelOrderItem,
+  type VoidKept,
+} from '@jozveyar/db';
 import { GATEWAY_NAMES, gatewayName } from '@jozveyar/payments';
 import { bytesParts, formatCardMask, formatJalaliNumeric, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
@@ -29,6 +39,7 @@ import { ResendPartnerSmsForm } from '../../../../../components/ResendPartnerSms
 import { ResendSmsForm } from '../../../../../components/ResendSmsForm';
 import { Segments } from '../../../../../components/Segments';
 import { StatusButton } from '../../../../../components/StatusButton';
+import { SupportBadge } from '../../../../../components/SupportBadge';
 import { VoidShipmentForm } from '../../../../../components/VoidShipmentForm';
 import { ZipButton } from '../../../../../components/ZipButton';
 import { dayHeading, dayText, tehranDay, whenText } from '../../../../../lib/format';
@@ -1309,6 +1320,39 @@ const INQUIRY_DONE: Record<InquiryOutcome, { tone: 'success' | 'info' | 'warning
 };
 
 /**
+ * کارت «پیام‌های مشتری» (برش ۱۲٫۱، سؤال ۳۱۵؛ طرح «سفارش با پیام»): گفت‌وگوی پشتیبانی همین سفارش با حالش، شمار پیام‌ها و آخرین پیام، و «دیدن
+ * گفت‌وگو». فقط مالک و متصدی (`support.reply`)، و فقط وقتی گفت‌وگویی هست؛ چاپخانه و حسابدار هرگز.
+ */
+function ThreadCard({ gate, thread, now }: { gate: string; thread: OrderThreadCard; now: Date }) {
+  const last = thread.last;
+  const who = !last ? null : last.kind === 'customer' ? 'مشتری' : (last.adminName ?? 'پشتیبانی');
+  return (
+    <section className="jy-card" aria-labelledby="t-thread" data-order-thread={thread.id}>
+      <div className="jy-card__head">
+        <h2 id="t-thread" className="jy-card__title">
+          پیام‌های مشتری
+        </h2>
+        <SupportBadge status={thread.status} />
+      </div>
+      <p className="ad-meta">
+        <span className="num">{formatNumber(thread.messages)}</span> پیام
+        {last && who ? (
+          <>
+            {' '}
+            · {last.kind === 'closed' ? `بسته شد: ${who}` : `آخرین پیام: ${who}`}، {whenText(last.at, now)}
+          </>
+        ) : null}
+      </p>
+      <div className="ad-actions">
+        <Link href={panelPath(gate, `/support/${thread.id}`)} className="jy-btn jy-btn--secondary">
+          دیدن گفت‌وگو
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+/**
  * مسدودی موبایل صاحب سفارش (۱۲٫۲، سؤال ۲۱۲)، زیر کارت «ارسال به»، فقط برای مالک و متصدی: مسدود با از کی، چه کسی و دلیل، و «رفع مسدودی»؛
  * وگرنه «مسدود کردن این شماره» که فرم دلیل را در همین کارت باز می‌کند (`?do=block`).
  */
@@ -1363,7 +1407,7 @@ export default async function OrderPage({
 }) {
   const { gate, number } = await params;
   const query = await searchParams;
-  const { orders, blocks } = requirePanel(gate);
+  const { orders, blocks, support } = requirePanel(gate);
   const session = await requireSession(gate);
   if (!can(session, 'orders.read')) return <NoAccess gate={gate} session={session} />;
   const back = (
@@ -1384,8 +1428,9 @@ export default async function OrderPage({
   const { details, bounds, canDownload, canEditRecipient } = view;
   const { order } = details;
   const now = bounds.at;
-  // مسدودی موبایل صاحب سفارش (۱۲٫۲): فقط با `customers.block`؛ بی آن کارت «ارسال به» همان امروز است.
-  const block = await blocks.ofOrder(session, order.orderNumber);
+  // مسدودی موبایل صاحب سفارش (۱۲٫۲): فقط با `customers.block`؛ بی آن کارت «ارسال به» همان امروز است. گفت‌وگوی پشتیبانی همین سفارش (۱۲٫۱):
+  // فقط با `support.reply`، و فقط وقتی هست.
+  const [block, thread] = await Promise.all([blocks.ofOrder(session, order.orderNumber), support.orderCard(session, order.id)]);
   const stale = staleSections(
     details.items.flatMap((item) => item.sections),
     now,
@@ -1475,6 +1520,7 @@ export default async function OrderPage({
             // چاپخانه (۵٫۳) کارت چاپخانه ندارد: سفارش‌هایش همه مال خودش است (طرح).
             <PartnerCard gate={gate} view={view} />
           )}
+          {thread ? <ThreadCard gate={gate} thread={thread} now={now} /> : null}
         </aside>
 
         <div className="ad-main">

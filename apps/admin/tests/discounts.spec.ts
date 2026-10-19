@@ -147,7 +147,7 @@ test.describe.serial('کدهای تخفیف (۱۱٫۴)', () => {
     const { page, problems } = who.owner;
     await page.goto(at('/'));
     const wide = page.getByRole('navigation', { name: 'بخش‌های پنل' }).locator('.ad-nav__wide');
-    await expect(wide).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(wide).toHaveText(['پشتیبانی', 'ارسال', 'تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await wide.filter({ hasText: 'تخفیف‌ها' }).click();
     await expect(page.getByRole('heading', { name: 'تخفیف‌ها', level: 1 })).toBeVisible();
     await expect(wide.filter({ hasText: 'تخفیف‌ها' })).toHaveAttribute('aria-current', 'page');
@@ -312,7 +312,7 @@ test.describe.serial('کدهای تخفیف (۱۱٫۴)', () => {
   test('متصدی: بی زبانه، و «تخفیف‌ها» فقط برای مالک است', async () => {
     const { page, problems } = who.operator;
     await page.goto(at('/'));
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه', 'محتوای سایت']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'تعرفه', 'محتوای سایت']);
     await page.goto(at('/discounts'));
     await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
     expect(problems).toEqual([]);

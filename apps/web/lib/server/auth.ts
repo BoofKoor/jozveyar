@@ -3,6 +3,9 @@
  *
  * - **کد:** ۵ رقم، ۲ دقیقه اعتبار، ۳ فرصت، ارسال دوباره پس از ۹۰ ثانیه.
  * - **شمارهٔ مسدود** (برش ۱۲٫۲، ADR-063، سؤال ۲۱۲): کد نمی‌گیرد، با ۴۰۳ `mobile_blocked` و پیام «تماس».
+ * - **«سفارش‌های من»** (برش ۱۲٫۱، ADR-068، سؤال ۳۰۶): دروازه به جای جزوه «سفارشی با همین شماره» است، و پاسخ برای هر شماره یکی، پس
+ *   از سایت معلوم نمی‌شود چه کسی سفارش داده. شمارهٔ بی سفارش یا مسدود کدی می‌گیرد که هرگز درست نیست (هش پیش‌تصویر تصادفی، نه ۵ رقم)،
+ *   با همان سقف‌ها و همان شمارش و بی پیامک؛ و پیامک شمارهٔ واقعی پس از پاسخ می‌رود، نه پیش از آن، تا زمان پاسخ هم چیزی نگوید.
  * - **سقف ارسال، لایه‌لایه** (برش ۷، ADR-049، سؤال ۱۱۷): کد فقط برای مرورگری که جزوهٔ آماده و زنده روی سرور دارد (دروازهٔ جزوه، همان
  *   شرط «ادامه»)؛ ۵ کد در ساعت برای هر مرورگر؛ ۵ در ساعت و ۱۰ در ۲۴ ساعت برای هر شماره؛ ۲۰ در ساعت برای هر IP؛ و ترمز آخر کل
  *   سایت، ساعتی و ۲۴ ساعته (`settings`، پیش‌فرض ۳۰۰ و ۲٬۰۰۰). پنجره‌ها لغزان‌اند (سؤال ۱۳۳). شمارش از ردیف‌های `otp_requests`، زیر یک
@@ -22,7 +25,7 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 import { otpRequestSchema, otpVerifySchema } from '@jozveyar/contracts/checkout';
-import { FILE_MARGIN_MS, OTP_FIXED_LIMITS, type AuthStore, type OtpCounts, type OtpRow } from '@jozveyar/db';
+import { FILE_MARGIN_MS, OTP_FIXED_LIMITS, type AuthStore, type OtpCounts, type OtpGate, type OtpRow } from '@jozveyar/db';
 import { otpParams, otpText, type SmsProvider } from '@jozveyar/sms';
 import { toLatinDigits } from '@jozveyar/text';
 import { normalizeIranMobile } from '@jozveyar/text/input';
@@ -85,18 +88,14 @@ export function createAuthService(deps: AuthServiceDeps) {
   };
 
   /**
-   * سقف پرشده، یا null. «چند ثانیهٔ دیگر» تا بیرون رفتن قدیمی‌ترین کد همان پنجره. اول دروازهٔ جزوه (کد برای مرورگری که جزوه‌ای
-   * روی سرور ندارد اصلاً معنا ندارد)، بعد شمارهٔ مسدود (برش ۱۲٫۲، ADR-063: پیامکی نمی‌رود و چیزی شمرده نمی‌شود، و «چند ثانیهٔ دیگر» به
-   * شماره‌ای که هرگز کد نمی‌گیرد معنا ندارد)، بعد لایه‌ها از تنگ به گشاد، و ترمز کل سایت آخر. دروازهٔ جزوه پیش از مسدودی است، تا رباتی
-   * بی جزوه نتواند شماره‌ها را بپرسد.
+   * سقف پرشده، یا null: لایه‌ها از تنگ به گشاد، و ترمز کل سایت آخر. «چند ثانیهٔ دیگر» تا بیرون رفتن قدیمی‌ترین کد همان پنجره. مسیر خرید
+   * و «سفارش‌های من» هر دو همین را دارند، با همان شمارنده‌ها (سؤال ۳۰۶).
    */
-  function limitHit(counts: OtpCounts, at: Date, siteLimit: number, siteDayLimit: number): Failure | null {
+  function capHit(counts: OtpCounts, at: Date, siteLimit: number, siteDayLimit: number): Failure | null {
     const wait = (from: Date | null, span: number) =>
       Math.max(1, Math.ceil(((from ?? at).getTime() + span - at.getTime()) / 1000));
     const tooMany = (scope: string, from: Date | null, span: number) =>
       fail(429, 'too_many_codes', { scope, retryAfterSeconds: wait(from, span) });
-    if (!counts.ready) return fail(409, 'otp_no_documents');
-    if (counts.blocked) return fail(403, 'mobile_blocked');
     if (counts.mobileLatest && at.getTime() - counts.mobileLatest.getTime() < OTP_RESEND_MS) {
       return fail(429, 'resend_too_soon', { retryAfterSeconds: wait(counts.mobileLatest, OTP_RESEND_MS) });
     }
@@ -115,6 +114,17 @@ export function createAuthService(deps: AuthServiceDeps) {
     return null;
   }
 
+  /**
+   * مسیر خرید: اول دروازهٔ جزوه (کد برای مرورگری که جزوه‌ای روی سرور ندارد اصلاً معنا ندارد)، بعد شمارهٔ مسدود (برش ۱۲٫۲، ADR-063:
+   * پیامکی نمی‌رود و چیزی شمرده نمی‌شود، و «چند ثانیهٔ دیگر» به شماره‌ای که هرگز کد نمی‌گیرد معنا ندارد)، بعد سقف‌ها. دروازهٔ جزوه پیش
+   * از مسدودی است، تا رباتی بی جزوه نتواند شماره‌ها را بپرسد.
+   */
+  function limitHit(counts: OtpCounts, at: Date, siteLimit: number, siteDayLimit: number): Failure | null {
+    if (!counts.ready) return fail(409, 'otp_no_documents');
+    if (counts.blocked) return fail(403, 'mobile_blocked');
+    return capHit(counts, at, siteLimit, siteDayLimit);
+  }
+
   /** چرا کد این شماره دیگر پذیرفته نمی‌شود؛ null یعنی هنوز می‌شود. */
   function closedReason(otp: OtpRow | null, at: Date): Failure | null {
     if (!otp || otp.consumedAt) return fail(404, 'no_code');
@@ -123,50 +133,68 @@ export function createAuthService(deps: AuthServiceDeps) {
     return null;
   }
 
+  type Issued = Result<{ mobile: string; expiresInSeconds: number; resendInSeconds: number }>;
+
+  /**
+   * کد تازه: مسیر خرید با دروازهٔ جزوه، و «سفارش‌های من» با دروازهٔ سفارش. پاسخ «سفارش‌های من» برای هر شماره‌ای که از سقف‌ها گذشت یکی
+   * است؛ کدِ بی سفارش یا مسدود هیچ‌وقت درست نیست، و پیامک فقط برای کد واقعی، بی منتظر ماندن.
+   */
+  async function issue(sessionHash: string, ip: string, body: unknown, path: 'checkout' | 'account'): Promise<Issued> {
+    const parsed = otpRequestSchema.safeParse(body);
+    if (!parsed.success) return fail(400, 'invalid_request');
+    const mobile = normalizeIranMobile(parsed.data.mobile);
+    if (!mobile) return fail(400, 'invalid_mobile');
+
+    const at = now();
+    const [siteLimit, siteDayLimit] = await Promise.all([deps.siteHourlyLimit(), deps.siteDailyLimit()]);
+    const code = newCode();
+    // همان حاشیهٔ پرداخت: جزوه‌ای که تا یک ساعت دیگر پاک می‌شود سفارش نمی‌شود، پس کد هم نمی‌گیرد.
+    const gate: OtpGate = path === 'checkout' ? { kind: 'documents', readyUntil: new Date(at.getTime() + FILE_MARGIN_MS) } : { kind: 'orders' };
+    const verdict: { refused: Failure | null; real: boolean } = { refused: null, real: false };
+    const issued = await deps.store.issueOtp(
+      {
+        mobile,
+        ipHash: ipHash(ip || 'unknown'),
+        sessionHash,
+        hourSince: new Date(at.getTime() - OTP_WINDOW_MS),
+        daySince: new Date(at.getTime() - OTP_DAY_MS),
+        gate,
+      },
+      (counts) => {
+        verdict.refused = path === 'checkout' ? limitHit(counts, at, siteLimit, siteDayLimit) : capHit(counts, at, siteLimit, siteDayLimit);
+        if (verdict.refused) return null;
+        verdict.real = path === 'checkout' || (counts.ready && !counts.blocked);
+        // پیش‌تصویر ۳۲ نویسهٔ هگز هرگز کد ۵ رقمی نیست: کدی که در سقف شمرده می‌شود ولی هیچ ورودی‌ای با آن درست نمی‌شود.
+        const preimage = verdict.real ? code : randomBytes(16).toString('hex');
+        return { codeHash: codeHash(mobile, preimage), createdAt: at, expiresAt: new Date(at.getTime() + OTP_TTL_MS) };
+      },
+    );
+    if (!issued) return verdict.refused ?? fail(503, 'unavailable');
+    const done = ok({ mobile, expiresInSeconds: OTP_TTL_MS / 1000, resendInSeconds: OTP_RESEND_MS / 1000 });
+    const message = { to: mobile, purpose: 'otp' as const, text: otpText(code), params: otpParams(code) };
+
+    if (path === 'account') {
+      // پیامکی که نرفت همان «پیامک نرسید؟» است؛ ۵۰۳ فقط برای شمارهٔ واقعی می‌گفت این شماره سفارش دارد.
+      if (verdict.real) void deps.sms.send(message).catch((error: unknown) => log('✗ پیامک کد «سفارش‌های من» فرستاده نشد:', error));
+      return done;
+    }
+    // بعد از درج، نه در همان تراکنش: پنل واقعی درخواست HTTP است. کدی که پیامکش نرسید در سقف
+    // شمرده می‌ماند؛ ربات با پنل از کار افتاده هم نمی‌تواند بی‌حساب درخواست بفرستد.
+    try {
+      await deps.sms.send(message);
+    } catch (error) {
+      log('✗ پیامک کد فرستاده نشد:', error);
+      return fail(503, 'sms_unavailable');
+    }
+    return done;
+  }
+
   return {
-    /** کد تازه به این شماره، برای همین مرورگر. */
-    async requestCode(
-      sessionHash: string,
-      ip: string,
-      body: unknown,
-    ): Promise<Result<{ mobile: string; expiresInSeconds: number; resendInSeconds: number }>> {
-      const parsed = otpRequestSchema.safeParse(body);
-      if (!parsed.success) return fail(400, 'invalid_request');
-      const mobile = normalizeIranMobile(parsed.data.mobile);
-      if (!mobile) return fail(400, 'invalid_mobile');
+    /** کد تازه به این شماره، برای همین مرورگر (مسیر خرید، دروازهٔ جزوه). */
+    requestCode: (sessionHash: string, ip: string, body: unknown) => issue(sessionHash, ip, body, 'checkout'),
 
-      const at = now();
-      const [siteLimit, siteDayLimit] = await Promise.all([deps.siteHourlyLimit(), deps.siteDailyLimit()]);
-      const code = newCode();
-      const verdict: { refused: Failure | null } = { refused: null };
-      const issued = await deps.store.issueOtp(
-        {
-          mobile,
-          ipHash: ipHash(ip || 'unknown'),
-          sessionHash,
-          hourSince: new Date(at.getTime() - OTP_WINDOW_MS),
-          daySince: new Date(at.getTime() - OTP_DAY_MS),
-          // همان حاشیهٔ پرداخت: جزوه‌ای که تا یک ساعت دیگر پاک می‌شود سفارش نمی‌شود، پس کد هم نمی‌گیرد.
-          readyUntil: new Date(at.getTime() + FILE_MARGIN_MS),
-        },
-        (counts) => {
-          verdict.refused = limitHit(counts, at, siteLimit, siteDayLimit);
-          if (verdict.refused) return null;
-          return { codeHash: codeHash(mobile, code), createdAt: at, expiresAt: new Date(at.getTime() + OTP_TTL_MS) };
-        },
-      );
-      if (!issued) return verdict.refused ?? fail(503, 'unavailable');
-
-      // بعد از درج، نه در همان تراکنش: پنل واقعی درخواست HTTP است. کدی که پیامکش نرسید در سقف
-      // شمرده می‌ماند؛ ربات با پنل از کار افتاده هم نمی‌تواند بی‌حساب درخواست بفرستد.
-      try {
-        await deps.sms.send({ to: mobile, purpose: 'otp', text: otpText(code), params: otpParams(code) });
-      } catch (error) {
-        log('✗ پیامک کد فرستاده نشد:', error);
-        return fail(503, 'sms_unavailable');
-      }
-      return ok({ mobile, expiresInSeconds: OTP_TTL_MS / 1000, resendInSeconds: OTP_RESEND_MS / 1000 });
-    },
+    /** کد ورود «سفارش‌های من» (برش ۱۲٫۱، سؤال ۳۰۶): فقط شماره‌ای که سفارشی دارد کد واقعی می‌گیرد، و پاسخ برای همه یکی است. */
+    requestAccountCode: (sessionHash: string, ip: string, body: unknown) => issue(sessionHash, ip, body, 'account'),
 
     /** کد درست: نشست تازه. توکن فقط همین یک بار برمی‌گردد و در کوکی می‌نشیند. */
     async verifyCode(

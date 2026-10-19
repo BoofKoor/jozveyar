@@ -12,6 +12,10 @@ import { SiteLogo } from './SiteLogo';
  * می‌مانند. `/#faq` است نه `#faq`، چون همین سربرگ در ۴۰۴ هم هست؛ در خود صفحهٔ اصلی فقط تا همان
  * بخش اسکرول می‌کند و صفحه را دوباره بار نمی‌کند.
  *
+ * از ۱۲٫۱ (سؤال ۳۰۵، طرح `account.html`) «سفارش‌های من» چهارمین پیوند است، در هر حالت مسیر خرید: سفارشی که ثبت شد با خاموش شدن خرید گم
+ * نمی‌شود. در گوشی کنار «تعرفه» می‌نشیند و «سؤال‌ها» فقط در دسکتاپ می‌ماند؛ در صفحه‌های همان بخش جاری دیده می‌شود (`data-account`،
+ * globals.css)، بی JS.
+ *
  * لوگو از ۱۱٫۲ لوگوی مالک است اگر روی سایت گذاشته (`SiteLogo`)، با کلاس `site-logo--custom` که کوچک شدنش را در پهنای کم می‌گذارد.
  */
 export function SiteHeader({ logo }: { logo: MediaFile | null }) {
@@ -30,7 +34,12 @@ export function SiteHeader({ logo }: { logo: MediaFile | null }) {
             چطور کار می‌کند
           </a>
           <a href="/#tariff">تعرفه</a>
-          <a href="/#faq">سؤال‌ها</a>
+          <a className="site-nav__faq" href="/#faq">
+            سؤال‌ها
+          </a>
+          <a className="site-nav__orders" href="/orders">
+            سفارش‌های من
+          </a>
         </nav>
       </header>
     </div>

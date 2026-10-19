@@ -4,12 +4,13 @@
  * پیامک کنسولی (توسعه و CI) فقط همین ردیف است، با متن کامل، تا کد پیامکی بی پنل پیامک هم آزمودنی باشد: تست سرتاسری ۳ج کد را از
  * همین جدول می‌خواند. پنل واقعی متن و پارامتر کد را نگه نمی‌دارد (CHECK `sms_messages_otp_secret`).
  *
- * پیامک پرداخت، رهگیری و چاپخانه ردیف «منتظر» است که در همان تراکنش پرداخت موفق (`queuedPaidSms`، در `orders.ts`)، مرسوله
- * (`queuedTrackingSms`، در `shipments.ts`) یا تخصیص چاپخانه (`queuedPartnerSms`، در `assignment.ts` و `panel.ts`، برش ۷٫۶) نوشته می‌شود،
- * و بعد از commit فرستاده (`createSmsOutbox` برای `deliverQueued` از `@jozveyar/sms`). «در حال فرستادن» یک `UPDATE` شرطی است، پس دو
- * فرستنده (دو کلیک، دو نود) یک ردیف را دو بار نمی‌فرستند؛ و فقط برای ردیفی که هنوز زنده است: کد رهگیری کنار نرفته، پیامک پرداخت به
- * پرداخت موفق سفارشی لغونشده وصل، و پیامک چاپخانه مال تخصیص امروز سفارشی که هنوز «در صف چاپ» همان چاپخانه است (تریگر
- * `sms_messages_guard`، 0028 و 0036، هم).
+ * پیامک پرداخت، رهگیری، چاپخانه و پاسخ پشتیبانی ردیف «منتظر» است که در همان تراکنش پرداخت موفق (`queuedPaidSms`، در `orders.ts`)،
+ * مرسوله (`queuedTrackingSms`، در `shipments.ts`)، تخصیص چاپخانه (`queuedPartnerSms`، در `assignment.ts` و `panel.ts`، برش ۷٫۶) یا پاسخ
+ * پشتیبانی (`queuedSupportSms`، در `support.ts`، برش ۱۲٫۱) نوشته می‌شود، و بعد از commit فرستاده (`createSmsOutbox` برای `deliverQueued`
+ * از `@jozveyar/sms`). «در حال فرستادن» یک `UPDATE` شرطی است، پس دو فرستنده (دو کلیک، دو نود) یک ردیف را دو بار نمی‌فرستند؛ و فقط
+ * برای ردیفی که هنوز زنده است: کد رهگیری کنار نرفته، پیامک پرداخت به پرداخت موفق سفارشی لغونشده وصل، پیامک چاپخانه مال تخصیص امروز
+ * سفارشی که هنوز «در صف چاپ» همان چاپخانه است، و پیامک پاسخ مال پاسخی که مشتری هنوز ندیده (تریگر `sms_messages_guard`، 0028، 0036
+ * و 0058، هم).
  */
 
 import {
@@ -18,6 +19,8 @@ import {
   paidParams,
   partnerOrderText,
   partnerParams,
+  supportParams,
+  supportReplyText,
   trackingParams,
   trackingText,
   type QueuedSms,
@@ -114,12 +117,32 @@ export async function queuedPartnerSms(tx: Writer, input: { toMobile: string; or
   return row!.id;
 }
 
+/**
+ * ردیف «منتظر» پیامک پاسخ پشتیبانی (برش ۱۲٫۱، سؤال ۳۱۲)، در همان تراکنش پاسخ؛ پاسخ با `sms_message_id` به آن وصل می‌شود (تریگر
+ * `support_messages_check`). شماره همان موبایل مشتری، و موضوع «سفارش 10027» یا «سؤال کلی» (`supportTopic`).
+ */
+export async function queuedSupportSms(tx: Writer, input: { toMobile: string; orderNumber: number | null; at: Date }): Promise<number> {
+  const [row] = await tx
+    .insert(smsMessages)
+    .values({
+      provider: 'queued',
+      toMobile: input.toMobile,
+      purpose: 'support_reply' satisfies SmsPurpose,
+      body: supportReplyText(input.orderNumber),
+      params: supportParams(input.orderNumber),
+      status: 'pending',
+      createdAt: input.at,
+    })
+    .returning({ id: smsMessages.id });
+  return row!.id;
+}
+
 /** هدف‌های پیامک از صف؛ کد تأیید یک بار و بی ردیف منتظر است. */
-const QUEUED_PURPOSES = ['tracking', 'order_paid', 'partner_order'] as const satisfies readonly SmsPurpose[];
+const QUEUED_PURPOSES = ['tracking', 'order_paid', 'partner_order', 'support_reply'] as const satisfies readonly SmsPurpose[];
 
 /**
- * زنده بودن پیامک از صف، همان شرط تریگر `sms_messages_guard` (0036): رهگیری با کد زنده؛ پرداخت با پرداخت موفق سفارشی لغونشده؛ و چاپخانه
- * با تخصیص امروز سفارشی که هنوز «در صف چاپ» همان چاپخانه است (سؤال ۱۷۴).
+ * زنده بودن پیامک از صف، همان شرط تریگر `sms_messages_guard` (0058): رهگیری با کد زنده؛ پرداخت با پرداخت موفق سفارشی لغونشده؛ چاپخانه
+ * با تخصیص امروز سفارشی که هنوز «در صف چاپ» همان چاپخانه است (سؤال ۱۷۴)؛ و پاسخ پشتیبانی تا مشتری همان پاسخ را ندیده (سؤال ۳۱۲).
  */
 export const liveSms = sql`(
     (${smsMessages.purpose} = 'tracking'
@@ -130,11 +153,15 @@ export const liveSms = sql`(
     OR (${smsMessages.purpose} = 'partner_order'
       AND EXISTS (SELECT 1 FROM order_assignments a JOIN orders o ON o.id = a.order_id
                    WHERE a.sms_message_id = ${smsMessages.id} AND o.status = 'paid' AND o.print_partner_id = a.to_partner_id
-                     AND a.id = (SELECT max(b.id) FROM order_assignments b WHERE b.order_id = a.order_id))))`;
+                     AND a.id = (SELECT max(b.id) FROM order_assignments b WHERE b.order_id = a.order_id)))
+    OR (${smsMessages.purpose} = 'support_reply'
+      AND EXISTS (SELECT 1 FROM support_messages m JOIN support_threads t ON t.id = m.thread_id
+                   WHERE m.sms_message_id = ${smsMessages.id}
+                     AND (t.customer_seen_at IS NULL OR t.customer_seen_at < m.created_at))))`;
 
 /**
- * درگاه `deliverQueued`: برداشتن («در حال فرستادن») و ثبت نتیجه، برای پیامک از صف (پرداخت، رهگیری و چاپخانه). زنده: همان `liveSms`،
- * همان شرط تریگر.
+ * درگاه `deliverQueued`: برداشتن («در حال فرستادن») و ثبت نتیجه، برای پیامک از صف (پرداخت، رهگیری، چاپخانه و پاسخ پشتیبانی). زنده: همان
+ * `liveSms`، همان شرط تریگر.
  */
 export function createSmsOutbox({ db }: Database, provider: string): SmsOutbox {
   const live = liveSms;
@@ -186,7 +213,10 @@ export function createSmsOutbox({ db }: Database, provider: string): SmsOutbox {
   };
 }
 
-/** پیامک رهگیری یک مرسوله، پرداخت یک سفارش، یا سفارش تازهٔ یک چاپخانه، برای پنل و صفحهٔ مشتری؛ حالش با `smsState` از `@jozveyar/sms`. */
+/**
+ * پیامک رهگیری یک مرسوله، پرداخت یک سفارش، سفارش تازهٔ یک چاپخانه یا پاسخ پشتیبانی، برای پنل و صفحهٔ مشتری؛ حالش با `smsState` از
+ * `@jozveyar/sms`.
+ */
 export interface ShipmentSms {
   id: number;
   toMobile: string;

@@ -97,7 +97,7 @@ test.describe.serial('نوار اعلان (۱۱٫۳)', () => {
     const { page, problems, secret } = who.operator;
     await page.goto(at());
     const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link');
-    await expect(nav).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه', 'محتوای سایت']);
+    await expect(nav).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'تعرفه', 'محتوای سایت']);
     await nav.filter({ hasText: 'محتوای سایت' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'محتوای سایت' })).toBeVisible();
     const card = page.getByTestId('content-bar');

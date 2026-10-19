@@ -1,5 +1,5 @@
 /**
- * متن چهار پیامک، یک منبع (برش ۷، ADR-049، سؤال ۱۱۵؛ پیامک چاپخانه از ۷٫۶، سؤال ۱۴۳): همین جدول هم متن پیامک کنسولی و ردیف
+ * متن پنج پیامک، یک منبع (برش ۷، ADR-049، سؤال ۱۱۵؛ پیامک چاپخانه از ۷٫۶، سؤال ۱۴۳؛ پیامک پاسخ پشتیبانی از ۱۲٫۱، سؤال ۳۱۲): همین جدول هم متن پیامک کنسولی و ردیف
  * `sms_messages` را می‌سازد، هم متن قالبی را که مالک در پنل sms.ir می‌سازد و برای تأیید می‌فرستد («تنظیمات» پنل همین را زیر هر شناسهٔ
  * قالب نشان می‌دهد). متنی که دو جا نوشته شود دیر یا زود دو متن است.
  *
@@ -8,6 +8,8 @@
  * - **هر پیامک یک تکه:** فارسی UCS-2 است؛ یک تکه تا ۷۰ نویسه، و پیامک چندتکه ۶۷ نویسه در هر تکه (`smsSegments`). پرداخت، رهگیری و
  *   پیامک چاپخانه با شمارهٔ سفارش شش رقمی و بلندترین روز تحویل («چهارشنبه 16 اردیبهشت») هم زیر ۷۰ می‌مانند؛ تست همین را قفل کرده.
  * - **پیامک چاپخانه نشانی پنل ندارد** (سؤال ۱۴۳): فقط شمارهٔ سفارش و روز تحویل؛ چاپخانه سفارش را در پنل خودش می‌بیند.
+ * - **پیامک پاسخ پشتیبانی متن پاسخ را ندارد** (سؤال ۳۱۲): فقط موضوع («سفارش 10027» یا «سؤال کلی») و نشانی «سفارش‌های من»؛ پاسخ را مشتری
+ *   همان‌جا با ورود می‌خواند.
  * - **مقدار هر پارامتر:** دست‌کم یک نویسه، بی خط تازه، و تا ۵۰ نویسه (سقف sms.ir برای مقدار هر پارامتر).
  *
  * خالص و بی وابستگی؛ پنل ادمین و وب هر دو از همین می‌خوانند.
@@ -16,7 +18,12 @@
 import type { SmsPurpose } from './index';
 
 /** نام کلید شناسهٔ قالب هر هدف، همان نام `.env` و «تنظیمات» (`service_secrets`). */
-export type SmsTemplateKey = 'SMS_OTP_TEMPLATE' | 'SMS_PAID_TEMPLATE' | 'SMS_TRACKING_TEMPLATE' | 'SMS_PARTNER_TEMPLATE';
+export type SmsTemplateKey =
+  | 'SMS_OTP_TEMPLATE'
+  | 'SMS_PAID_TEMPLATE'
+  | 'SMS_TRACKING_TEMPLATE'
+  | 'SMS_PARTNER_TEMPLATE'
+  | 'SMS_SUPPORT_TEMPLATE';
 
 type Part = string | { readonly param: string };
 
@@ -54,6 +61,13 @@ export const SMS_TEMPLATES = {
     key: 'SMS_PARTNER_TEMPLATE',
     params: ['ORDER', 'DAY'],
     parts: ['جزوه‌یار: سفارش تازه ', { param: 'ORDER' }, '؛ تحویل به پست تا ', { param: 'DAY' }],
+  },
+  // پیامک پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۲): به موبایل مشتری، وقتی پشتیبانی به پیامش پاسخ داد؛ موضوع، و نشانی «سفارش‌های من» بی https.
+  support_reply: {
+    purpose: 'support_reply',
+    key: 'SMS_SUPPORT_TEMPLATE',
+    params: ['TOPIC'],
+    parts: ['جزوه‌یار: پاسخ پیامت دربارهٔ ', { param: 'TOPIC' }, ' آمد. jozveyar.com/orders'],
   },
 } as const satisfies Record<SmsPurpose, SmsTemplate>;
 
@@ -115,6 +129,19 @@ export function partnerParams(orderNumber: number, handoffDay: string): [string,
   return [number, handoffDay];
 }
 
+/** موضوع گفت‌وگوی پشتیبانی (۱۲٫۱): «سفارش 10027»، یا «سؤال کلی» برای گفت‌وگویی که سفارش ندارد. */
+export function supportTopic(orderNumber: number | null): string {
+  if (orderNumber === null) return 'سؤال کلی';
+  const number = String(orderNumber);
+  if (!/^\d{1,9}$/.test(number)) throw new Error('شمارهٔ سفارش پیامک پاسخ درست نیست');
+  return `سفارش ${number}`;
+}
+
+/** پارامتر قالب پیامک پاسخ پشتیبانی (۱۲٫۱): موضوع گفت‌وگو (`supportTopic`). */
+export function supportParams(orderNumber: number | null): [string] {
+  return [supportTopic(orderNumber)];
+}
+
 /** دو پارامتر قالب رهگیری، هر دو بی فاصله: شمارهٔ سفارش و بارکد ۲۴ رقمی. */
 export function trackingParams(orderNumber: number, barcode: string): [string, string] {
   const number = String(orderNumber);
@@ -135,3 +162,6 @@ export const trackingText = (orderNumber: number, barcode: string) => templateTe
 /** متن پیامک چاپخانه (۷٫۶): سفارش تازه و روز تحویل به پست؛ بی نشانی پنل (سؤال ۱۴۳). */
 export const partnerOrderText = (orderNumber: number, handoffDay: string) =>
   templateText('partner_order', partnerParams(orderNumber, handoffDay));
+
+/** متن پیامک پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۲): موضوع و نشانی «سفارش‌های من»؛ بی متن پاسخ. */
+export const supportReplyText = (orderNumber: number | null) => templateText('support_reply', supportParams(orderNumber));

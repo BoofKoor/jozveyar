@@ -5,6 +5,8 @@ import { notFound } from 'next/navigation';
 import type { OrderView, OrderViewDetails, OrderViewReview } from '@jozveyar/contracts/checkout';
 import { formatCardMask, formatNumber } from '@jozveyar/text';
 import { Inline } from '../../../components/Inline';
+import { StatusBadge } from '../../../components/StatusBadge';
+import { ThreadBadge } from '../../../components/account/AccountViews';
 import { ForgetDraft } from '../../../components/checkout/ForgetDraft';
 import { CheckingWatch, OrderDock, PayAgainButton, PayAgainNote } from '../../../components/checkout/OrderPay';
 import { ReviewForm } from '../../../components/checkout/ReviewForm';
@@ -22,6 +24,7 @@ import {
 } from '../../../components/checkout/recap';
 import { formatMobile } from '../../../lib/checkout/format';
 import { ratingLabel } from '../../../lib/review';
+import { accountOpen, sessionUserOf } from '../../../lib/server/accountContext';
 import { AUTH_COOKIE, authTokenFrom, orderViewOf } from '../../../lib/server/checkoutContext';
 import { configuredMode } from '../../../lib/server/checkoutMode';
 
@@ -67,7 +70,10 @@ export default async function OrderPage({ params }: { params: Promise<{ token: s
   if (!result || !result.ok) notFound();
   const view = result.value;
 
-  if (!view.details) return <Stranger view={view} />;
+  if (!view.details) {
+    const claim = accountOpen() ? { next: `/order/${token.toLowerCase()}`, signedInAs: (await sessionUserOf(authToken))?.mobile ?? null } : null;
+    return <Stranger view={view} claim={claim} />;
+  }
   // در حال بررسی منقضی نیست: پولی شاید گرفته شده (برش ۷٫۲).
   if (view.status === 'expired' || (view.status === 'awaiting_payment' && !view.details.canPay && !view.details.checking)) {
     return <Expired view={view} />;
@@ -82,25 +88,7 @@ const OrderMode = () => <span hidden data-jozve="" />;
 /** پرداخت‌شده، هر وضعیتی که پنل بعدش داده (برش ۴٫۳). */
 const PAID: ReadonlySet<OrderView['status']> = new Set(['paid', 'printing', 'handed_to_post', 'cancelled']);
 
-/** برچسب وضعیت؛ رنگ همیشه با آیکون و متن. نام کلاس‌ها کامل‌اند: Tailwind فقط آیکونی را می‌سازد که نامش در کد است. */
-const BADGES: Record<OrderView['status'], { badge: string; icon: string; label: string }> = {
-  paid: { badge: 'jy-badge jy-badge--success', icon: 'jy-icon jy-icon-success', label: 'پرداخت شد' },
-  printing: { badge: 'jy-badge jy-badge--info', icon: 'jy-icon jy-icon-printer', label: 'در حال چاپ' },
-  handed_to_post: { badge: 'jy-badge jy-badge--success', icon: 'jy-icon jy-icon-truck', label: 'تحویل پست شد' },
-  cancelled: { badge: 'jy-badge jy-badge--error', icon: 'jy-icon jy-icon-error', label: 'لغو شد' },
-  awaiting_payment: { badge: 'jy-badge jy-badge--warning', icon: 'jy-icon jy-icon-warning', label: 'در انتظار پرداخت' },
-  expired: { badge: 'jy-badge jy-badge--error', icon: 'jy-icon jy-icon-error', label: 'منقضی' },
-};
-
-function statusBadge(status: OrderView['status']) {
-  const { badge, icon, label } = BADGES[status];
-  return (
-    <span className={badge}>
-      <span className={icon} aria-hidden="true" />
-      {label}
-    </span>
-  );
-}
+const statusBadge = (status: OrderView['status']) => <StatusBadge status={status} />;
 
 function OrderTitle({ view }: { view: OrderView }) {
   return (
@@ -113,8 +101,12 @@ function OrderTitle({ view }: { view: OrderView }) {
   );
 }
 
-/** نه صاحب سفارش: شماره، وضعیت و روز تحویل به پست، بی نشانی و موبایل و مبلغ. */
-function Stranger({ view }: { view: OrderView }) {
+/**
+ * نه صاحب سفارش: شماره، وضعیت و روز تحویل به پست، بی نشانی و موبایل و مبلغ. از ۱۲٫۱ (سؤال ۳۰۸) «این سفارش توست؟» با «ورود با موبایل»، که پس
+ * از ورود به همین صفحه برمی‌گردد (`claim`)؛ با نشست شمارهٔ دیگری «ورود با شمارهٔ دیگر»، که اول همان نشست را می‌بندد (وگرنه صفحهٔ ورود با نشست
+ * باز همین‌جا برمی‌گرداند)؛ بی «سفارش‌های من» (بی رمز نشست) همان جملهٔ قبلی.
+ */
+function Stranger({ view, claim }: { view: OrderView; claim: { next: string; signedInAs: string | null } | null }) {
   return (
     <main className="site-wrap ck-solo">
       <OrderMode />
@@ -135,9 +127,67 @@ function Stranger({ view }: { view: OrderView }) {
             کد رهگیری به موبایل گیرنده پیامک شد.
           </p>
         ) : null}
-        <p className="ck-sub">جزئیات این سفارش فقط با همان گوشی و مرورگری دیده می‌شود که با آن سفارش داده شد.</p>
+        {claim?.signedInAs ? (
+          <form className="ac-claim" method="post" action="/api/account/logout" data-testid="order-claim">
+            <input type="hidden" name="next" value={claim.next} />
+            <p>
+              <b>این سفارش توست؟</b> با شمارهٔ دیگری ثبت شده و تو با <span className="num nw">{formatMobile(claim.signedInAs)}</span> وارد شده‌ای.
+              با همان شماره‌ای که با آن سفارش دادی وارد شو.
+            </p>
+            <button type="submit" className="jy-btn jy-btn--secondary">
+              ورود با شمارهٔ دیگر
+            </button>
+          </form>
+        ) : claim ? (
+          <div className="ac-claim" data-testid="order-claim">
+            <p>
+              <b>این سفارش توست؟</b> با موبایلی که با آن سفارش دادی وارد شو تا جزئیات و پیام‌هایش را ببینی.
+            </p>
+            <a className="jy-btn jy-btn--secondary" href={`/orders?next=${encodeURIComponent(claim.next)}`}>
+              ورود با موبایل
+            </a>
+          </div>
+        ) : (
+          <p className="ck-sub">جزئیات این سفارش فقط با همان گوشی و مرورگری دیده می‌شود که با آن سفارش داده شد.</p>
+        )}
       </section>
     </main>
+  );
+}
+
+/**
+ * «سؤالی دربارهٔ این سفارش داری؟» (برش ۱۲٫۱، سؤال ۳۰۹، طرح «صفحهٔ سفارش»): «پیام به پشتیبانی» با همین سفارش از پیش انتخاب‌شده، و «همهٔ
+ * سفارش‌هایم»؛ با گفت‌وگوی موجود، حالش و «دیدن پیام‌ها» به جای پیام تازه، چون پیام تازه هم به همان گفت‌وگو می‌رود.
+ */
+function OrderHelp({ number, thread }: { number: number; thread: OrderViewDetails['thread'] }) {
+  return (
+    <section className="jy-card" aria-labelledby="order-help-title" data-testid="order-help">
+      <div className="jy-card__head">
+        <h2 id="order-help-title" className="jy-card__title">
+          سؤالی دربارهٔ این سفارش داری؟
+        </h2>
+        {thread ? <ThreadBadge status={thread.status} fresh={thread.unseen} /> : null}
+      </div>
+      <p className="ck-sub">
+        {thread?.unseen
+          ? 'پشتیبانی به پیامت دربارهٔ همین سفارش پاسخ داد.'
+          : 'پیام بده؛ پاسخ را در «سفارش‌های من» می‌بینی و پیامکش هم می‌آید.'}
+      </p>
+      <div className="ac-help__actions">
+        {thread ? (
+          <a className="jy-btn jy-btn--secondary" href={`/orders/messages/${thread.id}`}>
+            {thread.unseen ? 'دیدن پاسخ' : 'دیدن پیام‌ها'}
+          </a>
+        ) : (
+          <a className="jy-btn jy-btn--secondary" href={`/orders/messages/new?order=${number}`}>
+            پیام به پشتیبانی
+          </a>
+        )}
+        <a className="jy-btn jy-btn--text" href="/orders">
+          همهٔ سفارش‌هایم
+        </a>
+      </div>
+    </section>
   );
 }
 
@@ -694,6 +744,7 @@ function Owner({ token, view, details, zibal }: { token: string; view: OrderView
               </section>
             </>
           )}
+          {accountOpen() ? <OrderHelp number={view.number} thread={details.thread} /> : null}
         </div>
 
         <aside className="home-side" aria-labelledby="summary-title">

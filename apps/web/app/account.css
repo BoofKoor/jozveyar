@@ -1,0 +1,350 @@
+/*
+ * ===== «سفارش‌های من» و پیام به پشتیبانی، از طرح تأییدشدهٔ docs/ui/mockups/account.html (برش ۱۲٫۱) =====
+ * صفحه‌آرایی خود سایت است، نه جزء کیت؛ پیشوندش `ac-` (حساب مشتری)، مثل `ck-` مسیر خرید. ورود و کد یک کارت باریک‌اند (کار بعدی درون
+ * کارت، چون خلاصه‌ای کنارشان نیست)؛ فهرست و گفت‌وگو یک ستون تا ۷۲۰ پیکسل. فیلد، کد پیامکی و «پیامک نرسید؟» همان کیت و `ck-` مسیر خرید‌اند.
+ * رنگ فقط توکن. فقط logical properties.
+ */
+@layer components {
+  .ac-solo {
+    max-width: calc(520px + 2 * var(--jy-gutter));
+    padding-block: 8px 64px;
+  }
+  .ac-page {
+    max-width: calc(720px + 2 * var(--jy-gutter));
+    padding-block: 8px 64px;
+  }
+  /* کار بعدی درون کارت: در گوشی تمام‌عرض زیر شست، و بزرگ‌تر از آن به اندازهٔ خودش */
+  :is(.ac-solo, .ac-page) .ck-form > .jy-btn {
+    align-self: flex-start;
+  }
+  @media (max-width: 520px) {
+    :is(.ac-solo, .ac-page) .ck-form > .jy-btn {
+      align-self: stretch;
+    }
+  }
+  .ac-aside {
+    margin-block-start: 16px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    text-align: center;
+    color: var(--color-muted);
+  }
+
+  /* پیوند برگشت بالای صفحه: پیکان «به عقب» در راست‌به‌چپ رو به راست است */
+  .ac-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    margin-block-end: 4px;
+    color: var(--color-muted);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .ac-back:hover {
+    color: var(--color-ink);
+  }
+  .ac-back .jy-icon {
+    width: 18px;
+    height: 18px;
+    rotate: 180deg;
+  }
+
+  .ac-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 16px;
+    margin-block-end: 16px;
+  }
+  .ac-title {
+    font-size: var(--text-h3);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .ac-who {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ac-who .jy-btn {
+    margin-inline-end: -12px;
+    font-size: var(--text-small);
+  }
+  .ac-page > .jy-note {
+    margin-block-end: 16px;
+  }
+
+  /* فهرست سفارش‌ها: کل کارت پیوند صفحهٔ سفارش است (پیوند کشیده)، و دکمه‌های درونش رویش می‌نشینند */
+  .ac-orders {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ac-order {
+    position: relative;
+    transition: border-color var(--jy-dur-fast) var(--jy-ease);
+  }
+  .ac-order:hover {
+    border-color: var(--color-green-400);
+  }
+  .ac-order__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+  }
+  .ac-order__title {
+    flex: 1 1 auto;
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ac-order__link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .ac-order__link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+  .ac-order__link:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+  .ac-order:has(.ac-order__link:focus-visible) {
+    outline: 2px solid var(--jy-focus-outer);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--jy-focus-inner);
+  }
+  .ac-order__go {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    color: var(--color-muted);
+    rotate: 90deg;
+  }
+  .ac-order__meta {
+    margin-block-start: 2px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .ac-order__next {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-block-start: 12px;
+    padding-block-start: 12px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ac-order__line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex: 1 1 15rem;
+    min-width: 0;
+    line-height: 1.7;
+  }
+  .ac-order__line > .jy-icon {
+    flex: none;
+    margin-block-start: 3px;
+    color: var(--color-muted);
+  }
+  .ac-order__next :is(.jy-btn, .jy-barcode, .jy-link) {
+    position: relative;
+    z-index: 1;
+  }
+  /* کد رهگیری: جمله یک ردیف، و کد با «رهگیری در سایت پست» ردیف بعد (در گوشی زیر هم) */
+  .ac-order__next--track .ac-order__line {
+    flex-basis: 100%;
+  }
+
+  /* صفحه‌های فهرست: «تازه‌ترها»، «صفحهٔ 2 از 3» و «قدیمی‌ترها» */
+  .ac-pages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 4px 16px;
+    margin-block-start: 16px;
+  }
+  .ac-pages__at {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+
+  /* «پیام‌ها»: یک ردیف برای هر گفت‌وگو، کل ردیف پیوند */
+  .ac-sec {
+    margin-block-start: 32px;
+  }
+  .ac-sec__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin-block-end: 12px;
+  }
+  .ac-h2 {
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ac-threads {
+    padding-block: 4px;
+  }
+  .ac-threads > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ac-thread {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    min-height: 64px;
+    padding-block: 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .ac-thread__top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+  }
+  .ac-thread__top b {
+    font-weight: 600;
+  }
+  .ac-thread__snip {
+    grid-column: 1;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ac-thread > .jy-icon {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    width: 20px;
+    height: 20px;
+    color: var(--color-muted);
+    rotate: 90deg;
+  }
+  .ac-thread:hover .ac-thread__top b {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  /* گفت‌وگو: پیام‌ها زیر هم، نه حباب؛ پیام پشتیبانی زمینهٔ green-50 دارد، و نام ادمین به مشتری نمی‌رسد */
+  .ac-msgs {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-block-start: 20px;
+  }
+  .ac-msg {
+    padding: 12px 16px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ac-msg--us {
+    background: var(--color-green-50);
+    border-color: var(--color-green-100);
+  }
+  .ac-msg__who {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 8px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .ac-msg__who b {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .ac-msg__body {
+    margin-block-start: 4px;
+    line-height: 1.9;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .ac-msg__new {
+    font-weight: 600;
+    color: var(--color-green-700);
+  }
+  .ac-sys {
+    padding-inline: 16px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .ac-compose {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-block-start: 20px;
+    padding-block-start: 20px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .ac-compose > .jy-btn {
+    align-self: flex-start;
+  }
+  textarea.ac-text {
+    min-height: 8rem;
+    resize: vertical;
+    line-height: 1.9;
+  }
+  .ac-fs {
+    min-width: 0;
+  }
+  .ac-fs > legend {
+    padding: 0;
+    margin-block-end: 8px;
+  }
+  .ac-hours {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-block-start: 16px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .ac-hours .jy-icon {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-block-start: 3px;
+  }
+
+  /* کارت تازهٔ صفحهٔ سفارش، و «این سفارش توست؟» نگاه غریبه */
+  .ac-help__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-block-start: 16px;
+  }
+  .ac-claim {
+    margin-block-start: 16px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ac-claim p {
+    line-height: 1.8;
+  }
+  .ac-claim .jy-btn {
+    margin-block-start: 12px;
+  }
+}

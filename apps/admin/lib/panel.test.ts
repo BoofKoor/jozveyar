@@ -427,6 +427,7 @@ describe('رویدادها', () => {
       'ارسال',
       'تعرفه',
       'محتوای سایت',
+      'پشتیبانی',
       'تنظیمات و کلیدها',
       'چاپخانه‌ها',
       'ادمین‌ها',
@@ -443,6 +444,7 @@ describe('رویدادها', () => {
       'shipments',
       'tariff',
       'content',
+      'support',
       'settings',
       'partners',
       'admins',
@@ -692,6 +694,32 @@ describe('رویدادها', () => {
       false,
     ]);
     expect(EVENT_KINDS.at(-1)).toEqual({ kind: 'reviews', label: 'نظرها' });
+  });
+
+  it('پشتیبانی (۱۲٫۱، سؤال ۳۱۶): گفت‌وگوی کدام سفارش یا «سؤال کلی» کدام مشتری، پیامک ساخته شد یا نه؛ متن پیام هرگز؛ چیپ «پشتیبانی»', () => {
+    const support = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'support_thread', targetId: String(detail.thread), detail });
+    const lines = eventLines([
+      support('support.reply', { thread: 7, orderNumber: 10027, customer: 'مریم کاظمی', message: 41, sms: 'queued' }),
+      support('support.reply', { thread: 9, orderNumber: null, customer: 'امیر حسینی', message: 52, sms: 'skipped' }),
+      support('support.close', { thread: 9, orderNumber: null, customer: 'امیر حسینی' }),
+      support('support.close', { thread: 7, orderNumber: 10027, customer: null }),
+      support('support.sms_resend', { thread: 7, orderNumber: 10027, message: 41, mobile: '0915 ••• 5678', outcome: 'sent' }),
+      support('support.sms_resend', { thread: 9, orderNumber: null, message: 52, mobile: '0912 ••• 4567', outcome: 'failed', error: 'unconfigured' }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['پاسخ به گفت‌وگوی سفارش ', { ltr: '10027' }, ' (مریم کاظمی)؛ با پیامک پاسخ'],
+      ['پاسخ به گفت‌وگوی «سؤال کلی» امیر حسینی؛ بی پیامک تازه، خبر پاسخ قبلی هنوز دیده نشده بود'],
+      ['گفت‌وگوی «سؤال کلی» امیر حسینی بسته شد'],
+      ['گفت‌وگوی سفارش ', { ltr: '10027' }, ' بسته شد'],
+      ['پیامک پاسخ گفت‌وگوی سفارش ', { ltr: '10027' }, ' دوباره به ', { ltr: '0915 ••• 5678' }, ' فرستاده شد و رفت'],
+      ['پیامک پاسخ گفت‌وگوی «سؤال کلی» دوباره به ', { ltr: '0912 ••• 4567' }, ' فرستاده شد و باز نرفت'],
+    ]);
+    expect([inEventKind('support.reply', 'support'), inEventKind('support.sms_resend', 'support'), inEventKind('support.close', 'orders')]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(EVENT_KINDS.find((kind) => kind.kind === 'support')).toEqual({ kind: 'support', label: 'پشتیبانی' });
   });
 
   it('متن‌های سایت (۱۱٫۱، سؤال ۲۸۶): نام متن و شمارهٔ نسخه جدا از جمله، برگرداندن با نسخه‌ای که برگشت، خود متن هرگز؛ چیپ «محتوای سایت»', () => {

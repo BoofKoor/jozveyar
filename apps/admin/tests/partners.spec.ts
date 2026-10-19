@@ -216,7 +216,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
 
     await ownerPage.goto(at());
     const nav = ownerPage.getByRole('navigation', { name: 'بخش‌های پنل' });
-    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(nav.locator('.ad-nav__wide')).toHaveText(['پشتیبانی', 'ارسال', 'تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await nav.locator('.ad-nav__wide', { hasText: 'چاپخانه‌ها' }).click();
     await expect(ownerPage.getByRole('heading', { name: 'چاپخانه‌ها', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'چاپخانه‌ها' })).toHaveAttribute('aria-current', 'page');

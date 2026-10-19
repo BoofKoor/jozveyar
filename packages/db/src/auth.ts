@@ -9,7 +9,7 @@
 import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 
 import type { Database } from './index.js';
-import { documents, mobileBlocks, otpRequests, sessions, users } from './schema.js';
+import { documents, mobileBlocks, orders, otpRequests, sessions, users } from './schema.js';
 
 /** کلید قفل مشورتی صدور کد پیامکی: «otp» به عدد. */
 const OTP_LOCK = 0x6f7470;
@@ -17,8 +17,21 @@ const OTP_LOCK = 0x6f7470;
 export type OtpRow = typeof otpRequests.$inferSelect;
 
 /**
- * شمارش کدها در پنجرهٔ یک ساعت (بی پسوند) و ۲۴ ساعت (`…Day`، برش ۷، ADR-049)؛ `…Oldest` برای «چند ثانیهٔ دیگر». `ready`: این مرورگر
- * دست‌کم یک سند آماده و زنده روی سرور دارد (دروازهٔ جزوه، همان شرط «ادامه»). `blocked`: این شماره مسدودی زنده دارد (برش ۱۲٫۲، ADR-063).
+ * دروازهٔ کد پیامکی: مسیر خرید فقط مرورگری را می‌پذیرد که جزوه‌ای روی سرور دارد (`documents`، ADR-049)؛ «سفارش‌های من» (برش ۱۲٫۱، سؤال ۳۰۶)
+ * فقط شماره‌ای را که با آن سفارشی ثبت شده، در هر وضعیتی (`orders`).
+ */
+export type OtpGate =
+  | {
+      kind: 'documents';
+      /** سند «زنده» یعنی فایلش تا دست‌کم این لحظه می‌ماند (همان حاشیهٔ یک ساعتهٔ پرداخت، `FILE_MARGIN_MS`). */
+      readyUntil: Date;
+    }
+  | { kind: 'orders' };
+
+/**
+ * شمارش کدها در پنجرهٔ یک ساعت (بی پسوند) و ۲۴ ساعت (`…Day`، برش ۷، ADR-049)؛ `…Oldest` برای «چند ثانیهٔ دیگر». `ready`: دروازه باز است
+ * (`OtpGate`): این مرورگر دست‌کم یک سند آماده و زنده روی سرور دارد، یا این شماره سفارشی دارد. `blocked`: این شماره مسدودی زنده دارد
+ * (برش ۱۲٫۲، ADR-063).
  */
 export interface OtpCounts {
   mobile: number;
@@ -66,8 +79,7 @@ export interface AuthStore {
       /** آغاز پنجرهٔ یک ساعته و ۲۴ ساعته. */
       hourSince: Date;
       daySince: Date;
-      /** سند «زنده» یعنی فایلش تا دست‌کم این لحظه می‌ماند (همان حاشیهٔ یک ساعتهٔ پرداخت، `FILE_MARGIN_MS`). */
-      readyUntil: Date;
+      gate: OtpGate;
     },
     decide: (counts: OtpCounts) => NewOtp | null,
   ): Promise<{ id: string } | null>;
@@ -124,20 +136,29 @@ export function createAuthStore({ db }: Database): AuthStore {
           })
           .from(otpRequests)
           .where(gt(otpRequests.createdAt, input.daySince));
-        // دروازهٔ جزوه (ADR-049): سندی آماده، شمرده‌شده و زنده از همین مرورگر.
-        const [ready] = await tx
-          .select({ id: documents.id })
-          .from(documents)
-          .where(
-            and(
-              eq(documents.sessionHash, input.sessionHash),
-              eq(documents.status, 'ready'),
-              gt(documents.pageCount, 0),
-              isNull(documents.fileDeletedAt),
-              gt(documents.fileExpiresAt, input.readyUntil),
-            ),
-          )
-          .limit(1);
+        const gate = input.gate;
+        // دروازهٔ جزوه (ADR-049): سندی آماده، شمرده‌شده و زنده از همین مرورگر. دروازهٔ «سفارش‌های من» (سؤال ۳۰۶): سفارشی با همین شماره.
+        const [ready] =
+          gate.kind === 'documents'
+            ? await tx
+                .select({ id: documents.id })
+                .from(documents)
+                .where(
+                  and(
+                    eq(documents.sessionHash, input.sessionHash),
+                    eq(documents.status, 'ready'),
+                    gt(documents.pageCount, 0),
+                    isNull(documents.fileDeletedAt),
+                    gt(documents.fileExpiresAt, gate.readyUntil),
+                  ),
+                )
+                .limit(1)
+            : await tx
+                .select({ id: orders.id })
+                .from(orders)
+                .innerJoin(users, eq(users.id, orders.userId))
+                .where(eq(users.mobile, input.mobile))
+                .limit(1);
         const [blocked] = await tx
           .select({ id: mobileBlocks.id })
           .from(mobileBlocks)

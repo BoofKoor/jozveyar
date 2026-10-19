@@ -30,7 +30,8 @@ export type ApiResult<T> = { ok: true; value: T } | ApiFailure;
 
 export type Fetch = typeof fetch;
 
-async function call<T>(fetchImpl: Fetch, path: string, method = 'GET', body?: unknown): Promise<ApiResult<T>> {
+/** یک درخواست JSON با کوکی همین سایت؛ «سفارش‌های من» (برش ۱۲٫۱) هم با همین. */
+export async function call<T>(fetchImpl: Fetch, path: string, method = 'GET', body?: unknown): Promise<ApiResult<T>> {
   let response: Response;
   try {
     response = await fetchImpl(path, {

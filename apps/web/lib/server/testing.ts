@@ -28,6 +28,7 @@ import {
   type OrderReviewRow,
   type OrderRow,
   type OrderStore,
+  type OtpGate,
   type OtpRow,
   type PartnerCandidate,
   type PaymentRow,
@@ -119,12 +120,12 @@ export function memoryStore(): DocumentStore & {
 
 /**
  * `AuthStore` حافظه‌ای. شمارش همان پنجره‌ها و همان شرط‌های اتمی نسخهٔ پستگرس را دارد؛ قفل لازم ندارد، چون
- * اینجا هیچ دو کاری وسط هم اجرا نمی‌شوند (هم‌زمانی را تست یکپارچگی `packages/db` می‌سنجد). دروازهٔ جزوه (برش ۷) از
- * `ready`: این مرورگر سند آماده و زنده دارد؟ پیش‌فرض آری؛ پرسش واقعی سند را تست یکپارچگی می‌سنجد. `blocked`: این شماره مسدود است؟
- * (برش ۱۲٫۲)؛ پیش‌فرض نه.
+ * اینجا هیچ دو کاری وسط هم اجرا نمی‌شوند (هم‌زمانی را تست یکپارچگی `packages/db` می‌سنجد). دروازه (برش ۷، و از ۱۲٫۱ دروازهٔ سفارش) از
+ * `ready`: این مرورگر سند آماده و زنده دارد، یا این شماره سفارشی؟ پیش‌فرض آری؛ پرسش واقعی را تست یکپارچگی می‌سنجد. `blocked`: این شماره
+ * مسدود است؟ (برش ۱۲٫۲)؛ پیش‌فرض نه.
  */
 export function memoryAuthStore(
-  options: { ready?: (sessionHash: string, readyUntil: Date) => boolean; blocked?: (mobile: string) => boolean } = {},
+  options: { ready?: (sessionHash: string, gate: OtpGate, mobile: string) => boolean; blocked?: (mobile: string) => boolean } = {},
 ): AuthStore & {
   otps: OtpRow[];
   users: Map<string, { id: string; mobile: string }>;
@@ -161,7 +162,7 @@ export function memoryAuthStore(
         siteOldest: oldest(inWindow),
         siteDay: inDay.length,
         siteDayOldest: oldest(inDay),
-        ready: (options.ready ?? (() => true))(input.sessionHash, input.readyUntil),
+        ready: (options.ready ?? (() => true))(input.sessionHash, input.gate, input.mobile),
         blocked: (options.blocked ?? (() => false))(input.mobile),
       });
       if (!otp) return null;

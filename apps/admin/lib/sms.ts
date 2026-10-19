@@ -27,6 +27,12 @@ const PARTNER_SMS_ERRORS: Record<SmsErrorCode, string> = {
   unconfigured: 'کلید API یا شناسهٔ قالب پیامک چاپخانه خالی است یا خوانده نشد',
 };
 
+/** پیامک پاسخ پشتیبانی (برش ۱۲٫۱، سؤال ۳۱۲): «کلید خالی» هم نام قالب خودش را می‌برد، مثل پیامک چاپخانه. */
+const SUPPORT_SMS_ERRORS: Record<SmsErrorCode, string> = {
+  ...SMS_ERRORS,
+  unconfigured: 'کلید API یا شناسهٔ قالب پیامک پاسخ پشتیبانی خالی است یا خوانده نشد',
+};
+
 /** علت «نرفت» یک ردیف: «پنل پیامک نپذیرفت (کد 401).»؛ منتظرِ مانده «نیمه‌کاره ماند». */
 function whyNot(sms: ShipmentSms, errors: Record<SmsErrorCode, string> = SMS_ERRORS): string {
   if (sms.status === 'pending') return `${errors.interrupted}.`;
@@ -138,4 +144,20 @@ export function paymentSmsView(sms: ShipmentSms | null, orderOpen: boolean, now:
  */
 export function partnerSmsView(sms: ShipmentSms | null, live: boolean, now: Date): QueuedSmsView | null {
   return sms ? queuedSmsView(sms, live, now, PARTNER_SMS_ERRORS) : null;
+}
+
+/**
+ * ردیف «پیامک پاسخ» زیر هر پاسخ گفت‌وگو (برش ۱۲٫۱، سؤال ۳۱۲؛ همان شکل ردیف پیامک پرداخت): «به 0915 234 5678 رفت، امروز 10:42»، یا «نرفت: …» با
+ * «دوباره بفرست» فقط برای پیامک آخرین پاسخ پیامک‌دار (`latest`؛ پاسخ‌های پشت‌سرهم یک خبرند) و تا مشتری همان پاسخ را ندیده (`seen`). پیامکی که
+ * دیگر لازم نیست می‌گوید چرا دکمه ندارد.
+ */
+export function replySmsView(sms: ShipmentSms | null, live: { latest: boolean; seen: boolean }, now: Date): QueuedSmsView | null {
+  if (!sms) return null;
+  const view = queuedSmsView(sms, live.latest && !live.seen, now, SUPPORT_SMS_ERRORS);
+  if (view.state !== 'failed' && view.state !== 'unknown') return view;
+  const note = live.seen ? 'مشتری پاسخ را دیده، پس دوباره لازم نیست.' : live.latest ? null : 'پاسخ تازه‌تر پیامک خودش را دارد.';
+  if (!note) return view;
+  const last = view.text.at(-1);
+  const text = typeof last === 'string' ? [...view.text.slice(0, -1), `${last.replace(/\.$/, '')}؛ ${note}`] : [...view.text, `؛ ${note}`];
+  return { ...view, text };
 }

@@ -3,11 +3,11 @@
  *
  * - **آداپتور** (`SmsTransport`): فقط فرستادن. پیامک کنسولی (توسعه، CI، و پنل تا `SMS_PROVIDER=smsir`): یک خط لاگ، و ردیف
  *   `sms_messages` با متن کامل، تا پیامک بی پنل پیامک آزمودنی باشد. آداپتور sms.ir (`@jozveyar/sms/smsir`) قالب تأییدشده را با
- *   پارامترها می‌فرستد (`params`)، نه متن آزاد؛ متن هر سه قالب یک منبع دارد (`templates.ts`).
+ *   پارامترها می‌فرستد (`params`)، نه متن آزاد؛ متن همهٔ قالب‌ها یک منبع دارد (`templates.ts`).
  * - **پیامک کد** (`loggedSms`): فرستادن، بعد ردیف `sms_messages`، همان رفتار برش ۳.
- * - **پیامک پرداخت، رهگیری و چاپخانه** (`deliverQueued`): ردیف «منتظر» در همان تراکنش پرداخت، مرسوله یا تخصیص چاپخانه نوشته شده
- *   (`@jozveyar/db`)؛ اینجا بعد از commit فرستاده می‌شود: اول «در حال فرستادن» (فقط یک فرستنده برنده است)، بعد «رفت» یا «نرفت». هیچ
- *   پیامکی خودکار دوباره نمی‌رود.
+ * - **پیامک پرداخت، رهگیری، چاپخانه و پاسخ پشتیبانی** (`deliverQueued`): ردیف «منتظر» در همان تراکنش پرداخت، مرسوله، تخصیص چاپخانه یا
+ *   پاسخ پشتیبانی نوشته شده (`@jozveyar/db`)؛ اینجا بعد از commit فرستاده می‌شود: اول «در حال فرستادن» (فقط یک فرستنده برنده است)، بعد
+ *   «رفت» یا «نرفت». هیچ پیامکی خودکار دوباره نمی‌رود.
  *
  * بی وابستگی: نوشتن و خواندن جدول مال `@jozveyar/db` است و اینجا فقط درگاهش (`SmsLog`، `SmsOutbox`).
  */
@@ -24,6 +24,9 @@ export {
   partnerOrderText,
   partnerParams,
   smsSegments,
+  supportParams,
+  supportReplyText,
+  supportTopic,
   templateSource,
   templateText,
   trackingParams,
@@ -32,10 +35,10 @@ export {
   type SmsTemplateKey,
 } from './templates';
 
-/** کد تأیید، پرداخت، رهگیری (۶٫۳)، و از ۷٫۶ سفارش تازهٔ چاپخانه (`partner_order`). */
-export type SmsPurpose = 'otp' | 'order_paid' | 'tracking' | 'partner_order';
+/** کد تأیید، پرداخت، رهگیری (۶٫۳)، از ۷٫۶ سفارش تازهٔ چاپخانه (`partner_order`)، و از ۱۲٫۱ پاسخ پشتیبانی (`support_reply`). */
+export type SmsPurpose = 'otp' | 'order_paid' | 'tracking' | 'partner_order' | 'support_reply';
 
-/** `logged` (کنسولی)، `sent` (پنل واقعی)، `failed`؛ و فقط برای پیامک از صف (پرداخت، رهگیری و چاپخانه) `pending` (منتظر) و `sending` (در حال فرستادن). */
+/** `logged` (کنسولی)، `sent` (پنل واقعی)، `failed`؛ و فقط برای پیامک از صف (همه جز کد) `pending` (منتظر) و `sending` (در حال فرستادن). */
 export type SmsStatus = 'logged' | 'sent' | 'failed' | 'pending' | 'sending';
 
 export interface SmsRecord {
@@ -177,7 +180,7 @@ export function consoleSms(log: SmsLog, print: (line: string) => void = console.
   return loggedSms(consoleTransport(print), log);
 }
 
-/* ───────────────────────── پیامک از صف (پرداخت، رهگیری و چاپخانه): حال و فرستادن ───────────────────────── */
+/* ───────────────────────── پیامک از صف (پرداخت، رهگیری، چاپخانه و پاسخ پشتیبانی): حال و فرستادن ───────────────────────── */
 
 /** ردیفی که بیش از این «منتظر» یا «در حال فرستادن» ماند، دیگر در راه نیست: پنل پیش از پایان افتاد (ADR-047، «اجرا در ۶٫۳»). */
 export const SMS_STUCK_MS = 5 * 60_000;
@@ -218,7 +221,7 @@ export type SmsResult =
   /** `tag`: همان `smsErrorTag`، برای ستون `error`. */
   | { ok: false; provider: string; error: SmsErrorCode; tag: string };
 
-/** درگاه ردیف‌های منتظر پرداخت، رهگیری و چاپخانه (`@jozveyar/db`). */
+/** درگاه ردیف‌های منتظر پرداخت، رهگیری، چاپخانه و پاسخ پشتیبانی (`@jozveyar/db`). */
 export interface SmsOutbox {
   /**
    * «در حال فرستادن»، فقط یک بار: `queued` فقط ردیف منتظر؛ `retry` («دوباره بفرست») فقط نرفته یا معلوم‌نبوده. هر دو فقط اگر ردیف
