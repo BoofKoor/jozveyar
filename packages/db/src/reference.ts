@@ -63,6 +63,8 @@ export const FILE_MAX_MB_SETTING = 'file.max_mb';
 export const FILE_MAX_PAGES_SETTING = 'file.max_pages';
 /** گزینه‌های تعرفهٔ فعال که موقتاً در دسترس نیستند (برش ۸٫۴، سؤال ۱۸۸). */
 export const CATALOG_PAUSED_SETTING = 'catalog.paused';
+/** نوار اعلان بالای سربرگ سایت (برش ۱۱٫۳، ADR-066). */
+export const BAR_SETTING = 'content.bar';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -87,6 +89,8 @@ export const CATALOG_PAUSED_SETTING = 'catalog.paused';
  *
  * سقف کد در ۲۴ ساعت ۲٬۰۰۰ است (برش ۷، سؤال ۱۱۷): کمتر از هفت ساعت پشت‌سرهم با سقف ساعتی، پس روز شلوغ واقعی را نمی‌بندد، و
  * بدترین هزینهٔ روزانهٔ کد را به ۲٬۰۰۰ تکه می‌بندد. هشدار اعتبار ۷ روز مصرف است (سؤال ۱۳۷): یک هفته برای شارژ.
+ *
+ * نوار اعلان پس از استقرار ۱۱٫۳ خاموش و بی متن است: سایت همان می‌ماند تا مالک یا متصدی روشنش کند.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
@@ -103,6 +107,7 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [FILE_MAX_PAGES_SETTING]: DEFAULT_FILE_RULES.maxPages,
   [CATALOG_PAUSED_SETTING]: { sizes: [], papers: [], bindings: [] },
   [ASSIGNMENT_MODE_SETTING]: 'auto',
+  [BAR_SETTING]: { mode: 'off', from: null, until: null, text: '', href: '', linkText: '' },
 };
 
 /**

@@ -93,6 +93,58 @@ export function InlineText({ text, format, options }: { text: string; format: In
 }
 
 /**
+ * نوار اعلان (برش ۱۱٫۳، سؤال ۲۹۱؛ طرح `content.html`): متن با پررنگ و عدد امروز، و با پیوند کل نوار پیوند است با «متن پیوند ←» ته جمله.
+ * کلاس‌ها از `@jozveyar/ui/bar.css`. ریشه `className` را هم می‌گیرد (`site-idle` سایت: پس از انداختن فایل و در صفحهٔ سفارش نیست، سؤال ۲۹۲).
+ * پیش‌نمایش پنل (`inert`) پیوند نیست و ظرف پهنای سایت (`site-wrap`) را ندارد. متن در یک `span`، تا نوار flex یک تکه داشته باشد و فاصلهٔ کنار
+ * عدد و پررنگ نیفتد.
+ */
+export function AnnouncementBar({
+  bar,
+  options,
+  className,
+}: {
+  bar: { text: string; href: string; linkText: string };
+  options: RenderOptions;
+  className?: string;
+}): ReactNode {
+  const root = className ? `site-bar ${className}` : 'site-bar';
+  const go = bar.href ? (
+    <>
+      {' '}
+      <span className="site-bar__go">
+        <TextContent text={bar.linkText} />
+        <span className="jy-icon jy-icon-arrow" aria-hidden="true" />
+      </span>
+    </>
+  ) : null;
+  const body = (
+    <span>
+      <InlineNodes nodes={parseInline(bar.text, 'emphasis').nodes} options={options} />
+      {go}
+    </span>
+  );
+  if (options.inert) {
+    return (
+      <span className={root} data-href={bar.href || undefined}>
+        <span className="site-bar__in">{body}</span>
+      </span>
+    );
+  }
+  if (bar.href) {
+    return (
+      <a className={root} href={bar.href}>
+        <span className="site-wrap site-bar__in">{body}</span>
+      </a>
+    );
+  }
+  return (
+    <aside className={root} aria-label="اعلان">
+      <p className="site-wrap site-bar__in">{body}</p>
+    </aside>
+  );
+}
+
+/**
  * تیتر صفحهٔ اصلی: سر ویرگول به تکه‌های `clause` (که فقط آنجا می‌شکنند)، و تأکید `**…**` با `<mark>`. متن خام همان جمله می‌ماند (سئو).
  */
 export function HeroTitle({ text, options, clause }: { text: string; options: RenderOptions; clause?: string }): ReactNode {

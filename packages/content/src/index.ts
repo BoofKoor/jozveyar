@@ -5,6 +5,7 @@
  * فقط سرور: هیچ جزء مرورگری سایت از این پکیج چیزی نمی‌خواهد، پس باندل اولیه همان می‌ماند.
  */
 
+export * from './bar.js';
 export * from './check.js';
 export * from './contact.js';
 export * from './defaults.js';

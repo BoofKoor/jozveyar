@@ -18,7 +18,13 @@ export type ContentIssueCode =
   | 'instagram'
   | 'postal'
   | 'postal_without_address'
-  | 'faq_empty';
+  | 'faq_empty'
+  /** نوار اعلان (۱۱٫۳، `checkBar`): پیوند درون متن، پررنگ دوم، متن بلندتر از ۹۰ نویسه با عددهای امروز، پیوند به جای دیگر، و پیوند بی متن. */
+  | 'bar_link_in_text'
+  | 'bar_bold_twice'
+  | 'bar_too_long'
+  | 'bar_href'
+  | 'bar_link_text';
 
 export interface ContentIssue {
   /** مسیر فیلد (نام فیلد فرم)؛ «items» برای شمار سؤال‌ها. */

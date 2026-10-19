@@ -13,8 +13,9 @@ import { logoutAction } from '../actions';
  * زبانه‌ها در گوشی ۳۲۰ پیکسلی جا شوند، «تعرفه»ی مالک با بخش‌های مالک (در دسکتاپ کنارشان، در گوشی زیر «بیشتر»)، و متصدی همان
  * ردیف (طرح برش ۶). حسابدار (۹٫۴) «پیشخوان»، «سفارش‌ها» و «گزارش‌ها». «گزارش‌ها» (۱۰٫۲، سؤال ۲۷۶) به گزارش تولید می‌رود: مالک در
  * بخش‌های مالک، و حسابدار و کاربر چاپخانه در ردیف؛ گزارش ارسال با چیپ همان صفحه، و برای حسابدار، که «ارسال» ندارد، زبانهٔ «گزارش‌ها»
- * روی گزارش ارسال هم جاری است. «تخفیف‌ها» (۱۱٫۴) برای مالک پس از «تعرفه» و برای حسابدار پس از «گزارش‌ها»، و «محتوای سایت» (۱۱٫۱) فقط برای
- * مالک، پس از «گزارش‌ها». هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
+ * روی گزارش ارسال هم جاری است. «تخفیف‌ها» (۱۱٫۴) برای مالک پس از «تعرفه» و برای حسابدار پس از «گزارش‌ها»، و «محتوای سایت» (۱۱٫۱) برای مالک
+ * پس از «گزارش‌ها» و از ۱۱٫۳ برای متصدی در ردیف پس از «تعرفه»، با نوار اعلان (سؤال ۲۸۲). هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با
+ * رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
  */
 export default async function PanelLayout({ children, params }: { children: React.ReactNode; params: Promise<{ gate: string }> }) {
   const { gate } = await params;
@@ -32,8 +33,9 @@ export default async function PanelLayout({ children, params }: { children: Reac
     : [];
   // تخفیف‌ها (۱۱٫۴، سؤال ۳۰۴): مالک در بخش‌های مالک پس از «تعرفه»، و حسابدار در ردیف پس از «گزارش‌ها».
   const discounts = can(session, 'discounts.read') ? [{ href: panelPath(gate, '/discounts'), label: 'تخفیف‌ها' }] : [];
-  // محتوای سایت (۱۱٫۱، سؤال ۲۸۲): فقط مالک، در بخش‌های مالک کنار «تعرفه» و «گزارش‌ها».
-  const content = can(session, 'content.edit') ? [{ href: panelPath(gate, '/content'), label: 'محتوای سایت' }] : [];
+  // محتوای سایت (۱۱٫۱ و ۱۱٫۳، سؤال ۲۸۲): مالک در بخش‌های مالک کنار «تعرفه» و «گزارش‌ها»، و متصدی (فقط نوار اعلان) در ردیف پس از «تعرفه».
+  const content =
+    can(session, 'content.edit') || can(session, 'content.bar') ? [{ href: panelPath(gate, '/content'), label: 'محتوای سایت' }] : [];
   const ownerOnly = [
     ...(can(session, 'settings.edit') || can(session, 'secrets.edit') ? [{ href: panelPath(gate, '/settings'), label: 'تنظیمات' }] : []),
     ...(can(session, 'partners.manage') ? [{ href: panelPath(gate, '/partners'), label: 'چاپخانه‌ها' }] : []),
@@ -44,7 +46,7 @@ export default async function PanelLayout({ children, params }: { children: Reac
     { href: home, label: 'پیشخوان' },
     ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
     ...(can(session, 'shipments.import') ? [{ href: panelPath(gate, '/shipments'), label: 'ارسال' }] : []),
-    ...(ownerOnly.length > 0 ? [] : [...reports, ...discounts, ...tariff]),
+    ...(ownerOnly.length > 0 ? [] : [...reports, ...discounts, ...tariff, ...content]),
   ];
   const owner = ownerOnly.length > 0 ? [...tariff, ...discounts, ...reports, ...content, ...ownerOnly] : [];
 

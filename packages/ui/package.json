@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./tokens": "./src/tokens.ts",
     "./styles.css": "./src/index.css",
-    "./pages.css": "./src/pages.css"
+    "./pages.css": "./src/pages.css",
+    "./bar.css": "./src/bar.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

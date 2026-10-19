@@ -12,6 +12,7 @@ import { KIND_NAMES, type ContentKind } from '@jozveyar/content';
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
 import { formatDeadlineDay, formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
+import { barWhenText } from './bar';
 import { AUDIENCE_NAMES } from './checkout';
 import { tehranDay } from './format';
 import { REFUND_INQUIRY_TEXT, viaGateway } from './refunds';
@@ -639,6 +640,23 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
             : [`${title} منتشر شد`];
       return { badge: null, text: merged([...done, '، نسخهٔ ', { ltr: String(detail.version) }, '، با کد تازه']) };
     }
+    case 'content.bar': {
+      // نوار اعلان (۱۱٫۳، سؤال ۲۹۴): کار و بازهٔ نوار تازه، بی متن (متن در جزئیات رویداد می‌ماند، چون نوار نسخه ندارد).
+      const after = (detail.after ?? {}) as { mode?: unknown; from?: unknown; until?: unknown };
+      const when =
+        after.mode === 'always' || after.mode === 'range'
+          ? barWhenText({ mode: after.mode, from: typeof after.from === 'string' ? after.from : null, until: typeof after.until === 'string' ? after.until : null }, event.at)
+          : '';
+      const done =
+        detail.change === 'on'
+          ? `نوار اعلان روشن شد${when}`
+          : detail.change === 'off'
+            ? 'نوار اعلان خاموش شد'
+            : detail.change === 'save'
+              ? 'متن نوار اعلان ذخیره شد؛ نوار خاموش است'
+              : `نوار اعلان عوض شد${when}`;
+      return { badge: null, text: [`${done}${detail.fresh === true ? '، با کد تازه' : ''}`] };
+    }
     case 'reviews.approve':
     case 'reviews.hide':
     case 'reviews.delete': {
@@ -697,7 +715,7 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
  * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
- * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱) زیر «محتوای سایت»، پس از «تعرفه»، به ترتیب طرح.
+ * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱) و نوار اعلان (۱۱٫۳) زیر «محتوای سایت»، پس از «تعرفه»، به ترتیب طرح.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },

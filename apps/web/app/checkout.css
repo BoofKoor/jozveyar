@@ -535,7 +535,7 @@
   }
 
   /* ===== درگاه نمونه: بیرون از پوستهٔ سایت، مثل صفحهٔ بانک ===== */
-  :where(body:has([data-gate])) :is(.site-top, .site-foot) {
+  :where(body:has([data-gate])) :is(.site-bar, .site-top, .site-foot) {
     display: none;
   }
   :where(body:has([data-gate])) {

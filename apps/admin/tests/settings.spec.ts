@@ -150,11 +150,11 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
 
   test('متصدی نه زبانه دارد، نه صفحه («فقط مالک» با متن طرح)؛ مالک کارت‌ها با عددهای پایگاه داده، و کلید .env فقط با ۴ نویسهٔ آخر', async () => {
     await operatorPage.goto(at());
-    await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه']);
+    await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه', 'محتوای سایت']);
     await operatorPage.goto(at('/settings'));
     await expect(operatorPage.getByRole('heading', { name: NO_ACCESS })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
-      'تعرفه را می‌توانی ببینی؛ ساختن نسخهٔ تازه، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، نظر مشتری‌ها و برگرداندن ورود فایل پست با مالک پنل است، و گزارش‌ها و کدهای تخفیف با مالک و حسابدار.',
+      'تعرفه را می‌توانی ببینی و نوار اعلان را عوض کنی؛ ساختن نسخهٔ تازهٔ تعرفه، متن‌های سایت، تنظیمات، کلیدها، چاپخانه‌ها، ادمین‌ها، رویدادها، نظر مشتری‌ها و برگرداندن ورود فایل پست با مالک پنل است، و گزارش‌ها و کدهای تخفیف با مالک و حسابدار.',
     );
     expect((await html(operatorPage)).includes('کلیدهای سرویس‌ها')).toBe(false);
 

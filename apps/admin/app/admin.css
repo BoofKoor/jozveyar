@@ -162,6 +162,10 @@
     .ad-more {
       display: block;
     }
+    /* بی «بیشتر» (متصدی، پنج زبانه از ۱۱٫۳): ردیف زبانه‌ها خودش می‌لغزد، نه صفحه */
+    .ad-nav--slide {
+      overflow-x: auto;
+    }
   }
   /* گوشی ۳۲۰ پیکسلی: چهار زبانهٔ حسابدار (۱۱٫۴: «پیشخوان»، «سفارش‌ها»، «گزارش‌ها»، «تخفیف‌ها») با فاصلهٔ ۱۰ چهار پیکسل جا کم داشتند */
   @media (max-width: 360px) {
@@ -273,6 +277,13 @@
   .ad-availability-form:has(.ad-av-closed:checked) .jy-field.ad-if-away,
   .ad-availability-form:has(.ad-av-busy:checked) .jy-field.ad-if-away {
     display: flex;
+  }
+  /* نوار اعلان (۱۱٫۳): روز اول و آخر فقط با «در بازه»، بی JS */
+  .ad-bar-form .ad-if-range {
+    display: none;
+  }
+  .ad-bar-form:has(.ad-bar-range:checked) .ad-if-range {
+    display: grid;
   }
   /* کد تخفیف (۱۱٫۴): درصد و سقفش فقط با «درصد»، مبلغ فقط با «مبلغ ثابت»، بی JS */
   .jy-field.ad-if-percent,
@@ -2554,6 +2565,47 @@
   .ad-live-n {
     text-decoration: underline dashed var(--color-green-500);
     text-underline-offset: 5px;
+  }
+  /* پیش‌نمایش نوار اعلان (۱۱٫۳): همان `site-bar` سایت (`@jozveyar/ui/bar.css`) بالای سربرگی کوچک، در گوشی ۳۲۰ و دسکتاپ */
+  .ad-barpv {
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-band);
+  }
+  .ad-barpv--phone {
+    max-width: 320px;
+  }
+  .ad-barpv .site-bar__in {
+    padding-inline: 24px;
+  }
+  .ad-barpv--phone .site-bar__in {
+    padding-inline: 16px;
+  }
+  .ad-barpv .ad-live-n {
+    text-decoration-color: currentColor;
+  }
+  .ad-barpv__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-barpv__head img {
+    height: 40px;
+    width: auto;
+  }
+  .ad-pvlabel {
+    margin-block: 16px 6px;
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+  .ad-pv .jy-card__head + .ad-pvlabel {
+    margin-block-start: 0;
   }
   .ad-serp {
     display: flex;

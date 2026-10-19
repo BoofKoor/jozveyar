@@ -1,0 +1,76 @@
+/*
+ * ===== نوار اعلان بالای سربرگ سایت (برش ۱۱٫۳، ADR-066؛ طرح تأییدشدهٔ docs/ui/mockups/content.html، سؤال‌های ۲۹۱ و ۲۹۳) =====
+ * بیرون از `site-top` و پیش از آن. زمینهٔ green-700 («زمینهٔ تیره» README برند) با متن سفید، تضاد ۷٫۰۳ به ۱؛ وسط‌چین و کمینهٔ ارتفاع ۴۴. با
+ * پیوند کل نوار پیوند است (هدف لمسی) و «متن پیوند ←» ته همان جمله می‌نشیند، نه ردیف جدا، تا در ۳۲۰ پیکسل دو خط بماند. بستنی نیست و JS
+ * ندارد. پیام تعطیلی همهٔ چاپخانه‌ها (۱۰٫۱) با ظاهر هشدار جای همین نوار است (`site-bar--warn`).
+ *
+ * جزء پوستهٔ سایت است، نه کیت؛ اینجاست (نه `apps/web/app`) چون پیش‌نمایش نوار در پنل همان را می‌خواهد (`@jozveyar/ui/bar.css`، مثل
+ * `pages.css`). رنگ فقط توکن، فقط logical properties.
+ */
+@layer components {
+  .site-bar {
+    display: block;
+    background: var(--color-green-700);
+    color: var(--color-paper);
+    text-decoration: none;
+  }
+  .site-bar__in {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding-block: 8px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    text-align: center;
+  }
+  .site-bar b {
+    font-weight: 600;
+  }
+  .site-bar__go {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-inline-start: 8px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    vertical-align: bottom;
+  }
+  .site-bar__go .jy-icon {
+    width: 16px;
+    height: 16px;
+  }
+  a.site-bar:hover {
+    background: var(--color-green-800);
+  }
+  /* فوکوس روی زمینهٔ تیره: لایهٔ سفید درون نوار (لایهٔ green-700 کیت روی همین رنگ دیده نمی‌شود) */
+  a.site-bar:focus-visible {
+    outline: 2px solid var(--color-paper);
+    outline-offset: -4px;
+    box-shadow: none;
+  }
+  .site-bar--warn {
+    background: var(--color-warning-bg);
+    color: var(--color-ink);
+    border-block-end: 1px solid var(--color-warning-border);
+  }
+  .site-bar--warn .site-bar__in {
+    align-items: flex-start;
+    gap: 8px;
+    text-align: start;
+  }
+  .site-bar--warn .jy-icon {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin-block-start: 2px;
+    color: var(--color-warning-text);
+  }
+  @media (min-width: 861px) {
+    .site-bar--warn .site-bar__in {
+      justify-content: center;
+    }
+  }
+}

@@ -53,6 +53,29 @@ export type AssignmentMode = (typeof ASSIGNMENT_MODES)[number];
 export const CHECKOUT_AUDIENCES = ['paused', 'preview', 'everyone'] as const;
 export type CheckoutAudience = (typeof CHECKOUT_AUDIENCES)[number];
 
+/** کی نوار اعلان دیده شود (برش ۱۱٫۳، سؤال ۲۹۴): خاموش، همیشه، یا در بازه‌ای از روزها. */
+export const BAR_MODES = ['off', 'always', 'range'] as const;
+export type BarMode = (typeof BAR_MODES)[number];
+
+/**
+ * نوار اعلان بالای سربرگ سایت (برش ۱۱٫۳، ADR-066؛ سؤال‌های ۲۰۸ و ۲۹۱ تا ۲۹۴). بازه آغاز روز اول و پایان انحصاری روز آخر است، هر دو نیمه‌شب
+ * تهران، مثل تعطیلی چاپخانه (۱۰٫۱)؛ متن یک خط با پررنگ و جای‌نگهدار، و پیوند اختیاری به همین سایت با متنش (`href` خالی یعنی بی پیوند).
+ * خاموش متنش را نگه می‌دارد. شکل و سقف هر فیلد را پنل می‌سنجد (`checkBar` در `@jozveyar/content`)؛ سقف‌های اینجا فقط جلوی مقدار بی‌اندازه‌اند.
+ */
+export const announcementBarSchema = z
+  .object({
+    mode: z.enum(BAR_MODES),
+    from: z.iso.datetime().nullable(),
+    until: z.iso.datetime().nullable(),
+    text: z.string().max(400),
+    href: z.string().max(200),
+    linkText: z.string().max(60),
+  })
+  .refine((bar) => bar.mode !== 'range' || (bar.from !== null && bar.until !== null && Date.parse(bar.from) < Date.parse(bar.until)), {
+    message: 'بازهٔ نوار درست نیست',
+  });
+export type AnnouncementBar = z.infer<typeof announcementBarSchema>;
+
 export const SETTING_SCHEMAS = {
   /** روز کاری تا تحویل به پست (ADR-013). */
   'order.sla_days': z.number().int().min(1).max(30),
@@ -113,6 +136,11 @@ export const SETTING_SCHEMAS = {
    * سفارشی که پیش‌تر سپرده شد دست نمی‌خورد، و سفارش بی چاپخانه با رفتن به `auto` خودکار سپرده نمی‌شود.
    */
   'assignment.mode': z.enum(ASSIGNMENT_MODES),
+  /**
+   * نوار اعلان بالای همهٔ صفحه‌های سایت (برش ۱۱٫۳، ADR-066): مالک و متصدی از «محتوای سایت» عوضش می‌کنند؛ روشن کردن و هر تغییر نوار روشن با کد
+   * تازه، خاموش کردن بی کد (سؤال ۲۸۷). سایت با ISR یک دقیقه‌ای می‌خواندش، و وقتی همهٔ چاپخانه‌ها تعطیل‌اند پیام تعطیلی جایش را می‌گیرد.
+   */
+  'content.bar': announcementBarSchema,
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

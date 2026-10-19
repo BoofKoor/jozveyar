@@ -8,7 +8,9 @@ import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
 import {
+  BAR_SETTING,
   REFUND_AUTO_EVERY_MS,
+  allClosedWindow,
   createAdminStore,
   createBlockStore,
   createCheckoutPreviewStore,
@@ -31,6 +33,7 @@ import {
   createTicketTemplateStore,
   getDb,
   lastAudienceChange,
+  lastSettingEvent,
   serviceKeyReader,
 } from '@jozveyar/db';
 import { mockGateway, type PaymentGateway } from '@jozveyar/payments';
@@ -168,12 +171,19 @@ function build(config: AdminConfig): Panel {
     blocks: createPanelBlocks({ store: createBlockStore(getDb()), secret: config.secret }),
     // نظر مشتری‌ها (۱۲٫۳، ADR-064): فقط مالک، بی کد تازه؛ پاک کردن تأیید جدای صفحه را دارد.
     reviews: createPanelReviews({ store: createReviewStore(getDb()), secret: config.secret }),
-    // متن‌های سایت (۱۱٫۱، ADR-065): فقط مالک؛ انتشار و برگرداندن با همان کد تازهٔ ورود، و پیش‌نمایش با عدد امروز سایت.
+    // متن‌های سایت (۱۱٫۱، ADR-065): فقط مالک؛ انتشار و برگرداندن با همان کد تازهٔ ورود، و پیش‌نمایش با عدد امروز سایت. نوار اعلان (۱۱٫۳،
+    // ADR-066): مالک و متصدی، تنظیم `content.bar` با همان ذخیره‌گاه تنظیم‌ها؛ تعطیلی همهٔ چاپخانه‌ها با همان حکم سایت (`allClosedWindow`).
     content: createPanelContent({
       store: createSiteContentStore(getDb()),
       facts: () => loadContentFacts(createOrderStore(getDb())),
       stepUp: auth.stepUp,
       secret: config.secret,
+      settings: createSettingsStore(getDb()),
+      barEvent: () => lastSettingEvent(getDb(), BAR_SETTING),
+      closedUntil: async (now) => {
+        const window = allClosedWindow(await createOrderStore(getDb()).partnerHours());
+        return window && window.from.getTime() <= now.getTime() && now.getTime() < window.until.getTime() ? window.until : null;
+      },
     }),
   };
 }

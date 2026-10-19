@@ -331,14 +331,14 @@ test.describe.serial('در دسترس بودن چاپخانه و تخصیص (۱�
     await ownerPage.goto(at());
     const lastDay = formatDeadlineDay(tehranDayStart(new Date(), 2));
     await expect(ownerPage.locator('[data-alert="all-closed"]')).toHaveText(
-      `همهٔ چاپخانه‌ها تا ${lastDay} تعطیل‌اند. سفارش تازه پیش اولین چاپخانه‌ای می‌رود که باز می‌شود، مهلت تحویل به پستش از روز باز شدن شمرده می‌شود، و صفحهٔ اصلی سایت همین را در نواری بالای صفحه می‌گوید.`,
+      `همهٔ چاپخانه‌ها تا ${lastDay} تعطیل‌اند. سفارش تازه پیش اولین چاپخانه‌ای می‌رود که باز می‌شود، مهلت تحویل به پستش از روز باز شدن شمرده می‌شود، و سایت همین را در نواری بالای همهٔ صفحه‌ها، جای نوار اعلان، می‌گوید.`,
     );
     const d = await order('پریسا شریفی', `0912${String(RUN).slice(1)}7104`, TEHRAN);
     seeded.push(d);
     expect(await partnerOf(d)).toEqual({ name: SAHAR, rule: 'reopening' });
 
     if (WEB) {
-      // صفحهٔ اصلی با ISR یک دقیقه‌ای: نوار تا یک دقیقه می‌آید.
+      // صفحهٔ اصلی با ISR یک دقیقه‌ای: نوار تا یک دقیقه می‌آید؛ از ۱۱٫۳ بالای سربرگ همهٔ صفحه‌ها (layout).
       const site = await sitePage(ownerPage.context());
       await expect
         .poll(

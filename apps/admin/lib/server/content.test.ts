@@ -18,11 +18,12 @@ import {
   type FaqContent,
   type PageContent,
 } from '@jozveyar/content';
-import type { ContentDraftRow, ContentVersionRow, PublishOutcome, SiteContentStore } from '@jozveyar/db';
+import type { AnnouncementBar } from '@jozveyar/contracts';
+import type { ContentDraftRow, ContentVersionRow, PublishOutcome, SettingEvent, SettingsStore, SiteContentStore } from '@jozveyar/db';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { ipHashOf, type AdminSession } from './auth';
-import { applyFaqOp, contentSeen, createPanelContent, faqOpOf, loadContentFacts, publishFromOf } from './content';
+import { applyFaqOp, barSeen, contentSeen, createPanelContent, faqOpOf, loadContentFacts, publishFromOf } from './content';
 import { fail, ok, type Result } from './result';
 
 const NOW = new Date('2026-10-17T08:00:00Z');
@@ -42,8 +43,9 @@ function session(roles: string[], permissions: string[]): AdminSession {
     partner: null,
   };
 }
-const OWNER = session(['owner'], ['orders.read', 'content.edit']);
-const OPERATOR = session(['operator'], ['orders.read', 'orders.status']);
+const OWNER = session(['owner'], ['orders.read', 'content.edit', 'content.bar']);
+const OPERATOR = session(['operator'], ['orders.read', 'orders.status', 'content.bar']);
+const ACCOUNTANT = session(['accountant'], ['orders.read', 'orders.money']);
 
 /** ذخیره‌گاه حافظه‌ای با همان قرارداد: پایهٔ پیش‌نویس ثابت، انتشار فقط از نسخه‌ای که صفحه دید، و پیش‌نویس منتشرشده پاک. */
 function memoryStore() {
@@ -127,20 +129,62 @@ function memoryStore() {
   return { store, versions, drafts, calls, publishes, answerNext: (outcome: PublishOutcome) => (next = outcome) };
 }
 
+/**
+ * ذخیره‌گاه تنظیم‌های حافظه‌ای با همان قرارداد `change`: `decide` مقدار امروز را می‌بیند؛ «نوشتن» با رویداد، «همان» بی رویداد. `beforeLock` تغییری
+ * است که درست پیش از قفل جای دیگری نشست (همان که ذخیره‌گاه واقعی زیر قفل می‌بیند).
+ */
+function memorySettings() {
+  const values = new Map<string, unknown>();
+  const events: { key: string; action: string; detail: Record<string, unknown>; at: Date }[] = [];
+  const calls: string[] = [];
+  let beforeLock: (() => void) | null = null;
+  const store: Pick<SettingsStore, 'read' | 'change'> = {
+    async read(key) {
+      calls.push(`read:${key}`);
+      return values.get(key);
+    },
+    async change({ key, action, decide, at }) {
+      calls.push(`change:${key}`);
+      beforeLock?.();
+      beforeLock = null;
+      const decision = decide(values.get(key));
+      if (decision.kind === 'reject') return { ok: false, reason: decision.reason };
+      if (decision.kind === 'same') return { ok: true, written: false };
+      values.set(key, structuredClone(decision.value));
+      events.push({ key, action, detail: decision.detail, at });
+      return { ok: true, written: true };
+    },
+  };
+  return { store, values, events, calls, onLock: (change: () => void) => (beforeLock = change) };
+}
+
 function setup() {
   const memory = memoryStore();
+  const settings = memorySettings();
   const stepUps: unknown[] = [];
+  let event: SettingEvent | null = null;
+  let closed: Date | null = null;
   const content = createPanelContent({
     store: memory.store,
     facts: async () => SEED_FACTS,
     secret: SECRET,
     now: () => NOW,
+    settings: settings.store,
+    barEvent: async () => event,
+    closedUntil: async () => closed,
     async stepUp(_session, code): Promise<Result<true>> {
       stepUps.push(code);
       return code === GOOD_CODE ? ok(true) : fail(400, 'wrong_code');
     },
   });
-  return { ...memory, content, stepUps };
+  return {
+    ...memory,
+    settings,
+    content,
+    stepUps,
+    setEvent: (value: SettingEvent | null) => (event = value),
+    setClosed: (value: Date | null) => (closed = value),
+  };
 }
 
 /** فیلدهای فرم از یک متن، به نام مسیرشان. */
@@ -512,5 +556,175 @@ describe('واقعیت‌های امروز', () => {
       setting: async (key: string) => settings[key] ?? null,
     } as never);
     expect(facts).toMatchObject({ slaDays: 3, uploadDays: 1, orderFilesDays: 45, formats: { word: true, slides: false, image: true } });
+  });
+});
+
+describe('نوار اعلان (۱۱٫۳)', () => {
+  /** دوشنبه ۲۷ مهر ۱۴۰۵، ساعت ۱۱:۳۰ تهران؛ نیمه‌شب امروز و روزهای بعد. */
+  const TODAY = new Date('2026-10-18T20:30:00Z');
+  const day = (n: number) => new Date(TODAY.getTime() + n * 86_400_000);
+  const TEXT = 'هر صفحهٔ سیاه‌سفید فقط **{نرخ_سیاه_سفید} تومان**';
+  const form = (patch: Record<string, string> = {}) => ({
+    mode: 'always',
+    from: '',
+    until: '',
+    text: TEXT,
+    href: '/#tariff',
+    linkText: 'دیدن تعرفه',
+    ...patch,
+  });
+  const ON: AnnouncementBar = { mode: 'always', from: null, until: null, text: TEXT, href: '/#tariff', linkText: 'دیدن تعرفه' };
+  const OFF_SEEN = barSeen({ mode: 'off', from: null, until: null, text: '', href: '', linkText: '' });
+
+  it('دیدن، ذخیره و خاموش کردن فقط با `content.bar` (مالک و متصدی)، پیش از هر خواندن', async () => {
+    const t = setup();
+    expect(await t.content.bar(ACCOUNTANT)).toMatchObject({ ok: false, status: 403, error: 'forbidden' });
+    expect(await t.content.saveBar(ACCOUNTANT, { ...form(), seen: OFF_SEEN, code: GOOD_CODE }, IP)).toMatchObject({ status: 403 });
+    expect(await t.content.barOff(ACCOUNTANT, IP)).toMatchObject({ status: 403 });
+    expect(t.settings.calls).toEqual([]);
+    expect(t.stepUps).toEqual([]);
+    expect(await t.content.bar(OPERATOR)).toMatchObject({ ok: true });
+  });
+
+  it('نوار امروز با «همان که دیده شد»، عدد امروز، آخرین رویداد و تعطیلی همهٔ چاپخانه‌ها؛ نبود یا شکل خراب یعنی خاموش', async () => {
+    const t = setup();
+    const view = await t.content.bar(OWNER);
+    expect(view).toMatchObject({ ok: true, value: { bar: { mode: 'off', text: '' }, seen: OFF_SEEN, event: null, closedUntil: null } });
+    expect(view.ok && view.value.values.نرخ_سیاه_سفید).toBe('1,600');
+    t.settings.values.set('content.bar', { mode: 'always', text: 7 });
+    expect(await t.content.bar(OWNER)).toMatchObject({ ok: true, value: { bar: { mode: 'off' }, seen: OFF_SEEN } });
+    const event: SettingEvent = { at: NOW, by: 'علی', action: 'content.bar', detail: { change: 'on', fresh: true } };
+    t.setEvent(event);
+    t.setClosed(day(2));
+    expect(await t.content.bar(OPERATOR)).toMatchObject({ ok: true, value: { event, closedUntil: day(2) } });
+  });
+
+  it('روشن کردن کد تازه می‌خواهد، پس از هر سنجشی که بی کد جواب دارد؛ با کد، با رویداد پیش و پس', async () => {
+    const t = setup();
+    // کد خالی: بی `stepUp`.
+    expect(await t.content.saveBar(OPERATOR, { ...form(), seen: OFF_SEEN, code: '' }, IP)).toMatchObject({ status: 400, error: 'bar_code_required', field: 'code' });
+    // فرم خطادار: پیش از کد، با خطای هر فیلد.
+    const invalid = await t.content.saveBar(OPERATOR, { ...form({ text: '**یک** و **دو**', href: 'https://t.me/x' }), seen: OFF_SEEN, code: GOOD_CODE }, IP);
+    expect(invalid).toMatchObject({ status: 400, error: 'bar_invalid' });
+    expect(!invalid.ok && (invalid.issues as { code: string }[]).map((issue) => issue.code)).toEqual(['bar_bold_twice', 'bar_href']);
+    // روز نادرست: خطای همان فیلد.
+    expect(await t.content.saveBar(OPERATOR, { ...form({ mode: 'range', from: '1405/07/27', until: '1405/13/01' }), seen: OFF_SEEN, code: GOOD_CODE }, IP)).toMatchObject({
+      error: 'bar_invalid_last_day',
+      field: 'until',
+    });
+    expect(t.stepUps).toEqual([]);
+    expect(await t.content.saveBar(OPERATOR, { ...form(), seen: OFF_SEEN, code: '000000' }, IP)).toMatchObject({ error: 'wrong_code' });
+    expect(t.settings.events).toEqual([]);
+
+    expect(await t.content.saveBar(OPERATOR, { ...form(), seen: OFF_SEEN, code: GOOD_CODE }, IP)).toEqual({ ok: true, value: { change: 'on' } });
+    expect(t.settings.values.get('content.bar')).toEqual(ON);
+    expect(t.settings.events).toEqual([
+      {
+        key: 'content.bar',
+        action: 'content.bar',
+        at: NOW,
+        detail: { change: 'on', fresh: true, before: { mode: 'off', from: null, until: null, text: '', href: '', linkText: '' }, after: ON },
+      },
+    ]);
+  });
+
+  it('همان نوار هیچ (بی کد و بی رویداد)؛ تغییر نوار روشن کد تازه می‌خواهد؛ خاموش کردن نه، و متنش می‌ماند', async () => {
+    const t = setup();
+    t.settings.values.set('content.bar', ON);
+    const seen = barSeen(ON);
+    expect(await t.content.saveBar(OWNER, { ...form(), seen, code: '' }, IP)).toEqual({ ok: true, value: { change: 'same' } });
+    expect(await t.content.saveBar(OWNER, { ...form({ linkText: 'تعرفه' }), seen, code: '' }, IP)).toMatchObject({ error: 'bar_code_required' });
+    expect(await t.content.saveBar(OWNER, { ...form({ linkText: 'تعرفه' }), seen, code: GOOD_CODE }, IP)).toEqual({ ok: true, value: { change: 'change' } });
+    expect(t.stepUps).toEqual([GOOD_CODE]);
+
+    // «خاموش» از فرم: بی کد.
+    const changed = { ...ON, linkText: 'تعرفه' };
+    expect(await t.content.saveBar(OWNER, { ...form({ mode: 'off', linkText: 'تعرفه' }), seen: barSeen(changed), code: '' }, IP)).toEqual({
+      ok: true,
+      value: { change: 'off' },
+    });
+    // متن نوار خاموش: بی کد، «ذخیره».
+    const off = { ...changed, mode: 'off' as const };
+    expect(await t.content.saveBar(OWNER, { ...form({ mode: 'off', text: 'متن تازه', linkText: 'تعرفه' }), seen: barSeen(off), code: '' }, IP)).toEqual({
+      ok: true,
+      value: { change: 'save' },
+    });
+    expect(t.stepUps).toEqual([GOOD_CODE]);
+    expect(t.settings.events.map((event) => [event.detail.change, event.detail.fresh])).toEqual([
+      ['change', true],
+      ['off', false],
+      ['save', false],
+    ]);
+  });
+
+  it('«خاموش کن»: بی کد و بی «همان که دیده شد»؛ متن و پیوند می‌مانند؛ دوباره هیچ', async () => {
+    const t = setup();
+    t.settings.values.set('content.bar', { ...ON, mode: 'range', from: day(-1).toISOString(), until: day(3).toISOString() });
+    expect(await t.content.barOff(OPERATOR, IP)).toEqual({ ok: true, value: { change: 'off' } });
+    expect(t.settings.values.get('content.bar')).toEqual({ ...ON, mode: 'off' });
+    expect(await t.content.barOff(OPERATOR, IP)).toEqual({ ok: true, value: { change: 'same' } });
+    expect(t.settings.events).toHaveLength(1);
+    expect(t.stepUps).toEqual([]);
+  });
+
+  it('نواری که صفحه دید دیگر نیست: پیش از کد، و اگر درست پیش از قفل عوض شد، زیر قفل', async () => {
+    const t = setup();
+    t.settings.values.set('content.bar', ON);
+    expect(await t.content.saveBar(OWNER, { ...form({ text: 'سلام' }), seen: OFF_SEEN, code: GOOD_CODE }, IP)).toMatchObject({ status: 409, error: 'bar_changed' });
+    expect(t.stepUps).toEqual([]);
+    t.settings.onLock(() => t.settings.values.set('content.bar', { ...ON, text: 'جای دیگر' }));
+    expect(await t.content.saveBar(OWNER, { ...form({ text: 'سلام' }), seen: barSeen(ON), code: GOOD_CODE }, IP)).toMatchObject({ status: 409, error: 'bar_changed' });
+    expect(t.settings.values.get('content.bar')).toMatchObject({ text: 'جای دیگر' });
+    expect(t.settings.events).toEqual([]);
+  });
+
+  it('در بازه: روز اول از امروز، روز آخر تا ۹۰ روز بعد و نه پیش از روز اول؛ بازهٔ آینده هم کد می‌خواهد؛ متن بازهٔ جاری بی جابه‌جا کردن آغازش', async () => {
+    const t = setup();
+    const at = new Date(TODAY.getTime() + 11.5 * 3_600_000);
+    const content = createPanelContent({
+      store: t.store,
+      facts: async () => SEED_FACTS,
+      secret: SECRET,
+      now: () => at,
+      settings: t.settings.store,
+      barEvent: async () => null,
+      closedUntil: async () => null,
+      stepUp: async (_session, code) => (code === GOOD_CODE ? ok(true) : fail(400, 'wrong_code')),
+    });
+    const save = (patch: Record<string, string>, seen = OFF_SEEN) => content.saveBar(OWNER, { ...form({ mode: 'range', ...patch }), seen, code: GOOD_CODE }, IP);
+    expect(await save({ from: '1405/07/26', until: '1405/07/30' })).toMatchObject({ error: 'bar_day_past', field: 'from' });
+    expect(await save({ from: '1405/07/29', until: '1405/07/28' })).toMatchObject({ error: 'bar_day_order', field: 'until' });
+    expect(await save({ from: '1405/07/27', until: '1405/10/28' })).toMatchObject({ error: 'bar_day_too_far', field: 'until' });
+    expect(await save({ from: 'فردا', until: '1405/07/28' })).toMatchObject({ error: 'bar_invalid_day', field: 'from' });
+
+    // آینده: روی سایت نیست ولی بعداً بی کار دیگری می‌آید.
+    expect(await content.saveBar(OWNER, { ...form({ mode: 'range', from: '1405/07/29', until: '1405/08/01' }), seen: OFF_SEEN, code: '' }, IP)).toMatchObject({
+      error: 'bar_code_required',
+    });
+    // ارقام فارسی هم؛ تا ۹۰ روز بعد درست.
+    expect(await save({ from: '۱۴۰۵/۰۷/۲۷', until: '1405/10/27' })).toEqual({ ok: true, value: { change: 'on' } });
+    const stored = t.settings.values.get('content.bar') as AnnouncementBar;
+    expect(stored).toMatchObject({ mode: 'range', from: TODAY.toISOString(), until: day(91).toISOString() });
+
+    // فردای آغاز بازه، متن عوض می‌شود و روز اول (حالا دیروز) همان می‌ماند.
+    const tomorrow = new Date(at.getTime() + 86_400_000);
+    const later = createPanelContent({
+      store: t.store,
+      facts: async () => SEED_FACTS,
+      secret: SECRET,
+      now: () => tomorrow,
+      settings: t.settings.store,
+      barEvent: async () => null,
+      closedUntil: async () => null,
+      stepUp: async () => ok(true),
+    });
+    expect(
+      await later.saveBar(OWNER, { ...form({ mode: 'range', from: '1405/07/27', until: '1405/10/27', text: 'متن تازه' }), seen: barSeen(stored), code: GOOD_CODE }, IP),
+    ).toEqual({ ok: true, value: { change: 'change' } });
+    // ولی روز اول گذشتهٔ دیگری نه.
+    const now2 = t.settings.values.get('content.bar') as AnnouncementBar;
+    expect(await later.saveBar(OWNER, { ...form({ mode: 'range', from: '1405/07/26', until: '1405/10/27' }), seen: barSeen(now2), code: GOOD_CODE }, IP)).toMatchObject({
+      error: 'bar_day_past',
+    });
   });
 });
