@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CONTACT, contactLead, contactRows } from '../lib/contact';
+import { contactLead, contactRows, defaultContent, hasContact } from '@jozveyar/content';
 
 /**
  * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک، آیکون گوشی،
@@ -319,13 +319,14 @@ test.describe('۴۰۴', () => {
 });
 
 /**
- * صفحه‌های ثابت (قدم ۵، برش ۷٫۴؛ طرح `checkout.html`، سؤال ۱۴۲)، به ترتیب پاورقی. «تماس» فقط با اطلاعات تماس واقعی
- * (`lib/contact.ts`): اطلاعات ساختگی روی سایت زنده نمی‌رود، پس تا آن موقع ۴۰۴ است و در پاورقی و نقشهٔ سایت نیست. با رسیدن
- * اطلاعات، همین فهرست و تست‌ها خودشان صفحهٔ تماس را هم می‌سنجند.
+ * صفحه‌های ثابت (قدم ۵، برش ۷٫۴؛ طرح `checkout.html`، سؤال ۱۴۲)، به ترتیب پاورقی. این مرحله پایگاه داده ندارد، پس متن هر صفحه متن پیش‌فرض
+ * است (`@jozveyar/content`، ۱۱٫۱). «تماس» فقط وقتی راهی برای تماس هست: اطلاعات ساختگی روی سایت زنده نمی‌رود، پس بی آن ۴۰۴ است و در پاورقی و
+ * نقشهٔ سایت نیست.
  */
+const CONTACT = defaultContent('contact');
 const STATIC_PAGES = [
   { path: '/about', label: 'دربارهٔ ما', heading: 'دربارهٔ جزوه‌یار' },
-  ...(CONTACT ? [{ path: '/contact', label: 'تماس', heading: 'تماس با جزوه‌یار' }] : []),
+  ...(hasContact(CONTACT) ? [{ path: '/contact', label: 'تماس', heading: 'تماس با جزوه‌یار' }] : []),
   { path: '/terms', label: 'قوانین و مقررات', heading: 'قوانین جزوه‌یار' },
   { path: '/privacy', label: 'حریم خصوصی', heading: 'حریم خصوصی' },
 ];
@@ -337,6 +338,7 @@ test.describe('صفحه‌های ثابت', () => {
       const response = await request.get(path);
       expect(response.status()).toBe(200);
       const html = await response.text();
+      // عنوان گوگل هر صفحه از متن همان صفحه است (۱۱٫۱)؛ متن پیش‌فرض همان نام پیوند پاورقی.
       expect(html).toContain(`<title>${label} | جزوه‌یار</title>`);
       expect(html).toMatch(/<html[^>]+lang="fa"/);
       expect(html).toMatch(/<html[^>]+dir="rtl"/);
@@ -380,11 +382,11 @@ test.describe('صفحه‌های ثابت', () => {
     await expect(privacy).toContainText('(30 روز)');
   });
 
-  test('تماس فقط با اطلاعات واقعی: تا آن موقع ۴۰۴، نه در پاورقی و نه در نقشهٔ سایت', async ({ page, request }) => {
+  test('تماس فقط با اطلاعات واقعی: بی آن ۴۰۴، نه در پاورقی و نه در نقشهٔ سایت', async ({ page, request }) => {
     const response = await request.get('/contact');
     const sitemap = await (await request.get('/sitemap.xml')).text();
     await page.goto('/');
-    if (!CONTACT) {
+    if (!hasContact(CONTACT)) {
       expect(response.status()).toBe(404);
       expect(await response.text()).toContain('این صفحه پیدا نشد');
       await expect(footer(page).getByRole('link', { name: 'تماس' })).toHaveCount(0);
@@ -396,9 +398,7 @@ test.describe('صفحه‌های ثابت', () => {
     expect(sitemap).toContain('/contact');
     await page.goto('/contact');
     const article = page.getByRole('article');
-    for (const value of Object.values(CONTACT).filter((value) => value !== undefined)) {
-      await expect(article).toContainText(value);
-    }
+    for (const row of contactRows(CONTACT)) await expect(article).toContainText(row.value);
     // زیرعنوان به راه‌هایی که هست، ردیف‌ها به ترتیب طرح و فقط آنچه هست، و هر شماره و ایمیل پیوند خودش.
     await expect(article.locator('.pg-lead')).toHaveText(contactLead(CONTACT));
     await expect(article.locator('.pg-contact dt')).toHaveText(contactRows(CONTACT).map(({ label }) => label));
@@ -411,7 +411,7 @@ test.describe('صفحه‌های ثابت', () => {
     await page.goto('/about');
     const about = page.getByRole('article');
     const heading = about.getByRole('heading', { level: 2, name: 'نشانی' });
-    if (!CONTACT?.address) {
+    if (!CONTACT.address) {
       await expect(heading).toHaveCount(0);
       return;
     }

@@ -8,6 +8,7 @@ const config: NextConfig = {
   // پکیج‌های workspace به‌صورت TypeScript خام مصرف می‌شوند.
   transpilePackages: [
     '@jozveyar/analysis',
+    '@jozveyar/content',
     '@jozveyar/contracts',
     '@jozveyar/db',
     '@jozveyar/geo',

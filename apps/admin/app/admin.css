@@ -1349,6 +1349,10 @@
     margin-inline-start: auto;
     margin-block: -8px;
   }
+  /* «دیدن» و «برگرداندن…» نسخه‌های متن سایت (۱۱٫۱) با هم ته ردیف */
+  .ad-versions .jy-btn + .jy-btn {
+    margin-inline-start: 0;
+  }
   .ad-cards {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2365,5 +2369,420 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  /*
+   * ===== محتوای سایت (برش ۱۱٫۱، ADR-065؛ طرح «محتوای سایت (برش ۱۱)» در admin.html) =====
+   * فهرست متن‌ها، ویرایشگر و پیش‌نمایش کنار هم بالای ۱۰۸۰ پیکسل و زیر هم پایین‌تر، Markdown با راهنمای نحو، جدول جای‌نگهدارها، نمونهٔ
+   * نتیجهٔ گوگل، «چه عوض می‌شود» و فهرست سؤال‌ها. پیش‌نمایش صفحه همان کلاس‌های pg- سایت است (`@jozveyar/ui/pages.css`)، و قهرمان صفحهٔ
+   * اصلی همان شکل home.css، یک پله کوچک‌تر تا در کارت جا شود.
+   */
+  /* کارت‌های یک‌ستونی متن: انتشار و نسخه‌ها پهنای خواندن، فهرست سؤال‌ها کمی پهن‌تر */
+  .ad-measure {
+    max-width: 44rem;
+  }
+  .ad-faqcard {
+    max-width: 52rem;
+  }
+  .ad-texts > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 2px;
+    padding-block: 12px;
+  }
+  .ad-texts > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-texts__name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    font-weight: 600;
+  }
+  .ad-texts__meta {
+    grid-column: 1;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .ad-texts > li > .jy-btn {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .ad-ed {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .ad-ed > * {
+    min-width: 0;
+  }
+  @media (width <= 1080px) {
+    .ad-ed {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .ad-fs {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+  /* legend شناور «legend نمایشی» نیست: روی لبهٔ بالا نمی‌نشیند و خط جداکننده را نمی‌بُرد */
+  .ad-fs > legend {
+    float: inline-start;
+    width: 100%;
+    padding: 0;
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ad-fs + .ad-fs {
+    padding-block-start: 20px;
+    border-block-start: 1px solid var(--color-line);
+  }
+  .ad-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  @media (max-width: 520px) {
+    .ad-pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  /* قدم صفحهٔ اصلی: تیتر و متنش با هم، نزدیک‌تر از فیلدهای دیگر */
+  .ad-stepfield {
+    display: grid;
+    gap: 8px;
+  }
+  textarea.ad-md {
+    min-height: 24rem;
+    font-size: var(--text-small);
+    line-height: 1.9;
+  }
+  .ad-ph {
+    padding-inline: 4px;
+    border-radius: var(--radius-sm);
+    background: var(--color-green-100);
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--color-ink);
+    white-space: nowrap;
+  }
+  .ad-errs {
+    display: grid;
+    gap: 4px;
+    margin-block-start: 4px;
+    padding-inline-start: 18px;
+    list-style: disc;
+  }
+  .ad-mdhelp {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+    margin-block-start: 4px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  /* نمونه‌ها همان‌طور که در فیلد راست‌به‌چپ دیده می‌شوند: هر کدام جدا (isolate)، بی عوض کردن جهت */
+  .ad-mdhelp code {
+    padding-inline: 4px;
+    border-radius: var(--radius-sm);
+    background: var(--color-green-100);
+    font-family: inherit;
+    color: var(--color-ink);
+    unicode-bidi: isolate;
+  }
+  .ad-phs summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    font-weight: 600;
+    color: var(--color-muted);
+    list-style: none;
+    cursor: pointer;
+  }
+  .ad-phs summary::-webkit-details-marker {
+    display: none;
+  }
+  .ad-phs summary .jy-icon {
+    width: 16px;
+    height: 16px;
+    transition: rotate var(--jy-dur-fast) var(--jy-ease);
+  }
+  .ad-phs[open] summary .jy-icon {
+    rotate: 180deg;
+  }
+  .ad-phs .ad-table {
+    font-size: var(--text-small);
+  }
+  .ad-pv__frame {
+    padding: 24px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ad-pv__frame .pg-body {
+    max-width: none;
+  }
+  .ad-pv__frame .pg-title {
+    font-size: var(--text-h3);
+  }
+  .ad-pv__frame > .pg-lead:first-child {
+    margin-block-start: 0;
+  }
+  .ad-pv__frame .pg-contact {
+    margin-block-start: 0;
+    border-block-start: 0;
+  }
+  .ad-pv__frame .ad-pv-h {
+    margin-block-start: 32px;
+    font-size: var(--text-h4);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ad-pv__frame .ad-pv-h + :is(p, ul) {
+    margin-block-start: 8px;
+  }
+  .ad-live-n {
+    text-decoration: underline dashed var(--color-green-500);
+    text-underline-offset: 5px;
+  }
+  .ad-serp {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 16px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ad-serp__url {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-serp__t {
+    font-size: var(--text-h4);
+    line-height: 1.5;
+    color: var(--color-green-700);
+  }
+  .ad-serp__d {
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-mddiff {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-block-start: 8px;
+  }
+  .ad-mddiff > li {
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    line-height: 1.9;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .ad-mddiff > li.ad-mddiff__sec {
+    padding: 0;
+    font-weight: 600;
+  }
+  .ad-mddiff > li + li.ad-mddiff__sec {
+    margin-block-start: 8px;
+  }
+  .ad-mddiff__old {
+    background: var(--color-green-50);
+    color: var(--color-muted);
+  }
+  .ad-mddiff__new {
+    background: var(--color-success-bg);
+  }
+  .ad-mddiff__k {
+    display: block;
+    font-size: var(--text-small);
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+  .ad-mddiff ins {
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .ad-mddiff del {
+    text-decoration: line-through;
+  }
+  .ad-faq > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-faq summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding-block: 8px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .ad-faq summary::-webkit-details-marker {
+    display: none;
+  }
+  .ad-faq summary:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  .ad-faq__n {
+    flex: none;
+    width: 24px;
+    text-align: center;
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+  .ad-faq__q {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .ad-faq summary > .jy-icon {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    color: var(--color-muted);
+    transition: rotate var(--jy-dur-fast) var(--jy-ease);
+  }
+  .ad-faq details[open] > summary > .jy-icon {
+    rotate: 180deg;
+  }
+  .ad-faq__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-block: 4px 16px;
+    padding-inline-start: 36px;
+  }
+  .ad-faq__ctl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  @media (max-width: 520px) {
+    .ad-faq__body {
+      padding-inline-start: 0;
+    }
+  }
+  /* شناسهٔ تلگرام و اینستاگرام: پیشوند نشانی چپ‌به‌راست کنار فیلد، چون سایت خودش پیوند را می‌سازد */
+  .ad-prefix {
+    display: flex;
+    direction: ltr;
+  }
+  .ad-prefix__t {
+    display: inline-flex;
+    align-items: center;
+    padding-inline: 12px;
+    border: 1px solid var(--color-control);
+    border-inline-end: 0;
+    border-start-start-radius: var(--radius-md);
+    border-end-start-radius: var(--radius-md);
+    background: var(--color-green-50);
+    font-size: var(--text-small);
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .ad-prefix .jy-input {
+    flex: 1;
+    min-width: 0;
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+  }
+  .ad-pvh__eyebrow {
+    display: inline-block;
+    padding: 2px 12px;
+    border-radius: 999px;
+    background: var(--color-green-100);
+    color: var(--color-green-800);
+    font-size: var(--text-small);
+    font-weight: 600;
+    line-height: 1.9;
+  }
+  .ad-pvh__title {
+    margin-block-start: 12px;
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .ad-pvh__title > span {
+    display: inline-block;
+  }
+  .ad-pvh__title mark {
+    padding-inline: 2px;
+    color: inherit;
+    background: linear-gradient(transparent 58%, var(--color-green-200) 58%, var(--color-green-200) 90%, transparent 90%);
+  }
+  .ad-pvh__lead {
+    margin-block-start: 8px;
+    color: var(--color-muted);
+  }
+  .ad-pvh__trust {
+    display: grid;
+    gap: 12px;
+    margin-block-start: 20px;
+  }
+  .ad-pvh__trust li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .ad-pvh__ic {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--color-green-50);
+    color: var(--color-green-700);
+  }
+  .ad-pvh__t {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.6;
+  }
+  .ad-pvh__t > b {
+    font-weight: 600;
+  }
+  .ad-pvh__t > span {
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-pvh__how {
+    display: grid;
+    gap: 12px;
+    margin-block-start: 20px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-pvh__how h3 {
+    font-weight: 600;
+  }
+  .ad-pvh__how p {
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  @media (max-width: 520px) {
+    .ad-pv__frame {
+      padding: 16px;
+    }
+    .ad-pvh__title {
+      font-size: var(--text-h3);
+    }
   }
 }

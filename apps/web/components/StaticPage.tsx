@@ -14,7 +14,7 @@ export function StaticPage({
 }: {
   /** شناسهٔ تیتر، برای `aria-labelledby` مقاله. */
   id: string;
-  title: string;
+  title: ReactNode;
   /** «به‌روز شده در …»، شمسی عددی (`pageDate`). */
   updated?: string;
   lead: ReactNode;

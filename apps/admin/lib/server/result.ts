@@ -205,7 +205,18 @@ export type AdminErrorCode =
   | 'review_not_found'
   | 'review_stale'
   | 'review_no_body'
-  | 'review_bad_action';
+  | 'review_bad_action'
+  /**
+   * متن‌های سایت (۱۱٫۱): متن یا نسخه پیدا نشد، پیش‌نویسی برای انتشار نیست یا هنوز خطا دارد، متن همان است که روی سایت است، متن روی سایت یا
+   * پیش‌نویس همین حالا عوض شد، سؤال‌ها به سقف رسیده، و متنی که از سقف پایگاه داده هم بزرگ‌تر است.
+   */
+  | 'content_not_found'
+  | 'content_no_draft'
+  | 'content_invalid'
+  | 'content_unchanged'
+  | 'content_changed'
+  | 'content_faq_full'
+  | 'content_too_large';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

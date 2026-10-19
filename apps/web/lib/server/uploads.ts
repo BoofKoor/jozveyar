@@ -12,7 +12,15 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { ANALYZE_DOCUMENT_JOB, CONVERT_DOCUMENT_JOB, type DocumentRow, type DocumentStore } from '@jozveyar/db';
+import {
+  ANALYZE_DOCUMENT_JOB,
+  CONVERT_DOCUMENT_JOB,
+  DEFAULT_UPLOAD_RETENTION_DAYS,
+  UPLOAD_RETENTION_SETTING,
+  positiveSetting,
+  type DocumentRow,
+  type DocumentStore,
+} from '@jozveyar/db';
 import {
   DEFAULT_PART_SIZE_BYTES,
   partSize,
@@ -43,15 +51,12 @@ export const MAX_BROWSER_ANALYSIS_PAGES = 1500;
 
 /** یک مگابایت سقف حجم (`file.max_mb`، برش ۸٫۴)، همان که مرورگر می‌سنجد. */
 export const MEGABYTE = 1024 * 1024;
-/** پیش‌فرض‌های `settings` — همان اعدادی که ARCHITECTURE فهرست کرده. */
-export const DEFAULT_RETENTION_DAYS = 2;
-/** روزهایی که فایل آپلود می‌ماند: قاعدهٔ سنی باکت و `file_expires_at`؛ صفحه‌های قوانین و حریم خصوصی هم همین را می‌گویند (۷٫۴). */
-export const UPLOAD_RETENTION_SETTING = 'file.retention_days';
-
-/** تنظیم عددی آپلود (`file.*`، بیرون از `SETTING_SCHEMAS`): عدد مثبت متناهی، وگرنه پیش‌فرض. */
-export function positiveSetting(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
+/**
+ * پیش‌فرض‌های `settings` — همان اعدادی که ARCHITECTURE فهرست کرده. روزهای فایل آپلود و قاعدهٔ تنظیم عددی از ۱۱٫۱ در `@jozveyar/db`اند، تا
+ * پیش‌نمایش متن‌های سایت در پنل همان عدد سایت را بگوید.
+ */
+export const DEFAULT_RETENTION_DAYS = DEFAULT_UPLOAD_RETENTION_DAYS;
+export { UPLOAD_RETENTION_SETTING, positiveSetting };
 
 type SourceKind = DocumentRow['sourceKind'];
 

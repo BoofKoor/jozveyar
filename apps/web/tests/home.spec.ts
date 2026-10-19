@@ -10,6 +10,8 @@ import {
 } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans, toLatinDigits } from '@jozveyar/text';
 
+import { defaultContent, hasContact } from '@jozveyar/content';
+
 import { footerGroups } from '../lib/staticPages';
 
 /**
@@ -185,7 +187,7 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
     expect(questions).toHaveLength(6);
     const order: string[] = [];
     // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد.
-    const footer = footerGroups().flatMap(({ pages }) => pages.map(({ label }) => label));
+    const footer = footerGroups(hasContact(defaultContent('contact'))).flatMap(({ pages }) => pages.map(({ label }) => label));
     for (let i = 0; i < 7 + questions.length + footer.length; i++) {
       await page.keyboard.press('Tab');
       order.push(

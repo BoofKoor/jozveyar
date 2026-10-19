@@ -24,6 +24,7 @@ import {
   createSettingsStore,
   createShipmentStore,
   createShippingReportStore,
+  createSiteContentStore,
   createSmsOutbox,
   createSmsStats,
   createTariffStore,
@@ -43,6 +44,7 @@ import { createAdminAuth, type AdminAuth, type AdminSession } from './auth';
 import { adminConfig, panelMockGateway, panelSmsProvider, smsIrInUse, type AdminConfig } from './config';
 import { clientIpOf, cookieName, isSecureRequest, sessionCookieOptions } from './cookie';
 import { createPanelBlocks, type PanelBlocks } from './blocks';
+import { createPanelContent, loadContentFacts, type PanelContent } from './content';
 import { createPanelDiscounts, type PanelDiscounts } from './discounts';
 import { createPanelExports, type PanelExports } from './exports';
 import { createPanelOrders, type PanelOrders } from './orders';
@@ -71,6 +73,7 @@ interface Panel {
   discounts: PanelDiscounts;
   blocks: PanelBlocks;
   reviews: PanelReviews;
+  content: PanelContent;
 }
 
 let cached: Panel | null | undefined;
@@ -165,6 +168,13 @@ function build(config: AdminConfig): Panel {
     blocks: createPanelBlocks({ store: createBlockStore(getDb()), secret: config.secret }),
     // نظر مشتری‌ها (۱۲٫۳، ADR-064): فقط مالک، بی کد تازه؛ پاک کردن تأیید جدای صفحه را دارد.
     reviews: createPanelReviews({ store: createReviewStore(getDb()), secret: config.secret }),
+    // متن‌های سایت (۱۱٫۱، ADR-065): فقط مالک؛ انتشار و برگرداندن با همان کد تازهٔ ورود، و پیش‌نمایش با عدد امروز سایت.
+    content: createPanelContent({
+      store: createSiteContentStore(getDb()),
+      facts: () => loadContentFacts(createOrderStore(getDb())),
+      stepUp: auth.stepUp,
+      secret: config.secret,
+    }),
   };
 }
 

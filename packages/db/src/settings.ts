@@ -26,6 +26,21 @@ export const SETTINGS_LOCK = 0x73657474;
 /** هدف رویدادهای تنظیم در `admin_events`؛ شناسهٔ هدف نام تنظیم است. */
 export const SETTING_TARGET = 'setting';
 
+/**
+ * روزهایی که فایل آپلود می‌ماند (`file.retention_days`، بیرون از `SETTING_SCHEMAS`): قاعدهٔ سنی باکت و `file_expires_at` سایت؛ قوانین و
+ * حریم خصوصی و از ۱۱٫۱ جای‌نگهدار `{روزهای_فایل}` هم همین را می‌گویند. اینجا، تا سایت و پیش‌نمایش پنل یک عدد بگویند.
+ */
+export const UPLOAD_RETENTION_SETTING = 'file.retention_days';
+export const DEFAULT_UPLOAD_RETENTION_DAYS = 2;
+
+/** تنظیم عددی آپلود (`file.*`، بیرون از `SETTING_SCHEMAS`): عدد مثبت متناهی، وگرنه پیش‌فرض. */
+export function positiveSetting(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** روزهای ماندن فایل آپلود برای متن سایت: گرد به بالا، مثل قاعدهٔ سنی باکت. */
+export const uploadDaysOf = (value: unknown) => Math.ceil(positiveSetting(value, DEFAULT_UPLOAD_RETENTION_DAYS));
+
 /** کنندهٔ کار، برای رویداد. */
 export interface SettingsActor {
   adminUserId: string;

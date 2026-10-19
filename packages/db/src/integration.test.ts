@@ -23,6 +23,8 @@ import { createDiscountStore, termsOf } from './discounts.js';
 import { DiscountRefusedError, MobileBlockedError } from './orders.js';
 import { createBlockStore } from './blocks.js';
 import { createReviewStore } from './reviews.js';
+import { CONTENT_TARGET, createSiteContentStore } from './content.js';
+import { siteContentDrafts, siteContentVersions } from './schema.js';
 import { mobileBlocks, orderReviews } from './schema.js';
 import { discountCodes, discountTiers } from './schema.js';
 import { DISCOUNT_TIERS_MAX, TIER_PERCENT_MAX } from '@jozveyar/contracts';
@@ -2602,7 +2604,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -2656,9 +2658,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const read = async (role: string) =>
         (await conn.db.select().from(rolePermissions).where(eq(rolePermissions.roleId, role))).map((r) => r.permissionId).sort();
       expect(await read('owner')).toEqual(Object.keys(ADMIN_PERMISSIONS).sort());
-      // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است. نظر مشتری‌ها (۱۲٫۳، سؤال ۲۱۳: «امکان حذف توسط من») هم فقط مالک.
+      // گزارش ارسال (۶٫۴، ADR-048) فقط مالک: حاشیه راز کسب‌وکار است. نظر مشتری‌ها (۱۲٫۳، سؤال ۲۱۳: «امکان حذف توسط من») هم فقط مالک،
+      // و متن‌های سایت (۱۱٫۱، سؤال ۲۸۲) هم.
       expect(await read('owner')).toContain('reports.read');
       expect(await read('owner')).toContain('reviews.manage');
+      expect(await read('owner')).toContain('content.edit');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
       // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها و از ۱۲٫۲ مسدود کردن موبایل مشتری؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی
@@ -3104,7 +3108,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -3583,7 +3587,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -4634,7 +4638,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5018,7 +5022,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5498,7 +5502,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -6942,7 +6946,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7318,7 +7322,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7792,7 +7796,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -9575,7 +9579,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
@@ -10053,7 +10057,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -10336,6 +10340,141 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       ).toBe('jobs_one_target');
       expect(await rejectedConstraint(conn.db.insert(jobs).values({ kind: RENDER_REPORT_JOB, reportExportId: other, payload: {} }))).toBe(
         'jobs_report_export_kind',
+      );
+    });
+  });
+  describe('متن‌های سایت روی پستگرس (برش ۱۱٫۱)', () => {
+    const NOW = new Date('2026-10-17T07:30:00Z');
+    const MINUTE = 60_000;
+    let owner = '';
+    const actor = () => ({ adminUserId: owner, ipHash: 'h'.repeat(64) });
+    const store = () => createSiteContentStore(conn);
+    const terms = (lead: string) => ({ title: 'قوانین جزوه‌یار', lead, body: '## پرداخت\nبا درگاه زیبال.', seo: { title: 'قوانین', description: 'قوانین سفارش' } });
+    const contentEvents = () =>
+      conn.db.select().from(adminEvents).where(eq(adminEvents.targetType, CONTENT_TARGET)).orderBy(asc(adminEvents.id));
+    const insertVersion = (over: Partial<typeof siteContentVersions.$inferInsert>) =>
+      rejectedConstraint(conn.db.insert(siteContentVersions).values({ kind: 'terms', version: 1, content: terms('x'), createdBy: owner, ...over }));
+
+    beforeAll(async () => {
+      const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner111', displayName: 'سارا رضایی' }).returning();
+      owner = admin!.id;
+    });
+
+    beforeEach(async () => {
+      // نسخه و رویداد پاک‌نشدنی‌اند (`site_content_versions_append_only`، `admin_events_append_only`)؛ TRUNCATE تریگر ردیفی ندارد.
+      await conn.db.execute(sql`TRUNCATE site_content_versions, site_content_drafts, admin_events`);
+    });
+
+    it('پیش‌نویس، انتشار از همان که دیده شد، برگشت به پیش‌فرض و برگرداندن نسخه، هر کدام با رویداد بی متن', async () => {
+      expect(await store().live()).toEqual({});
+      const draft = await store().saveDraft({ kind: 'terms', content: terms('یک'), actor: actor(), at: NOW });
+      expect(draft).toMatchObject({ kind: 'terms', baseVersion: 0, updatedByName: 'سارا رضایی', createdAt: NOW, updatedAt: NOW });
+      const later = new Date(NOW.getTime() + MINUTE);
+      expect(await store().saveDraft({ kind: 'terms', content: terms('دو'), actor: actor(), at: later })).toMatchObject({
+        baseVersion: 0,
+        content: terms('دو'),
+        createdAt: NOW,
+        updatedAt: later,
+      });
+
+      const publish = (expectedLive: number, source: Parameters<ReturnType<typeof store>['publish']>[0]['source']) =>
+        store().publish({ kind: 'terms', expectedLive, source, actor: actor(), at: later });
+      const fromDraft = (verify: (draft: unknown) => boolean) => ({ type: 'draft' as const, content: terms('دو'), verify });
+      // صفحه‌ای که نسخهٔ دیگری دید، و پیش‌نویسی که پس از سنجش عوض شد.
+      expect(await publish(1, fromDraft(() => true))).toEqual({ ok: false, reason: 'stale' });
+      expect(await publish(0, fromDraft(() => false))).toEqual({ ok: false, reason: 'draft_changed' });
+      // jsonb ترتیب کلیدها را نگه نمی‌دارد؛ سرویس پنل با JSON یکتای `@jozveyar/content` می‌سنجد.
+      expect(await publish(0, fromDraft((d) => (d as { lead?: string }).lead === 'دو'))).toEqual({ ok: true, version: 1 });
+      expect(await store().drafts()).toEqual({});
+      expect(await publish(1, fromDraft(() => true))).toEqual({ ok: false, reason: 'draft_changed' });
+
+      const live = await store().live();
+      expect(live.terms).toMatchObject({ version: 1, content: terms('دو'), restoredFrom: null, createdByName: 'سارا رضایی', createdAt: later });
+
+      expect(await publish(1, { type: 'restore', version: 0 })).toEqual({ ok: true, version: 2 });
+      // برگشت دوباره به پیش‌فرض چیزی را عوض نمی‌کند (`site_content_versions_noop`).
+      expect(await publish(2, { type: 'restore', version: 0 })).toEqual({ ok: false, reason: 'noop' });
+      expect(await publish(2, { type: 'restore', version: 9 })).toEqual({ ok: false, reason: 'not_found' });
+      expect(await publish(2, { type: 'restore', version: 1 })).toEqual({ ok: true, version: 3 });
+      expect((await store().versions('terms')).map((v) => [v.version, v.restoredFrom, v.content === null])).toEqual([
+        [3, 1, false],
+        [2, 0, true],
+        [1, null, false],
+      ]);
+      expect((await store().live()).terms?.content).toEqual(terms('دو'));
+
+      // پیش‌نویس تازه از نسخهٔ امروز، و پایه‌اش با انتشار دیگری عوض نمی‌شود (صفحهٔ انتشار «پایهٔ کهنه» را از همین می‌گوید)؛ دور انداختن یک بار.
+      expect(await store().saveDraft({ kind: 'terms', content: terms('سه'), actor: actor(), at: later })).toMatchObject({ baseVersion: 3 });
+      expect(await publish(3, { type: 'restore', version: 0 })).toEqual({ ok: true, version: 4 });
+      expect(await store().saveDraft({ kind: 'terms', content: terms('چهار'), actor: actor(), at: later })).toMatchObject({
+        baseVersion: 3,
+        content: terms('چهار'),
+      });
+      expect(await store().discardDraft('terms')).toBe(true);
+      expect(await store().discardDraft('terms')).toBe(false);
+
+      expect((await contentEvents()).map((e) => [e.action, e.targetId, e.detail, e.ipHash])).toEqual([
+        ['content.publish', 'terms', { kind: 'terms', version: 1, restored: null }, 'h'.repeat(64)],
+        ['content.publish', 'terms', { kind: 'terms', version: 2, restored: 0 }, 'h'.repeat(64)],
+        ['content.publish', 'terms', { kind: 'terms', version: 3, restored: 1 }, 'h'.repeat(64)],
+        ['content.publish', 'terms', { kind: 'terms', version: 4, restored: 0 }, 'h'.repeat(64)],
+      ]);
+      expect(JSON.stringify(await contentEvents())).not.toContain('زیبال');
+    });
+
+    it('انتشارهای هم‌زمان زیر قفل پشت‌سرهم‌اند: یکی منتشر می‌شود و بقیه «عوض شد» می‌گیرند، نه خطای ایندکس', async () => {
+      await store().saveDraft({ kind: 'faq', content: { items: [{ q: 'پ', a: 'پا' }] }, actor: actor(), at: NOW });
+      const outcome = (r: { ok: boolean; reason?: string }) => (r.ok ? 'ok' : r.reason);
+      // پنج صفحه‌ای که همه نسخهٔ ۰ را دیدند؛ هر کدام پس از اولی نسخهٔ ۱ را روی سایت می‌بیند، نه آنچه صفحه‌اش دید.
+      const drafts = await Promise.all(
+        [0, 1, 2, 3, 4].map(() =>
+          store().publish({ kind: 'faq', expectedLive: 0, source: { type: 'draft', content: { items: [{ q: 'پ', a: 'پا' }] }, verify: () => true }, actor: actor(), at: NOW }),
+        ),
+      );
+      expect(drafts.map(outcome).sort()).toEqual(['ok', 'stale', 'stale', 'stale', 'stale']);
+      // برگرداندن قفل ردیف پیش‌نویس ندارد: فقط قفل متن‌ها پنج برگشت هم‌زمان به پیش‌فرض را پشت‌سرهم می‌کند.
+      const restores = await Promise.all(
+        [0, 1, 2, 3, 4].map(() => store().publish({ kind: 'faq', expectedLive: 1, source: { type: 'restore', version: 0 }, actor: actor(), at: NOW })),
+      );
+      expect(restores.map(outcome).sort()).toEqual(['ok', 'stale', 'stale', 'stale', 'stale']);
+      expect((await store().versions('faq')).map((v) => v.version)).toEqual([2, 1]);
+    });
+
+    it('محافظ‌ها: نسخه عوض و پاک نمی‌شود، شماره پشت‌سرهم، برگرداندن راست، و هر نسخه تغییری است', async () => {
+      await conn.db.insert(siteContentVersions).values({ kind: 'terms', version: 1, content: terms('یک'), createdBy: owner });
+      const where = and(eq(siteContentVersions.kind, 'terms'), eq(siteContentVersions.version, 1));
+      expect(await rejectedConstraint(conn.db.update(siteContentVersions).set({ content: terms('دو') }).where(where))).toBe(
+        'site_content_versions_frozen',
+      );
+      expect(await rejectedConstraint(conn.db.delete(siteContentVersions).where(where))).toBe('site_content_versions_append_only');
+      expect(await insertVersion({ version: 3, content: terms('سه') })).toBe('site_content_versions_sequence');
+      expect(await insertVersion({ version: 1, content: terms('سه') })).toBe('site_content_versions_sequence');
+      expect(await insertVersion({ version: 2, content: terms('یک') })).toBe('site_content_versions_noop');
+      expect(await insertVersion({ version: 2, content: terms('سه'), restoredFrom: 1 })).toBe('site_content_versions_restored_same');
+      expect(await insertVersion({ version: 2, content: null })).toBe('site_content_versions_default');
+      expect(await insertVersion({ version: 2, content: terms('سه'), restoredFrom: 0 })).toBe('site_content_versions_default');
+      expect(await insertVersion({ version: 2, content: terms('سه'), restoredFrom: 2 })).toBe('site_content_versions_restored_same');
+      expect(await insertVersion({ version: 2, content: terms('سه'), restoredFrom: -1 })).toBe('site_content_versions_restored');
+      expect(await insertVersion({ version: 2, content: ['آرایه'] })).toBe('site_content_versions_content');
+      expect(await insertVersion({ version: 2, content: { body: 'ا'.repeat(70_000) } })).toBe('site_content_versions_content');
+      expect(await insertVersion({ version: 0, content: terms('سه') })).toBe('site_content_versions_sequence');
+      // برگرداندن درست: همان متن نسخهٔ ۱، و برگشت به پیش‌فرض.
+      expect(await insertVersion({ version: 2, content: null, restoredFrom: 0 })).toBeUndefined();
+      expect(await insertVersion({ version: 3, content: terms('یک'), restoredFrom: 1 })).toBeUndefined();
+      // نسخه‌ای از نوع دیگر شمارهٔ خودش را دارد.
+      expect(await insertVersion({ kind: 'about', version: 1, content: terms('یک') })).toBeUndefined();
+    });
+
+    it('پیش‌نویس: از نسخه‌ای که هست، JSON شیء، و زمان ویرایش نه پیش از ساختن', async () => {
+      const insertDraft = (over: Partial<typeof siteContentDrafts.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(siteContentDrafts).values({ kind: 'terms', content: terms('x'), baseVersion: 0, updatedBy: owner, ...over }));
+      expect(await insertDraft({ baseVersion: 4 })).toBe('site_content_drafts_base_exists');
+      expect(await insertDraft({ baseVersion: -1 })).toBe('site_content_drafts_base_exists');
+      expect(await insertDraft({ content: 'متن' })).toBe('site_content_drafts_content');
+      expect(await insertDraft({ createdAt: NOW, updatedAt: new Date(NOW.getTime() - MINUTE) })).toBe('site_content_drafts_times');
+      expect(await insertDraft({})).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.update(siteContentDrafts).set({ baseVersion: 2 }).where(eq(siteContentDrafts.kind, 'terms')))).toBe(
+        'site_content_drafts_base_exists',
       );
     });
   });

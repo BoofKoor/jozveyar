@@ -5,6 +5,8 @@ import { quote, wholeDocumentRule } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID, SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 
+import { defaultContent, hasContact } from '@jozveyar/content';
+
 import { footerGroups } from '../lib/staticPages';
 
 /**
@@ -276,7 +278,7 @@ test.describe('دسترس‌پذیری پس از فایل', () => {
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       const order: string[] = [];
       // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد؛ در حالت سفارش همان نام‌ها، در زبانهٔ تازه (`site.spec.ts`).
-      const footer = footerGroups().flatMap(({ pages }) => pages.map(({ label }) => label));
+      const footer = footerGroups(hasContact(defaultContent('contact'))).flatMap(({ pages }) => pages.map(({ label }) => label));
       for (let i = 0; i < 11 + questions.length + footer.length; i++) {
         await page.keyboard.press('Tab');
         order.push(await focused(page));
