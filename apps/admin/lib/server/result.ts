@@ -216,7 +216,21 @@ export type AdminErrorCode =
   | 'content_unchanged'
   | 'content_changed'
   | 'content_faq_full'
-  | 'content_too_large';
+  | 'content_too_large'
+  /**
+   * نوار اعلان (۱۱٫۳): نوار همین حالا جای دیگری عوض شد، فرم خطا دارد (هر فیلد زیر خودش)، روشن کردن یا تغییر نوار روشن بی کد، «کی» ناشناس، و
+   * خطای روزها (همان قاعدهٔ تعطیلی چاپخانه، با متن نوار).
+   */
+  | 'bar_changed'
+  | 'bar_invalid'
+  | 'bar_code_required'
+  | 'invalid_bar_mode'
+  | 'bar_invalid_day'
+  | 'bar_invalid_last_day'
+  | 'bar_day_past'
+  | 'bar_last_day_past'
+  | 'bar_day_order'
+  | 'bar_day_too_far';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

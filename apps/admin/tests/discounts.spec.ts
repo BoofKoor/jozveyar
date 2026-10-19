@@ -312,7 +312,7 @@ test.describe.serial('کدهای تخفیف (۱۱٫۴)', () => {
   test('متصدی: بی زبانه، و «تخفیف‌ها» فقط برای مالک است', async () => {
     const { page, problems } = who.operator;
     await page.goto(at('/'));
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه', 'محتوای سایت']);
     await page.goto(at('/discounts'));
     await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
     expect(problems).toEqual([]);

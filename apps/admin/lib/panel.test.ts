@@ -709,6 +709,28 @@ describe('رویدادها', () => {
     expect([inEventKind('content.publish', 'content'), inEventKind('content.publish', 'settings')]).toEqual([true, false]);
     expect(EVENT_KINDS.find((kind) => kind.kind === 'content')).toEqual({ kind: 'content', label: 'محتوای سایت' });
   });
+
+  it('نوار اعلان (۱۱٫۳، سؤال ۲۹۴): کار و بازهٔ نوار تازه، همان سطر طرح؛ متن نوار هرگز؛ زیر «محتوای سایت»', () => {
+    // رویدادها دوشنبه ۱۳ مهر ۱۱:۰۰ تهران‌اند؛ بازه نیمه‌شب تهران با پایان انحصاری.
+    const bar = (detail: Record<string, unknown>) => event('content.bar', { targetType: 'setting', targetId: 'content.bar', detail });
+    const after = (mode: string, from: string | null = null, until: string | null = null) => ({ mode, from, until, text: 'متن نوار', href: '', linkText: '' });
+    const lines = eventLines([
+      bar({ change: 'on', fresh: true, after: after('range', '2026-10-04T20:30:00.000Z', '2026-10-22T20:30:00.000Z') }),
+      bar({ change: 'on', fresh: true, after: after('range', '2026-10-23T20:30:00.000Z', '2026-10-29T20:30:00.000Z') }),
+      bar({ change: 'change', fresh: true, after: after('always') }),
+      bar({ change: 'off', fresh: false, after: after('off') }),
+      bar({ change: 'save', fresh: false, after: after('off') }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['نوار اعلان روشن شد، تا پنجشنبه 30 مهر، با کد تازه'],
+      ['نوار اعلان روشن شد، از شنبه 2 آبان تا پنجشنبه 7 آبان، با کد تازه'],
+      ['نوار اعلان عوض شد، همیشه، با کد تازه'],
+      ['نوار اعلان خاموش شد'],
+      ['متن نوار اعلان ذخیره شد؛ نوار خاموش است'],
+    ]);
+    expect(JSON.stringify(lines)).not.toContain('متن نوار"');
+    expect([inEventKind('content.bar', 'content'), inEventKind('content.bar', 'settings')]).toEqual([true, false]);
+  });
 });
 
 describe('نقش در سربرگ و فهرست ادمین‌ها', () => {

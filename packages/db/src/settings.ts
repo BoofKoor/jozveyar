@@ -14,11 +14,11 @@
  * هر خواندن از خود پایگاه داده است، بی کش در حافظه: سایت و پنل، روی هر چند نود، تغییر را با درخواست بعدی می‌بینند.
  */
 
-import { eq, inArray, max, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, max, sql } from 'drizzle-orm';
 
 import { adminEventRow } from './admin.js';
 import type { Database } from './index.js';
-import { adminEvents, settings } from './schema.js';
+import { adminEvents, adminUsers, settings } from './schema.js';
 
 /** کلید قفل مشورتی تغییر تنظیم‌ها: «sett» به عدد. پیوند پیش‌نمایش مسیر خرید هم زیر همین ساخته می‌شود (برش ۷٫۵، `checkout.ts`). */
 export const SETTINGS_LOCK = 0x73657474;
@@ -85,6 +85,31 @@ export async function settingsChangedAt({ db }: Database, keys: readonly string[
     .from(settings)
     .where(inArray(settings.key, [...keys]));
   return row?.at ?? null;
+}
+
+/** آخرین رویداد یک تنظیم، با نام کننده. */
+export interface SettingEvent {
+  at: Date;
+  by: string | null;
+  action: string;
+  detail: Record<string, unknown>;
+}
+
+/**
+ * آخرین رویداد یک تنظیم (`admin_events` با هدف همان تنظیم)، یا null اگر هیچ‌وقت از پنل عوض نشده؛ برای «روشن از امروز 10:05، علی، با کد تازه»
+ * کارت نوار اعلان (برش ۱۱٫۳). مقدار خود تنظیم از `read` است، نه از رویداد.
+ */
+export async function lastSettingEvent({ db }: Pick<Database, 'db'>, key: string): Promise<SettingEvent | null> {
+  const [row] = await db
+    .select({ at: adminEvents.at, action: adminEvents.action, detail: adminEvents.detail, by: adminUsers.displayName })
+    .from(adminEvents)
+    .leftJoin(adminUsers, eq(adminUsers.id, adminEvents.adminUserId))
+    .where(and(eq(adminEvents.targetType, SETTING_TARGET), eq(adminEvents.targetId, key)))
+    .orderBy(desc(adminEvents.at), desc(adminEvents.id))
+    .limit(1);
+  if (!row) return null;
+  const detail = row.detail !== null && typeof row.detail === 'object' && !Array.isArray(row.detail) ? (row.detail as Record<string, unknown>) : {};
+  return { at: row.at, by: row.by ?? null, action: row.action, detail };
 }
 
 export function createSettingsStore({ db }: Database): SettingsStore {

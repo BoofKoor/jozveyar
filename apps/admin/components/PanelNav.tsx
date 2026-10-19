@@ -14,7 +14,7 @@ export interface Tab {
 /**
  * زبانه‌های پنل (طرح پنل، تصمیم ۲۴): بخش‌های همه در ردیف؛ بخش‌های مالک در دسکتاپ کنارشان و در گوشی زیر
  * «بیشتر»، تا زبانهٔ جاری همیشه دیده شود. زبانهٔ جاری `aria-current`؛ «بیشتر» با رفتن به صفحهٔ دیگر بسته
- * می‌شود.
+ * می‌شود. بی «بیشتر» (متصدی از ۱۱٫۳ پنج زبانه دارد) خود ردیف زبانه‌ها در گوشی می‌لغزد، نه صفحه (`ad-nav--slide`).
  */
 export function PanelNav({ home, primary, owner }: { home: string; primary: Tab[]; owner: Tab[] }) {
   const pathname = usePathname();
@@ -24,7 +24,7 @@ export function PanelNav({ home, primary, owner }: { home: string; primary: Tab[
   const ownerCurrent = owner.some(isCurrent);
 
   return (
-    <nav className="ad-wrap ad-nav" aria-label="بخش‌های پنل">
+    <nav className={`ad-wrap ad-nav${owner.length > 0 ? '' : ' ad-nav--slide'}`} aria-label="بخش‌های پنل">
       {primary.map((tab) => (
         <Link key={tab.href} href={tab.href} aria-current={current(tab)}>
           {tab.label}

@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import { hasContact } from '@jozveyar/content';
 import { BAND_COLOR } from '@jozveyar/ui/tokens';
+import { SiteBar } from '../components/SiteBar';
 import { SiteFooter } from '../components/SiteFooter';
 import { SiteHeader } from '../components/SiteHeader';
 import { PREVIEW_BAR_SCRIPT } from '../lib/previewBar';
+import { siteBar } from '../lib/server/bar';
 import { liveText, sitePublished } from '../lib/server/content';
 import { SITE_OPEN_GRAPH } from '../lib/staticPages';
 import './globals.css';
@@ -48,15 +50,20 @@ export const viewport: Viewport = {
  * `site-grow` دارد تا پاورقی در صفحهٔ کوتاه هم ته صفحه بنشیند. معرفی و جملهٔ پایین پاورقی، و پیوند «تماس»، از متن «تماس و پاورقی» (۱۱٫۱)؛
  * همان خواندنِ صفحه (`sitePublished`، یک بار در هر رسم).
  *
+ * بالای سربرگ نوار اعلانی که مالک یا متصدی از پنل روشن کرده، یا وقتی همهٔ چاپخانه‌ها تعطیل‌اند پیام تعطیلی جای آن (۱۱٫۳، `SiteBar`)؛ هر دو
+ * کامپوننت سرور و بی JS، با همین ISR.
+ *
  * نوار پیش‌نمایش مالک (برش ۷٫۵، `lib/previewBar.ts`): اسکریپت کوچک درون HTML، ته بدنه، که فقط با کوکی نشانهٔ `jy_pv` می‌پرسد و نوار را
  * اول بدنه می‌گذارد؛ باندل اولیه همان می‌ماند.
  */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const contact = liveText('contact', await sitePublished()).content;
+  const [published, bar] = await Promise.all([sitePublished(), siteBar()]);
+  const contact = liveText('contact', published).content;
   return (
     // `data-restoring` را اسکریپت درون HTML صفحهٔ اصلی پیش از رسم می‌گذارد (۳د)؛ React نباید آن را ناجوری بداند.
     <html lang="fa" dir="rtl" suppressHydrationWarning>
       <body className="site">
+        {bar ? <SiteBar view={bar} /> : null}
         <SiteHeader />
         <div className="site-grow">{children}</div>
         <SiteFooter intro={contact.footerIntro} legal={contact.footerLegal} contact={hasContact(contact)} />

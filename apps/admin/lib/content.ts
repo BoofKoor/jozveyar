@@ -124,6 +124,22 @@ export function issueMessage(issue: ContentIssue): ContentSeg[] {
       return ['کد پستی کنار نشانی می‌آید؛ اول نشانی را بنویس.'];
     case 'faq_empty':
       return ['دست‌کم یک سؤال لازم است.'];
+    case 'bar_link_in_text':
+      return ['پیوند نوار در فیلد «پیوند» است و کل نوار پیوند می‌شود؛ اینجا فقط متن، پررنگ و جای‌نگهدار.'];
+    case 'bar_bold_twice':
+      return ['نوار فقط یک پررنگ دارد؛ یکی از دو ', ph('**…**'), ' را بردار.'];
+    case 'bar_too_long':
+      return [
+        'با عددهای امروز ',
+        { num: formatNumber(issue.length ?? 0) },
+        ' نویسه است؛ دست‌بالا ',
+        { num: formatNumber(issue.max ?? 0) },
+        '، تا در گوشی دو خط بماند.',
+      ];
+    case 'bar_href':
+      return ['پیوند نوار فقط به صفحه‌ای از همین سایت می‌رود، مثل ', { ltr: '/contact' }, '؛ ', { ltr: issue.detail ?? '' }, ' نیست.'];
+    case 'bar_link_text':
+      return ['با پیوند، متنی لازم است که ته نوار بیاید، مثل «دیدن تعرفه».'];
   }
 }
 

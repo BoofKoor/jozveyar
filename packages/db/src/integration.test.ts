@@ -95,7 +95,7 @@ import {
   shippingMethods,
 } from './schema.js';
 import { createTariffStore, type TariffActor } from './tariff.js';
-import { createSettingsStore, settingsChangedAt, SETTING_TARGET, type SettingsActor } from './settings.js';
+import { createSettingsStore, lastSettingEvent, settingsChangedAt, SETTING_TARGET, type SettingsActor } from './settings.js';
 import { createSecretStore, resolveServiceKey, serviceKeyContext, SERVICE_KEY_TARGET, SERVICE_KEYS } from './secrets.js';
 import { seal } from './sealed.js';
 import { serviceSecrets } from './schema.js';
@@ -135,7 +135,7 @@ import {
   gatewayRejection,
   lastAudienceChange,
 } from './checkout.js';
-import { CHECKOUT_AUDIENCE_SETTING, DEFAULT_SETTINGS } from './reference.js';
+import { BAR_SETTING, CHECKOUT_AUDIENCE_SETTING, DEFAULT_SETTINGS } from './reference.js';
 import { checkoutPreviews } from './schema.js';
 import { SETTINGS_LOCK } from './settings.js';
 import { orderTickets, TICKET_TEMPLATE_MAX_BYTES, ticketTemplates } from './schema.js';
@@ -2664,10 +2664,11 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await read('owner')).toContain('reviews.manage');
       expect(await read('owner')).toContain('content.edit');
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
-      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها و از ۱۲٫۲ مسدود کردن موبایل مشتری؛ چاپخانه فقط دیدن،
+      // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها، از ۱۲٫۲ مسدود کردن موبایل مشتری و از ۱۱٫۳ نوار اعلان؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی
       // مبلغ). هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید هم نه (سؤال ۲۰۱). صریح، نه از کد.
       expect(await read('operator')).toEqual([
+        'content.bar',
         'customers.block',
         'files.download',
         'orders.address',
@@ -2775,6 +2776,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       const session = await store.findSession(sessionHash);
       expect(session).toMatchObject({ revokedAt: null, roles: ['operator'] });
       expect(session!.permissions).toEqual([
+        'content.bar',
         'customers.block',
         'files.download',
         'orders.address',
@@ -7427,6 +7429,49 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await settingsChangedAt(conn, [])).toBeNull();
       expect(await valueOf(SLA_DAYS_SETTING)).toBe(2);
       expect(await valueOf(FILES_RETENTION_SETTING)).toEqual(retention!.value);
+    });
+
+    it('نوار اعلان (۱۱٫۳): دادهٔ پایه خاموش و بی متن، به شکل قرارداد؛ آخرین رویداد همین تنظیم با نام کننده، تازه‌تر به شناسه، و تنظیم دیگر نه', async () => {
+      await conn.db.delete(settings).where(eq(settings.key, BAR_SETTING));
+      const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      expect(seeded.settingsInserted).toEqual([BAR_SETTING]);
+      const off = { mode: 'off', from: null, until: null, text: '', href: '', linkText: '' };
+      expect(await valueOf(BAR_SETTING)).toEqual(off);
+      expect(await readSetting((key) => createSettingsStore(conn).read(key), BAR_SETTING)).toEqual(off);
+      expect(DEFAULT_SETTINGS[BAR_SETTING]).toEqual(off);
+
+      expect(await lastSettingEvent(conn, BAR_SETTING)).toBeNull();
+      const store = createSettingsStore(conn);
+      const on = { mode: 'always', from: null, until: null, text: 'سلام', href: '/contact', linkText: 'تماس' };
+      const T1 = new Date('2026-10-05T06:35:00Z');
+      expect(
+        await store.change({
+          key: BAR_SETTING,
+          action: 'content.bar',
+          at: T1,
+          actor: actor(),
+          decide: () => ({ kind: 'write', value: on, detail: { change: 'on', fresh: true, before: off, after: on } }),
+        }),
+      ).toEqual({ ok: true, written: true });
+      expect(await valueOf(BAR_SETTING)).toEqual(on);
+      expect(await lastSettingEvent(conn, BAR_SETTING)).toEqual({
+        at: T1,
+        by: 'سارا رضایی',
+        action: 'content.bar',
+        detail: { change: 'on', fresh: true, before: off, after: on },
+      });
+      // تنظیم دیگر جایش را نمی‌گیرد؛ دو رویداد در یک لحظه، تازه‌تر به شناسه؛ دستور سرور بی نام؛ جزئیات خراب، جزئیات خالی.
+      await store.change({ key: SLA_DAYS_SETTING, action: 'settings.update', at: new Date(T1.getTime() + 60_000), actor: actor(), decide: () => ({ kind: 'write', value: 3, detail: {} }) });
+      expect(await lastSettingEvent(conn, BAR_SETTING)).toMatchObject({ at: T1, action: 'content.bar' });
+      await conn.db.insert(adminEvents).values({ adminUserId: null, action: 'content.bar', targetType: SETTING_TARGET, targetId: BAR_SETTING, detail: [1, 2], at: T1 });
+      expect(await lastSettingEvent(conn, BAR_SETTING)).toEqual({ at: T1, by: null, action: 'content.bar', detail: {} });
+      // هم‌لحظه، تازه‌تر به شناسه، نه به جای ردیف: شناسهٔ بزرگ‌تر پیش از کوچک‌تر نوشته می‌شود (رویداد پاک و عوض نمی‌شود، پس جای ردیف همان ترتیب نوشتن است).
+      const T2 = new Date(T1.getTime() + 120_000);
+      const [{ top }] = (await conn.db.execute(sql`SELECT max(id) + 1000000 AS top FROM admin_events`)) as unknown as [{ top: string }];
+      await conn.db.insert(adminEvents).values({ id: Number(top), adminUserId: sara, action: 'content.bar', targetType: SETTING_TARGET, targetId: BAR_SETTING, detail: { n: 1 }, at: T2 });
+      await conn.db.insert(adminEvents).values({ adminUserId: null, action: 'content.bar', targetType: SETTING_TARGET, targetId: BAR_SETTING, detail: { n: 2 }, at: T2 });
+      expect(await lastSettingEvent(conn, BAR_SETTING)).toEqual({ at: T2, by: 'سارا رضایی', action: 'content.bar', detail: { n: 1 } });
+      await conn.db.update(settings).set({ value: 2 }).where(eq(settings.key, SLA_DAYS_SETTING));
     });
 
     it('تنظیمی که ردیفش نیست با اولین نوشتن ساخته می‌شود', async () => {

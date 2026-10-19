@@ -6,6 +6,8 @@
 @import '@jozveyar/ui/styles.css';
 /* صفحه‌های ثابت سایت، برای پیش‌نمایش متن‌های سایت (۱۱٫۱): همان ظاهر سایت. */
 @import '@jozveyar/ui/pages.css';
+/* نوار اعلان سایت، برای پیش‌نمایش «نوار اعلان» (۱۱٫۳): همان ظاهر سایت. */
+@import '@jozveyar/ui/bar.css';
 /* پوستهٔ پنل و صفحه‌هایش، از طرح نمونهٔ تأییدشده (docs/ui/mockups/admin.html، ۱۴۰۵/۰۷/۰۴). */
 @import './admin.css';
 

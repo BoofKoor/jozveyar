@@ -10,11 +10,13 @@
 
 import { redirect } from 'next/navigation';
 
+import type { ContentIssue } from '@jozveyar/content';
 import { REPORT_BOUNDS_MAX } from '@jozveyar/contracts';
 import { bandsSeen } from '@jozveyar/db';
 import { findCity } from '@jozveyar/geo';
 import { formatTehranTime } from '@jozveyar/text';
 
+import type { BarField } from '../../lib/bar';
 import { panelPath } from '../../lib/gate';
 import { cityLabel } from '../../lib/partners';
 import { searchOf } from '../../lib/production';
@@ -1465,4 +1467,67 @@ export async function publishContentAction(_state: FormState, form: FormData): P
     redirect(`${panelPath(gate, `/content/${encodeURIComponent(kind)}/publish`)}?${query}e=${result.error}`);
   }
   return failure(result);
+}
+
+/* ───────────────────────── نوار اعلان (۱۱٫۳) ───────────────────────── */
+
+/** فیلدهای فرم نوار که پس از خطا می‌مانند؛ هرگز کد برنامهٔ تأیید. */
+const BAR_VALUE_FIELDS = ['mode', 'from', 'until', 'text', 'href', 'linkText'] as const satisfies readonly BarField[];
+
+export interface BarState {
+  error?: AdminErrorCode;
+  /** فیلد خطای «کی» یا روزها؛ `code` کد برنامهٔ تأیید است. خطای متن و پیوند در `issues`، هر کدام با فیلد خودش. */
+  field?: BarField | 'code';
+  issues?: ContentIssue[];
+  /** پایان قفل، «11:35». */
+  until?: string;
+  values?: Partial<Record<BarField, string>>;
+}
+
+/**
+ * «ذخیره کن» نوار اعلان (۱۱٫۳، سؤال‌های ۲۸۷ و ۲۹۴): خطای هر فیلد و کد برنامهٔ تأیید همین‌جا با نوشته‌ها؛ نواری که همین حالا جای دیگری عوض شد به
+ * همان صفحه با حال تازه؛ موفق به همان صفحه با پیام. روشن کردن و هر تغییر نوار روشن کد تازه می‌خواهد، و خاموش و ذخیرهٔ متن نوار خاموش نه.
+ */
+export async function saveBarAction(_state: BarState, form: FormData): Promise<BarState> {
+  const gate = field(form, 'gate');
+  const { content } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const input = {
+    mode: field(form, 'mode'),
+    from: field(form, 'from'),
+    until: field(form, 'until'),
+    text: field(form, 'text'),
+    href: field(form, 'href'),
+    linkText: field(form, 'linkText'),
+    seen: field(form, 'seen'),
+    code: form.get('code'),
+  };
+  const result = await content.saveBar(session, input, await requestIp());
+  const page = panelPath(gate, '/content/bar');
+  if (result.ok) redirect(`${page}?done=${result.value.change}&${doneMark()}`);
+  if (result.error === 'bar_changed' || result.error === 'forbidden') redirect(`${page}?e=${result.error}&${doneMark()}`);
+  const values: NonNullable<BarState['values']> = {};
+  for (const key of BAR_VALUE_FIELDS) values[key] = field(form, key).slice(0, key === 'text' ? 1000 : 300);
+  const at = typeof result.field === 'string' ? (result.field as BarState['field']) : undefined;
+  const codeError = result.error === 'wrong_code' || result.error === 'code_used' || result.error === 'bar_code_required';
+  const until = result.lockedUntil instanceof Date ? formatTehranTime(result.lockedUntil) : undefined;
+  return {
+    error: result.error,
+    ...(at ? { field: at } : codeError ? { field: 'code' as const } : {}),
+    ...(Array.isArray(result.issues) ? { issues: result.issues as ContentIssue[] } : {}),
+    ...(until ? { until } : {}),
+    values,
+  };
+}
+
+/**
+ * «خاموش کن» نوار اعلان (۱۱٫۳، سؤال ۲۸۷): از کارت «محتوای سایت» یا صفحهٔ نوار، بی کد تازه و همان لحظه؛ برگشت به همان صفحه با پیام.
+ */
+export async function barOffAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { content } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await content.barOff(session, await requestIp());
+  const back = panelPath(gate, field(form, 'back') === 'bar' ? '/content/bar' : '/content');
+  redirect(`${back}?${result.ok ? `done=${result.value.change}` : `e=${result.error}`}&${doneMark()}`);
 }

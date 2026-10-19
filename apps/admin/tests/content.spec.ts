@@ -13,7 +13,8 @@ import { at, awayFromMidnight, BASE, codeFor, enroll, GATE, layoutProblems, newC
  * و عدد امروز جای‌نگهدار؛ انتشار با «چه عوض می‌شود»، کد نادرست، پیش‌نویسی که پشت سر صفحه عوض شد (همان که دیده شد، پیش از کد) و کد تازه؛
  * «نسخه‌ها»، «دیدن» و برگشت به متن پیش‌فرض؛ سؤال‌ها بی JS (افزودن، سؤال خالی با خطا، بالاتر، حذف)؛ و «تماس و پاورقی» با سنجش شکل و شمارهٔ
  * فارسی. هر انتشار روی همان وب ۳۱۰۱ دیده می‌شود (`E2E_WEB_BASE_URL`، ISR یک دقیقه‌ای): صفحهٔ «قوانین»، سؤال‌های صفحهٔ اصلی، صفحهٔ «تماس»
- * و پاورقی. رویدادها زیر «محتوای سایت» بی متن؛ متصدی و حسابدار نه زبانه دارند نه صفحه.
+ * و پاورقی. رویدادها زیر «محتوای سایت» بی متن؛ متصدی از ۱۱٫۳ زبانه را با کارت نوار اعلان دارد ولی متن‌ها و صفحه‌هایشان را نه (`bar.spec.ts`)،
+ * و حسابدار هیچ‌کدام.
  *
  * ادمین‌ها با دستور سرور، و نقش حسابدار با SQL. نسخه‌ها پاک‌نشدنی‌اند (`site_content_versions_append_only`)، ولی تریگر ردیفی TRUNCATE را
  * نمی‌گیرد: در آغاز و پایان `TRUNCATE` متن‌ها، تا سایت دوباره متن پیش‌فرض را نشان دهد (مثل `refunds` در `refunds.spec.ts`).
@@ -416,12 +417,15 @@ test.describe.serial('متن‌های سایت (۱۱٫۱)', () => {
     }
   });
 
-  test('متصدی و حسابدار: نه زبانهٔ «محتوای سایت»، نه صفحه‌هایش', async () => {
+  test('متصدی: زبانه با کارت نوار اعلان، بی متن‌ها و صفحه‌هایشان؛ حسابدار نه زبانه، نه صفحه', async () => {
     const operator = who.operator.page;
     await operator.goto(at());
     await expect(operator.getByRole('heading', { level: 1 })).toBeVisible();
-    await expect(operator.locator(`a[href$="${GATE}/content"]`)).toHaveCount(0);
-    for (const path of ['/content', '/content/terms', '/content/terms/publish', '/content/terms/versions', '/content/terms/versions/1']) {
+    await expect(operator.locator(`nav a[href$="${GATE}/content"]`)).toHaveCount(1);
+    await operator.goto(at('/content'));
+    await expect(operator.getByTestId('content-bar')).toBeVisible();
+    await expect(operator.getByTestId('content-texts')).toHaveCount(0);
+    for (const path of ['/content/terms', '/content/terms/publish', '/content/terms/versions', '/content/terms/versions/1']) {
       await operator.goto(at(path));
       await expect(operator.locator('main'), path).toContainText('این بخش فقط برای مالک است');
       await expect(operator.locator('main textarea, main form[action] input[name="kind"]'), path).toHaveCount(0);

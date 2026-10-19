@@ -58,8 +58,12 @@ export interface MarkdownIssue {
   suggestion?: string;
 }
 
-/** نشانی پیوند: همین سایت (`/…`، و `https://jozveyar.com/…` همان مسیر می‌شود)، `tel:` و `mailto:`؛ null یعنی سایت دیگر. */
+/**
+ * نشانی پیوند: همین سایت (`/…`، و `https://jozveyar.com/…` همان مسیر می‌شود)، `tel:` و `mailto:`؛ null یعنی سایت دیگر. «\» هرگز: مرورگر در
+ * نشانی آن را «/» می‌خواند، پس `/\evil.com` همان `//evil.com` است، یعنی سایت دیگر (۱۱٫۳).
+ */
 export function linkTarget(href: string): string | null {
+  if (href.includes('\\')) return null;
   if (/^\/(?!\/)\S*$/.test(href)) return href;
   const own = /^https?:\/\/(?:www\.)?jozveyar\.com(\/\S*)?$/i.exec(href);
   if (own) return own[1] && own[1] !== '' ? own[1] : '/';

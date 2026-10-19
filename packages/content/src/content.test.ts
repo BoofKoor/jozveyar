@@ -106,7 +106,17 @@ describe('Markdown محدود (سؤال ۲۸۴)', () => {
     expect(linkTarget('https://www.jozveyar.com')).toBe('/');
     expect(linkTarget('tel:+989123456789')).toBe('tel:+989123456789');
     expect(linkTarget('mailto:jozveyar.com@gmail.com')).toBe('mailto:jozveyar.com@gmail.com');
-    for (const href of ['//evil.example', 'https://t.me/jozveyar', 'https://jozveyar.com.evil.example/', 'javascript:alert(1)', 'tel:abc']) {
+    // «\» را مرورگر در نشانی «/» می‌خواند: `/\evil.example` همان `//evil.example` است (۱۱٫۳).
+    for (const href of [
+      '//evil.example',
+      '/\\evil.example',
+      '/\\/evil.example',
+      'https://jozveyar.com/\\evil.example',
+      'https://t.me/jozveyar',
+      'https://jozveyar.com.evil.example/',
+      'javascript:alert(1)',
+      'tel:abc',
+    ]) {
       expect(linkTarget(href)).toBeNull();
     }
   });

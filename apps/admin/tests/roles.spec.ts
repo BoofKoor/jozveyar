@@ -287,7 +287,7 @@ test.describe.serial('حسابدار و عوض کردن نقش (۹٫۴)', () => 
     const { page, problems } = who.accountant;
     await page.goto(at('/'));
     await expect(page.locator('.ad-user')).toContainText(`${ACCOUNTANT} · متصدی`);
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه', 'محتوای سایت']);
     await page.goto(at('/shipments/report'));
     await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();
 

@@ -3,7 +3,6 @@ import type { Metadata, ResolvingMetadata } from 'next';
 import { inlineText, parseInline, placeholderValues } from '@jozveyar/content';
 import { HeroTitle, InlineText } from '@jozveyar/content/render';
 
-import { ClosureBar } from '../components/ClosureBar';
 import { Faq } from '../components/Faq';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
@@ -12,7 +11,6 @@ import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
 import { acceptOf } from '../lib/fileRules';
-import { siteClosure } from '../lib/server/closure';
 import { contentFacts, liveText, sitePublished } from '../lib/server/content';
 import { siteFiles } from '../lib/server/fileRules';
 import { siteReviews } from '../lib/server/reviews';
@@ -67,17 +65,16 @@ const PROMISE_ICONS = ['tag', 'truck', 'lock'] as const;
  * سؤال‌ها در همان شبکه. قهرمان و بخش‌ها با CSS و نشانهٔ `data-jozve` جزیره کنار می‌روند.
  *
  * تعرفه و روز کاری تحویل به پست از پایگاه داده‌اند (برش ۴٫۴): در جدول تعرفه، سؤال‌ها و «روز کاری»ها، و به JSON درون HTML
- * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است. از ۱۰٫۱ وقتی همهٔ
- * چاپخانه‌ها تعطیل‌اند، نوار کوچکی بالای همه (`ClosureBar`)، و از ۱۲٫۳ نظرهایی که مالک روی سایت گذاشت پس از تعرفه (`Reviews`).
+ * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است. از ۱۲٫۳ نظرهایی که
+ * مالک روی سایت گذاشت پس از تعرفه (`Reviews`). پیام «چاپخانه‌ها تعطیل‌اند» (۱۰٫۱) از ۱۱٫۳ بالای سربرگ همهٔ صفحه‌هاست (layout، `SiteBar`).
  *
  * از ۱۱٫۱ قهرمان، سه نوید، «سه قدم» و سؤال‌ها متنی است که مالک از پنل منتشر کرد، یا متن پیش‌فرض (`lib/server/content.ts`)، با عدد امروز هر
  * جای‌نگهدار؛ کارت بارگذاری، تعرفه و میز سفارش همان کد سایت‌اند.
  */
 export default async function HomePage() {
-  const [tariff, files, closure, reviews, published, facts] = await Promise.all([
+  const [tariff, files, reviews, published, facts] = await Promise.all([
     siteTariff(),
     siteFiles(),
-    siteClosure(),
     siteReviews(),
     sitePublished(),
     siteFacts(),
@@ -129,8 +126,6 @@ export default async function HomePage() {
 
       {/* نام سایت را لوگوی سربرگ می‌گوید. سربرگ و پاورقی در layout است. */}
       <main className="home">
-        {/* همهٔ چاپخانه‌ها تعطیل‌اند (۱۰٫۱): فقط همان روزها، با ISR همین صفحه. */}
-        {closure ? <ClosureBar closure={closure} /> : null}
         <OrderFlow
           rules={files.rules}
           accept={acceptOf(files.rules.formats)}

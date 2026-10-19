@@ -375,7 +375,7 @@ export default async function Dashboard({
               <span className="jy-icon jy-icon-warning" aria-hidden="true" />
               <span>
                 همهٔ چاپخانه‌ها تا {formatDeadlineDay(allClosed.until)} تعطیل‌اند. سفارش تازه پیش اولین چاپخانه‌ای می‌رود که باز می‌شود، مهلت تحویل به
-                پستش از روز باز شدن شمرده می‌شود، و صفحهٔ اصلی سایت همین را در نواری بالای صفحه می‌گوید.
+                پستش از روز باز شدن شمرده می‌شود، و سایت همین را در نواری بالای همهٔ صفحه‌ها، جای نوار اعلان، می‌گوید.
               </span>
             </p>
           ) : null}

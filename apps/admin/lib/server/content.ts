@@ -12,15 +12,23 @@
  *   ذخیره‌گاه سنجیده می‌شود.
  * - **رویداد** `content.publish` در همان تراکنش انتشار، بی متن (ذخیره‌گاه).
  *
+ * از ۱۱٫۳ نوار اعلان هم (ADR-066، سؤال‌های ۲۸۷ و ۲۹۱ تا ۲۹۴): تنظیم `content.bar` با همان ذخیره‌گاه تنظیم‌ها (قفل، «همان که دیده شد» زیر قفل،
+ * رویداد `content.bar` در همان تراکنش، با نوار پیش و پس، متن هم، چون نوار نسخه ندارد). مجوزش `content.bar` (مالک و متصدی)؛ روشن کردن و هر تغییری
+ * که نوار تازه‌اش حالا یا بعداً روی سایت است کد تازه می‌خواهد، پس از هر سنجشی که بی کد جواب دارد؛ خاموش کردن و ذخیرهٔ متن نوار خاموش نه.
+ *
  * بی نکست؛ هر وابستگی از درگاه می‌آید، پس با ذخیره‌گاه ساختگی تست می‌شود. قفل، تراکنش و محافظ‌ها روی پستگرس در تست یکپارچگی `packages/db`.
  */
 
 import { createHash } from 'node:crypto';
 
+import type { AnnouncementBar } from '@jozveyar/contracts';
+
 import {
   FAQ_MAX_ITEMS,
   PLACEHOLDERS,
   PLACEHOLDER_SOURCES,
+  barShown,
+  canonicalBar,
   canonicalContent,
   checkContent,
   contentDiff,
@@ -30,6 +38,7 @@ import {
   factsOf,
   isContentKind,
   placeholderValues,
+  sameBar,
   tidyContent,
   type AnyContent,
   type ContentByKind,
@@ -42,6 +51,7 @@ import {
   type PlaceholderValues,
 } from '@jozveyar/content';
 import {
+  BAR_SETTING,
   FILES_RETENTION_SETTING,
   SITE_CONTENT_MAX_BYTES,
   SLA_DAYS_SETTING,
@@ -51,9 +61,12 @@ import {
   type ContentDraftRow,
   type ContentVersionRow,
   type OrderStore,
+  type SettingEvent,
+  type SettingsStore,
   type SiteContentStore,
 } from '@jozveyar/db';
 
+import { barChange, barFormOf, barOf, type BarChange, type BarFormInput } from '../bar';
 import { can, ipHashOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 
@@ -65,8 +78,33 @@ export interface PanelContentDeps {
   stepUp: (session: AdminSession, code: unknown, ip: string) => Promise<Result<true>>;
   /** `SESSION_SECRET`: کلید HMAC IP، مثل ورود. */
   secret: string;
+  /** نوار اعلان (۱۱٫۳): همان ذخیره‌گاه تنظیم‌ها، و آخرین رویدادش برای «روشن از امروز 10:05، علی». */
+  settings: Pick<SettingsStore, 'read' | 'change'>;
+  barEvent: () => Promise<SettingEvent | null>;
+  /** همهٔ چاپخانه‌ها همین حالا تعطیل‌اند؟ پایان انحصاری تعطیلی، تا کارت بگوید پیام تعطیلی جای نوار است (سؤال ۲۹۳). */
+  closedUntil: (now: Date) => Promise<Date | null>;
   now?: () => Date;
 }
+
+/** نوار اعلان در پنل (۱۱٫۳): نوار امروز، «همان که دیده شد»، عدد امروز جای‌نگهدارها، آخرین تغییر و تعطیلی همهٔ چاپخانه‌ها. */
+export interface BarView {
+  now: Date;
+  bar: AnnouncementBar;
+  seen: string;
+  values: PlaceholderValues;
+  event: SettingEvent | null;
+  /** پایان انحصاری تعطیلی همهٔ چاپخانه‌ها، اگر همین حالا همه تعطیل‌اند. */
+  closedUntil: Date | null;
+}
+
+/** «همان که دیده شد» نوار: اثر انگشت همهٔ فیلدها. */
+export const barSeen = (bar: AnnouncementBar) => createHash('sha256').update(canonicalBar(bar)).digest('hex');
+
+/** کد برنامهٔ تأیید خالی: بی `stepUp`، چون هر کد نادرست یک اشتباه از سقف قفل است و خالی اشتباه نیست، فراموش شده. */
+const blank = (code: unknown) => typeof code !== 'string' || code.trim() === '';
+
+/** نوار برای رویداد: همهٔ فیلدها، متن هم، چون نوار نسخه ندارد و رد هر چه روی سایت آمد همین است. */
+const barDetail = (bar: AnnouncementBar) => ({ ...bar });
 
 /** متن روی سایت یک نوع: آخرین نسخه، و متنی که سایت نشان می‌دهد. */
 export interface LiveContent<K extends ContentKind = ContentKind> {
@@ -371,6 +409,81 @@ export function createPanelContent(deps: PanelContentDeps) {
       if (done.ok) return ok({ kind: kind.value, version: done.version });
       if (done.reason === 'not_found') return fail(404, 'content_not_found');
       return fail(409, done.reason === 'noop' ? 'content_unchanged' : 'content_changed');
+    },
+
+    /** نوار اعلان (۱۱٫۳): کارت «محتوای سایت» و صفحهٔ «نوار اعلان»، برای مالک و متصدی. */
+    async bar(session: AdminSession): Promise<Result<BarView>> {
+      if (!can(session, 'content.bar')) return fail(403, 'forbidden');
+      const at = now();
+      const [raw, facts, event, closedUntil] = await Promise.all([deps.settings.read(BAR_SETTING), deps.facts(), deps.barEvent(), deps.closedUntil(at)]);
+      const bar = barOf(raw);
+      return ok({ now: at, bar, seen: barSeen(bar), values: placeholderValues(facts), event, closedUntil });
+    },
+
+    /**
+     * «ذخیره کن» نوار (سؤال‌های ۲۸۷ و ۲۹۴): پیش از کد، نوار همان است که صفحه دید و فرم درست است (روزها، و متن ۹۰ نویسه با عدد امروز)؛ همان
+     * نوار هیچ نمی‌کند؛ نواری که حالا یا بعداً روی سایت است کد تازه می‌خواهد. ذخیره‌گاه «همان که دیده شد» را زیر قفل دوباره می‌سنجد.
+     */
+    async saveBar(
+      session: AdminSession,
+      input: BarFormInput & { seen: unknown; code: unknown },
+      ip: string,
+    ): Promise<Result<{ change: BarChange | 'same' }>> {
+      if (!can(session, 'content.bar')) return fail(403, 'forbidden');
+      const at = now();
+      const [raw, facts] = await Promise.all([deps.settings.read(BAR_SETTING), deps.facts()]);
+      const current = barOf(raw);
+      const seen = typeof input.seen === 'string' ? input.seen : '';
+      if (seen !== barSeen(current)) return fail(409, 'bar_changed');
+      const parsed = barFormOf(input, at, current, placeholderValues(facts));
+      if (!parsed.ok) return fail(400, parsed.error ?? 'bar_invalid', { ...(parsed.field ? { field: parsed.field } : {}), issues: parsed.issues });
+      const next = parsed.bar;
+      if (sameBar(next, current)) return ok({ change: 'same' });
+      const fresh = barShown(next, at);
+      const change = barChange({ shown: barShown(current, at) }, { shown: fresh });
+      if (fresh) {
+        if (blank(input.code)) return fail(400, 'bar_code_required', { field: 'code' });
+        const stepped = await deps.stepUp(session, input.code, ip);
+        if (!stepped.ok) return stepped;
+      }
+      const done = await deps.settings.change({
+        key: BAR_SETTING,
+        action: 'content.bar',
+        at,
+        actor: { adminUserId: session.userId, ipHash: ipHashOf(deps.secret, ip) },
+        decide: (value) => {
+          const locked = barOf(value);
+          if (barSeen(locked) !== seen) return { kind: 'reject', reason: 'changed' };
+          if (sameBar(locked, next)) return { kind: 'same' };
+          return { kind: 'write', value: next, detail: { change, before: barDetail(locked), after: barDetail(next), fresh } };
+        },
+      });
+      if (!done.ok) return fail(409, 'bar_changed');
+      return ok({ change: done.written ? change : 'same' });
+    },
+
+    /**
+     * «خاموش کن» (سؤال ۲۸۷): بی کد و همان لحظه، از کارت یا صفحهٔ نوار؛ متن و پیوند می‌مانند. «همان که دیده شد» نمی‌خواهد: هر نوار امروز را
+     * برمی‌دارد، و نوار خاموش همان می‌ماند، بی رویداد.
+     */
+    async barOff(session: AdminSession, ip: string): Promise<Result<{ change: 'off' | 'same' }>> {
+      if (!can(session, 'content.bar')) return fail(403, 'forbidden');
+      const at = now();
+      const done = await deps.settings.change({
+        key: BAR_SETTING,
+        action: 'content.bar',
+        at,
+        actor: { adminUserId: session.userId, ipHash: ipHashOf(deps.secret, ip) },
+        decide: (value) => {
+          const locked = barOf(value);
+          if (locked.mode === 'off') return { kind: 'same' };
+          const next: AnnouncementBar = { ...locked, mode: 'off', from: null, until: null };
+          const change = barChange({ shown: barShown(locked, at) }, { shown: false });
+          return { kind: 'write', value: next, detail: { change, before: barDetail(locked), after: barDetail(next), fresh: false } };
+        },
+      });
+      if (!done.ok) return fail(409, 'bar_changed');
+      return ok({ change: done.written ? 'off' : 'same' });
     },
 
     /** نسخه‌های یک متن، تازه‌ترین اول، با متن پیش‌فرض ته فهرست (صفحه). */

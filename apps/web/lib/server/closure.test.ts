@@ -1,13 +1,13 @@
 /**
- * نوار «چاپخانه‌ها تعطیل‌اند» صفحهٔ اصلی (برش ۱۰٫۱، سؤال ۲۷۰): فقط وقتی همین حالا همه تعطیل‌اند، با روز آخر و اولین روز کاری پس از
- * آن؛ build و بی پایگاه داده هیچ، و خطای پایگاه داده بالا می‌رود تا ISR صفحهٔ قبلی را نگه دارد.
+ * پیام «چاپخانه‌ها تعطیل‌اند» (برش ۱۰٫۱، سؤال ۲۷۰): فقط وقتی همین حالا همه تعطیل‌اند، با روز آخر و اولین روز کاری پس از آن. از ۱۱٫۳ بالای
+ * سربرگ همهٔ صفحه‌هاست؛ build، بی پایگاه داده و خطای پایگاه داده در `bar.test.ts`.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { PartnerHours } from '@jozveyar/db';
 
-import { loadClosure, siteClosure } from './closure';
+import { loadClosure } from './closure';
 
 /** آغاز شنبه ۴ مهر ۱۴۰۵ تهران. */
 const DAY4 = new Date('2026-09-25T20:30:00Z');
@@ -38,16 +38,5 @@ describe('نوار تعطیلی', () => {
     expect(await loadClosure(source([closed(1, 3)]), at(0.5))).toBeNull();
     expect(await loadClosure(source([closed(0, 2)]), at(2))).toBeNull();
     expect(await loadClosure(source([]), at(0.5))).toBeNull();
-  });
-
-  it('build و بی پایگاه داده هیچ؛ خطای پایگاه داده بالا می‌رود', async () => {
-    const broken = () => ({ partnerHours: async () => Promise.reject(new Error('db down')), setting: async () => undefined });
-    expect(await siteClosure({ NEXT_PHASE: 'phase-production-build', DATABASE_URL: 'x' }, broken)).toBeNull();
-    expect(await siteClosure({}, broken)).toBeNull();
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await expect(siteClosure({ DATABASE_URL: 'x' }, broken)).rejects.toThrow('db down');
-    expect(error).toHaveBeenCalled();
-    error.mockRestore();
-    expect(await siteClosure({ DATABASE_URL: 'x' }, () => source([closed(0, 2)]), () => at(0.5))).toMatchObject({ resumes: 'دوشنبه 6 مهر' });
   });
 });
