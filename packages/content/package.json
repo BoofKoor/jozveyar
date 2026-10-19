@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./bar": "./src/bar.ts",
+    "./banner": "./src/banner.ts",
     "./render": "./src/render.tsx"
   },
   "scripts": {

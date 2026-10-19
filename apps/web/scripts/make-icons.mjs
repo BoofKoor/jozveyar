@@ -1,19 +1,20 @@
 /**
  * نشانک، آیکون گوشی و تصویر اشتراک، از روی فایل‌های برند (docs/brand)، با Chromium.
  *
- * - `app/icon.svg`: خود favicon برند؛ مرورگرهای تازه همان را می‌گیرند.
- * - `app/favicon.ico`: برای مرورگر و جایی که SVG نمی‌گیرد؛ سه اندازهٔ ۱۶، ۳۲ و ۴۸ پیکسل، هر کدام
+ * همه در `public/` (از ۱۱٫۲؛ پیش از آن متادیتای فایلی `app/`)، و layout و manifest با `lib/brand.ts` به آنها پیوند می‌دهند؛ لوگویی که مالک از
+ * پنل روی سایت بگذارد جای همه را می‌گیرد (کارگر از آن می‌سازد، `services/docworker/docworker/site_images.py`).
+ *
+ * - `public/icon.svg`: خود favicon برند؛ مرورگرهای تازه همان را می‌گیرند.
+ * - `public/favicon.ico`: برای مرورگر و جایی که SVG نمی‌گیرد؛ سه اندازهٔ ۱۶، ۳۲ و ۴۸ پیکسل، هر کدام
  *   PNG شفاف درون ICO، که همهٔ مرورگرها می‌خوانند.
  * - **آیکون گوشی:** نشان کامل (`jozveyar-mark.svg`) روی مربع سفید مات، ۵۸٪ ارتفاع و وسط. favicon
  *   برای ۲۴ پیکسل و کوچک‌تر است و کاشی‌اش را پر می‌کند، پس روی صفحهٔ گوشی تنگ است؛ و اپل گوشهٔ
- *   شفاف را توصیه نمی‌کند. `app/apple-icon.png` ۱۸۰ پیکسل، و `public/icons/icon-192.png` و
+ *   شفاف را توصیه نمی‌کند. `public/apple-icon.png` ۱۸۰ پیکسل، و `public/icons/icon-192.png` و
  *   `icon-512.png` برای manifest. همان ۵۱۲ «maskable» هم هست، چون کل نشان در دایرهٔ امن (قطر ۸۰٪)
  *   می‌ماند. هر اندازه جدا از خود SVG کشیده می‌شود، نه با کوچک کردن ۵۱۲.
- * - **تصویر اشتراک** (`app/opengraph-image.png`، ۱۲۰۰×۶۳۰): طرح الف (docs/UI.md، قدم ۳). لوگوی
+ * - **تصویر اشتراک** (`public/opengraph-image.png`، ۱۲۰۰×۶۳۰): طرح الف (docs/UI.md، قدم ۳). لوگوی
  *   بی‌شعار، تیتر صفحهٔ اصلی و یک خط معرفی، همه وسط، روی green-50 با لبهٔ green-600 در پایین. متن
- *   جایگزینش `opengraph-image.alt.txt` است؛ Next آن را عیناً می‌خواند، پس خط تازه ندارد. کش build
- *   نکست این فایل را وابستگی نمی‌شمارد: اگر فقط متن جایگزین عوض شد، پیش از build محلی
- *   `apps/web/.next/cache` را پاک کنید. CI همیشه از صفر می‌سازد.
+ *   جایگزینش `BRAND_SHARE_ALT` در `lib/brand.ts` است؛ تیتر یا معرفی که اینجا عوض شد، آن را هم عوض کنید.
  *
  * رنگ فقط از `docs/brand/jozveyar-colors.css` و فونت فقط وزیرمتن لوکال (`public/fonts`)؛ هیچ
  * درخواست بیرونی. خروجی یک بار ساخته و در مخزن نگه داشته می‌شود؛ بیلد به Chromium بند نیست. برند
@@ -30,18 +31,16 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
-const APP = `${REPO}apps/web/app/`;
 const PUBLIC = `${REPO}apps/web/public/`;
 const BRAND = `${REPO}docs/brand/`;
 const ICO_SIZES = [16, 32, 48];
 
 /** آیکون گوشی: ارتفاع نشان، سهمی از ضلع مربع. */
 const PHONE_MARK_SHARE = 0.58;
-/** تصویر اشتراک: اندازه، تیتر (همان صفحهٔ اصلی)، خط معرفی و متن جایگزین. */
+/** تصویر اشتراک: اندازه، تیتر (همان صفحهٔ اصلی) و خط معرفی؛ متن جایگزین در `lib/brand.ts`. */
 const OG = { width: 1200, height: 630 };
 const OG_TITLE = 'جزوه‌ات را بینداز، قیمت را <mark>همین حالا</mark> ببین';
 const OG_LINE = 'چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران';
-const OG_ALT = 'لوگوی جزوه‌یار و تیتر «جزوه‌ات را بینداز، قیمت را همین حالا ببین»؛ چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران';
 
 const brandFile = (name) => readFileSync(`${BRAND}${name}`, 'utf8');
 const colors = brandFile('jozveyar-colors.css');
@@ -147,13 +146,13 @@ try {
   await page.route(/^https?:/, (route) => route.abort());
 
   const favicon = brandFile('jozveyar-favicon.svg');
-  copyFileSync(`${BRAND}jozveyar-favicon.svg`, `${APP}icon.svg`);
+  copyFileSync(`${BRAND}jozveyar-favicon.svg`, `${PUBLIC}icon.svg`);
   const images = [];
   for (const size of ICO_SIZES) images.push({ size, png: await renderPng(page, favicon, size, { transparent: true }) });
-  writeFileSync(`${APP}favicon.ico`, ico(images));
+  writeFileSync(`${PUBLIC}favicon.ico`, ico(images));
 
   const phone = phoneIconSvg();
-  writeFileSync(`${APP}apple-icon.png`, await renderPng(page, phone, 180, { transparent: false }));
+  writeFileSync(`${PUBLIC}apple-icon.png`, await renderPng(page, phone, 180, { transparent: false }));
   mkdirSync(`${PUBLIC}icons`, { recursive: true });
   for (const size of [192, 512]) {
     writeFileSync(`${PUBLIC}icons/icon-${size}.png`, await renderPng(page, phone, size, { transparent: false }));
@@ -165,12 +164,11 @@ try {
   await page.evaluate(() => document.fonts.ready);
   const loaded = await page.evaluate(() => [...document.fonts].filter((face) => face.status === 'loaded').length);
   if (loaded !== 2) throw new Error(`وزیرمتن بار نشد (${loaded} از ۲ وزن)`);
-  writeFileSync(`${APP}opengraph-image.png`, await page.screenshot({ clip: { x: 0, y: 0, ...OG } }));
-  writeFileSync(`${APP}opengraph-image.alt.txt`, OG_ALT);
+  writeFileSync(`${PUBLIC}opengraph-image.png`, await page.screenshot({ clip: { x: 0, y: 0, ...OG } }));
 
   console.log(
-    `ساخته شد: app/icon.svg، app/favicon.ico (${ICO_SIZES.join('، ')} پیکسل)، app/apple-icon.png (180)، ` +
-      'public/icons/icon-192.png و icon-512.png، و app/opengraph-image.png (1200×630) با متن جایگزینش.',
+    `ساخته شد در public/: icon.svg، favicon.ico (${ICO_SIZES.join('، ')} پیکسل)، apple-icon.png (180)، ` +
+      'icons/icon-192.png و icon-512.png، و opengraph-image.png (1200×630).',
   );
 } finally {
   await browser.close();

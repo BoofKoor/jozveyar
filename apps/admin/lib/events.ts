@@ -657,6 +657,24 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
               : `نوار اعلان عوض شد${when}`;
       return { badge: null, text: [`${done}${detail.fresh === true ? '، با کد تازه' : ''}`] };
     }
+    case 'content.upload': {
+      // لوگو و بنر (۱۱٫۲، سؤال ۲۰۶): نوع و نسخهٔ بارگذاری؛ نام فایل در صفحهٔ همان بارگذاری است، نه در رویداد.
+      const what = detail.kind === 'banner' ? 'بنر تازه' : 'لوگوی تازه';
+      return { badge: null, text: [`${what} بارگذاری شد، نسخهٔ `, { ltr: String(detail.version) }] };
+    }
+    case 'content.logo': {
+      // لوگو (۱۱٫۲): نسخه‌ای که روی سایت رفت، یا برگشت به لوگوی جزوه‌یار؛ هر دو همیشه با کد تازه.
+      const fresh = detail.fresh === true ? '، با کد تازه' : '';
+      if (detail.change === 'brand') return { badge: null, text: [`لوگو به لوگوی جزوه‌یار برگشت${fresh}`] };
+      return { badge: null, text: ['لوگوی نسخهٔ ', { ltr: String(detail.version) }, ` روی سایت رفت${fresh}`] };
+    }
+    case 'content.banner': {
+      // بنر صفحهٔ اصلی (۱۱٫۲): روشن، عوض یا خاموش، با نسخهٔ تصویر؛ متن جایگزین و پیوند در جزئیات رویداد می‌مانند، نه در سطر.
+      const fresh = detail.fresh === true ? '، با کد تازه' : '';
+      if (detail.change === 'off') return { badge: null, text: ['بنر صفحهٔ اصلی خاموش شد'] };
+      const done = detail.change === 'on' ? 'روشن شد' : 'عوض شد';
+      return { badge: null, text: [`بنر صفحهٔ اصلی ${done}، نسخهٔ `, { ltr: String(detail.version) }, ...(fresh ? [fresh] : [])] };
+    }
     case 'reviews.approve':
     case 'reviews.hide':
     case 'reviews.delete': {
@@ -715,7 +733,8 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
  * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
- * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱) و نوار اعلان (۱۱٫۳) زیر «محتوای سایت»، پس از «تعرفه»، به ترتیب طرح.
+ * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱)، نوار اعلان (۱۱٫۳) و لوگو و بنر (۱۱٫۲) زیر «محتوای سایت»، پس از
+ * «تعرفه»، به ترتیب طرح.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },

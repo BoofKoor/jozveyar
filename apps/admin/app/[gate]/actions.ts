@@ -1531,3 +1531,109 @@ export async function barOffAction(form: FormData): Promise<void> {
   const back = panelPath(gate, field(form, 'back') === 'bar' ? '/content/bar' : '/content');
   redirect(`${back}?${result.ok ? `done=${result.value.change}` : `e=${result.error}`}&${doneMark()}`);
 }
+
+/* ───────────────────────── لوگو و بنر (۱۱٫۲) ───────────────────────── */
+
+export interface ImageUploadState {
+  error?: AdminErrorCode;
+  /** فایلی که خطا دارد: اصلی (لوگو، بنر دسکتاپ) یا دومی (نشان، بنر گوشی). */
+  field?: 'main' | 'extra';
+}
+
+/**
+ * بارگذاری لوگو یا بنر تازه (۱۱٫۲، سؤال ۲۰۶): موفق به صفحهٔ همان بارگذاری، که تا کارگر فایل‌ها را بسازد «در حال آماده شدن» است؛ فایل نادرست
+ * همین‌جا، زیر همان فایل. کد تازه نمی‌خواهد: تا «روی سایت بگذار» چیزی روی سایت عوض نمی‌شود. بدنهٔ کار حداکثر ۳ مگابایت است (`next.config.ts`)،
+ * کمی بیش از دو فایل ۱ مگابایتی.
+ */
+export async function uploadImageAction(_state: ImageUploadState, form: FormData): Promise<ImageUploadState> {
+  const gate = field(form, 'gate');
+  const { images } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const fileOf = async (name: string) => {
+    const file = form.get(name);
+    return file instanceof File && file.size > 0 ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
+  };
+  const result = await images.upload(session, { kind: field(form, 'kind'), main: await fileOf('main'), extra: await fileOf('extra') }, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, `/content/${result.value.kind}/${result.value.id}`)}?done=upload`);
+  return { error: result.error, ...(result.field === 'main' || result.field === 'extra' ? { field: result.field } : {}) };
+}
+
+/** خطاهایی که کارهای لوگو و بنر با برگشت به صفحه می‌گویند، تا حال تازه را از نو نشان دهد. */
+const IMAGE_PAGE_ERRORS: AdminErrorCode[] = ['logo_changed', 'banner_changed', 'image_not_ready', 'image_not_found', 'forbidden'];
+
+/**
+ * «روی سایت بگذار» یک لوگو با کد تازه (۱۱٫۲، کار حساس): خطای کد همین‌جا؛ لوگویی که همین حالا جای دیگری عوض شد، یا بارگذاری‌ای که آماده نیست،
+ * به صفحهٔ همان بارگذاری با پیامش. موفق به «لوگو» با نسخه.
+ */
+export async function publishLogoAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { images } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const result = await images.publishLogo(session, { id, seen: field(form, 'seen'), code: form.get('code') }, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, '/content/logo')}?done=${result.value.change}&v=${result.value.version}&${doneMark()}`);
+  if (IMAGE_PAGE_ERRORS.includes(result.error)) redirect(`${panelPath(gate, `/content/logo/${encodeURIComponent(id)}`)}?e=${result.error}&${doneMark()}`);
+  return failure(result);
+}
+
+/** «برگشت به لوگوی جزوه‌یار» با کد تازه (۱۱٫۲): خطای کد همین‌جا؛ لوگویی که همین حالا عوض شد به «لوگو» با پیامش. */
+export async function brandLogoAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { images } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await images.brandLogo(session, { seen: field(form, 'seen'), code: form.get('code') }, await requestIp());
+  const page = panelPath(gate, '/content/logo');
+  if (result.ok) redirect(`${page}?done=${result.value.change === 'brand' ? 'brand' : 'same'}&${doneMark()}`);
+  if (IMAGE_PAGE_ERRORS.includes(result.error)) redirect(`${page}?e=${result.error}&${doneMark()}`);
+  return failure(result);
+}
+
+/** فیلدهای فرم بنر که پس از خطا می‌مانند؛ هرگز کد برنامهٔ تأیید. */
+const BANNER_VALUE_FIELDS = ['alt', 'href'] as const;
+export type BannerField = (typeof BANNER_VALUE_FIELDS)[number];
+
+export interface BannerState {
+  error?: AdminErrorCode;
+  /** `code` کد برنامهٔ تأیید است؛ خطای متن و پیوند در `issues`، هر کدام با فیلد خودش. */
+  field?: 'code';
+  issues?: ContentIssue[];
+  /** پایان قفل، «11:35». */
+  until?: string;
+  values?: Partial<Record<BannerField, string>>;
+}
+
+/**
+ * «روی سایت بگذار» بنر، یا ذخیرهٔ متن و پیوند بنر روشن، با کد تازه (۱۱٫۲، سؤال ۲۰۶): خطای هر فیلد و کد همین‌جا با نوشته‌ها؛ بنری که همین حالا
+ * جای دیگری عوض شد، یا بارگذاری‌ای که آماده نیست، به صفحهٔ همان بارگذاری با پیامش؛ موفق به «بنر» با پیام.
+ */
+export async function saveBannerAction(_state: BannerState, form: FormData): Promise<BannerState> {
+  const gate = field(form, 'gate');
+  const { images } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const input = { id, alt: field(form, 'alt'), href: field(form, 'href'), seen: field(form, 'seen'), code: form.get('code') };
+  const result = await images.saveBanner(session, input, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, '/content/banner')}?done=${result.value.change}&${doneMark()}`);
+  if (IMAGE_PAGE_ERRORS.includes(result.error)) redirect(`${panelPath(gate, `/content/banner/${encodeURIComponent(id)}`)}?e=${result.error}&${doneMark()}`);
+  const values: NonNullable<BannerState['values']> = {};
+  for (const key of BANNER_VALUE_FIELDS) values[key] = field(form, key).slice(0, 1000);
+  const codeError = result.error === 'wrong_code' || result.error === 'code_used' || result.error === 'banner_code_required';
+  const until = result.lockedUntil instanceof Date ? formatTehranTime(result.lockedUntil) : undefined;
+  return {
+    error: result.error,
+    ...(codeError ? { field: 'code' as const } : {}),
+    ...(Array.isArray(result.issues) ? { issues: result.issues as ContentIssue[] } : {}),
+    ...(until ? { until } : {}),
+    values,
+  };
+}
+
+/** «خاموش کن» بنر (۱۱٫۲): از کارت «محتوای سایت» یا صفحهٔ بنر، بی کد تازه و همان لحظه؛ برگشت به همان صفحه با پیام. */
+export async function bannerOffAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { images } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const result = await images.bannerOff(session, await requestIp());
+  const back = panelPath(gate, field(form, 'back') === 'banner' ? '/content/banner' : '/content');
+  redirect(`${back}?${result.ok ? `done=banner_${result.value.change}` : `e=${result.error}`}&${doneMark()}`);
+}

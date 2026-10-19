@@ -8,7 +8,9 @@ import { cookies, headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
 import {
+  BANNER_SETTING,
   BAR_SETTING,
+  LOGO_SETTING,
   REFUND_AUTO_EVERY_MS,
   allClosedWindow,
   createAdminStore,
@@ -27,6 +29,7 @@ import {
   createShipmentStore,
   createShippingReportStore,
   createSiteContentStore,
+  createSiteImageStore,
   createSmsOutbox,
   createSmsStats,
   createTariffStore,
@@ -50,6 +53,7 @@ import { createPanelBlocks, type PanelBlocks } from './blocks';
 import { createPanelContent, loadContentFacts, type PanelContent } from './content';
 import { createPanelDiscounts, type PanelDiscounts } from './discounts';
 import { createPanelExports, type PanelExports } from './exports';
+import { createPanelImages, type PanelImages } from './images';
 import { createPanelOrders, type PanelOrders } from './orders';
 import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
@@ -77,6 +81,7 @@ interface Panel {
   blocks: PanelBlocks;
   reviews: PanelReviews;
   content: PanelContent;
+  images: PanelImages;
 }
 
 let cached: Panel | null | undefined;
@@ -184,6 +189,16 @@ function build(config: AdminConfig): Panel {
         const window = allClosedWindow(await createOrderStore(getDb()).partnerHours());
         return window && window.from.getTime() <= now.getTime() && now.getTime() < window.until.getTime() ? window.until : null;
       },
+    }),
+    // لوگو و بنر (۱۱٫۲، ADR-067): لوگو فقط مالک، بنر مالک و متصدی؛ گذاشتن روی سایت با همان کد تازهٔ ورود. فایل‌ها را کارگر می‌سازد
+    // (`build_site_image`) و پنل فقط می‌خواندشان.
+    images: createPanelImages({
+      store: createSiteImageStore(getDb()),
+      settings: createSettingsStore(getDb()),
+      logoEvent: () => lastSettingEvent(getDb(), LOGO_SETTING),
+      bannerEvent: () => lastSettingEvent(getDb(), BANNER_SETTING),
+      stepUp: auth.stepUp,
+      secret: config.secret,
     }),
   };
 }

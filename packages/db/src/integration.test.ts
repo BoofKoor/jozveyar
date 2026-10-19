@@ -24,6 +24,9 @@ import { DiscountRefusedError, MobileBlockedError } from './orders.js';
 import { createBlockStore } from './blocks.js';
 import { createReviewStore } from './reviews.js';
 import { CONTENT_TARGET, createSiteContentStore } from './content.js';
+import { BUILD_SITE_IMAGE_JOB, SITE_IMAGE_TARGET, createSiteImageStore } from './siteImages.js';
+import { siteImageFiles, siteImages } from './schema.js';
+import { BANNER_SETTING, LOGO_SETTING } from './reference.js';
 import { siteContentDrafts, siteContentVersions } from './schema.js';
 import { mobileBlocks, orderReviews } from './schema.js';
 import { discountCodes, discountTiers } from './schema.js';
@@ -2604,7 +2607,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -3110,7 +3113,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -3589,7 +3592,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -4640,7 +4643,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5024,7 +5027,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5504,7 +5507,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -6948,7 +6951,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7324,7 +7327,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7841,7 +7844,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -9624,7 +9627,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
@@ -10102,7 +10105,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -10521,6 +10524,271 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await rejectedConstraint(conn.db.update(siteContentDrafts).set({ baseVersion: 2 }).where(eq(siteContentDrafts.kind, 'terms')))).toBe(
         'site_content_drafts_base_exists',
       );
+    });
+  });
+
+  describe('تصویرهای سایت روی پستگرس (برش ۱۱٫۲)', () => {
+    const NOW = new Date('2026-10-19T08:00:00Z');
+    const MINUTE = 60_000;
+    const LOGO_FILES = ['apple', 'favicon', 'icon192', 'icon512', 'logo', 'og'];
+    let owner = '';
+    const actor = () => ({ adminUserId: owner, ipHash: 'i'.repeat(64) });
+    const store = () => createSiteImageStore(conn);
+    const bytes = (n: number, size = 5) => Buffer.alloc(size, n);
+    const sha = (c: string) => c.repeat(64);
+    const typeOf = (name: string) => (name === 'favicon' ? 'image/x-icon' : 'image/png');
+    const insertFile = (imageId: number, name: string, over: Partial<typeof siteImageFiles.$inferInsert> = {}) =>
+      rejectedConstraint(
+        conn.db.insert(siteImageFiles).values({
+          imageId,
+          name,
+          contentType: typeOf(name),
+          bytes: bytes(7),
+          width: 64,
+          height: 64,
+          sha256: sha('c'),
+          hasAlpha: true,
+          ...over,
+        }),
+      );
+    /** کار کارگر: فایل‌ها و پایان در یک تراکنش، مثل `site_images.py`. */
+    const build = (imageId: number, names: string[], at = NOW) =>
+      conn.db.transaction(async (tx) => {
+        for (const name of names) {
+          await tx.insert(siteImageFiles).values({
+            imageId,
+            name,
+            contentType: typeOf(name),
+            bytes: bytes(name.length),
+            width: name === 'og' ? 1200 : 64,
+            height: name === 'og' ? 630 : 64,
+            sha256: sha(String.fromCharCode(97 + ((imageId * 7 + name.length) % 6))),
+            hasAlpha: name !== 'og',
+          });
+        }
+        await tx.update(siteImages).set({ builtAt: at }).where(eq(siteImages.id, imageId));
+      });
+    const valueOf = async (key: string) => (await conn.db.select({ value: settings.value }).from(settings).where(eq(settings.key, key)))[0]?.value;
+    const imageEvents = () => conn.db.select().from(adminEvents).orderBy(asc(adminEvents.id));
+
+    beforeAll(async () => {
+      const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner112', displayName: 'بهار مقدم' }).returning();
+      owner = admin!.id;
+    });
+
+    beforeEach(async () => {
+      // بارگذاری روی سایت رفته و رویداد پاک‌نشدنی‌اند؛ TRUNCATE تریگر ردیفی ندارد.
+      await conn.db.execute(sql`TRUNCATE site_images, site_image_files, admin_events CASCADE`);
+      await conn.db.update(settings).set({ value: DEFAULT_SETTINGS[LOGO_SETTING] }).where(eq(settings.key, LOGO_SETTING));
+      await conn.db.update(settings).set({ value: DEFAULT_SETTINGS[BANNER_SETTING] }).where(eq(settings.key, BANNER_SETTING));
+    });
+
+    it('دادهٔ پایه: لوگوی برند و بنر خاموش و بی تصویر، به شکل قرارداد', async () => {
+      await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      await conn.db.delete(settings).where(inArray(settings.key, [LOGO_SETTING, BANNER_SETTING]));
+      const seeded = await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
+      expect([...seeded.settingsInserted].sort()).toEqual([BANNER_SETTING, LOGO_SETTING]);
+      expect(await valueOf(LOGO_SETTING)).toEqual({ imageId: null });
+      expect(await valueOf(BANNER_SETTING)).toEqual({ mode: 'off', imageId: null, alt: '', href: '' });
+      const read = (key: string) => createSettingsStore(conn).read(key);
+      expect(await readSetting(read, LOGO_SETTING)).toEqual({ imageId: null });
+      expect(await readSetting(read, BANNER_SETTING)).toEqual({ mode: 'off', imageId: null, alt: '', href: '' });
+    });
+
+    it('بارگذاری با کار کارگر و رویداد؛ فایل‌های کارگر؛ و روی سایت زیر قفل تنظیم‌ها با published_at یک‌باره', async () => {
+      const logo1 = await store().upload({ kind: 'logo', main: { name: 'logo.png', bytes: bytes(1) }, extra: null, actor: actor(), at: NOW });
+      expect(logo1).toEqual({
+        id: logo1.id,
+        kind: 'logo',
+        version: 1,
+        mainName: 'logo.png',
+        mainBytes: 5,
+        extraName: null,
+        extraBytes: null,
+        createdBy: owner,
+        createdByName: 'بهار مقدم',
+        createdAt: NOW,
+        builtAt: null,
+        error: null,
+        publishedAt: null,
+        files: [],
+      });
+      const banner1 = await store().upload({
+        kind: 'banner',
+        main: { name: 'wide.jpg', bytes: bytes(2, 9) },
+        extra: { name: 'phone.jpg', bytes: bytes(3) },
+        actor: actor(),
+        at: NOW,
+      });
+      expect([banner1.version, banner1.extraName, banner1.extraBytes]).toEqual([1, 'phone.jpg', 5]);
+      const logo2 = await store().upload({ kind: 'logo', main: { name: 'logo2.webp', bytes: bytes(4) }, extra: { name: 'mark.png', bytes: bytes(5) }, actor: actor(), at: NOW });
+      expect(logo2.version).toBe(2);
+      expect((await store().recent('logo', 10)).map((row) => row.version)).toEqual([2, 1]);
+      const queued = await conn.db.select({ kind: jobs.kind, siteImageId: jobs.siteImageId }).from(jobs).where(sql`${jobs.siteImageId} IS NOT NULL`);
+      expect(queued.map((job) => [job.kind, job.siteImageId]).sort()).toEqual(
+        [
+          [BUILD_SITE_IMAGE_JOB, logo1.id],
+          [BUILD_SITE_IMAGE_JOB, banner1.id],
+          [BUILD_SITE_IMAGE_JOB, logo2.id],
+        ].sort(),
+      );
+      expect((await imageEvents()).map((e) => [e.action, e.targetType, e.targetId, e.detail])).toEqual([
+        ['content.upload', SITE_IMAGE_TARGET, String(logo1.id), { kind: 'logo', version: 1, files: 1, bytes: 5 }],
+        ['content.upload', SITE_IMAGE_TARGET, String(banner1.id), { kind: 'banner', version: 1, files: 2, bytes: 14 }],
+        ['content.upload', SITE_IMAGE_TARGET, String(logo2.id), { kind: 'logo', version: 2, files: 2, bytes: 10 }],
+      ]);
+
+      await build(logo1.id, LOGO_FILES);
+      const built = (await store().get(logo1.id))!;
+      expect(built.builtAt).toEqual(NOW);
+      expect(built.files.map((file) => [file.name, file.contentType, file.width, file.hasAlpha, file.sizeBytes])).toEqual([
+        ['apple', 'image/png', 64, true, 5],
+        ['favicon', 'image/x-icon', 64, true, 5],
+        ['icon192', 'image/png', 64, true, 5],
+        ['icon512', 'image/png', 64, true, 5],
+        ['logo', 'image/png', 64, true, 5],
+        ['og', 'image/png', 1200, false, 5],
+      ]);
+      const og = built.files.find((file) => file.name === 'og')!;
+      expect(await store().file(logo1.id, 'og')).toEqual({ contentType: 'image/png', bytes: bytes(2), sha256: og.sha256 });
+      expect(await store().file(logo1.id, 'desktop')).toBeNull();
+      // پیش از روی سایت رفتن، سایت هیچ‌کدام را نمی‌دهد.
+      expect(await store().publishedFile(og.sha256)).toBeNull();
+      expect(await store().publishedFiles(logo1.id, 'logo')).toBeNull();
+
+      const T1 = new Date(NOW.getTime() + MINUTE);
+      let seen: unknown[] = [];
+      expect(
+        await store().change({
+          key: LOGO_SETTING,
+          action: 'content.logo',
+          imageId: logo1.id,
+          at: T1,
+          actor: actor(),
+          decide: (current, image) => {
+            seen = [current, image?.id, image?.files.length, image?.publishedAt];
+            return { kind: 'write', value: { imageId: logo1.id }, detail: { change: 'publish', version: 1, fresh: true } };
+          },
+        }),
+      ).toEqual({ ok: true, written: true });
+      expect(seen).toEqual([{ imageId: null }, logo1.id, 6, null]);
+      expect(await valueOf(LOGO_SETTING)).toEqual({ imageId: logo1.id });
+      expect((await store().get(logo1.id))!.publishedAt).toEqual(T1);
+      expect(await store().publishedFile(og.sha256)).toEqual({ contentType: 'image/png', bytes: bytes(2), sha256: og.sha256 });
+      expect((await store().publishedFiles(logo1.id, 'logo'))!.map((file) => file.name)).toEqual(LOGO_FILES);
+      expect(await store().publishedFiles(logo1.id, 'banner')).toBeNull();
+
+      // برگشت به لوگوی برند: بی ردیف تصویر؛ گذاشتن دوباره، published_at همان اولی می‌ماند.
+      expect(
+        await store().change({
+          key: LOGO_SETTING,
+          action: 'content.logo',
+          imageId: null,
+          at: T1,
+          actor: actor(),
+          decide: (_current, image) => {
+            seen = [image];
+            return { kind: 'write', value: { imageId: null }, detail: { change: 'brand', fresh: true } };
+          },
+        }),
+      ).toEqual({ ok: true, written: true });
+      expect(seen).toEqual([null]);
+      const T2 = new Date(NOW.getTime() + 2 * MINUTE);
+      await store().change({
+        key: LOGO_SETTING,
+        action: 'content.logo',
+        imageId: logo1.id,
+        at: T2,
+        actor: actor(),
+        decide: () => ({ kind: 'write', value: { imageId: logo1.id }, detail: { change: 'publish', version: 1, fresh: true } }),
+      });
+      expect((await store().get(logo1.id))!.publishedAt).toEqual(T1);
+      // «همان» و «رد» نه می‌نویسند نه رویداد دارند؛ ردیفی که نیست null است.
+      const before = (await imageEvents()).length;
+      expect(
+        await store().change({ key: LOGO_SETTING, action: 'content.logo', imageId: logo2.id, at: T2, actor: actor(), decide: () => ({ kind: 'same' }) }),
+      ).toEqual({ ok: true, written: false });
+      expect(
+        await store().change({
+          key: LOGO_SETTING,
+          action: 'content.logo',
+          imageId: 999_999,
+          at: T2,
+          actor: actor(),
+          decide: (_current, image) => (image === null ? { kind: 'reject', reason: 'image_not_found' } : { kind: 'same' }),
+        }),
+      ).toEqual({ ok: false, reason: 'image_not_found' });
+      expect((await imageEvents()).length).toBe(before);
+      expect((await store().get(logo2.id))!.publishedAt).toBeNull();
+      expect((await imageEvents()).filter((e) => e.action === 'content.logo').map((e) => [e.targetType, e.targetId, e.detail])).toEqual([
+        [SETTING_TARGET, LOGO_SETTING, { change: 'publish', version: 1, fresh: true }],
+        [SETTING_TARGET, LOGO_SETTING, { change: 'brand', fresh: true }],
+        [SETTING_TARGET, LOGO_SETTING, { change: 'publish', version: 1, fresh: true }],
+      ]);
+    });
+
+    it('محافظ‌ها: بارگذاری تازه و منجمد، نتیجهٔ یک‌بارهٔ کارگر با همهٔ فایل‌ها، روی سایت یک بار، و پاک شدن فقط آنچه روی سایت نرفت', async () => {
+      const logo = await store().upload({ kind: 'logo', main: { name: 'logo.png', bytes: bytes(1) }, extra: null, actor: actor(), at: NOW });
+      const where = eq(siteImages.id, logo.id);
+      const insertImage = (over: Partial<typeof siteImages.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(siteImages).values({ kind: 'logo', version: 9, main: bytes(1), mainName: 'x.png', createdBy: owner, ...over }));
+      expect(await insertImage({ builtAt: NOW })).toBe('site_images_insert_state');
+      expect(await insertImage({ main: bytes(1, 1024 * 1024 + 1) })).toBe('site_images_main');
+      expect(await insertImage({ mainName: '' })).toBe('site_images_main');
+      expect(await insertImage({ extra: bytes(2) })).toBe('site_images_extra');
+      expect(await insertImage({ version: 0 })).toBe('site_images_version_positive');
+      expect(await insertImage({ version: 1 })).toBe('site_images_version');
+      for (const change of [{ mainName: 'y.png' }, { main: bytes(9) }, { kind: 'banner' as const }, { version: 7 }, { createdAt: new Date(0) }]) {
+        expect(await rejectedConstraint(conn.db.update(siteImages).set(change).where(where)), JSON.stringify(Object.keys(change))).toBe('site_images_frozen');
+      }
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ publishedAt: NOW }).where(where))).toBe('site_images_published');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW }).where(where))).toBe('site_images_files_complete');
+      // فایل نام نوع دیگر، و نوع محتوای نادرست.
+      expect(await insertFile(logo.id, 'desktop', { contentType: 'image/png' })).toBe('site_image_files_kind');
+      expect(await insertFile(logo.id, 'favicon', { contentType: 'image/png' })).toBe('site_image_files_type');
+      expect(await insertFile(logo.id, 'logo', { contentType: 'image/jpeg' })).toBe('site_image_files_type');
+      expect(await insertFile(logo.id, 'logo', { sha256: 'x' })).toBe('site_image_files_sha256');
+      expect(await insertFile(logo.id, 'logo', { width: 0 })).toBe('site_image_files_size');
+      expect(await insertFile(logo.id, 'logo')).toBeUndefined();
+      // نیمه‌کاره ساخته نمی‌شود، و «ساخته نشد» فایل ندارد.
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW }).where(where))).toBe('site_images_files_complete');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW, error: 'too_small: کوچک' }).where(where))).toBe('site_images_files_complete');
+      expect(await rejectedConstraint(conn.db.update(siteImageFiles).set({ width: 2 }).where(eq(siteImageFiles.imageId, logo.id)))).toBe('site_image_files_frozen');
+      expect(await rejectedConstraint(conn.db.delete(siteImageFiles).where(eq(siteImageFiles.imageId, logo.id)))).toBe('site_image_files_frozen');
+      await build(logo.id, LOGO_FILES.filter((name) => name !== 'logo'));
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ error: 'دیر' }).where(where))).toBe('site_images_build_once');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: new Date(NOW.getTime() + MINUTE) }).where(where))).toBe('site_images_build_once');
+      expect(await insertFile(logo.id, 'og')).toBe('site_image_files_once');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ publishedAt: NOW }).where(where))).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ publishedAt: new Date(NOW.getTime() + MINUTE) }).where(where))).toBe('site_images_publish_once');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ publishedAt: null }).where(where))).toBe('site_images_publish_once');
+      expect(await rejectedConstraint(conn.db.delete(siteImages).where(where))).toBe('site_images_published_kept');
+
+      // ساخته نشد: بی فایل و با خطا؛ روی سایت نمی‌رود، و پاک شدنش آزاد است.
+      const failed = await store().upload({ kind: 'logo', main: { name: 'tiny.png', bytes: bytes(2) }, extra: null, actor: actor(), at: NOW });
+      const failedWhere = eq(siteImages.id, failed.id);
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW, error: ' ' }).where(failedWhere))).toBe('site_images_error');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ error: 'too_small' }).where(failedWhere))).toBe('site_images_error');
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW, error: 'too_small: ارتفاع 90 پیکسل' }).where(failedWhere))).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ publishedAt: NOW }).where(failedWhere))).toBe('site_images_published');
+      expect(await rejectedConstraint(conn.db.delete(siteImages).where(failedWhere))).toBeUndefined();
+
+      // بنر: «mobile» فقط با تصویر گوشی، و ساخته یعنی همان که بارگذاری شد؛ پاک شدن بارگذاری‌ای که روی سایت نرفت فایل‌هایش را هم می‌برد.
+      const desktopOnly = await store().upload({ kind: 'banner', main: { name: 'wide.jpg', bytes: bytes(3) }, extra: null, actor: actor(), at: NOW });
+      expect(await insertFile(desktopOnly.id, 'mobile', { contentType: 'image/jpeg' })).toBe('site_image_files_kind');
+      expect(await insertFile(desktopOnly.id, 'logo')).toBe('site_image_files_kind');
+      await build(desktopOnly.id, ['desktop']);
+      const both = await store().upload({ kind: 'banner', main: { name: 'wide.jpg', bytes: bytes(3) }, extra: { name: 'p.jpg', bytes: bytes(4) }, actor: actor(), at: NOW });
+      expect(await insertFile(both.id, 'desktop', { contentType: 'image/jpeg' })).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW }).where(eq(siteImages.id, both.id)))).toBe('site_images_files_complete');
+      expect(await insertFile(both.id, 'mobile', { contentType: 'image/jpeg' })).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.update(siteImages).set({ builtAt: NOW }).where(eq(siteImages.id, both.id)))).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.delete(siteImages).where(eq(siteImages.id, both.id)))).toBeUndefined();
+      expect(await conn.db.select().from(siteImageFiles).where(eq(siteImageFiles.imageId, both.id))).toEqual([]);
+      // کار کارگر مال یک چیز است.
+      expect(
+        await rejectedConstraint(conn.db.insert(jobs).values({ kind: BUILD_SITE_IMAGE_JOB, siteImageId: desktopOnly.id, reportExportId: randomUUID() })),
+      ).toBe('jobs_one_target');
     });
   });
 });

@@ -87,6 +87,19 @@
     height: 64px;
     width: auto;
   }
+  /*
+   * لوگوی مالک (۱۱٫۲): تا چهار برابر ارتفاعش پهن است، پس در پهنای کم کوچک می‌شود و ناوبری جا می‌ماند (فلکس آیتمی که از کمینهٔ پهنا کوچک‌تر
+   * می‌شود)؛ نسبت از ابعاد خود `<img>`.
+   */
+  .site-logo--custom {
+    min-width: 0;
+  }
+  .site-logo--custom img,
+  .site-foot__brand--custom img {
+    height: auto;
+    max-height: 64px;
+    max-width: 100%;
+  }
   .site-nav {
     display: flex;
     gap: 4px;
@@ -229,6 +242,10 @@
     }
     .site-logo img {
       height: 56px;
+    }
+    .site-logo--custom img {
+      height: auto;
+      max-height: 56px;
     }
     /* در موبایل فقط «تعرفه» و «سؤال‌ها»؛ «چطور کار می‌کند» جا ندارد */
     .site-nav .site-nav__how {

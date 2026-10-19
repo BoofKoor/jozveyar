@@ -1,15 +1,15 @@
 /**
  * ابزارهای مشترک تست‌های سرتاسری پنل (`admin.spec.ts`، `orders.spec.ts`، `status.spec.ts`، …): دستور سرور، کد برنامهٔ تأیید مثل
  * گوشی، مرورگر با IP خودش، پاییدن CSP و درخواست بیرونی، ثبت با پیوند، ورود، تخصیص چاپخانه در پرداخت (۵٫۲)، فایل پست و
- * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`)، فرمان سرور ساختگی sms.ir (۷٫۱)، و از ۱۰٫۲ دانلود و خوانندهٔ کتاب اکسل خروجی
- * گزارش‌ها. طرز اجرا بالای `admin.spec.ts`.
+ * بارگذاری‌اش (۶٫۱، از ۶٫۲ مشترک با `review.spec.ts`)، فرمان سرور ساختگی sms.ir (۷٫۱)، از ۱۰٫۲ دانلود و خوانندهٔ کتاب اکسل خروجی
+ * گزارش‌ها، و از ۱۱٫۲ سازندهٔ PNG آزمایشی لوگو و بنر. طرز اجرا بالای `admin.spec.ts`.
  */
 
 import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inflateRawSync } from 'node:zlib';
+import { crc32, deflateSync, inflateRawSync } from 'node:zlib';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type postgres from 'postgres';
@@ -307,3 +307,33 @@ export function xlsxParts(bytes: Buffer): Map<string, string> {
   }
   return parts;
 }
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * PNG رنگی ساده (RGBA، بی فیلتر) با رنگ هر پیکسل، بی کتابخانه: لوگو و بنر آزمایشی `brand.spec.ts` (۱۱٫۲). کارگر همان را با Pillow می‌خواند و از
+ * نو می‌سازد، پس شکل فایل همان PNG معمول است.
+ */
+export function pngOf(width: number, height: number, pixel: (x: number, y: number) => readonly [number, number, number, number]): Buffer {
+  const stride = width * 4 + 1;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) raw.set(pixel(x, y), y * stride + 1 + x * 4);
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const size = Buffer.alloc(4);
+    size.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([size, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 6, 0, 0, 0], 8); // ۸ بیت، RGBA
+  return Buffer.concat([PNG_SIGNATURE, chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** پهنا و ارتفاع یک PNG از سرآیندش. */
+export const pngSize = (png: Buffer) => ({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) });

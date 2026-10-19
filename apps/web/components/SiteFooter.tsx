@@ -1,8 +1,9 @@
 import { TextContent } from '@jozveyar/content/render';
 import { jalaliYear } from '@jozveyar/text';
-import { Logo } from '@jozveyar/ui';
 
+import type { MediaFile } from '../lib/server/brand';
 import { footerGroups } from '../lib/staticPages';
+import { SiteLogo } from './SiteLogo';
 
 /** شناسه و کد نشان اینماد جزوه‌یار، از کدی که اینماد داده (۱۴۰۵/۰۷/۰۳). */
 const ENAMAD_ID = '7896821';
@@ -70,17 +71,17 @@ function FooterNav({ contact }: { contact: boolean }) {
 /**
  * پاورقی سایت، از طرح ز (docs/UI.md، قدم ۳). کامپوننت سرور، بی JS.
  *
- * معرفی، پیوند صفحه‌های ثابت (قدم ۵، برش ۷٫۴) و نشان اینماد. معرفی و جملهٔ پایین از ۱۱٫۱ از «تماس و پاورقی» پنل‌اند (سؤال ۲۸۳؛ جملهٔ
- * پایین خالی یعنی نیامدن)، و پیوند «تماس» فقط وقتی راهی برای تماس هست. سال شمسی موقع ساخت صفحه حساب می‌شود؛ صفحه‌ها با ISR ساخته
- * می‌شوند، پس «©» با بازسازی صفحه سال تازه را می‌گیرد.
+ * لوگو (از ۱۱٫۲ لوگوی مالک اگر روی سایت است)، معرفی، پیوند صفحه‌های ثابت (قدم ۵، برش ۷٫۴) و نشان اینماد. معرفی و جملهٔ پایین از ۱۱٫۱ از
+ * «تماس و پاورقی» پنل‌اند (سؤال ۲۸۳؛ جملهٔ پایین خالی یعنی نیامدن)، و پیوند «تماس» فقط وقتی راهی برای تماس هست. سال شمسی موقع ساخت صفحه
+ * حساب می‌شود؛ صفحه‌ها با ISR ساخته می‌شوند، پس «©» با بازسازی صفحه سال تازه را می‌گیرد.
  */
-export function SiteFooter({ intro, legal, contact }: { intro: string; legal: string; contact: boolean }) {
+export function SiteFooter({ intro, legal, contact, logo }: { intro: string; legal: string; contact: boolean; logo: MediaFile | null }) {
   return (
     <footer className="site-foot">
       <div className="site-wrap">
         <div className="site-foot__top">
-          <div className="site-foot__brand">
-            <Logo height={64} loading="lazy" />
+          <div className={`site-foot__brand${logo ? ' site-foot__brand--custom' : ''}`}>
+            <SiteLogo logo={logo} loading="lazy" />
             <p>
               <TextContent text={intro} />
             </p>

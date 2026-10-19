@@ -2598,6 +2598,177 @@
     height: 40px;
     width: auto;
   }
+  /*
+   * لوگو و بنر (برش ۱۱٫۲، ADR-067): فرم بارگذاری با دو برچسب `jy-add`، سربرگ کوچک با لوگو (مثل پیش‌نمایش نوار)، بنر و تصویر اشتراک به پهنای کارت،
+   * شبکهٔ فایل‌هایی که کارگر ساخت، و فهرست بارگذاری‌ها با تصویر کوچک؛ ابعاد چپ‌به‌راست.
+   */
+  .ad-imgup {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .ad-imgup[data-pending] .jy-add {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .ad-imgup__pick {
+    justify-content: flex-start;
+    padding-inline: 16px;
+  }
+  .ad-imgup__pick.is-picked {
+    border-style: solid;
+  }
+  .ad-imgup__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ad-logopv {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+    background: var(--color-band);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ad-logopv img {
+    flex: none;
+    width: auto;
+    max-width: 60%;
+    height: 40px;
+    object-fit: contain;
+  }
+  picture.ad-bannerpv {
+    display: block;
+  }
+  img.ad-bannerpv,
+  .ad-bannerpv img,
+  .ad-ogpv {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ad-ogpv {
+    max-width: 600px;
+  }
+  .ad-imgfiles {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .ad-imgfiles__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .ad-imgfile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+  }
+  .ad-imgfile--wide {
+    width: 100%;
+  }
+  .ad-imgfile--phone {
+    max-width: 320px;
+  }
+  .ad-imgfile figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+  }
+  .ad-imgfile__box {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    width: fit-content;
+    padding: 12px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+  .ad-imgfile__box img {
+    display: block;
+  }
+  /* آیفون گوشه را خودش گرد می‌کند؛ اندروید آیکون maskable را تا دایرهٔ امن می‌بُرد */
+  .ad-imgfile[data-file='apple'] img {
+    border-radius: 22%;
+  }
+  .ad-imgfile__box--round img {
+    border-radius: 50%;
+  }
+  .ad-imglist > li {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 2px;
+    padding-block: 12px;
+  }
+  .ad-imglist > li + li {
+    border-block-start: 1px solid var(--color-green-100);
+  }
+  .ad-imglist__thumb {
+    grid-row: 1 / span 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 96px;
+    height: 56px;
+    overflow: hidden;
+    background: var(--color-band);
+    border-radius: var(--radius-sm);
+  }
+  .ad-imglist__thumb img {
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .ad-imglist__name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    font-weight: 600;
+  }
+  .ad-imglist__meta {
+    grid-column: 2;
+    font-size: var(--text-small);
+    line-height: 1.7;
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .ad-imglist > li > .jy-btn {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  @media (width <= 520px) {
+    .ad-imglist > li {
+      grid-template-columns: 72px minmax(0, 1fr);
+    }
+    .ad-imglist__thumb {
+      width: 72px;
+      height: 44px;
+    }
+    .ad-imglist > li > .jy-btn {
+      grid-column: 2;
+      grid-row: auto;
+      justify-self: start;
+    }
+  }
   .ad-pvlabel {
     margin-block: 16px 6px;
     font-size: var(--text-small);

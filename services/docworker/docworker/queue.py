@@ -33,6 +33,8 @@ class Job:
     ticket_template_id: int | None = None
     # خروجی PDF گزارش (`render_report`، برش ۱۰٫۲)؛ هدف پنجم.
     report_export_id: str | None = None
+    # تصویر سایت (`build_site_image`، برش ۱۱٫۲)؛ هدف ششم.
+    site_image_id: int | None = None
 
 
 CLAIM_SQL = """
@@ -51,7 +53,7 @@ UPDATE jobs
          LIMIT 1
          FOR UPDATE SKIP LOCKED)
 RETURNING id, kind, document_id::text, payload, attempts, max_attempts, order_id::text, shipment_import_id::text,
-          ticket_template_id, report_export_id::text
+          ticket_template_id, report_export_id::text, site_image_id
 """
 
 

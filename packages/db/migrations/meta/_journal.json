@@ -386,6 +386,20 @@
       "when": 1792278007902,
       "tag": "0054_site_content_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792425193545,
+      "tag": "0055_site_images",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1792425206224,
+      "tag": "0056_site_images_guards",
+      "breakpoints": true
     }
   ]
 }
