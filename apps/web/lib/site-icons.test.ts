@@ -2,7 +2,7 @@
  * نشانک، آیکون گوشی و تصویر اشتراک، از روی فایل‌های برند (docs/UI.md، قدم ۳).
  *
  * icon.svg خود فایل برند است؛ بقیه را scripts/make-icons.mjs یک بار با Chromium از فایل‌های برند
- * می‌سازد. اینجا Chromium نیست، پس خود رندر سنجیده نمی‌شود؛ خروجی سنجیده می‌شود: برابری SVG، اندازه
+ * می‌سازد. همه در `public/`اند (از ۱۱٫۲؛ پیش از آن متادیتای فایلی `app/`)، و layout و manifest از `lib/brand.ts` به آنها می‌رسند. اینجا Chromium نیست، پس خود رندر سنجیده نمی‌شود؛ خروجی سنجیده می‌شود: برابری SVG، اندازه
  * و ماتی هر تصویر، اینکه نشان در دایرهٔ امن آیکون maskable است، و اینکه رنگ‌ها همان رنگ‌های امروز
  * برندند. برند که عوض شد و اسکریپت دوباره اجرا نشد، اینجا می‌افتد. اینکه سرور همه را با نوع درست
  * می‌دهد در tests/site.spec.ts است.
@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 
 import { describe, expect, it } from 'vitest';
+
+import { BRAND_SHARE_ALT } from './brand';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const read = (path: string) => readFileSync(`${REPO}${path}`);
@@ -147,18 +149,18 @@ function outsideSafeZone(png: Png, paper: number[]): number {
 }
 
 describe('نشانک سایت', () => {
-  it('app/icon.svg بایت‌به‌بایت همان favicon برند است', () => {
-    expect(read('apps/web/app/icon.svg').equals(read('docs/brand/jozveyar-favicon.svg'))).toBe(true);
+  it('public/icon.svg بایت‌به‌بایت همان favicon برند است', () => {
+    expect(read('apps/web/public/icon.svg').equals(read('docs/brand/jozveyar-favicon.svg'))).toBe(true);
   });
 
   it('favicon.ico سه اندازهٔ ۱۶، ۳۲ و ۴۸ دارد، هر کدام PNG شفاف', () => {
-    const images = icoImages(read('apps/web/app/favicon.ico'));
+    const images = icoImages(read('apps/web/public/favicon.ico'));
     expect(images.map(({ width, height }) => `${width}×${height}`)).toEqual(['16×16', '32×32', '48×48']);
     expect(images.every(({ colorType }) => colorType === 6)).toBe(true);
   });
 
   it('شاهد: ICO خراب یا ردیفی که با PNG نمی‌خواند دیده می‌شود', () => {
-    const ico = Buffer.from(read('apps/web/app/favicon.ico'));
+    const ico = Buffer.from(read('apps/web/public/favicon.ico'));
     const wrongSize = Buffer.from(ico);
     wrongSize[6] = 24; // ردیف اول می‌گوید ۲۴، PNG آن ۱۶ است
     expect(() => icoImages(wrongSize)).toThrow('ردیف 0');
@@ -170,7 +172,7 @@ describe('نشانک سایت', () => {
 
 describe('آیکون گوشی: نشان کامل روی مربع سفید مات', () => {
   const PHONE = [
-    ['apps/web/app/apple-icon.png', 180],
+    ['apps/web/public/apple-icon.png', 180],
     ['apps/web/public/icons/icon-192.png', 192],
     ['apps/web/public/icons/icon-512.png', 512],
   ] as const;
@@ -210,7 +212,7 @@ describe('آیکون گوشی: نشان کامل روی مربع سفید مات
 
 describe('تصویر اشتراک: طرح الف', () => {
   it('۱۲۰۰×۶۳۰ و مات؛ زمینهٔ green-50 و لبهٔ ۱۲ پیکسلی green-600 در پایین', () => {
-    const png = decodePng(read('apps/web/app/opengraph-image.png'));
+    const png = decodePng(read('apps/web/public/opengraph-image.png'));
     expect(`${png.width}×${png.height}`).toBe('1200×630');
     expect(opaque(png)).toBe(true);
 
@@ -227,7 +229,7 @@ describe('تصویر اشتراک: طرح الف', () => {
   });
 
   it('متن جایگزین تیتر را دارد؛ یک خط، بی فاصله در دو سر', () => {
-    const alt = read('apps/web/app/opengraph-image.alt.txt').toString('utf8');
+    const alt = BRAND_SHARE_ALT;
     expect(alt).toBe(alt.trim());
     expect(alt).not.toContain('\n');
     expect(alt).toContain('جزوه‌ات را بینداز، قیمت را همین حالا ببین');

@@ -10,14 +10,15 @@
 متغیرها: DATABASE_URL، S3_ENDPOINT، S3_BUCKET، S3_ACCESS_KEY، S3_SECRET_KEY،
 S3_REGION (اختیاری)، DOCWORKER_POLL_SECONDS (اختیاری)، DOCWORKER_KINDS (اختیاری؛
 مثلاً `analyze_document` برای نودی که فقط تحلیل کند — پیش‌فرض همهٔ کارها: تبدیل، تحلیل، از برش ۳ب
-ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، از ۶٫۱ خواندن فایل پست، از ۹٫۲ پیش‌نمایش قالب برگه، و از ۱۰٫۲
-PDF گزارش‌های پنل)،
+ساختن PDF جزوهٔ سفارش پرداخت‌شده، از ۵٫۱ فایل چاپ و برگهٔ سفارش، از ۶٫۱ خواندن فایل پست، از ۹٫۲ پیش‌نمایش قالب برگه، از ۱۰٫۲
+PDF گزارش‌های پنل، و از ۱۱٫۲ فایل‌های لوگو و بنر سایت)،
 DOCWORKER_CONVERT_TIMEOUT (اختیاری، ثانیه؛ پیش‌فرض ۳۰۰)، DOCWORKER_TICKET_TIMEOUT (اختیاری، ثانیه؛ ساختن برگه از قالب، پیش‌فرض ۹۰)،
 DOCWORKER_RETENTION_SECONDS (اختیاری؛ فاصلهٔ دورهای پاک کردن فایل‌های سفارش بسته، پیش‌فرض ۶۰۰).
 
 نودی که کار سفارش (`prepare_order`) برمی‌دارد، بین کارها فایل‌های سفارش‌های بسته را هم پس از روزهای نگهداری پاک می‌کند
 (ADR-044)، و از ۶٫۱ فایل پست خام و متن سطرهایی که سفارش ما نشدند (ADR-045)؛ نود فقط‌تحلیل نه. نودی که PDF گزارش می‌سازد
-(`render_report`)، در همان دور خروجی‌های یک روزه را هم پاک می‌کند (۱۰٫۲، ADR-061).
+(`render_report`)، در همان دور خروجی‌های یک روزه را هم پاک می‌کند (۱۰٫۲، ADR-061)، و نودی که تصویرهای سایت را می‌سازد
+(`build_site_image`) بارگذاری‌هایی را که ۳۰ روز روی سایت نرفتند (۱۱٫۲، ADR-067).
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from .orders import PREPARE_ORDER, prepare_order
 from .report import RENDER_REPORT, mark_export_failed, purge_exports, render_report
 from .retention import sweep
 from .shipments import READ_POST_FILE, mark_import_failed, read_post_file
+from .site_images import BUILD_SITE_IMAGE, build_site_image, mark_image_failed, purge_images
 from .storage import S3Storage
 from .ticket import PREPARE_TICKET, PREVIEW_TICKET_TEMPLATE, prepare_ticket, preview_ticket_template
 
@@ -52,7 +54,16 @@ log = logging.getLogger("docworker")
 # سالم هیچ‌وقت وسط کار دزدیده نمی‌شود.
 LEASE_SECONDS = 30 * 60
 
-KINDS = (CONVERT_DOCUMENT, ANALYZE_DOCUMENT, PREPARE_ORDER, PREPARE_TICKET, READ_POST_FILE, PREVIEW_TICKET_TEMPLATE, RENDER_REPORT)
+KINDS = (
+    CONVERT_DOCUMENT,
+    ANALYZE_DOCUMENT,
+    PREPARE_ORDER,
+    PREPARE_TICKET,
+    READ_POST_FILE,
+    PREVIEW_TICKET_TEMPLATE,
+    RENDER_REPORT,
+    BUILD_SITE_IMAGE,
+)
 # شکست گذرایی که تلاش‌هایش تمام شد؛ مرورگر برای هر دو پیام فارسی دارد.
 EXHAUSTED = {CONVERT_DOCUMENT: "convert_failed", ANALYZE_DOCUMENT: "analysis_failed"}
 
@@ -78,10 +89,11 @@ class Worker:
         self.office = convert.LibreOffice()
         # اولین هم‌گام‌سازی فونت همان اول کار؛ بعد هر ده دقیقه، بین کارها.
         self.fonts_due = 0.0
-        # پاک کردن فایل‌های سفارش بسته (ADR-044): همان الگو، فقط روی نودی که کار سفارش برمی‌دارد؛ و از ۱۰٫۲ خروجی‌های کهنهٔ گزارش، روی
-        # نودی که PDF گزارش می‌سازد.
+        # پاک کردن فایل‌های سفارش بسته (ADR-044): همان الگو، فقط روی نودی که کار سفارش برمی‌دارد؛ از ۱۰٫۲ خروجی‌های کهنهٔ گزارش، روی
+        # نودی که PDF گزارش می‌سازد؛ و از ۱۱٫۲ بارگذاری‌های کهنهٔ تصویر سایت، روی نودی که آنها را می‌سازد.
         self.retention_every = float(os.environ.get("DOCWORKER_RETENTION_SECONDS", "600"))
-        self.retention_due = 0.0 if PREPARE_ORDER in self.kinds or RENDER_REPORT in self.kinds else float("inf")
+        swept = (PREPARE_ORDER, RENDER_REPORT, BUILD_SITE_IMAGE)
+        self.retention_due = 0.0 if any(kind in self.kinds for kind in swept) else float("inf")
 
     def stop(self, *_: object) -> None:
         # کار جاری تمام می‌شود؛ اگر داکر زودتر بکشد، اجاره کار را برمی‌گرداند.
@@ -106,7 +118,8 @@ class Worker:
             )
 
     def sweep_if_due(self, conn: psycopg.Connection) -> None:
-        """فایل‌های سفارش‌های بستهٔ سررسیده، و خروجی‌های کهنهٔ گزارش. شکست هر کدام کار را نگه نمی‌دارد: دور بعد دوباره."""
+        """فایل‌های سفارش‌های بستهٔ سررسیده، خروجی‌های کهنهٔ گزارش، و بارگذاری‌های کهنهٔ تصویر سایت. شکست هر کدام کار را نگه نمی‌دارد: دور
+        بعد دوباره."""
         now = time.monotonic()
         if now < self.retention_due:
             return
@@ -123,6 +136,12 @@ class Worker:
             except Exception as error:  # noqa: BLE001
                 conn.rollback()
                 log.warning("خروجی‌های کهنهٔ گزارش پاک نشدند: %s", error)
+        if BUILD_SITE_IMAGE in self.kinds:
+            try:
+                purge_images(conn)
+            except Exception as error:  # noqa: BLE001
+                conn.rollback()
+                log.warning("بارگذاری‌های کهنهٔ تصویر سایت پاک نشدند: %s", error)
 
     def run_once(self, conn: psycopg.Connection) -> bool:
         """یک کار برمی‌دارد و انجام می‌دهد. false یعنی صف خالی بود."""
@@ -134,6 +153,7 @@ class Worker:
             else f"ورود فایل پست {job.shipment_import_id}" if job.shipment_import_id
             else f"قالب {job.ticket_template_id}" if job.ticket_template_id
             else f"خروجی گزارش {job.report_export_id}" if job.report_export_id
+            else f"تصویر سایت {job.site_image_id}" if job.site_image_id
             else f"سند {job.document_id}"
         )
         log.info("کار %s (%s) %s — تلاش %s", job.id, job.kind, target, job.attempts)
@@ -150,6 +170,8 @@ class Worker:
                 result = preview_ticket_template(conn, self.storage, job.ticket_template_id, job.payload)
             elif job.kind == RENDER_REPORT:
                 result = render_report(conn, job.report_export_id)
+            elif job.kind == BUILD_SITE_IMAGE:
+                result = build_site_image(conn, job.site_image_id)
             else:
                 result = analyze_document(conn, self.storage, job.document_id)
             queue.complete(conn, job)
@@ -167,6 +189,9 @@ class Worker:
             # خروجی گزارشی که ساخته نشد «ساخته نشد» است با کد و پیام کوتاه، تا صفحه‌اش تا ابد «در حال ساختن» نماند.
             if job.report_export_id:
                 mark_export_failed(conn, job.report_export_id, f"{failure.code}: {failure}")
+            # تصویری که پذیرفته نیست «ساخته نشد» است با کد و پیام آماده، برای صفحهٔ همان بارگذاری در پنل.
+            if job.site_image_id:
+                mark_image_failed(conn, job.site_image_id, f"{failure.code}: {failure}")
             conn.commit()
             log.warning("✗ کار %s شکست قطعی: %s", job.id, failure.code)
         except Exception as error:  # noqa: BLE001 — هر خطای دیگری گذرا فرض می‌شود
@@ -179,6 +204,8 @@ class Worker:
                 mark_import_failed(conn, job.shipment_import_id)
             if final and job.report_export_id:
                 mark_export_failed(conn, job.report_export_id, f"render_failed: {type(error).__name__}")
+            if final and job.site_image_id:
+                mark_image_failed(conn, job.site_image_id, f"build_failed: {type(error).__name__}")
             conn.commit()
             log.exception("✗ کار %s شکست%s", job.id, " — تلاش‌ها تمام شد" if final else "، دوباره تلاش می‌شود")
         return True

@@ -230,7 +230,20 @@ export type AdminErrorCode =
   | 'bar_day_past'
   | 'bar_last_day_past'
   | 'bar_day_order'
-  | 'bar_day_too_far';
+  | 'bar_day_too_far'
+  /** لوگو و بنر (۱۱٫۲). */
+  | 'image_kind'
+  | 'image_required'
+  | 'image_too_large'
+  | 'image_format'
+  | 'image_svg'
+  | 'image_not_found'
+  | 'image_not_ready'
+  | 'logo_changed'
+  | 'logo_code_required'
+  | 'banner_changed'
+  | 'banner_invalid'
+  | 'banner_code_required';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

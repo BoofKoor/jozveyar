@@ -1,15 +1,23 @@
 import type { MetadataRoute } from 'next';
 import { BAND_COLOR } from '@jozveyar/ui/tokens';
 
+import { manifestIcons } from '../lib/brand';
+import { siteBrand } from '../lib/server/brand';
+
+/** آیکون‌ها از لوگوی مالک اگر روی سایت است (۱۱٫۲)، با همان ISR ۶۰ ثانیهٔ صفحه‌ها. */
+export const revalidate = 60;
+
 /**
  * manifest سایت (`/manifest.webmanifest`)، برای «افزودن به صفحهٔ اصلی» گوشی: نام، جهت و آیکون.
  *
  * `display: 'browser'`: سایت در مرورگر باز می‌شود، نه مثل برنامهٔ جدا. آیکون‌ها از
  * `scripts/make-icons.mjs` می‌آیند: نشان کامل روی مربع سفید مات. همان ۵۱۲ «maskable» هم هست، چون کل
  * نشان در دایرهٔ امن می‌ماند (`lib/site-icons.test.ts` این را می‌سنجد). رنگ‌ها green-50‌اند، همان
- * `BAND_COLOR` نوار بالای صفحه.
+ * `BAND_COLOR` نوار بالای صفحه. از ۱۱٫۲ اگر مالک لوگوی خودش را روی سایت گذاشته، آیکون‌هایی که کارگر از آن ساخت (`manifestIcons`)، که آنها
+ * هم در دایرهٔ امن‌اند.
  */
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const brand = await siteBrand();
   return {
     name: 'جزوه‌یار',
     short_name: 'جزوه‌یار',
@@ -19,10 +27,6 @@ export default function manifest(): MetadataRoute.Manifest {
     display: 'browser',
     theme_color: BAND_COLOR,
     background_color: BAND_COLOR,
-    icons: [
-      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    ],
+    icons: manifestIcons(brand),
   };
 }

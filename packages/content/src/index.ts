@@ -6,6 +6,7 @@
  */
 
 export * from './bar.js';
+export * from './banner.js';
 export * from './check.js';
 export * from './contact.js';
 export * from './defaults.js';

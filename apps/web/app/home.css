@@ -229,6 +229,25 @@
   .home-more {
     padding-block-end: 64px;
   }
+  /* بنر صفحهٔ اصلی (۱۱٫۲): تصویری که مالک از پنل روشن کرده، به پهنای محتوا، بالای سه قدم؛ پیوندش حلقهٔ فوکوس کیت را دارد */
+  .home-banner {
+    padding-block-start: 48px;
+  }
+  .home-banner img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-lg);
+  }
+  .home-banner__link {
+    display: block;
+    border-radius: var(--radius-lg);
+  }
+  @media (max-width: 520px) {
+    .home-banner {
+      padding-block-start: 32px;
+    }
+  }
   .home-sec {
     padding-block-start: 80px;
   }
@@ -500,8 +519,8 @@
   :where([data-restoring] > body) .home-hero__text {
     padding: 0;
   }
-  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff, #reviews),
-  :where([data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, #how, #tariff, #reviews) {
+  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, .home-banner, #how, #tariff, #reviews),
+  :where([data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, .home-banner, #how, #tariff, #reviews) {
     display: none;
   }
   :where(body:has([data-jozve])) .home-title,

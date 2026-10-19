@@ -83,12 +83,12 @@ def test_unreachable_database_waits(worker, monkeypatch):
 
 
 def test_worker_takes_every_kind_by_default(monkeypatch):
-    """از برش ۳ب ساختن PDF جزوهٔ سفارش پرداخت‌شده (`prepare_order`)، از ۵٫۱ برگهٔ سفارش (`prepare_ticket`)، از ۹٫۲ پیش‌نمایش قالب، و از
-    ۱۰٫۲ PDF گزارش‌ها (`render_report`)."""
+    """از برش ۳ب ساختن PDF جزوهٔ سفارش پرداخت‌شده (`prepare_order`)، از ۵٫۱ برگهٔ سفارش (`prepare_ticket`)، از ۹٫۲ پیش‌نمایش قالب، از
+    ۱۰٫۲ PDF گزارش‌ها (`render_report`)، و از ۱۱٫۲ فایل‌های لوگو و بنر (`build_site_image`)."""
     monkeypatch.delenv("DOCWORKER_KINDS", raising=False)
     assert kinds_from_env() == [
         "convert_document", "analyze_document", "prepare_order", "prepare_ticket", "read_post_file", "preview_ticket_template",
-        "render_report",
+        "render_report", "build_site_image",
     ] == list(KINDS)
 
 
@@ -110,8 +110,8 @@ class FakeConn:
 
 
 def test_a_retention_failure_never_stops_the_worker(worker, monkeypatch):
-    """استوریج یا پایگاه داده در دسترس نیست ← هشدار، نه کرش؛ و دور بعد دوباره. از ۱۰٫۲ پاک کردن خروجی‌های گزارش هم، جدا از فایل‌های
-    سفارش: شکست یکی دیگری را نگه نمی‌دارد."""
+    """استوریج یا پایگاه داده در دسترس نیست ← هشدار، نه کرش؛ و دور بعد دوباره. از ۱۰٫۲ پاک کردن خروجی‌های گزارش هم، و از ۱۱٫۲ بارگذاری‌های
+    کهنهٔ تصویر سایت، جدا از فایل‌های سفارش: شکست یکی دیگری را نگه نمی‌دارد."""
     calls = []
 
     def broken(conn, storage):
@@ -122,13 +122,18 @@ def test_a_retention_failure_never_stops_the_worker(worker, monkeypatch):
         calls.append("purge")
         raise OSError("db down")
 
+    def broken_images(conn):
+        calls.append("images")
+        raise OSError("db down")
+
     monkeypatch.setattr(main, "sweep", broken)
     monkeypatch.setattr(main, "purge_exports", broken_purge)
+    monkeypatch.setattr(main, "purge_images", broken_images)
     FakeConn.rolled_back = 0
     worker.retention_due = 0.0
     worker.sweep_if_due(FakeConn())
     worker.sweep_if_due(FakeConn())  # هنوز وقتش نشده
-    assert calls == ["sweep", "purge"] and FakeConn.rolled_back == 2
+    assert calls == ["sweep", "purge", "images"] and FakeConn.rolled_back == 3
     assert worker.retention_due > 0
 
 
@@ -142,12 +147,19 @@ def test_a_report_node_purges_exports_but_never_order_files(monkeypatch):
     calls = []
     monkeypatch.setattr(main, "sweep", lambda conn, storage: calls.append("sweep"))
     monkeypatch.setattr(main, "purge_exports", lambda conn: calls.append("purge"))
+    monkeypatch.setattr(main, "purge_images", lambda conn: calls.append("images"))
     node.sweep_if_due(FakeConn())
     assert calls == ["purge"]
     monkeypatch.setenv("DOCWORKER_KINDS", "prepare_order")
     order_node = Worker()
     order_node.sweep_if_due(FakeConn())
     assert calls == ["purge", "sweep"]
+    # نودی که فقط تصویرهای سایت را می‌سازد (۱۱٫۲) فقط بارگذاری‌های کهنهٔ آنها را.
+    monkeypatch.setenv("DOCWORKER_KINDS", "build_site_image")
+    image_node = Worker()
+    assert image_node.retention_due == 0.0
+    image_node.sweep_if_due(FakeConn())
+    assert calls == ["purge", "sweep", "images"]
 
 
 def test_a_node_can_take_only_analysis(monkeypatch):

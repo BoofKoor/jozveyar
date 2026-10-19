@@ -76,6 +76,32 @@ export const announcementBarSchema = z
   });
 export type AnnouncementBar = z.infer<typeof announcementBarSchema>;
 
+/**
+ * لوگوی سایت (برش ۱۱٫۲، ADR-067؛ سؤال ۲۰۶): ردیف `site_images` لوگویی که روی سایت است؛ null یعنی لوگوی برند (پیش‌فرض). اینکه ردیف لوگوی
+ * ساخته‌شده است را ذخیره‌گاه زیر قفل می‌سنجد، و سایت ردیفی را که نیست یا آماده نیست همان لوگوی برند می‌گیرد.
+ */
+export const siteLogoSchema = z.object({ imageId: z.number().int().positive().nullable() });
+export type SiteLogo = z.infer<typeof siteLogoSchema>;
+
+/** بنر صفحهٔ اصلی (برش ۱۱٫۲): روشن یا خاموش؛ بازهٔ روز ندارد (نوار اعلان دارد). */
+export const BANNER_MODES = ['off', 'on'] as const;
+export type BannerMode = (typeof BANNER_MODES)[number];
+
+/**
+ * بنر صفحهٔ اصلی (برش ۱۱٫۲، ADR-067؛ سؤال ۲۰۶، «تصویر»): ردیف `site_images` بنر (تصویر دسکتاپ و، اختیاری، گوشی)، متن جایگزین، و پیوند اختیاری
+ * به همین سایت (`href` خالی یعنی بی پیوند). خاموش تصویر و متنش را نگه می‌دارد. شکل و سقف هر فیلد را پنل می‌سنجد؛ سقف‌های اینجا فقط جلوی مقدار
+ * بی‌اندازه‌اند.
+ */
+export const siteBannerSchema = z
+  .object({
+    mode: z.enum(BANNER_MODES),
+    imageId: z.number().int().positive().nullable(),
+    alt: z.string().max(400),
+    href: z.string().max(200),
+  })
+  .refine((banner) => banner.mode === 'off' || banner.imageId !== null, { message: 'بنر روشن تصویر ندارد' });
+export type SiteBanner = z.infer<typeof siteBannerSchema>;
+
 export const SETTING_SCHEMAS = {
   /** روز کاری تا تحویل به پست (ADR-013). */
   'order.sla_days': z.number().int().min(1).max(30),
@@ -141,6 +167,15 @@ export const SETTING_SCHEMAS = {
    * تازه، خاموش کردن بی کد (سؤال ۲۸۷). سایت با ISR یک دقیقه‌ای می‌خواندش، و وقتی همهٔ چاپخانه‌ها تعطیل‌اند پیام تعطیلی جایش را می‌گیرد.
    */
   'content.bar': announcementBarSchema,
+  /**
+   * لوگوی سایت (برش ۱۱٫۲، ADR-067): فقط مالک از «محتوای سایت» عوضش می‌کند، با کد تازه (برگشت به لوگوی برند هم). سایت سربرگ، پاورقی، آیکون‌ها
+   * و تصویر اشتراک را از فایل‌هایی که کارگر از آن ساخت می‌گیرد، با ISR یک دقیقه‌ای.
+   */
+  'content.logo': siteLogoSchema,
+  /**
+   * بنر صفحهٔ اصلی (برش ۱۱٫۲، ADR-067): مالک و متصدی، مثل نوار اعلان؛ روشن کردن و هر تغییر بنر روشن با کد تازه، خاموش کردن بی کد.
+   */
+  'content.banner': siteBannerSchema,
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

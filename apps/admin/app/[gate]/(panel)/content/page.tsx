@@ -6,6 +6,7 @@ import { faqCountOf } from '@jozveyar/content';
 import { Alert } from '../../../../components/Alert';
 import { BarCard } from '../../../../components/BarCard';
 import { ContentSegs } from '../../../../components/ContentSegs';
+import { BannerCard, LogoCard } from '../../../../components/ImageCards';
 import { NoAccess } from '../../../../components/NoAccess';
 import { kindName, scopeText, stateText } from '../../../../lib/content';
 import { panelPath } from '../../../../lib/gate';
@@ -16,15 +17,17 @@ import { requirePanel, requireSession } from '../../../../lib/server/context';
 
 export const metadata: Metadata = { title: 'محتوای سایت' };
 
-/** پیام «خاموش کن» کارت نوار (`?done=`). */
+/** پیام «خاموش کن» کارت نوار و کارت بنر (`?done=`). */
 const BAR_DONE: Record<string, string> = {
   off: 'نوار اعلان خاموش شد؛ تا یک دقیقه بعد از سایت می‌رود.',
   same: 'نوار اعلان همین حالا هم خاموش است.',
+  banner_off: 'بنر خاموش شد؛ تا یک دقیقه بعد از صفحهٔ اصلی می‌رود.',
+  banner_same: 'بنر همین حالا هم خاموش است.',
 };
 
 /**
- * محتوای سایت (برش ۱۱٫۱، ADR-065؛ طرح «محتوای سایت (برش ۱۱)»، سؤال ۲۸۲): کارت «نوار اعلان» (۱۱٫۳، مالک و متصدی، `content.bar`) و کارت شش
- * متنی که مالک از پنل عوض می‌کند، هر کدام با حال روی سایت و پیش‌نویس (فقط مالک، `content.edit`).
+ * محتوای سایت (برش ۱۱٫۱، ADR-065؛ طرح «محتوای سایت (برش ۱۱)»، سؤال ۲۸۲): کارت «نوار اعلان» (۱۱٫۳) و «بنر صفحهٔ اصلی» (۱۱٫۲)، مالک و متصدی
+ * (`content.bar`)؛ و کارت «لوگو» (۱۱٫۲) و شش متنی که مالک از پنل عوض می‌کند، هر کدام با حال روی سایت و پیش‌نویس (فقط مالک، `content.edit`).
  */
 export default async function ContentPage({
   params,
@@ -35,13 +38,18 @@ export default async function ContentPage({
 }) {
   const { gate } = await params;
   const { done, e } = await searchParams;
-  const { content } = requirePanel(gate);
+  const { content, images } = requirePanel(gate);
   const session = await requireSession(gate);
   const texts = can(session, 'content.edit');
   const bars = can(session, 'content.bar');
   if (!texts && !bars) return <NoAccess gate={gate} session={session} />;
-  const [overview, bar] = await Promise.all([texts ? content.overview(session) : null, bars ? content.bar(session) : null]);
-  if ((overview && !overview.ok) || (bar && !bar.ok)) return <NoAccess gate={gate} session={session} />;
+  const [overview, bar, logo, banner] = await Promise.all([
+    texts ? content.overview(session) : null,
+    bars ? content.bar(session) : null,
+    texts ? images.logo(session) : null,
+    bars ? images.banner(session) : null,
+  ]);
+  if ([overview, bar, logo, banner].some((result) => result && !result.ok)) return <NoAccess gate={gate} session={session} />;
   const doneText = done ? BAR_DONE[done] : undefined;
 
   return (
@@ -50,13 +58,15 @@ export default async function ContentPage({
         <div>
           <h1 className="ad-title">محتوای سایت</h1>
           <p className="ad-sub">
-            متن‌هایی که روی <bdi className="ad-ltr">jozveyar.com</bdi> است. هر تغییری تا یک دقیقه بعد روی سایت است.
+            متن‌ها و تصویرهایی که روی <bdi className="ad-ltr">jozveyar.com</bdi> است. هر تغییری تا یک دقیقه بعد روی سایت است.
           </p>
         </div>
       </div>
       {doneText ? <Alert tone="success">{doneText}</Alert> : e ? <Alert tone="error">{messageOf(e)}</Alert> : null}
       <div className="ad-stack">
         {bar?.ok ? <BarCard gate={gate} view={bar.value} /> : null}
+        {banner?.ok ? <BannerCard gate={gate} view={banner.value} /> : null}
+        {logo?.ok ? <LogoCard gate={gate} view={logo.value} /> : null}
         {overview?.ok ? <TextsCard gate={gate} now={overview.value.now} rows={overview.value.rows} /> : null}
       </div>
     </>

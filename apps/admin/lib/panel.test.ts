@@ -731,6 +731,36 @@ describe('رویدادها', () => {
     expect(JSON.stringify(lines)).not.toContain('متن نوار"');
     expect([inEventKind('content.bar', 'content'), inEventKind('content.bar', 'settings')]).toEqual([true, false]);
   });
+
+  it('لوگو و بنر (۱۱٫۲): بارگذاری با نوع و نسخه، روی سایت رفتن و برگشت، و بنر روشن، عوض و خاموش؛ نام فایل، متن جایگزین و پیوند هرگز', () => {
+    const upload = (kind: string, version: number) =>
+      event('content.upload', { targetType: 'site_image', targetId: String(version + 10), detail: { kind, version, files: 1, bytes: 2048, name: 'تبلیغ.png' } });
+    const logo = (detail: Record<string, unknown>) => event('content.logo', { targetType: 'setting', targetId: 'content.logo', detail });
+    const banner = (detail: Record<string, unknown>) => event('content.banner', { targetType: 'setting', targetId: 'content.banner', detail });
+    const after = { mode: 'on', imageId: 12, alt: 'تخفیف دانشجویی', href: '/#tariff' };
+    const lines = eventLines([
+      upload('logo', 3),
+      upload('banner', 2),
+      logo({ change: 'publish', imageId: 13, version: 3, before: null, fresh: true }),
+      logo({ change: 'brand', before: 13, fresh: true }),
+      banner({ change: 'on', version: 2, before: { ...after, mode: 'off' }, after, fresh: true }),
+      banner({ change: 'change', version: 2, before: after, after: { ...after, alt: 'تخفیف' }, fresh: true }),
+      banner({ change: 'off', before: after, after: { ...after, mode: 'off' }, fresh: false }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['لوگوی تازه بارگذاری شد، نسخهٔ ', { ltr: '3' }],
+      ['بنر تازه بارگذاری شد، نسخهٔ ', { ltr: '2' }],
+      ['لوگوی نسخهٔ ', { ltr: '3' }, ' روی سایت رفت، با کد تازه'],
+      ['لوگو به لوگوی جزوه‌یار برگشت، با کد تازه'],
+      ['بنر صفحهٔ اصلی روشن شد، نسخهٔ ', { ltr: '2' }, '، با کد تازه'],
+      ['بنر صفحهٔ اصلی عوض شد، نسخهٔ ', { ltr: '2' }, '، با کد تازه'],
+      ['بنر صفحهٔ اصلی خاموش شد'],
+    ]);
+    const text = JSON.stringify(lines);
+    for (const hidden of ['تبلیغ.png', 'تخفیف دانشجویی', '/#tariff']) expect(text).not.toContain(hidden);
+    expect(['content.upload', 'content.logo', 'content.banner'].map((action) => inEventKind(action, 'content'))).toEqual([true, true, true]);
+    expect(inEventKind('content.logo', 'settings')).toBe(false);
+  });
 });
 
 describe('نقش در سربرگ و فهرست ادمین‌ها', () => {

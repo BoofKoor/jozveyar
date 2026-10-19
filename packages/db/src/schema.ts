@@ -504,6 +504,8 @@ export const jobs = pgTable(
     ticketTemplateId: integer('ticket_template_id').references(() => ticketTemplates.id, { onDelete: 'cascade' }),
     /** خروجی PDF گزارشی که کار رویش است: ساختنش (`render_report`، برش ۱۰٫۲، ADR-061). */
     reportExportId: uuid('report_export_id').references(() => reportExports.id, { onDelete: 'cascade' }),
+    /** تصویر سایتی که کار رویش است: ساختن فایل‌هایش (`build_site_image`، برش ۱۱٫۲، ADR-067). */
+    siteImageId: integer('site_image_id').references(() => siteImages.id, { onDelete: 'cascade' }),
     payload: jsonb('payload').notNull().default({}),
     status: jobStatus('status').notNull().default('queued'),
     attempts: integer('attempts').notNull().default(0),
@@ -529,10 +531,12 @@ export const jobs = pgTable(
     uniqueIndex('jobs_ticket_template_kind').on(t.ticketTemplateId, t.kind),
     /** و برای خروجی گزارش: یک کار ساختن برای هر خروجی. */
     uniqueIndex('jobs_report_export_kind').on(t.reportExportId, t.kind),
-    /** هر کار مال یک چیز است: سند، سفارش، ورود فایل پست، نسخهٔ قالب یا خروجی گزارش. */
+    /** و برای تصویر سایت: یک کار ساختن برای هر بارگذاری. */
+    uniqueIndex('jobs_site_image_kind').on(t.siteImageId, t.kind),
+    /** هر کار مال یک چیز است: سند، سفارش، ورود فایل پست، نسخهٔ قالب، خروجی گزارش یا تصویر سایت. */
     check(
       'jobs_one_target',
-      sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}, ${t.ticketTemplateId}, ${t.reportExportId}) <= 1`,
+      sql`num_nonnulls(${t.documentId}, ${t.orderId}, ${t.shipmentImportId}, ${t.ticketTemplateId}, ${t.reportExportId}, ${t.siteImageId}) <= 1`,
     ),
   ],
 );
@@ -2213,5 +2217,119 @@ export const siteContentDrafts = pgTable(
       sql`jsonb_typeof(${t.content}) = 'object' AND octet_length(${t.content}::text) <= ${sql.raw(String(SITE_CONTENT_MAX_BYTES))}`,
     ),
     check('site_content_drafts_times', sql`${t.updatedAt} >= ${t.createdAt}`),
+  ],
+);
+
+/* ──────────────────────────── تصویرهای سایت (برش ۱۱٫۲) ──────────────────────────── */
+
+/** نوع تصویر سایت (برش ۱۱٫۲، ADR-067): لوگو (با نشان اختیاری برای آیکون‌ها) و بنر صفحهٔ اصلی (با تصویر گوشی اختیاری). */
+export const siteImageKind = pgEnum('site_image_kind', ['logo', 'banner']);
+
+/** بیشترین فایلی که بارگذاری می‌شود (لوگو، نشان، و هر تصویر بنر). */
+export const SITE_IMAGE_MAX_BYTES = 1024 * 1024;
+/** بیشترین فایلی که کارگر می‌سازد؛ PNG دسکتاپ بنر در ۲۱۶۰ پیکسل هم زیر این است. */
+export const SITE_IMAGE_FILE_MAX_BYTES = 4 * 1024 * 1024;
+/** فایل‌هایی که کارگر از هر نوع می‌سازد (`services/docworker/docworker/site_images.py`)؛ `mobile` فقط وقتی تصویر گوشی بارگذاری شد. */
+export const SITE_IMAGE_FILES = {
+  logo: ['logo', 'favicon', 'apple', 'icon192', 'icon512', 'og'],
+  banner: ['desktop', 'mobile'],
+} as const;
+export type SiteImageFileName = (typeof SITE_IMAGE_FILES)[keyof typeof SITE_IMAGE_FILES][number];
+
+/**
+ * هر بارگذاری لوگو یا بنر (برش ۱۱٫۲، ADR-067؛ سؤال ۲۰۶): فایل‌هایی که مالک یا متصدی داد، و نتیجهٔ کار کارگر (`build_site_image`). سایت هرگز
+ * همین فایل‌ها را نمی‌دهد؛ فقط آنچه کارگر با Pillow از نو ساخت (`site_image_files`). کدام لوگو و بنر روی سایت است در تنظیم‌های `content.logo`
+ * و `content.banner` است.
+ *
+ * فایل‌ها و سازنده عوض نمی‌شوند، نتیجهٔ کارگر یک بار نوشته می‌شود و `published_at` هم؛ بارگذاری‌ای که روی سایت رفت پاک نمی‌شود، و بقیه را
+ * کارگر پس از چند روز پاک می‌کند (تریگرهای `site_images_guard` و `site_image_files_guard`، 0056).
+ */
+export const siteImages = pgTable(
+  'site_images',
+  {
+    id: serial('id').primaryKey(),
+    kind: siteImageKind('kind').notNull(),
+    /** شمارهٔ بارگذاری در همان نوع، از ۱. */
+    version: integer('version').notNull(),
+    /** لوگو، یا تصویر دسکتاپ بنر. */
+    main: bytea('main').notNull(),
+    /** نام فایلی که بارگذاری شد، فقط برای نمایش. */
+    mainName: text('main_name').notNull(),
+    /** نشان لوگو (برای آیکون‌ها) یا تصویر گوشی بنر؛ اختیاری. */
+    extra: bytea('extra'),
+    extraName: text('extra_name'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** کار کارگر تمام شد: فایل‌ها، یا خطا. */
+    builtAt: timestamp('built_at', { withTimezone: true }),
+    /** ساخته نشد: کد و پیام کوتاه، برای صفحهٔ همین بارگذاری. */
+    error: text('error'),
+    /** اولین بار که روی سایت رفت. */
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('site_images_version').on(t.kind, t.version),
+    check('site_images_version_positive', sql`${t.version} >= 1`),
+    check(
+      'site_images_main',
+      sql`octet_length(${t.main}) BETWEEN 1 AND ${sql.raw(String(SITE_IMAGE_MAX_BYTES))} AND length(${t.mainName}) BETWEEN 1 AND 200`,
+    ),
+    /** فایل دوم با نامش، یا هیچ‌کدام. */
+    check(
+      'site_images_extra',
+      sql`(${t.extra} IS NULL AND ${t.extraName} IS NULL)
+          OR (${t.extra} IS NOT NULL AND ${t.extraName} IS NOT NULL
+              AND octet_length(${t.extra}) BETWEEN 1 AND ${sql.raw(String(SITE_IMAGE_MAX_BYTES))} AND length(${t.extraName}) BETWEEN 1 AND 200)`,
+    ),
+    /** خطا فقط با پایان کار، و کوتاه. */
+    check('site_images_error', sql`${t.error} IS NULL OR (${t.builtAt} IS NOT NULL AND length(btrim(${t.error})) BETWEEN 1 AND 500)`),
+    /** روی سایت فقط بارگذاری‌ای که ساخته شد و خطا ندارد. */
+    check('site_images_published', sql`${t.publishedAt} IS NULL OR (${t.builtAt} IS NOT NULL AND ${t.error} IS NULL)`),
+  ],
+);
+
+/**
+ * فایل‌هایی که کارگر از هر بارگذاری ساخت (برش ۱۱٫۲): لوگو در ۱۲۸ پیکسل ارتفاع، favicon، آیکون گوشی و manifest، و تصویر اشتراک؛ یا تصویرهای بنر.
+ * سایت فقط فایل بارگذاری‌ای را که روی سایت رفته با نام sha256 خودش می‌دهد (`/media/<sha256>.<پسوند>`)، و پنل پیش‌نمایش همه را از راه خودش.
+ * فقط در تراکنشی نوشته می‌شوند که کار کارگر را تمام می‌کند، و عوض نمی‌شوند (`site_image_files_guard`، 0056).
+ */
+export const siteImageFiles = pgTable(
+  'site_image_files',
+  {
+    imageId: integer('image_id')
+      .notNull()
+      .references(() => siteImages.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    contentType: text('content_type').notNull(),
+    bytes: bytea('bytes').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    /** sha256 خود بایت‌ها، نام فایل روی سایت. */
+    sha256: text('sha256').notNull(),
+    /** پیکسل نیمه‌شفاف یا شفاف دارد: پیش‌نمایش لوگوی بی شفافیت را می‌گوید (روی نوار سبز سربرگ چهارگوش دیده می‌شود). */
+    hasAlpha: boolean('has_alpha').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.imageId, t.name] }),
+    index('site_image_files_sha256').on(t.sha256),
+    check(
+      'site_image_files_name',
+      sql`${t.name} IN ('logo', 'favicon', 'apple', 'icon192', 'icon512', 'og', 'desktop', 'mobile')`,
+    ),
+    /** ICO فقط favicon، و JPEG فقط تصویرهای بنر (عکس بی شفافیت)؛ بقیه PNG. */
+    check(
+      'site_image_files_type',
+      sql`(${t.name} = 'favicon' AND ${t.contentType} = 'image/x-icon')
+          OR (${t.name} IN ('desktop', 'mobile') AND ${t.contentType} IN ('image/png', 'image/jpeg'))
+          OR (${t.name} NOT IN ('favicon', 'desktop', 'mobile') AND ${t.contentType} = 'image/png')`,
+    ),
+    check(
+      'site_image_files_size',
+      sql`octet_length(${t.bytes}) BETWEEN 1 AND ${sql.raw(String(SITE_IMAGE_FILE_MAX_BYTES))}
+          AND ${t.width} BETWEEN 1 AND 4096 AND ${t.height} BETWEEN 1 AND 4096`,
+    ),
+    check('site_image_files_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
   ],
 );

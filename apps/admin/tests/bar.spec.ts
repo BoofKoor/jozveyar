@@ -273,7 +273,7 @@ test.describe.serial('نوار اعلان (۱۱٫۳)', () => {
     const operator = who.operator.page;
     await operator.goto(at('/content/terms'));
     await expect(operator.locator('main')).toContainText('این بخش فقط برای مالک است');
-    await expect(operator.locator('main')).toContainText('نوار اعلان را عوض کنی');
+    await expect(operator.locator('main')).toContainText('نوار اعلان و بنر صفحهٔ اصلی را عوض کنی');
     expect([who.accountant.problems, who.operator.problems]).toEqual([[], []]);
   });
 

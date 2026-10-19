@@ -4,6 +4,7 @@ import { inlineText, parseInline, placeholderValues } from '@jozveyar/content';
 import { HeroTitle, InlineText } from '@jozveyar/content/render';
 
 import { Faq } from '../components/Faq';
+import { HomeBanner } from '../components/HomeBanner';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
 import { Reviews } from '../components/Reviews';
@@ -11,6 +12,7 @@ import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
 import { acceptOf } from '../lib/fileRules';
+import { siteBanner } from '../lib/server/brand';
 import { contentFacts, liveText, sitePublished } from '../lib/server/content';
 import { siteFiles } from '../lib/server/fileRules';
 import { siteReviews } from '../lib/server/reviews';
@@ -66,18 +68,20 @@ const PROMISE_ICONS = ['tag', 'truck', 'lock'] as const;
  *
  * تعرفه و روز کاری تحویل به پست از پایگاه داده‌اند (برش ۴٫۴): در جدول تعرفه، سؤال‌ها و «روز کاری»ها، و به JSON درون HTML
  * (`#jy-tariff`) که رابط پس از فایل برای `quote()` می‌خواند (`lib/tariff.ts`)؛ پیش‌فاکتور مرورگر همان عدد سرور است. از ۱۲٫۳ نظرهایی که
- * مالک روی سایت گذاشت پس از تعرفه (`Reviews`). پیام «چاپخانه‌ها تعطیل‌اند» (۱۰٫۱) از ۱۱٫۳ بالای سربرگ همهٔ صفحه‌هاست (layout، `SiteBar`).
+ * مالک روی سایت گذاشت پس از تعرفه (`Reviews`). پیام «چاپخانه‌ها تعطیل‌اند» (۱۰٫۱) از ۱۱٫۳ بالای سربرگ همهٔ صفحه‌هاست (layout، `SiteBar`). از ۱۱٫۲
+ * بنری که مالک یا متصدی از پنل روشن کرده بالای سه قدم (`HomeBanner`).
  *
  * از ۱۱٫۱ قهرمان، سه نوید، «سه قدم» و سؤال‌ها متنی است که مالک از پنل منتشر کرد، یا متن پیش‌فرض (`lib/server/content.ts`)، با عدد امروز هر
  * جای‌نگهدار؛ کارت بارگذاری، تعرفه و میز سفارش همان کد سایت‌اند.
  */
 export default async function HomePage() {
-  const [tariff, files, reviews, published, facts] = await Promise.all([
+  const [tariff, files, reviews, published, facts, banner] = await Promise.all([
     siteTariff(),
     siteFiles(),
     siteReviews(),
     sitePublished(),
     siteFacts(),
+    siteBanner(),
   ]);
   const factsNow = contentFacts(tariff, files, facts);
   const values = placeholderValues(factsNow);
@@ -165,6 +169,7 @@ export default async function HomePage() {
           }
           more={
             <>
+              {banner ? <HomeBanner banner={banner} /> : null}
               <HowItWorks title={home.howTitle} steps={home.steps} values={values} />
               <Tariff priceList={tariff.priceList} paused={tariff.paused} />
               <Reviews reviews={reviews} />

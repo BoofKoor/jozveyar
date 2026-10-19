@@ -65,6 +65,10 @@ export const FILE_MAX_PAGES_SETTING = 'file.max_pages';
 export const CATALOG_PAUSED_SETTING = 'catalog.paused';
 /** نوار اعلان بالای سربرگ سایت (برش ۱۱٫۳، ADR-066). */
 export const BAR_SETTING = 'content.bar';
+/** لوگوی سایت (برش ۱۱٫۲، ADR-067): ردیف `site_images` روی سایت، یا null برای لوگوی برند. */
+export const LOGO_SETTING = 'content.logo';
+/** بنر صفحهٔ اصلی (برش ۱۱٫۲، ADR-067). */
+export const BANNER_SETTING = 'content.banner';
 
 /**
  * پیش‌فرض هر تنظیمی که کد می‌خواند؛ شکلشان در قرارداد است (`SETTING_SCHEMAS`). همین‌ها هنگام بالا آمدن
@@ -90,7 +94,8 @@ export const BAR_SETTING = 'content.bar';
  * سقف کد در ۲۴ ساعت ۲٬۰۰۰ است (برش ۷، سؤال ۱۱۷): کمتر از هفت ساعت پشت‌سرهم با سقف ساعتی، پس روز شلوغ واقعی را نمی‌بندد، و
  * بدترین هزینهٔ روزانهٔ کد را به ۲٬۰۰۰ تکه می‌بندد. هشدار اعتبار ۷ روز مصرف است (سؤال ۱۳۷): یک هفته برای شارژ.
  *
- * نوار اعلان پس از استقرار ۱۱٫۳ خاموش و بی متن است: سایت همان می‌ماند تا مالک یا متصدی روشنش کند.
+ * نوار اعلان پس از استقرار ۱۱٫۳ خاموش و بی متن است: سایت همان می‌ماند تا مالک یا متصدی روشنش کند. لوگو پس از استقرار ۱۱٫۲ همان لوگوی برند
+ * است و بنر خاموش و بی تصویر.
  */
 export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingValue<K>> } = {
   [SLA_DAYS_SETTING]: 2,
@@ -108,6 +113,8 @@ export const DEFAULT_SETTINGS: { readonly [K in SettingKey]: Readonly<SettingVal
   [CATALOG_PAUSED_SETTING]: { sizes: [], papers: [], bindings: [] },
   [ASSIGNMENT_MODE_SETTING]: 'auto',
   [BAR_SETTING]: { mode: 'off', from: null, until: null, text: '', href: '', linkText: '' },
+  [LOGO_SETTING]: { imageId: null },
+  [BANNER_SETTING]: { mode: 'off', imageId: null, alt: '', href: '' },
 };
 
 /**

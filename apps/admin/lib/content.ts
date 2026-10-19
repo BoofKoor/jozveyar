@@ -140,6 +140,8 @@ export function issueMessage(issue: ContentIssue): ContentSeg[] {
       return ['پیوند نوار فقط به صفحه‌ای از همین سایت می‌رود، مثل ', { ltr: '/contact' }, '؛ ', { ltr: issue.detail ?? '' }, ' نیست.'];
     case 'bar_link_text':
       return ['با پیوند، متنی لازم است که ته نوار بیاید، مثل «دیدن تعرفه».'];
+    case 'banner_href':
+      return ['پیوند بنر فقط به صفحه‌ای از همین سایت می‌رود، مثل ', { ltr: '/#tariff' }, '؛ ', { ltr: issue.detail ?? '' }, ' نیست.'];
   }
 }
 

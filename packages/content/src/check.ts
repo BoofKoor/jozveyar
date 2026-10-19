@@ -24,7 +24,9 @@ export type ContentIssueCode =
   | 'bar_bold_twice'
   | 'bar_too_long'
   | 'bar_href'
-  | 'bar_link_text';
+  | 'bar_link_text'
+  /** بنر صفحهٔ اصلی (۱۱٫۲، `checkBanner`): پیوند به جای دیگر. */
+  | 'banner_href';
 
 export interface ContentIssue {
   /** مسیر فیلد (نام فیلد فرم)؛ «items» برای شمار سؤال‌ها. */
