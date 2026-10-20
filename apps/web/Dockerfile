@@ -80,6 +80,8 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     NPM_CONFIG_FETCH_TIMEOUT=180000
 
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+# وصلهٔ وابستگی‌ها (`patchedDependencies` در pnpm-workspace.yaml): بی آن install با «فایل وصله نیست» می‌افتد.
+COPY patches/ patches/
 COPY apps/web/package.json apps/web/
 COPY packages/analysis/package.json packages/analysis/
 COPY packages/content/package.json packages/content/
