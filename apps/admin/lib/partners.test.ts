@@ -102,6 +102,7 @@ describe('فهرست «چاپخانه‌ها»', () => {
     closedFrom: null,
     closedUntil: null,
     availabilityNote: null,
+    shareBp: null,
     ...over,
   });
 

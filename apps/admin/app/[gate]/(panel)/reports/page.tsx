@@ -299,6 +299,7 @@ function Tables({ report, money, partnerTable }: { report: ProductionReport; mon
                 <th scope="col">صفحه</th>
                 <th scope="col">برگ</th>
                 {money ? <th scope="col">مبلغ</th> : null}
+                {money ? <th scope="col">سهم چاپخانه</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -314,11 +315,32 @@ function Tables({ report, money, partnerTable }: { report: ProductionReport; mon
                       <span className="num">{tomansText(row.amountRials)}</span>
                     </td>
                   ) : null}
+                  {money ? (
+                    <td data-k="سهم چاپخانه">
+                      {row.key === 'none' ? (
+                        '—'
+                      ) : (
+                        <span>
+                          <span className="num">{tomansText(row.shareRials)}</span>
+                          {row.unshared > 0 ? (
+                            <span className="ad-pct">
+                              {' '}
+                              (<span className="num">{formatNumber(row.unshared)}</span> بی سهم)
+                            </span>
+                          ) : null}
+                        </span>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
           </table>
-          {money ? <p className="ad-hint ad-gap">مبلغ: جمع پرداخت مشتری، تومان.</p> : null}
+          {money ? (
+            <p className="ad-hint ad-gap">
+              مبلغ: جمع پرداخت مشتری، تومان. سهم چاپخانه: سهم منجمد هر سفارش، همان که صورت‌حساب «تسویه» می‌شمارد؛ سفارش بی سهم در آن نیست.
+            </p>
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -405,7 +427,8 @@ export default async function ProductionPage({ params, searchParams }: { params:
                 </Tile>
                 {money ? (
                   <Tile id="amount" label="مبلغ" n={tomansText(report.amountRials)}>
-                    جمع پرداخت مشتری، تومان
+                    جمع پرداخت مشتری، تومان؛ سهم چاپخانه{' '}
+                    <span className="num">{tomansText(report.partners.reduce((sum, row) => sum + row.shareRials, 0n))}</span>
                   </Tile>
                 ) : null}
               </ul>

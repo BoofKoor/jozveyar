@@ -432,6 +432,7 @@ describe('رویدادها', () => {
       'چاپخانه‌ها',
       'ادمین‌ها',
       'گزارش‌ها',
+      'تسویه',
       'تخفیف‌ها',
       'مشتری‌ها',
       'نظرها',
@@ -449,6 +450,7 @@ describe('رویدادها', () => {
       'partners',
       'admins',
       'reports',
+      'settlements',
       'discounts',
       'customers',
       'reviews',
@@ -627,6 +629,43 @@ describe('رویدادها', () => {
       ['خروجی PDF گزارش ارسال خواسته شد'],
     ]);
     expect([inEventKind('reports.export', 'reports'), inEventKind('reports.export', 'orders')]).toEqual([true, false]);
+  });
+
+  it('تسویهٔ چاپخانه‌ها (۱۰٫۳، سؤال ۴۰۲): درصد سهم از و به؛ پرداخت، اصلاح و باطل با مبلغ، چاپخانه و روز، بی کد پیگیری و یادداشت؛ چیپ «تسویه»', () => {
+    const partner = { id: 'p-2', name: 'چاپ نور' };
+    const at = (iso: string) => new Date(iso).toISOString();
+    const lines = eventLines([
+      event('partners.share', { targetType: 'partner', detail: { name: 'چاپ نور', from: null, to: 6_500 } }),
+      event('partners.share', { targetType: 'partner', detail: { name: 'چاپ نور', from: 6_500, to: 6_250 } }),
+      event('settlements.payment', {
+        targetType: 'partner',
+        detail: {
+          entry: 7,
+          partner,
+          amountRials: 25_000_000,
+          day: at('2026-10-12T20:30:00Z'),
+          period: { from: at('2026-09-22T20:30:00Z'), until: at('2026-10-07T20:30:00Z') },
+        },
+      }),
+      event('settlements.adjust', { targetType: 'partner', detail: { entry: 8, partner, amountRials: -500_000, day: at('2026-10-12T20:30:00Z'), orderNumber: 10027 } }),
+      event('settlements.adjust', { targetType: 'partner', detail: { entry: 9, partner, amountRials: 1_200_000, day: at('2026-10-12T20:30:00Z') } }),
+      event('settlements.void', { targetType: 'partner', detail: { entry: 7, partner, kind: 'payment', amountRials: 25_000_000, day: at('2026-10-12T20:30:00Z') } }),
+      event('reports.export', { detail: { report: 'settlement', format: 'xlsx', range: 'چاپ نور · مشهد · مهر 1405، تا امروز' } }),
+    ]).map((line) => line.text);
+    expect(lines).toEqual([
+      ['درصد سهم «چاپ نور» ', { ltr: '65٪' }, ' شد'],
+      ['درصد سهم «چاپ نور» ', { ltr: '65٪' }, ' ← ', { ltr: '62.5٪' }],
+      ['پرداخت ', { ltr: '2,500,000' }, ' تومان به «چاپ نور» ثبت شد، روز ', { ltr: '1405/07/21' }, ' بابت ', { ltr: '1405/07/01' }, ' تا ', { ltr: '1405/07/15' }],
+      ['اصلاح ', { ltr: '50,000' }, ' تومان به زیان «چاپ نور» ثبت شد، روز ', { ltr: '1405/07/21' }, ' برای سفارش ', { ltr: '10027' }],
+      ['اصلاح ', { ltr: '120,000' }, ' تومان به سود «چاپ نور» ثبت شد، روز ', { ltr: '1405/07/21' }],
+      ['پرداخت ', { ltr: '2,500,000' }, ' تومان «چاپ نور»، روز ', { ltr: '1405/07/21' }, '، باطل شد'],
+      ['خروجی اکسل صورت‌حساب تسویه دانلود شد: چاپ نور · مشهد · مهر 1405، تا امروز'],
+    ]);
+    expect([inEventKind('settlements.payment', 'settlements'), inEventKind('settlements.void', 'reports'), inEventKind('partners.share', 'partners')]).toEqual([
+      true,
+      false,
+      true,
+    ]);
   });
 
   it('کد تخفیف (۱۱٫۴، سؤال ۳۰۴): ساخته شد، خاموش و روشن شد، و ویرایش با نام شرط‌ها؛ متن کد جدا و بی مبلغ؛ چیپ «تخفیف‌ها»', () => {

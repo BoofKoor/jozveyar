@@ -200,7 +200,8 @@ test.describe.serial('گزارش تولید و خروجی‌ها (۱۰٫۲)', ()
     await page.goto(at('/'));
     await nav(page).filter({ hasText: 'گزارش‌ها' }).first().click();
     await expect(page.getByRole('heading', { name: 'گزارش تولید', level: 1 })).toBeVisible();
-    await expect(reportsNav(page)).toHaveText(['گزارش تولید', 'گزارش ارسال']);
+    // از ۱۰٫۳ «تسویه» هم.
+    await expect(reportsNav(page)).toHaveText(['گزارش تولید', 'گزارش ارسال', 'تسویه']);
     await expect(reportsNav(page).first()).toHaveAttribute('aria-current', 'page');
     // پیش‌فرض امروز.
     await expect(page.getByRole('navigation', { name: 'روز پرداخت' }).getByRole('link', { name: 'امروز' })).toHaveAttribute('aria-current', 'page');
@@ -346,7 +347,8 @@ test.describe.serial('گزارش تولید و خروجی‌ها (۱۰٫۲)', ()
     await page.goto(at(`/reports?nfrom=${a.number}&nto=${c.number}&p=${defaultId}`));
     await expect(page.getByRole('heading', { name: 'گزارش تولید', level: 1 })).toBeVisible();
     await expect(page.locator('.ad-sub')).toContainText('فقط سفارش‌های همین چاپخانه.');
-    await expect(page.getByRole('navigation', { name: 'گزارش‌ها' })).toHaveCount(0);
+    // بی گزارش ارسال؛ از ۱۰٫۳ صورت‌حساب تسویهٔ خودش هست، پس چیپ‌ها.
+    await expect(reportsNav(page)).toHaveText(['گزارش تولید', 'تسویه']);
     await expect(page.getByRole('navigation', { name: 'چاپخانه' })).toHaveCount(0);
     await expect(page.locator('[data-production="label"]')).toHaveText(`سفارش‌های ${a.number} تا ${c.number} · ${SAHAR} · مشهد`);
     await expect(tile(page, 'orders').locator('.ad-tile__n')).toHaveText('2');

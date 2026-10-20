@@ -10,6 +10,7 @@ import { StatusButton } from '../../../../components/StatusButton';
 import { panelPath } from '../../../../lib/gate';
 import { messageOf } from '../../../../lib/messages';
 import { availabilityView, partnerMeta } from '../../../../lib/partners';
+import { shareText } from '../../../../lib/settlement';
 import { can } from '../../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../../lib/server/context';
 import { partnerStateAction } from '../../actions';
@@ -59,6 +60,9 @@ function doneNote(done: string, partner: PartnerView | undefined) {
       return partner.deactivatedAt ? null : `«${partner.name}» دوباره فعال شد.`;
     case 'availability':
       return partner.deactivatedAt ? null : `«${partner.name}» حالا ${availabilityView(partner, new Date()).text} است؛ از سفارش بعدی اثر دارد.`;
+    case 'share':
+      // درصد سهم (۱۰٫۳): فقط سپردن‌های بعدی؛ سهم سفارش‌های سپرده‌شده همان است که بود.
+      return partner.shareBp === null ? null : `درصد سهم «${partner.name}» حالا ${shareText(partner.shareBp)} است؛ از سفارش بعدی، و سهم سفارش‌های سپرده‌شده همان است که بود.`;
     default:
       return null;
   }
@@ -110,6 +114,15 @@ export default async function PartnersPage({ params, searchParams }: { params: P
                   <span className="ad-partners__name">{partner.name}</span>
                   {partner.isDefault ? <span className="jy-badge jy-badge--neutral">پیش‌فرض</span> : null}
                   {partner.deactivatedAt ? <span className="jy-badge jy-badge--neutral">غیرفعال</span> : <AvailabilityBadge partner={partner} />}
+                  {partner.shareBp === null ? (
+                    <span className="jy-badge jy-badge--warning" data-share="">
+                      درصد سهم تعیین نشده
+                    </span>
+                  ) : (
+                    <span className="jy-badge jy-badge--neutral" data-share="">
+                      سهم <span className="num">{shareText(partner.shareBp)}</span>
+                    </span>
+                  )}
                 </p>
                 <p className="ad-partners__meta">
                   <Segments segs={partnerMeta(partner)} />
@@ -127,6 +140,9 @@ export default async function PartnersPage({ params, searchParams }: { params: P
                     </Link>
                     <Link href={`${panelPath(gate, `/partners/${partner.id}/availability`)}?back=partners`} className="jy-btn jy-btn--text">
                       در دسترس بودن
+                    </Link>
+                    <Link href={panelPath(gate, `/partners/${partner.id}/share`)} className="jy-btn jy-btn--text">
+                      درصد سهم
                     </Link>
                     {partner.isDefault ? null : (
                       <StateForm gate={gate} partner={partner} intent="default">
@@ -146,7 +162,8 @@ export default async function PartnersPage({ params, searchParams }: { params: P
         </ul>
         <p className="ad-hint ad-gap">
           چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد. کاربر
-          چاپخانه را از «ادمین‌ها» بساز.
+          چاپخانه را از «ادمین‌ها» بساز. «درصد سهم»: سهم چاپخانه از جمع چاپ، کاغذ و صحافی هر سفارشی که به آن سپرده می‌شود؛ صورت‌حسابش در
+          «گزارش‌ها»، «تسویه».
         </p>
       </section>
     </>

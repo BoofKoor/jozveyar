@@ -28,8 +28,9 @@ export default async function ExportPage({ params }: { params: Promise<{ gate: s
   const result = await exports.view(session, id);
   if (!result.ok) notFound();
   const row = result.value;
-  const reportName = row.report === 'shipping' ? 'گزارش ارسال' : 'گزارش تولید';
-  const back = panelPath(gate, row.report === 'shipping' ? '/shipments/report' : '/reports');
+  // صورت‌حساب تسویه (۱۰٫۳) به نمای کلی برمی‌گردد؛ کاربر چاپخانه از آنجا یکراست به صورت‌حساب خودش می‌رود.
+  const reportName = row.report === 'shipping' ? 'گزارش ارسال' : row.report === 'settlement' ? 'صورت‌حساب تسویه' : 'گزارش تولید';
+  const back = panelPath(gate, row.report === 'shipping' ? '/shipments/report' : row.report === 'settlement' ? '/reports/settlement' : '/reports');
   const asked = (
     <>
       خواستی {formatJalali(row.requestedAt)}، ساعت <span className="num">{formatTehranTime(row.requestedAt)}</span>.

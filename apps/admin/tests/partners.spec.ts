@@ -148,6 +148,8 @@ const partnerSmsRows = async (o: Seeded) =>
 const side = (page: Page) => page.locator('.ad-side');
 const partnerCard = (page: Page) => page.locator('section', { has: page.getByRole('heading', { name: 'چاپخانه', exact: true }) });
 const row = (page: Page, name: string) => page.locator(`.ad-partners li[data-partner="${name}"]`);
+/** نشان پیش‌فرض یا غیرفعال ردیف؛ نشان درصد سهم (۱۰٫۳، `data-share`) جداست. */
+const STATE_BADGE = '.jy-badge:not([data-share])';
 
 test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
   const owner = `sara${RUN}`;
@@ -225,13 +227,16 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     );
     // اولین چاپخانه، از دادهٔ پایه: تهران، پیش‌فرض، و بی «غیرفعال کن» (پیش‌فرض غیرفعال نمی‌شود).
     const first = row(ownerPage, FIRST);
-    await expect(first.locator('.jy-badge')).toHaveText('پیش‌فرض');
+    await expect(first.locator(STATE_BADGE)).toHaveText('پیش‌فرض');
+    // از ۱۰٫۳ درصد سهم هر چاپخانه، که دادهٔ پایه ندارد.
+    await expect(first.locator('[data-share]')).toHaveText('درصد سهم تعیین نشده');
+    await expect(first.getByRole('link', { name: 'درصد سهم' })).toBeVisible();
     await expect(first.locator('.ad-partners__meta')).toHaveText('تهران · 0 سفارش باز · کاربرها: همان مالک و متصدی');
     await expect(first.getByRole('link', { name: 'ویرایش' })).toBeVisible();
     await expect(first.getByRole('button')).toHaveCount(0);
     // از ۵٫۳ کاربر چاپخانه هم هست، و راهش پایین فهرست، همان طرح.
     await expect(ownerPage.locator('.ad-hint')).toHaveText(
-      'چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد. کاربر چاپخانه را از «ادمین‌ها» بساز.',
+      'چاپخانه پاک نمی‌شود، غیرفعال می‌شود: سفارش‌های قبلی به آن اشاره می‌کنند. غیرفعال کردن فقط وقتی سفارش باز ندارد. کاربر چاپخانه را از «ادمین‌ها» بساز. «درصد سهم»: سهم چاپخانه از جمع چاپ، کاغذ و صحافی هر سفارشی که به آن سپرده می‌شود؛ صورت‌حسابش در «گزارش‌ها»، «تسویه».',
     );
     expect(ownerProblems).toEqual([]);
   });
@@ -482,13 +487,13 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(ownerPage.locator('main .jy-note--success')).toHaveText(
       `«${NOOR}» حالا پیش‌فرض است: وقتی دو چاپخانه به یک اندازه به مشتری نزدیک‌اند، مثل دو چاپخانهٔ یک شهر، سفارش به آن می‌رود.`,
     );
-    await expect(row(ownerPage, NOOR).locator('.jy-badge')).toHaveText('پیش‌فرض');
-    await expect(row(ownerPage, FIRST).locator('.jy-badge')).toHaveCount(0);
+    await expect(row(ownerPage, NOOR).locator(STATE_BADGE)).toHaveText('پیش‌فرض');
+    await expect(row(ownerPage, FIRST).locator(STATE_BADGE)).toHaveCount(0);
     await expect(row(ownerPage, NOOR).getByRole('button')).toHaveCount(0);
     // اولی دیگر پیش‌فرض نیست ولی سفارش باز دارد: «غیرفعال کن» ندارد.
     await expect(row(ownerPage, FIRST).getByRole('button')).toHaveText(['پیش‌فرض کن']);
     await row(ownerPage, FIRST).getByRole('button', { name: 'پیش‌فرض کن' }).click();
-    await expect(row(ownerPage, FIRST).locator('.jy-badge')).toHaveText('پیش‌فرض');
+    await expect(row(ownerPage, FIRST).locator(STATE_BADGE)).toHaveText('پیش‌فرض');
 
     // فهرست کهنه: «غیرفعال کن» برای چاپ نور دیده می‌شود، ولی همین حالا سفارشی به آن رفت.
     await expect(row(ownerPage, NOOR).getByRole('button', { name: 'غیرفعال کن' })).toBeVisible();
@@ -498,7 +503,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await expect(alertOf(ownerPage)).toHaveText(
       'این چاپخانه سفارش باز دارد و غیرفعال نمی‌شود؛ اول سفارش‌هایش را جابه‌جا کن یا به پست برسان.',
     );
-    await expect(row(ownerPage, NOOR).locator('.jy-badge')).toHaveCount(0);
+    await expect(row(ownerPage, NOOR).locator(STATE_BADGE)).toHaveCount(0);
     // شاهد: پس از جابه‌جایی سفارشش، غیرفعال می‌شود؛ و «فعال کن» برمی‌گرداندش.
     await ownerPage.goto(at(`/orders/${D.number}?do=assign`));
     await ownerPage.locator('[data-assign]').getByLabel('دلیل').fill('چاپ نور تعطیل است.');
@@ -507,7 +512,7 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     await ownerPage.goto(at('/partners'));
     await row(ownerPage, NOOR).getByRole('button', { name: 'غیرفعال کن' }).click();
     await expect(ownerPage.locator('main .jy-note--success')).toHaveText(`«${NOOR}» غیرفعال شد؛ از این لحظه سفارش تازه نمی‌گیرد.`);
-    await expect(row(ownerPage, NOOR).locator('.jy-badge')).toHaveText('غیرفعال');
+    await expect(row(ownerPage, NOOR).locator(STATE_BADGE)).toHaveText('غیرفعال');
     await expect(row(ownerPage, NOOR).locator('.ad-partners__meta')).toHaveText(/^مشهد · از \d{4}\/\d\d\/\d\d سفارش تازه نمی‌گیرد$/);
     await expect(row(ownerPage, NOOR).getByRole('button')).toHaveText(['فعال کن']);
     // غیرفعال سفارش تازه نمی‌گیرد: سفارش مشهد به نزدیک‌ترین چاپخانهٔ فعال می‌رود، تهران (۱۰٫۱).
@@ -515,14 +520,14 @@ test.describe.serial('چاپخانه‌ها و تخصیص در پنل', () => {
     expect(await partnerOf(E)).toBe(FIRST);
     await row(ownerPage, NOOR).getByRole('button', { name: 'فعال کن' }).click();
     await expect(ownerPage.locator('main .jy-note--success')).toHaveText(`«${NOOR}» دوباره فعال شد.`);
-    await expect(row(ownerPage, NOOR).locator('.jy-badge')).toHaveCount(0);
+    await expect(row(ownerPage, NOOR).locator(STATE_BADGE)).toHaveCount(0);
 
     // نام تازهٔ اولین چاپخانه روی برگهٔ سفارش‌های بازش: برگه دوباره ساخته می‌شود.
     await expect.poll(() => jobStatus(E, 'prepare_ticket'), { timeout: 60_000 }).toBe('done');
     await row(ownerPage, FIRST).getByRole('link', { name: 'ویرایش' }).click();
     await ownerPage.getByLabel('نام').fill(`${FIRST} ${RUN}`);
     await ownerPage.getByRole('button', { name: 'ذخیره' }).click();
-    await expect(row(ownerPage, `${FIRST} ${RUN}`).locator('.jy-badge')).toHaveText('پیش‌فرض');
+    await expect(row(ownerPage, `${FIRST} ${RUN}`).locator(STATE_BADGE)).toHaveText('پیش‌فرض');
     await expect
       .poll(async () => (await sql<{ fresh: boolean }[]>`
           SELECT t.stamp = order_ticket_stamp(o) AS fresh FROM order_tickets t JOIN orders o ON o.id = t.order_id WHERE t.order_id = ${E.id}`)[0]

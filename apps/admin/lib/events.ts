@@ -10,7 +10,7 @@
 
 import { KIND_NAMES, type ContentKind } from '@jozveyar/content';
 import type { AdminEventView, OrderStatus } from '@jozveyar/db';
-import { formatDeadlineDay, formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
+import { formatDeadlineDay, formatJalaliNumeric, formatJalaliWeekday, formatNumber, formatTehranTime, formatTomans } from '@jozveyar/text';
 
 import { barWhenText } from './bar';
 import { AUDIENCE_NAMES } from './checkout';
@@ -19,6 +19,7 @@ import { REFUND_INQUIRY_TEXT, viaGateway } from './refunds';
 import { ROLE_NAMES } from './messages';
 import { boundsText } from './report';
 import { KEY_INFO, formatsSegs } from './settings';
+import { shareText } from './settlement';
 
 /** نام وضعیت‌های سفارش در رویدادها؛ همان `STATUS_LABELS` صفحهٔ سفارش (`orders.ts` پایگاه داده را با خودش می‌آورد). */
 const STATUS: Record<OrderStatus, string> = {
@@ -231,6 +232,12 @@ function orderRef(detail: Detail): Segment[] {
   const item = typeof detail.item === 'number' && detail.item > 1 ? [' (جزوهٔ ', { ltr: String(detail.item) }, ')'] : [];
   return [{ ltr: number }, ...item];
 }
+
+/** روز یک لحظهٔ ISO به شمسی، جدا از جملهٔ فارسی؛ `shift` −۱ برای پایان انحصاری («بابت» تا روز پیش از آن). */
+const dayRef = (value: unknown, shift = 0): Segment[] => {
+  const at = typeof value === 'string' ? new Date(value) : null;
+  return at && !Number.isNaN(at.getTime()) ? [{ ltr: formatJalaliNumeric(new Date(at.getTime() + shift * 86_400_000)) }] : [];
+};
 
 /** «462,500 تومان»، عدد جدا از جملهٔ فارسی. */
 const tomansOf = (value: unknown): Segment[] =>
@@ -471,6 +478,17 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» غیرفعال شد`] };
     case 'partners.activate':
       return { badge: null, text: [`چاپخانهٔ «${str(detail.name)}» دوباره فعال شد`] };
+    case 'partners.share': {
+      // درصد سهم (۱۰٫۳، سؤال ۴۰۲): از و به؛ همیشه با کد تازه.
+      const to = typeof detail.to === 'number' ? shareText(detail.to) : '';
+      return {
+        badge: null,
+        text:
+          typeof detail.from === 'number'
+            ? [`درصد سهم «${str(detail.name)}» `, { ltr: shareText(detail.from) }, ' ← ', { ltr: to }]
+            : [`درصد سهم «${str(detail.name)}» `, { ltr: to }, ' شد'],
+      };
+    }
     case 'shipments.upload':
       return { badge: null, text: ['فایل پست ', { ltr: str(detail.filename) }, ' بارگذاری شد'] };
     case 'shipments.commit': {
@@ -597,10 +615,32 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
     }
     case 'reports.export': {
       // خروجی گزارش (۱۰٫۲، سؤال ۲۷۹): اکسل همان لحظه دانلود می‌شود، و PDF را کارگر می‌سازد؛ بازه و چاپخانه همان زیرعنوان گزارش.
-      const report = detail.report === 'shipping' ? 'گزارش ارسال' : 'گزارش تولید';
+      const report = detail.report === 'shipping' ? 'گزارش ارسال' : detail.report === 'settlement' ? 'صورت‌حساب تسویه' : 'گزارش تولید';
       const range = str(detail.range);
       const done = detail.format === 'pdf' ? `خروجی PDF ${report} خواسته شد` : `خروجی اکسل ${report} دانلود شد`;
       return { badge: null, text: [range ? `${done}: ${range}` : done] };
+    }
+    case 'settlements.payment':
+    case 'settlements.adjust':
+    case 'settlements.void': {
+      // دفتر تسویه (۱۰٫۳، سؤال ۴۰۲): مبلغ، چاپخانه و روز، و سفارش اصلاح؛ کد پیگیری، یادداشت و دلیل نه (در خود صورت‌حساب‌اند).
+      const partner = (detail.partner ?? {}) as { name?: unknown };
+      const name = `«${str(partner.name)}»`;
+      const amount = typeof detail.amountRials === 'number' ? Math.abs(detail.amountRials) : null;
+      const money = tomansOf(amount);
+      const day = dayRef(detail.day);
+      if (event.action === 'settlements.payment') {
+        const period = (detail.period ?? null) as { from?: unknown; until?: unknown } | null;
+        const span = period ? [' بابت ', ...dayRef(period.from), ' تا ', ...dayRef(period.until, -1)] : [];
+        return { badge: null, text: merged(['پرداخت ', ...money, ` به ${name} ثبت شد، روز `, ...day, ...span]) };
+      }
+      if (event.action === 'settlements.adjust') {
+        const side = typeof detail.amountRials === 'number' && detail.amountRials < 0 ? 'به زیان' : 'به سود';
+        const order = typeof detail.orderNumber === 'number' ? [' برای سفارش ', ...orderRef(detail)] : [];
+        return { badge: null, text: merged(['اصلاح ', ...money, ` ${side} ${name} ثبت شد، روز `, ...day, ...order]) };
+      }
+      const kind = detail.kind === 'payment' ? 'پرداخت' : 'اصلاح';
+      return { badge: null, text: merged([`${kind} `, ...money, ` ${name}، روز `, ...day, '، باطل شد']) };
     }
     case 'discounts.create':
       // کد تخفیف (۱۱٫۴، سؤال ۳۰۴): متن کد، بی مبلغ؛ شرط‌ها در صفحهٔ همان کد است.
@@ -760,7 +800,8 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * ارسال ۶٫۱، پرداخت و بازپرداخت ۷٫۱)، به ترتیب طرح. جابه‌جایی چاپخانهٔ یک سفارش و از ۷٫۶ «دوباره بفرست» پیامک سفارش تازهٔ چاپخانه کار روی
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
- * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
+ * سؤال ۲۷۹) زیر «گزارش‌ها»، دفتر تسویهٔ چاپخانه‌ها (۱۰٫۳، سؤال ۴۰۲) زیر «تسویه» پس از آن (درصد سهم کار روی چاپخانه است، پس زیر
+ * «چاپخانه‌ها»)، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
  * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱)، نوار اعلان (۱۱٫۳) و لوگو و بنر (۱۱٫۲) زیر «محتوای سایت»، پس از
  * «تعرفه»، و پاسخ، بستن و «دوباره بفرست» پشتیبانی (۱۲٫۱، سؤال ۳۱۶) زیر «پشتیبانی» پس از آن، به ترتیب طرح.
  */
@@ -777,6 +818,7 @@ export const EVENT_KINDS = [
   { kind: 'partners', label: 'چاپخانه‌ها' },
   { kind: 'admins', label: 'ادمین‌ها' },
   { kind: 'reports', label: 'گزارش‌ها' },
+  { kind: 'settlements', label: 'تسویه' },
   { kind: 'discounts', label: 'تخفیف‌ها' },
   { kind: 'customers', label: 'مشتری‌ها' },
   { kind: 'reviews', label: 'نظرها' },

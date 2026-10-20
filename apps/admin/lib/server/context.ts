@@ -23,6 +23,7 @@ import {
   createProductionReportStore,
   createRefundStore,
   createReportExportStore,
+  createSettlementStore,
   createReviewStore,
   createSecretStore,
   createSettingsStore,
@@ -62,6 +63,7 @@ import { createPanelProduction, type PanelProduction } from './production';
 import { createPanelReport, type PanelReport } from './report';
 import { createPanelReviews, type PanelReviews } from './reviews';
 import { createPanelSettings, type PanelSettings } from './settings';
+import { createPanelSettlement, type PanelSettlement } from './settlement';
 import { createPanelShipments, type PanelShipments } from './shipments';
 import { createPanelSupport, type PanelSupport } from './support';
 import { createPanelTariff, type PanelTariff } from './tariff';
@@ -77,6 +79,7 @@ interface Panel {
   shipments: PanelShipments;
   report: PanelReport;
   production: PanelProduction;
+  settlement: PanelSettlement;
   exports: PanelExports;
   templates: PanelTemplates;
   discounts: PanelDiscounts;
@@ -118,6 +121,9 @@ function build(config: AdminConfig): Panel {
   // گزارش‌ها (۶٫۴ و ۱۰٫۲): فقط خواندن، کوئری زنده؛ خروجی اکسل در خود درخواست و PDF با کارگر، هر دو از همان سند صفحه.
   const report = createPanelReport({ store: createShippingReportStore(getDb()) });
   const production = createPanelProduction({ store: createProductionReportStore(getDb()) });
+  // تسویهٔ چاپخانه‌ها (۱۰٫۳، ADR-069): دیدن مالک، حسابدار و کاربر چاپخانه (فقط خودش)؛ ثبت پرداخت، اصلاح و باطل مالک و حسابدار، با همان کد
+  // تازهٔ ورود. خروجی‌اش از همان سرویس خروجی گزارش‌ها.
+  const settlement = createPanelSettlement({ store: createSettlementStore(getDb()), stepUp: auth.stepUp, secret: config.secret });
   return {
     config,
     auth,
@@ -157,7 +163,8 @@ function build(config: AdminConfig): Panel {
       checkout: { previews: createCheckoutPreviewStore(getDb()), lastChange: () => lastAudienceChange(getDb()) },
     }),
     // چاپخانه‌ها (۵٫۲): فقط مالک، بی کد تازه؛ هر کار برگشت‌پذیر است و به‌تنهایی به کسی دسترسی نمی‌دهد (سؤال ۳۵).
-    partners: createPanelPartners({ store: createPartnerStore(getDb()), secret: config.secret }),
+    // از ۱۰٫۳ درصد سهم هر چاپخانه هم، با همان کد تازهٔ ورود (عددی که پول چاپخانه از آن درمی‌آید).
+    partners: createPanelPartners({ store: createPartnerStore(getDb()), stepUp: auth.stepUp, secret: config.secret }),
     // ارسال (۶٫۱): ورود فایل پست؛ خواندن فایل با کارگر است، پس پنل بایت‌ها را فقط در پایگاه داده می‌گذارد (ADR-045). پیامک رهگیری
     // (۶٫۳، ADR-047) با آداپتور پنل (۷٫۱).
     shipments: createPanelShipments({
@@ -169,8 +176,9 @@ function build(config: AdminConfig): Panel {
     report,
     // گزارش تولید (۱۰٫۲، ADR-061): مالک، حسابدار و کاربر چاپخانه (فقط خودش، بی مبلغ).
     production,
+    settlement,
     // خروجی اکسل و PDF گزارش‌ها (۱۰٫۲): PDF را کارگر می‌سازد و فقط خواهنده، با همان دسترسی امروز، دانلودش می‌کند.
-    exports: createPanelExports({ store: createReportExportStore(getDb()), events: admins, production, report, secret: config.secret }),
+    exports: createPanelExports({ store: createReportExportStore(getDb()), events: admins, production, report, settlement, secret: config.secret }),
     // قالب برگه‌ها (۹٫۲، ADR-057): فقط مالک؛ فعال کردن با همان کد تازهٔ ورود. پیش‌نمایش را کارگر می‌سازد و پنل فقط فایلش را می‌خواند.
     templates: createPanelTemplates({ store: createTicketTemplateStore(getDb()), storage, stepUp: auth.stepUp, secret: config.secret }),
     // کدهای تخفیف (۱۱٫۴، ADR-062): دیدن مالک و حسابدار، ساختن و عوض کردن فقط مالک با همان کد تازهٔ ورود؛ خاموش کردن تنها بی کد.

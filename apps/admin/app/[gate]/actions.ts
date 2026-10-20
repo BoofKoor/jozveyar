@@ -1163,7 +1163,12 @@ export async function requestReportPdfAction(form: FormData): Promise<void> {
     REPORT_PARAMS.map((name) => [name, field(form, name).slice(0, 40)] as const).filter(([, value]) => value !== ''),
   ) as Partial<Record<(typeof REPORT_PARAMS)[number], string>>;
   const { month, ...range } = params;
-  const home = kind === 'shipping' ? reportHome(gate, month ?? '') : `${panelPath(gate, '/reports')}${searchOf(range)}`;
+  const home =
+    kind === 'shipping'
+      ? reportHome(gate, month ?? '')
+      : kind === 'settlement'
+        ? settlementHome(gate, range.p ?? '', range)
+        : `${panelPath(gate, '/reports')}${searchOf(range)}`;
   if (!isReportKind(kind)) redirect(home);
   const result = await exports.requestPdf(session, kind, params, await requestIp());
   if (!result.ok) redirect(withQuery(home, `e=${result.error}`));
@@ -1684,4 +1689,136 @@ export async function supportResendSmsAction(form: FormData): Promise<void> {
   const result = await support.resendSms(session, { message: field(form, 'message') }, await requestIp());
   if (result.ok) redirect(threadPath(gate, result.value.threadId, `done=resend&sms=${result.value.outcome}`));
   redirect(threadPath(gate, field(form, 'thread'), `e=${result.error}`));
+}
+
+/* ───────────────────────── تسویهٔ چاپخانه‌ها (۱۰٫۳) ───────────────────────── */
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * صورت‌حساب همان چاپخانه با همان بازه‌ای که فرم از آن آمد: فقط `d`، `from` و `to` به شکل خودشان (چیپ یا روز شمسی)، تا برگشت فرم نشانی
+ * دیگری نسازد. شناسهٔ نادرست به نمای کلی.
+ */
+function settlementHome(gate: string, partnerId: string, range: { d?: string; from?: string; to?: string }): string {
+  if (!UUID_RE.test(partnerId)) return panelPath(gate, '/reports/settlement');
+  const safe = Object.fromEntries(
+    (['d', 'from', 'to'] as const)
+      .map((name) => [name, range[name] ?? ''] as const)
+      .filter(([name, value]) => (name === 'd' ? value === 'month' || value === 'last' : /^[0-9۰-۹/]{1,10}$/.test(value))),
+  );
+  return `${panelPath(gate, `/reports/settlement/${partnerId}`)}${searchOf(safe)}`;
+}
+
+const backOf = (form: FormData) => ({ d: field(form, 'd').slice(0, 10), from: field(form, 'from').slice(0, 10), to: field(form, 'to').slice(0, 10) });
+
+/** خطاهایی که فرم‌های تسویه همان‌جا نشان می‌دهند: هر فیلد زیر خودش و کد کنار کد. بقیه به صورت‌حساب با پیامش. */
+const SETTLEMENT_FORM_ERRORS: readonly AdminErrorCode[] = [
+  'wrong_code',
+  'code_used',
+  'account_locked',
+  'settlement_code_required',
+  'settlement_amount_invalid',
+  'settlement_day_invalid',
+  'settlement_day_future',
+  'settlement_period_invalid',
+  'settlement_period_order',
+  'settlement_period_long',
+  'settlement_tracking_invalid',
+  'settlement_note_too_long',
+  'settlement_reason_required',
+  'settlement_reason_too_long',
+  'settlement_direction',
+  'settlement_order_invalid',
+  'settlement_order_not_found',
+];
+
+/** «ثبت پرداخت» (برش ۱۰٫۳، سؤال ۳۹۶؛ مالک و حسابدار): با کد تازه؛ به صورت‌حساب با پیام، یا همین فرم با خطای فیلدش. */
+export async function settlementPaymentAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { settlement } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const partnerId = field(form, 'partner');
+  const values = {
+    amount: field(form, 'amount').slice(0, 30),
+    day: field(form, 'day').slice(0, 20),
+    periodFrom: field(form, 'periodFrom').slice(0, 20),
+    periodTo: field(form, 'periodTo').slice(0, 20),
+    tracking: field(form, 'tracking').slice(0, 80),
+    note: field(form, 'note').slice(0, 700),
+  };
+  const result = await settlement.recordPayment(
+    session,
+    partnerId,
+    { ...values, seen: field(form, 'seen'), request: field(form, 'request'), code: form.get('code') },
+    await requestIp(),
+  );
+  const home = settlementHome(gate, partnerId, backOf(form));
+  if (result.ok) redirect(withQuery(home, `done=payment&entry=${result.value.entryId}&${doneMark()}`));
+  if (SETTLEMENT_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(home, `e=${result.error}&${doneMark()}`));
+}
+
+/** «ثبت اصلاح» (برش ۱۰٫۳، سؤال ۳۹۶): به سود یا زیان چاپخانه، با دلیل و کد تازه. */
+export async function settlementAdjustmentAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { settlement } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const partnerId = field(form, 'partner');
+  const values = {
+    amount: field(form, 'amount').slice(0, 30),
+    direction: field(form, 'direction').slice(0, 10),
+    day: field(form, 'day').slice(0, 20),
+    order: field(form, 'order').slice(0, 20),
+    reason: field(form, 'reason').slice(0, 700),
+  };
+  const result = await settlement.recordAdjustment(
+    session,
+    partnerId,
+    { ...values, seen: field(form, 'seen'), request: field(form, 'request'), code: form.get('code') },
+    await requestIp(),
+  );
+  const home = settlementHome(gate, partnerId, backOf(form));
+  if (result.ok) redirect(withQuery(home, `done=adjustment&entry=${result.value.entryId}&${doneMark()}`));
+  if (SETTLEMENT_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(home, `e=${result.error}&${doneMark()}`));
+}
+
+/** «باطل کن» یک ردیف دفتر (برش ۱۰٫۳): دلیل و کد تازه؛ دو کلیک همان باطل. */
+export async function settlementVoidAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { settlement } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const partnerId = field(form, 'partner');
+  const values = { reason: field(form, 'reason').slice(0, 700) };
+  const result = await settlement.voidEntry(
+    session,
+    partnerId,
+    field(form, 'entry'),
+    { ...values, seen: field(form, 'seen'), code: form.get('code') },
+    await requestIp(),
+  );
+  const home = settlementHome(gate, partnerId, backOf(form));
+  if (result.ok) redirect(withQuery(home, `done=void&entry=${result.value.entryId}&${doneMark()}`));
+  if (SETTLEMENT_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(home, `e=${result.error}&${doneMark()}`));
+}
+
+/** خطاهایی که صفحهٔ درصد سهم همان‌جا نشان می‌دهد. */
+const SHARE_FORM_ERRORS: readonly AdminErrorCode[] = ['share_invalid', 'share_code_required', 'wrong_code', 'code_used', 'account_locked'];
+
+/**
+ * درصد سهم یک چاپخانه (برش ۱۰٫۳، سؤال ۳۹۱؛ فقط مالک): با کد تازه؛ به «چاپخانه‌ها» با پیام. درصدی که همین حالا جای دیگری عوض شد به همان
+ * صفحه با پیامش، تا درصد تازه دیده شود.
+ */
+export async function partnerShareAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { partners } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const id = field(form, 'id');
+  const values = { share: field(form, 'share').slice(0, 20) };
+  const result = await partners.setShare(session, id, { ...values, seen: field(form, 'seen'), code: form.get('code') }, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, '/partners')}?done=share&p=${encodeURIComponent(id)}&${doneMark()}`);
+  if (SHARE_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  if (result.error === 'partner_share_changed' && UUID_RE.test(id)) redirect(`${panelPath(gate, `/partners/${id}/share`)}?e=${result.error}&${doneMark()}`);
+  redirect(`${panelPath(gate, '/partners')}?e=${result.error}&${doneMark()}`);
 }

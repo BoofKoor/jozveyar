@@ -18,6 +18,7 @@ import type {
   ProductionReportStore,
   ReportExportStore,
   ReportExportView,
+  SettlementStore,
   ShippingReportStore,
 } from '@jozveyar/db';
 
@@ -26,6 +27,8 @@ import type { AdminSession } from './auth';
 import { createPanelExports, mayOpenExport } from './exports';
 import { createPanelProduction } from './production';
 import { createPanelReport } from './report';
+import { ok } from './result';
+import { createPanelSettlement } from './settlement';
 
 const NOW = new Date('2026-10-14T07:50:00Z'); // چهارشنبه 22 مهر 1405، ساعت 11:20 تهران
 
@@ -76,8 +79,8 @@ const item = (over: Partial<ProductionItem> = {}): ProductionItem => ({
   ...over,
 });
 const ORDERS: ProductionOrder[] = [
-  { orderNumber: 10027, status: 'paid', paidAt: NOW, totalRials: 1_540_000n, partner: { id: 'p-1', name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران' }, items: [item()] },
-  { orderNumber: 10028, status: 'printing', paidAt: NOW, totalRials: 990_000n, partner: { id: 'p-2', name: 'چاپ نور', cityName: 'مشهد' }, items: [item()] },
+  { orderNumber: 10027, status: 'paid', paidAt: NOW, totalRials: 1_540_000n, partner: { id: 'p-1', name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران' }, shareRials: null, items: [item()] },
+  { orderNumber: 10028, status: 'printing', paidAt: NOW, totalRials: 990_000n, partner: { id: 'p-2', name: 'چاپ نور', cityName: 'مشهد' }, shareRials: 594_000n, items: [item()] },
 ];
 
 function productionStore(orders: ProductionOrder[] = ORDERS) {
@@ -173,7 +176,9 @@ describe('گزارش تولید در پنل (برش ۱۰٫۲، سؤال‌های
       made: 'ساخته شده 22 مهر 1405، 11:20، الهام فرجی',
       fileBase: 'gozaresh-tolid-1405-07-22',
     });
-    expect(document.stats.at(-1)).toEqual({ label: 'مبلغ (تومان)', value: 253_000 });
+    expect(document.stats.at(-2)).toEqual({ label: 'مبلغ (تومان)', value: 253_000 });
+    // سهم چاپخانه (۱۰٫۳): فقط سفارش چاپ نور سهم دارد.
+    expect(document.stats.at(-1)).toEqual({ label: 'سهم چاپخانه (تومان)', value: 59_400 });
     expect(document.tables.map((t) => t.title)).toEqual(['جزوه‌ها', 'صحافی', 'اندازه و کاغذ', 'چاپخانه‌ها']);
   });
 });
@@ -218,11 +223,19 @@ function exportsOf(rows: Record<string, ReportExportView & { pdf?: Buffer }> = {
   const { store, created } = exportStore(rows);
   const production = createPanelProduction({ store: productionStore().store, now: () => NOW });
   const report = createPanelReport({ store: shippingStore(), now: () => NOW, log: () => undefined });
+  // صورت‌حساب تسویه (۱۰٫۳) تست خودش را دارد (`settlement.test.ts`)؛ اینجا فقط «چاپخانه‌ای نیست».
+  const settlement = createPanelSettlement({
+    store: { statement: vi.fn(async () => null) } as unknown as SettlementStore,
+    stepUp: async () => ok(true as const),
+    secret: 's'.repeat(32),
+    now: () => NOW,
+  });
   const exports = createPanelExports({
     store,
     events: { logEvent: async (event) => void events.push(event) },
     production,
     report,
+    settlement,
     secret: 's'.repeat(32),
     now: () => NOW,
   });
@@ -280,6 +293,29 @@ describe('خروجی اکسل و PDF گزارش‌ها (برش ۱۰٫۲، سؤا
         at: NOW,
       },
     ]);
+  });
+
+  it('صورت‌حساب تسویه با مجوز خودش (۱۰٫۳): `reports.production` تنها ۴۰۳ و بی رویداد، و PDF خواسته‌شده‌اش را باز نمی‌کند؛ `settlements.read` تنها تا سرویس تسویه می‌رسد', async () => {
+    const { exports, events } = exportsOf();
+    const partner = '1b0e6c8a-5d4f-4a2b-9c3d-7e8f9a0b1c2d';
+    expect(await exports.xlsx({ ...OWNER, permissions: ['reports.production', 'orders.money'] }, 'settlement', { d: 'month', p: partner }, 'ip')).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+    expect(await exports.requestPdf({ ...OWNER, permissions: ['reports.production'] }, 'settlement', { d: 'month', p: partner }, 'ip')).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+    // با `settlements.read` تنها، تا سرویس تسویه می‌رسد؛ اینجا چاپخانه‌ای نیست.
+    expect(await exports.xlsx({ ...OWNER, permissions: ['settlements.read'] }, 'settlement', { d: 'month', p: partner }, 'ip')).toMatchObject({
+      ok: false,
+      status: 404,
+    });
+    expect(events).toEqual([]);
+    // دانلود PDF صورت‌حساب همان مجوز صورت‌حساب را می‌خواهد، نه گزارش تولید.
+    const row = { report: 'settlement' as const, money: false, printPartnerId: null, requestedBy: OWNER.userId };
+    expect(mayOpenExport({ ...OWNER, permissions: ['settlements.read'] }, row)).toBe(true);
+    expect(mayOpenExport({ ...OWNER, permissions: ['reports.production'] }, row)).toBe(false);
   });
 
   it('اکسل گزارش ارسال بی ماه داده‌دار ۴۰۴، و بی `reports.read` ۴۰۳ (کاربر چاپخانه گزارش ارسال ندارد)', async () => {

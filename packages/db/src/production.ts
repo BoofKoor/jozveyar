@@ -10,6 +10,7 @@
  *  - **عدد هر جزوه** از ریز قیمت منجمد (`price_breakdown.items[seq - 1]`): روهای رنگی و سیاه‌سفید، برگ و جلد یک نسخه، همان که کارگر فایل
  *    چاپ و برگه را با آن می‌سازد؛ نسخه، صفحه، رو، اندازه و صحافی از ستون‌های منجمد `order_items`، شمار فایل از بخش‌ها، و کاغذ از قاعده‌ها.
  *  - **آماده:** جزوه‌ای که فایل چاپش ساخته شده (`order_print_files`؛ همهٔ جلدهای یک جزوه در یک تراکنش نوشته می‌شوند).
+ *  - **سهم چاپخانه** (برش ۱۰٫۳): سهم منجمد آخرین تخصیص سفارش (`order_assignments.share_rials`)، همان که صورت‌حساب تسویه می‌شمارد.
  *  - **محدوده** (ADR-042): آرگومان اول و در خود کوئری، مثل هر ذخیره‌گاه سفارش پنل؛ کاربر چاپخانه فقط سفارش‌های امروز خودش.
  *  - **پول bigint:** مبلغ سفارش رشتهٔ int8 پستگرس است و `BigInt` می‌شود.
  */
@@ -59,6 +60,8 @@ export interface ProductionOrder {
   totalRials: bigint;
   /** چاپخانهٔ امروز سفارش؛ null یعنی بی چاپخانه. */
   partner: { id: string; name: string; cityName: string } | null;
+  /** سهم منجمد چاپخانه از این سفارش (برش ۱۰٫۳، سؤال ۴۰۱): همان آخرین تخصیص؛ null یعنی بی چاپخانه یا بی سهم. */
+  shareRials: bigint | null;
   items: ProductionItem[];
 }
 
@@ -116,6 +119,9 @@ export function createProductionReportStore({ db }: Database): ProductionReportS
             partnerId: printPartners.id,
             partnerName: printPartners.name,
             partnerCity: cities.nameFa,
+            // نام جدول صریح: `"id"` بی نام درون زیرکوئری شناسهٔ تخصیص خوانده می‌شود.
+            shareRials: sql<string | null>`(SELECT a.share_rials::text FROM order_assignments a
+              WHERE a.order_id = "orders"."id" ORDER BY a.id DESC LIMIT 1)`,
           })
           .from(orders)
           .leftJoin(printPartners, eq(printPartners.id, orders.printPartnerId))
@@ -190,6 +196,7 @@ export function createProductionReportStore({ db }: Database): ProductionReportS
         paidAt: row.paidAt!,
         totalRials: BigInt(row.totalRials),
         partner: row.partnerId ? { id: row.partnerId, name: row.partnerName ?? '', cityName: row.partnerCity ?? '' } : null,
+        shareRials: row.shareRials === null ? null : BigInt(row.shareRials),
         items: itemsBy.get(row.id) ?? [],
       }));
     },

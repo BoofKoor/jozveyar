@@ -9,8 +9,8 @@
  *   نسخه، همه از ریز قیمت منجمد. جزوهٔ «رنگی» یعنی دست‌کم یک روی رنگی؛ «فرد» یعنی شمار صفحه‌اش فرد است. کاغذ و اندازه با هم، و جزوه‌ای
  *   با بیش از یک کاغذ («چند کاغذ») جدا، چون برگ هر کاغذش از ریز قیمت درنمی‌آید.
  * - **هنوز آماده نیست** (سؤال ۲۷۵): «در صف چاپ»ی که فایل چاپ یکی از جزوه‌هایش ساخته نشده؛ «در حال چاپ» و پس از آن همیشه آماده‌اند.
- * - **چاپخانه‌ها** به ترتیب بیشترین سفارش، و «بی چاپخانه» آخر، مثل گزارش ارسال؛ مبلغ (جمع پرداخت مشتری) فقط برای کسی که `orders.money`
- *   دارد، که سازندهٔ سند می‌گوید.
+ * - **چاپخانه‌ها** به ترتیب بیشترین سفارش، و «بی چاپخانه» آخر، مثل گزارش ارسال؛ مبلغ (جمع پرداخت مشتری) و از ۱۰٫۳ سهم چاپخانه (سهم منجمد
+ *   هر سفارش، سؤال ۴۰۱) فقط برای کسی که `orders.money` دارد، که سازندهٔ سند می‌گوید.
  */
 
 import type { PaperSize } from '@jozveyar/contracts';
@@ -231,6 +231,10 @@ export interface PartnerRow {
   pages: number;
   sheets: number;
   amountRials: bigint;
+  /** جمع سهم منجمد چاپخانه از همین سفارش‌ها (۱۰٫۳)؛ بی سهم‌ها هیچ. */
+  shareRials: bigint;
+  /** سفارش‌های همین چاپخانه که سهم ندارند (سپرده‌شده وقتی چاپخانه درصد نداشت). */
+  unshared: number;
 }
 
 export interface ProductionReport {
@@ -287,9 +291,13 @@ export function aggregateProduction(orders: readonly ProductionOrder[]): Product
         pages: 0,
         sheets: 0,
         amountRials: 0n,
+        shareRials: 0n,
+        unshared: 0,
       } satisfies PartnerRow);
     partner.orders += 1;
     partner.amountRials += order.totalRials;
+    partner.shareRials += order.shareRials ?? 0n;
+    if (order.partner && order.shareRials === null) partner.unshared += 1;
     partners.set(partnerKey, partner);
 
     for (const item of order.items) {
@@ -428,7 +436,7 @@ export function productionDocument(input: {
         { label: 'نسخه', numeric: true },
         { label: 'صفحه', numeric: true },
         { label: 'برگ', numeric: true },
-        ...(money ? [{ label: 'مبلغ (تومان)', numeric: true }] : []),
+        ...(money ? [{ label: 'مبلغ (تومان)', numeric: true }, { label: 'سهم چاپخانه (تومان)', numeric: true }] : []),
       ],
       rows: report.partners.map((row) => [
         row.label,
@@ -437,8 +445,9 @@ export function productionDocument(input: {
         row.copies,
         row.pages,
         row.sheets,
-        ...(money ? [tomans(row.amountRials)] : []),
+        ...(money ? [tomans(row.amountRials), row.key === 'none' ? null : tomans(row.shareRials)] : []),
       ]),
+      note: money ? 'سهم چاپخانه: سهم منجمد هر سفارش، همان که صورت‌حساب تسویه می‌شمارد؛ سفارش بی سهم در آن نیست.' : null,
     });
   }
   const detail: ReportTable | null =
@@ -459,7 +468,7 @@ export function productionDocument(input: {
             { label: 'برگ', numeric: true },
             { label: 'صحافی (جلد)' },
             { label: 'فایل چاپ' },
-            ...(money ? [{ label: 'مبلغ (تومان)', numeric: true }] : []),
+            ...(money ? [{ label: 'مبلغ (تومان)', numeric: true }, { label: 'سهم چاپخانه (تومان)', numeric: true }] : []),
           ],
           rows: report.orders.map((order) => {
             const sum = (value: (item: ProductionOrder['items'][number]) => number) => order.items.reduce((n, item) => n + value(item), 0);
@@ -476,7 +485,7 @@ export function productionDocument(input: {
               sum((item) => item.sheets * item.copies),
               orderBindingsText(order),
               order.items.every((item) => item.ready) ? 'ساخته شد' : 'هنوز نه',
-              ...(money ? [tomans(order.totalRials)] : []),
+              ...(money ? [tomans(order.totalRials), order.shareRials === null ? null : tomans(order.shareRials)] : []),
             ];
           }),
         };
@@ -493,7 +502,12 @@ export function productionDocument(input: {
       { label: 'صفحهٔ رنگی', value: totals.colorPages },
       { label: 'صفحهٔ سیاه‌سفید', value: totals.bwPages },
       { label: 'برگ', value: totals.sheets },
-      ...(money ? [{ label: 'مبلغ (تومان)', value: tomans(report.amountRials) }] : []),
+      ...(money
+        ? [
+            { label: 'مبلغ (تومان)', value: tomans(report.amountRials) },
+            { label: 'سهم چاپخانه (تومان)', value: tomans(report.partners.reduce((sum, row) => sum + row.shareRials, 0n)) },
+          ]
+        : []),
     ],
     tables,
     detail,

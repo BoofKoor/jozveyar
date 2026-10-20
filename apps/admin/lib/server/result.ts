@@ -255,7 +255,32 @@ export type AdminErrorCode =
   | 'logo_code_required'
   | 'banner_changed'
   | 'banner_invalid'
-  | 'banner_code_required';
+  | 'banner_code_required'
+  /**
+   * تسویهٔ چاپخانه‌ها (۱۰٫۳): درصد سهم (همین حالا جای دیگری عوض شد، نادرست، بی کد)، دفتر (همین حالا عوض شد، فرمی که با چیز دیگری فرستاده
+   * شده، سفارشی که مال این چاپخانه نبود، ردیفی که نیست یا باطل شده، بی کد)، و خطای هر فیلد فرم‌ها زیر خودش.
+   */
+  | 'partner_share_changed'
+  | 'share_invalid'
+  | 'share_code_required'
+  | 'settlement_changed'
+  | 'settlement_form_used'
+  | 'settlement_order_not_found'
+  | 'settlement_entry_not_found'
+  | 'settlement_already_voided'
+  | 'settlement_code_required'
+  | 'settlement_amount_invalid'
+  | 'settlement_day_invalid'
+  | 'settlement_day_future'
+  | 'settlement_period_invalid'
+  | 'settlement_period_order'
+  | 'settlement_period_long'
+  | 'settlement_tracking_invalid'
+  | 'settlement_note_too_long'
+  | 'settlement_reason_required'
+  | 'settlement_reason_too_long'
+  | 'settlement_direction'
+  | 'settlement_order_invalid';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

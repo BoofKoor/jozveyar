@@ -11,6 +11,7 @@ import { CITIES } from '@jozveyar/geo';
 
 import { ipHashOf, type AdminSession } from './auth';
 import { createPanelPartners } from './partners';
+import { fail, ok } from './result';
 
 const NOW = new Date('2026-10-05T07:50:00Z');
 const SECRET = 's'.repeat(64);
@@ -56,6 +57,7 @@ function memoryPartners() {
         closedFrom: null,
         closedUntil: null,
         availabilityNote: null,
+        shareBp: null,
       },
     ],
   ]);
@@ -90,6 +92,7 @@ function memoryPartners() {
         closedFrom: null,
         closedUntil: null,
         availabilityNote: null,
+        shareBp: null,
       };
       rows.set(id, row);
       events.push(input.event);
@@ -145,6 +148,16 @@ function memoryPartners() {
       events.push(event);
       return 'ok';
     },
+    async setShare({ id, seen, next, event }) {
+      calls.push({ method: 'setShare', input: { id, seen, next } });
+      const row = rows.get(id);
+      if (!row) return 'not_found';
+      if (row.shareBp !== seen) return 'changed';
+      if (row.shareBp === next) return 'same';
+      row.shareBp = next;
+      events.push(event);
+      return 'ok';
+    },
     async activate({ id, event }) {
       calls.push({ method: 'activate', input: id });
       const row = rows.get(id);
@@ -158,9 +171,20 @@ function memoryPartners() {
   return { store, rows, events, calls };
 }
 
+/** کد تازه: «123456» درست است، «000000» نادرست؛ هر بار ثبت می‌شود تا تست بداند کد خواسته شد یا نه. */
+function stepper() {
+  const codes: unknown[] = [];
+  const stepUp = async (_session: AdminSession, code: unknown) => {
+    codes.push(code);
+    return code === '123456' ? ok(true as const) : fail(400, 'wrong_code');
+  };
+  return { codes, stepUp };
+}
+
 function service() {
   const memory = memoryPartners();
-  return { ...memory, partners: createPanelPartners({ store: memory.store, secret: SECRET, now: () => NOW }) };
+  const step = stepper();
+  return { ...memory, codes: step.codes, partners: createPanelPartners({ store: memory.store, stepUp: step.stepUp, secret: SECRET, now: () => NOW }) };
 }
 
 describe('مجوز در سرور (ADR-038)', () => {
@@ -459,5 +483,31 @@ describe('در دسترس بودن (برش ۱۰٫۱)', () => {
     const { partners, rows } = service();
     rows.get(FIRST)!.deactivatedAt = NOW;
     expect(await partners.availability(STAFF, FIRST)).toMatchObject({ ok: false, status: 404 });
+  });
+});
+
+describe('درصد سهم (برش ۱۰٫۳، سؤال ۳۹۱)', () => {
+  it('فقط مالک؛ همان که دیده شد، بعد درصد، و درصد یکسان بی کد و بی رویداد؛ کد پس از هر سنجش بی کد', async () => {
+    const { partners, calls, events, codes } = service();
+    const share = (form: Partial<{ share: unknown; seen: unknown; code: unknown }>, who = OWNER) =>
+      partners.setShare(who, FIRST, { share: '65', seen: '', code: '123456', ...form }, '1.2.3.4');
+    expect(await share({}, OPERATOR)).toMatchObject({ status: 403, error: 'forbidden' });
+    expect(await partners.setShare(OWNER, 'nope', { share: '65', seen: '', code: '123456' }, '1.2.3.4')).toMatchObject({ status: 404 });
+    expect(await share({ seen: '6500' })).toMatchObject({ status: 409, error: 'partner_share_changed' });
+    expect(await share({ seen: 'x' })).toMatchObject({ status: 409, error: 'partner_share_changed' });
+    expect(await share({ share: '62.555' })).toMatchObject({ status: 400, error: 'share_invalid', field: 'share' });
+    expect(await share({ share: '101' })).toMatchObject({ status: 400, error: 'share_invalid' });
+    expect(await share({ code: '' })).toMatchObject({ status: 400, error: 'share_code_required', field: 'code' });
+    expect(codes).toEqual([]);
+    expect(await share({ code: '000000' })).toMatchObject({ error: 'wrong_code' });
+    expect(calls.filter((c) => c.method === 'setShare')).toEqual([]);
+    expect(await share({ share: '۶۲٫۵' })).toEqual({ ok: true, value: { name: 'چاپخانهٔ جزوه‌یار', bp: 6_250, written: true } });
+    expect(calls.filter((c) => c.method === 'setShare')).toEqual([{ method: 'setShare', input: { id: FIRST, seen: null, next: 6_250 } }]);
+    expect(events.at(-1)).toMatchObject({ adminUserId: 'admin-1', action: 'partners.share', targetType: 'partner', targetId: FIRST, ipHash: ipHashOf(SECRET, '1.2.3.4') });
+    // همان درصد: موفق، بی کد و بی رویداد؛ ۰ («سهمی ندارد») هم درصد است.
+    const before = events.length;
+    expect(await share({ share: '62.5', seen: '6250', code: '' })).toEqual({ ok: true, value: { name: 'چاپخانهٔ جزوه‌یار', bp: 6_250, written: false } });
+    expect(events.length).toBe(before);
+    expect(await share({ share: '0', seen: '6250' })).toMatchObject({ ok: true, value: { bp: 0, written: true } });
   });
 });

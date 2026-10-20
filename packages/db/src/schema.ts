@@ -618,6 +618,12 @@ export const printPartners = pgTable(
     closedUntil: timestamp('closed_until', { withTimezone: true }),
     /** «دستگاه خراب است»: فقط برای شلوغ و تعطیل، ۱ تا ۲۰۰ نویسه. */
     availabilityNote: text('availability_note'),
+    /**
+     * سهم چاپخانه (برش ۱۰٫۳، ADR-069؛ سؤال ۲۰۳: «درصدی از سفارش»)، صدم درصد: ۶۵۰۰ یعنی ۶۵٪ از جمع چاپ، کاغذ و صحافی سفارش پیش از تخفیف. null یعنی
+     * هنوز تعیین نشده: سفارشی که حالا سپرده شود «بی سهم» است؛ ۰ یعنی سهمی ندارد (چاپخانهٔ خود جزوه‌یار). سهم هر سفارش هنگام تخصیص روی
+     * ردیف تخصیص منجمد می‌شود، پس عوض کردن این فقط سپردن‌های بعدی را عوض می‌کند.
+     */
+    shareBp: integer('share_bp'),
   },
   (t) => [
     foreignKey({
@@ -645,6 +651,8 @@ export const printPartners = pgTable(
        OR (${t.availability} <> 'open' AND length(${t.availabilityNote}) BETWEEN 1 AND 200
            AND ${t.availabilityNote} = btrim(${t.availabilityNote}))`,
     ),
+    /** ۰ تا ۱۰۰ درصد با دو رقم اعشار (سؤال ۳۹۱)؛ ۰ یعنی «سهمی ندارد»، مثل چاپخانهٔ خود جزوه‌یار، نه «تعیین نشده». */
+    check('print_partners_share', sql`${t.shareBp} IS NULL OR ${t.shareBp} BETWEEN 0 AND 10000`),
   ],
 );
 
@@ -1220,9 +1228,21 @@ export const orderAssignments = pgTable(
     reason: text('reason'),
     /** پیامک سفارش تازه به چاپخانه (برش ۷٫۶)؛ null برای چاپخانهٔ بی موبایل اعلان و تخصیص‌های پیش از ۷٫۶. */
     smsMessageId: bigint('sms_message_id', { mode: 'number' }).references(() => smsMessages.id),
+    /**
+     * سهم چاپخانه از این سفارش (برش ۱۰٫۳، ADR-069، سؤال ۳۹۲): درصد امروز همان چاپخانه و مبلغش، که خود پایگاه داده هنگام درج می‌نشاند
+     * (`order_assignments_share`، 0060)، از جمع چاپ، کاغذ و صحافی منجمد سفارش، به تومان گرد. سهم سفارش همان آخرین تخصیص است. null یعنی
+     * چاپخانه درصد نداشت، یا تخصیص پیش از ۱۰٫۳ است.
+     */
+    shareBp: integer('share_bp'),
+    shareRials: bigint('share_rials', { mode: 'number' }),
   },
   (t) => [
     index('order_assignments_order').on(t.orderId, t.id),
+    check(
+      'order_assignments_share',
+      sql`(${t.shareBp} IS NULL) = (${t.shareRials} IS NULL)
+       AND (${t.shareBp} IS NULL OR (${t.shareBp} BETWEEN 0 AND 10000 AND ${t.shareRials} >= 0 AND ${t.shareRials} % 10 = 0))`,
+    ),
     /** یک پیامک برای هر تخصیص (ردیف پیامک به تخصیص دیگری وصل نمی‌شود). */
     uniqueIndex('order_assignments_sms').on(t.smsMessageId),
     check('order_assignments_moves', sql`${t.fromPartnerId} IS DISTINCT FROM ${t.toPartnerId}`),
@@ -2197,7 +2217,7 @@ export const reportExports = pgTable(
   'report_exports',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    /** `production` (گزارش تولید، ۱۰٫۲) یا `shipping` (گزارش ارسال، ۶٫۴). */
+    /** `production` (گزارش تولید، ۱۰٫۲)، `shipping` (گزارش ارسال، ۶٫۴) یا `settlement` (صورت‌حساب تسویهٔ یک چاپخانه، ۱۰٫۳). */
     report: text('report').notNull(),
     /** دادهٔ قالب PDF: عنوان، بازه، کاشی‌ها و جدول‌ها، همه متن آماده (`apps/admin/lib/reportDocument.ts`). */
     context: jsonb('context').notNull(),
@@ -2222,7 +2242,7 @@ export const reportExports = pgTable(
   },
   (t) => [
     index('report_exports_requested').on(t.requestedAt),
-    check('report_exports_report', sql`${t.report} IN ('production', 'shipping')`),
+    check('report_exports_report', sql`${t.report} IN ('production', 'shipping', 'settlement')`),
     check('report_exports_file_name', sql`${t.fileName} ~ '^[a-z0-9][a-z0-9-]{0,118}[.]pdf$'`),
     check('report_exports_context', sql`jsonb_typeof(${t.context}) = 'object' AND octet_length(${t.context}::text) <= 4194304`),
     /**
@@ -2237,6 +2257,77 @@ export const reportExports = pgTable(
               AND ${t.pages} BETWEEN 1 AND ${sql.raw(String(REPORT_EXPORT_MAX_PAGES))} AND ${t.sha256} ~ '^[0-9a-f]{64}$')
           OR (${t.finishedAt} IS NOT NULL AND ${t.error} IS NOT NULL AND ${t.pdf} IS NULL AND ${t.pages} IS NULL AND ${t.sha256} IS NULL
               AND length(btrim(${t.error})) BETWEEN 1 AND 500)`,
+    ),
+  ],
+);
+
+/* ──────────────────────────── تسویهٔ چاپخانه‌ها (برش ۱۰٫۳، ADR-069) ──────────────────────────── */
+
+/**
+ * دفتر تسویهٔ هر چاپخانه (برش ۱۰٫۳، ADR-069؛ سؤال‌های ۲۰۳ و ۳۹۶): پرداخت به چاپخانه، و اصلاح به سود یا زیان آن (هزینهٔ پست، لغو پس از شروع
+ * چاپ، خسارت). بدهی خود سفارش‌ها از سهم منجمد هر تخصیص است (`order_assignments.share_rials`)، نه ردیف این جدول؛ مانده = سهم سفارش‌های
+ * «تحویل پست شد» + اصلاح‌ها − پرداخت‌ها. مالک و حسابدار می‌نویسند، با کد تازه؛ هر فرم یک ردیف (`request_id`). فقط افزودنی: اشتباه با «باطل
+ * کردن» یک‌باره و دلیل، نه پاک کردن (`partner_ledger_guard`، 0060).
+ */
+export const partnerLedger = pgTable(
+  'partner_ledger',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    printPartnerId: uuid('print_partner_id')
+      .notNull()
+      .references(() => printPartners.id),
+    /** `payment` (پرداخت به چاپخانه) یا `adjustment` (اصلاح). */
+    kind: text('kind').notNull(),
+    /** ریال؛ پرداخت مثبت؛ اصلاح غیرصفر: مثبت به سود چاپخانه (بدهی ما بیشتر)، منفی به زیانش. */
+    amountRials: bigint('amount_rials', { mode: 'number' }).notNull(),
+    /** روز پرداخت یا اصلاح: آغاز همان روز به وقت تهران. */
+    day: timestamp('day', { withTimezone: true }).notNull(),
+    /** «بابت» پرداخت (سؤال ۳۹۶): آغاز اولین روز و آغاز روز پس از آخرین (پایان انحصاری)، نیمه‌شب تهران؛ هر دو یا هیچ. */
+    periodFrom: timestamp('period_from', { withTimezone: true }),
+    periodUntil: timestamp('period_until', { withTimezone: true }),
+    /** کد پیگیری بانک، فقط پرداخت. */
+    tracking: text('tracking'),
+    /** یادداشت پرداخت (اختیاری) یا دلیل اصلاح (لازم)، ۱ تا ۳۰۰ نویسه. */
+    note: text('note'),
+    /** سفارشی که اصلاح برای آن است (اختیاری، فقط اصلاح)؛ سفارشی که روزی به همین چاپخانه سپرده شد. */
+    orderId: uuid('order_id').references(() => orders.id),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** شناسهٔ فرم: دو کلیک یک ردیف، همان فرم با چیز دیگر «فرم کهنه». */
+    requestId: uuid('request_id').notNull(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidedBy: uuid('voided_by').references(() => adminUsers.id),
+    voidReason: text('void_reason'),
+  },
+  (t) => [
+    index('partner_ledger_partner').on(t.printPartnerId, t.day),
+    uniqueIndex('partner_ledger_request').on(t.requestId),
+    check('partner_ledger_kind', sql`${t.kind} IN ('payment', 'adjustment')`),
+    /** پرداخت مثبت با بابت و کد پیگیری اختیاری؛ اصلاح غیرصفر با دلیل لازم، بی بابت و کد پیگیری. سقف هر ردیف ۱۰۰ میلیارد ریال. */
+    check(
+      'partner_ledger_shape',
+      sql`abs(${t.amountRials}) <= 100000000000 AND ${t.amountRials} % 10 = 0
+       AND ((${t.kind} = 'payment' AND ${t.amountRials} > 0 AND ${t.orderId} IS NULL)
+         OR (${t.kind} = 'adjustment' AND ${t.amountRials} <> 0 AND ${t.note} IS NOT NULL
+             AND ${t.periodFrom} IS NULL AND ${t.tracking} IS NULL))`,
+    ),
+    check(
+      'partner_ledger_period',
+      sql`(${t.periodFrom} IS NULL) = (${t.periodUntil} IS NULL)
+       AND (${t.periodFrom} IS NULL OR (${t.periodFrom} < ${t.periodUntil} AND ${t.periodUntil} <= ${t.periodFrom} + interval '400 days'))`,
+    ),
+    check(
+      'partner_ledger_texts',
+      sql`(${t.tracking} IS NULL OR (length(${t.tracking}) BETWEEN 1 AND 40 AND ${t.tracking} = btrim(${t.tracking})))
+       AND (${t.note} IS NULL OR (length(${t.note}) BETWEEN 1 AND 300 AND ${t.note} = btrim(${t.note})))`,
+    ),
+    /** باطل: هر سه با هم، با دلیل ۱ تا ۳۰۰ نویسه. */
+    check(
+      'partner_ledger_void',
+      sql`(${t.voidedAt} IS NULL) = (${t.voidedBy} IS NULL) AND (${t.voidedAt} IS NULL) = (${t.voidReason} IS NULL)
+       AND (${t.voidReason} IS NULL OR (length(${t.voidReason}) BETWEEN 1 AND 300 AND ${t.voidReason} = btrim(${t.voidReason})))`,
     ),
   ],
 );

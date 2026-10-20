@@ -331,8 +331,8 @@ test.describe.serial('گزارش ارسال', () => {
     test.setTimeout(180_000);
     const page = ownerPage;
     await page.goto(at(`/shipments/report?month=${THIS_KEY}`));
-    // مالک هر دو گزارش را دارد: چیپ «گزارش تولید» بالای صفحه.
-    await expect(page.getByRole('navigation', { name: 'گزارش‌ها' }).getByRole('link')).toHaveText(['گزارش تولید', 'گزارش ارسال']);
+    // مالک همهٔ گزارش‌ها را دارد: چیپ «گزارش تولید» بالای صفحه، و از ۱۰٫۳ «تسویه».
+    await expect(page.getByRole('navigation', { name: 'گزارش‌ها' }).getByRole('link')).toHaveText(['گزارش تولید', 'گزارش ارسال', 'تسویه']);
     const file = await download(page, () => page.locator('[data-export="xlsx"]').click());
     expect(file.name).toBe(`gozaresh-ersal-${THIS_KEY}.xlsx`);
     const parts = xlsxParts(file.bytes);

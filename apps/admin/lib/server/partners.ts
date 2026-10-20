@@ -13,6 +13,8 @@
  * - **در دسترس بودن** (برش ۱۰٫۱، سؤال‌های ۲۰۰ و ۲۶۶ تا ۲۶۸): «باز»، «شلوغ» یا «تعطیل از … تا …» با یادداشت. مجوز جدا
  *   (`partners.availability`): مالک و متصدی برای هر چاپخانه، و کاربر چاپخانه فقط برای خودش (چاپخانهٔ دیگر برایش همان «نیست» است، ۴۰۴).
  *   بی کد تازه، از همان که دیده شد، و فقط چاپخانهٔ فعال.
+ * - **درصد سهم** (برش ۱۰٫۳، سؤال ۳۹۱): فقط مالک، و با کد تازه، چون عددی است که پول چاپخانه از آن درمی‌آید؛ کد پس از هر سنجش بی کد. فقط
+ *   سپردن‌های بعدی را عوض می‌کند: سهم هر سفارش هنگام تخصیص منجمد است.
  *
  * بی نکست؛ ذخیره‌گاه از درگاه می‌آید (`PartnerStore`)، پس با ذخیره‌گاه ساختگی تست می‌شود. تراکنش‌ها و محافظ‌ها روی پستگرس در
  * تست یکپارچگی `packages/db`.
@@ -23,14 +25,24 @@ import type { City } from '@jozveyar/geo';
 
 import { availabilityOf, availabilitySeen, availabilityStateOf, partnerMobileOf, partnerNameOf, pickCity } from '../partners';
 import { maskMobile } from '../settings';
+import { readSharePercent, shareSeenOf } from '../settlement';
 import { can, ipHashOf, type AdminSession } from './auth';
 import { fail, ok, type Result } from './result';
 
 export interface PanelPartnersDeps {
   store: PartnerStore;
+  /** کد تازهٔ برنامهٔ تأیید برای درصد سهم (۱۰٫۳)؛ همان `AdminAuth.stepUp`، با سقف اشتباه و قفلش. */
+  stepUp: (session: AdminSession, code: unknown, ip: string) => Promise<Result<true>>;
   /** `SESSION_SECRET`: کلید HMAC IP، مثل ورود. */
   secret: string;
   now?: () => Date;
+}
+
+/** فرم درصد سهم (۱۰٫۳): درصد تایپ‌شده، درصدی که مالک دید (`shareSeen`) و کد تازه. */
+export interface ShareForm {
+  share: unknown;
+  seen: unknown;
+  code: unknown;
 }
 
 /** فرم افزودن و ویرایش: نام، متن فیلد شهر و موبایل اعلان؛ ویرایش نام، شهر و موبایلی را هم دارد که مالک دید. */
@@ -81,6 +93,9 @@ function seenMobileOf(value: unknown): string | null | undefined {
   if (value === undefined || value === '') return null;
   return typeof value === 'string' && /^09\d{9}$/.test(value) ? value : undefined;
 }
+
+/** کد برنامهٔ تأیید خالی: بی `stepUp`، چون هر کد نادرست یک اشتباه از سقف قفل است و خالی اشتباه نیست، فراموش شده. */
+const blank = (code: unknown) => typeof code !== 'string' || code.trim() === '';
 
 /** موبایل در رویداد: پوشیده («0915 ••• 4567»)، مثل موبایل پیامک آزمایشی (سؤال‌های ۱۴۱ و ۱۷۷). */
 const maskedOrNull = (mobile: string | null) => (mobile ? maskMobile(mobile) : null);
@@ -235,6 +250,29 @@ export function createPanelPartners(deps: PanelPartnersDeps) {
       if (done === 'not_found' || done === 'inactive') return fail(404, 'partner_not_found');
       if (done === 'changed') return fail(409, 'partner_availability_changed');
       return ok({ name: partner.name, state: parsed.state, written: done === 'ok' });
+    },
+
+    /**
+     * درصد سهم تازه (۱۰٫۳): اول همان که مالک دید (درصدی که همین حالا جای دیگری عوض شد هیچ نمی‌نویسد، `partner_share_changed`)، بعد درصد، و
+     * درصد یکسان موفق است، بی کد و بی رویداد؛ بعد کد تازه، و زیر قفل دوباره. غیرفعال هم، چون دوباره فعال می‌شود.
+     */
+    async setShare(session: AdminSession, idParam: string, form: ShareForm, ip: string): Promise<Result<{ name: string; bp: number; written: boolean }>> {
+      if (!can(session, 'partners.manage')) return fail(403, 'forbidden');
+      const id = idOf(idParam);
+      const partner = id ? await store.find(id) : null;
+      if (!partner) return fail(404, 'partner_not_found');
+      const seen = shareSeenOf(form.seen);
+      if (seen === undefined || seen !== partner.shareBp) return fail(409, 'partner_share_changed');
+      const bp = readSharePercent(form.share);
+      if (bp === null) return fail(400, 'share_invalid', { field: 'share' });
+      if (bp === partner.shareBp) return ok({ name: partner.name, bp, written: false });
+      if (blank(form.code)) return fail(400, 'share_code_required', { field: 'code' });
+      const stepped = await deps.stepUp(session, form.code, ip);
+      if (!stepped.ok) return stepped;
+      const done = await store.setShare({ id: partner.id, seen, next: bp, event: event(session, 'partners.share', ip, now(), partner.id) });
+      if (done === 'not_found') return fail(404, 'partner_not_found');
+      if (done === 'changed') return fail(409, 'partner_share_changed');
+      return ok({ name: partner.name, bp, written: done === 'ok' });
     },
 
     async activate(session: AdminSession, idParam: string, ip: string): Promise<Result<true>> {
