@@ -181,14 +181,14 @@ test.describe('کارت بارگذاری', () => {
 });
 
 test.describe('دسترس‌پذیری پیش از فایل', () => {
-  test('ترتیب Tab: لوگو، سه پیوند، کارت بارگذاری، ریز تعرفه، سؤال‌ها، پیوندهای پاورقی و نشان اینماد', async ({ page }) => {
+  test('ترتیب Tab: لوگو، چهار پیوند، کارت بارگذاری، ریز تعرفه، سؤال‌ها، پیوندهای پاورقی و نشان اینماد', async ({ page }) => {
     await page.goto('/');
     const questions = await page.locator('#faq summary').allTextContents();
     expect(questions).toHaveLength(6);
     const order: string[] = [];
     // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد.
     const footer = footerGroups(hasContact(defaultContent('contact'))).flatMap(({ pages }) => pages.map(({ label }) => label));
-    for (let i = 0; i < 7 + questions.length + footer.length; i++) {
+    for (let i = 0; i < 8 + questions.length + footer.length; i++) {
       await page.keyboard.press('Tab');
       order.push(
         await page.evaluate(() => {
@@ -202,6 +202,8 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
       'چطور کار می‌کند',
       'تعرفه',
       'سؤال‌ها',
+      // از ۱۲٫۱ پیوند چهارم سربرگ (سؤال ۳۰۵).
+      'سفارش‌های من',
       'jozve-file',
       'بر اساس تعداد برگ',
       ...questions.map((q) => q.trim()),

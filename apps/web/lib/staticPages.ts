@@ -23,20 +23,28 @@ export const STATIC_PAGES = {
 
 export type StaticPageKind = keyof typeof STATIC_PAGES;
 
+/**
+ * «سفارش‌های من» (برش ۱۲٫۱، سؤال ۳۰۵): اولین پیوند گروه «جزوه‌یار» پاورقی، ولی صفحهٔ ثابت نیست: خصوصی هر مشتری است، پس نه در نقشهٔ سایت
+ * و نه در نتیجهٔ جست‌وجو.
+ */
+export const ACCOUNT_PAGE = { path: '/orders', label: 'سفارش‌های من' } as const satisfies StaticPage;
+
 /** همان openGraph پایهٔ layout؛ صفحه‌ای که openGraph خودش را دارد جای کل آن را می‌گیرد، پس این‌ها را هم باید بدهد. */
 export const SITE_OPEN_GRAPH = { type: 'website', locale: 'fa_IR', siteName: 'جزوه‌یار' } as const;
 
-/** پیوندهای پاورقی در دو گروه طرح؛ «تماس» فقط وقتی راهی برای تماس هست (`hasContact`). */
+/** پیوندهای پاورقی در دو گروه طرح؛ «تماس» فقط وقتی راهی برای تماس هست (`hasContact`)، و از ۱۲٫۱ «سفارش‌های من» اول «جزوه‌یار». */
 export function footerGroups(contact: boolean): { heading: string; pages: StaticPage[] }[] {
   return [
-    { heading: 'جزوه‌یار', pages: [STATIC_PAGES.about, ...(contact ? [STATIC_PAGES.contact] : [])] },
+    { heading: 'جزوه‌یار', pages: [ACCOUNT_PAGE, STATIC_PAGES.about, ...(contact ? [STATIC_PAGES.contact] : [])] },
     { heading: 'قوانین', pages: [STATIC_PAGES.terms, STATIC_PAGES.privacy] },
   ];
 }
 
-/** صفحه‌های ثابت نقشهٔ سایت، همان‌ها که پاورقی دارد. */
+/** صفحه‌های ثابت نقشهٔ سایت، همان‌ها که پاورقی دارد، جز «سفارش‌های من». */
 export function sitemapPages(contact: boolean): StaticPage[] {
-  return footerGroups(contact).flatMap(({ pages }) => pages);
+  return footerGroups(contact)
+    .flatMap(({ pages }) => pages)
+    .filter((page) => page.path !== ACCOUNT_PAGE.path);
 }
 
 /**

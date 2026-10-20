@@ -34,6 +34,7 @@ export const SERVICE_KEYS = [
   'SMS_PAID_TEMPLATE',
   'SMS_TRACKING_TEMPLATE',
   'SMS_PARTNER_TEMPLATE',
+  'SMS_SUPPORT_TEMPLATE',
   'PAYMENT_MERCHANT_ID',
 ] as const;
 export type ServiceKeyName = (typeof SERVICE_KEYS)[number];

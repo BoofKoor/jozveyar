@@ -19,6 +19,9 @@ import {
   smsErrorTag,
   smsSegments,
   smsState,
+  supportParams,
+  supportReplyText,
+  supportTopic,
   templateSource,
   templateText,
   trackingParams,
@@ -48,6 +51,7 @@ describe('متن‌ها: یک منبع برای کد و قالب‌های sms.ir
       ['order_paid', 'SMS_PAID_TEMPLATE', ['ORDER', 'DAY']],
       ['tracking', 'SMS_TRACKING_TEMPLATE', ['ORDER', 'BARCODE']],
       ['partner_order', 'SMS_PARTNER_TEMPLATE', ['ORDER', 'DAY']],
+      ['support_reply', 'SMS_SUPPORT_TEMPLATE', ['TOPIC']],
     ]);
     // متن جز پارامترها چیز متغیری ندارد: قالب با همان پارامترها همان متن است.
     expect(templateText('tracking', trackingParams(10027, BARCODE))).toBe(trackingText(10027, BARCODE));
@@ -67,6 +71,23 @@ describe('متن‌ها: یک منبع برای کد و قالب‌های sms.ir
     expect(() => partnerParams(-1, 'دوشنبه 13 مهر')).toThrow();
     expect(() => partnerParams(10027, '')).toThrow();
     expect(() => partnerParams(10027, 'دوشنبه\n13 مهر')).toThrow();
+  });
+
+  it('پیامک پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۲): موضوع و نشانی «سفارش‌های من»، یک تکه، و هرگز متن پاسخ', () => {
+    expect(supportReplyText(10027)).toBe('جزوه‌یار: پاسخ پیامت دربارهٔ سفارش 10027 آمد. jozveyar.com/orders');
+    expect(supportReplyText(null)).toBe('جزوه‌یار: پاسخ پیامت دربارهٔ سؤال کلی آمد. jozveyar.com/orders');
+    expect(templateSource('support_reply')).toBe('جزوه‌یار: پاسخ پیامت دربارهٔ #TOPIC# آمد. jozveyar.com/orders');
+    expect(templateText('support_reply', supportParams(10027))).toBe(supportReplyText(10027));
+    expect(supportTopic(10027)).toBe('سفارش 10027');
+    expect(supportTopic(null)).toBe('سؤال کلی');
+    // بلندترین موضوع، شمارهٔ نُه رقمی، هنوز یک تکه است.
+    const longest = supportReplyText(999_999_999);
+    expect([...longest].length).toBe(69);
+    expect(smsSegments(longest)).toBe(1);
+    // نشانی بی پروتکل، تا پیوند پیامک همان نشانی‌ای باشد که مشتری می‌شناسد؛ و متن پاسخ هرگز در پیامک نیست.
+    expect(templateSource('support_reply')).not.toMatch(/https?:/);
+    expect(() => supportTopic(-1)).toThrow();
+    expect(() => supportTopic(1.5)).toThrow();
   });
 
   it('هر پیامک یک تکه، حتی با شمارهٔ شش رقمی و بلندترین روز تحویل', () => {

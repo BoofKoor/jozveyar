@@ -150,7 +150,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
 
   test('متصدی نه زبانه دارد، نه صفحه («فقط مالک» با متن طرح)؛ مالک کارت‌ها با عددهای پایگاه داده، و کلید .env فقط با ۴ نویسهٔ آخر', async () => {
     await operatorPage.goto(at());
-    await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'تعرفه', 'محتوای سایت']);
+    await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'تعرفه', 'محتوای سایت']);
     await operatorPage.goto(at('/settings'));
     await expect(operatorPage.getByRole('heading', { name: NO_ACCESS })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
@@ -162,7 +162,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await page.goto(at());
     const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
     // «تعرفه»ی مالک از ۶٫۱ با بخش‌های مالک: در دسکتاپ کنارشان، در گوشی زیر «بیشتر» (طرح برش ۶).
-    await expect(nav.locator('.ad-nav__wide')).toHaveText(['تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(nav.locator('.ad-nav__wide')).toHaveText(['پشتیبانی', 'ارسال', 'تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' }).click();
     await expect(page.getByRole('heading', { name: 'تنظیمات', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' })).toHaveAttribute('aria-current', 'page');
@@ -226,6 +226,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
       'شناسهٔ قالب پیامک پرداخت',
       'شناسهٔ قالب پیامک رهگیری',
       'شناسهٔ قالب پیامک چاپخانه',
+      'شناسهٔ قالب پیامک پاسخ پشتیبانی',
       'کد پذیرندهٔ زیبال',
     ]);
     const api = keyRow(page, 'SMS_API_KEY');
@@ -257,6 +258,17 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     );
     await expect(partner.getByRole('link', { name: 'وارد کن' })).toBeVisible();
     await expect(partner.getByRole('link', { name: 'آزمایش' })).toHaveCount(0);
+    // قالب هفتم (۱۲٫۱، سؤال ۳۸۱): پیامک «پاسخ پیامت آمد» به مشتری؛ خالی، پس «آزمایش» ندارد و می‌گوید پاسخ بی پیامک هم می‌رود.
+    const support = keyRow(page, 'SMS_SUPPORT_TEMPLATE');
+    await expect(support.locator('.jy-badge')).toHaveText('خالی');
+    await expect(support.locator('.ad-keys__tpl')).toHaveText(
+      'متن در sms.ir: «جزوه‌یار: پاسخ پیامت دربارهٔ #TOPIC# آمد. jozveyar.com/orders» · پارامتر: TOPIC',
+    );
+    await expect(support.locator('.ad-keys__test')).toHaveText(
+      'تا شناسه وارد نشود، پاسخ‌ها می‌روند ولی پیامکشان «نرفت» است؛ هشدار پیشخوان همین را می‌گوید.',
+    );
+    await expect(support.getByRole('link', { name: 'وارد کن' })).toBeVisible();
+    await expect(support.getByRole('link', { name: 'آزمایش' })).toHaveCount(0);
     // کد پذیرنده از ۷٫۲ با زیبال آزموده می‌شود، وقتی مقدار دارد (`payments.spec.ts` خود آزمایش را می‌سنجد، با سقف ۱۰ در ساعت).
     await expect(keyRow(page, 'PAYMENT_MERCHANT_ID').getByRole('button', { name: 'آزمایش' })).toHaveCount(process.env.PAYMENT_MERCHANT_ID ? 1 : 0);
     await expect(page.getByRole('link', { name: 'برگرداندن به .env' })).toHaveCount(0);

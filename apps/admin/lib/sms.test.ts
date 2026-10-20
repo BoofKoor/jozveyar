@@ -4,7 +4,7 @@ import type { ShipmentSms } from '@jozveyar/db';
 import { SMS_STUCK_MS } from '@jozveyar/sms';
 
 import type { Seg } from './orders';
-import { partnerSmsView, paymentSmsView, smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
+import { partnerSmsView, paymentSmsView, replySmsView, smsCounts, smsCountsText, smsReached, smsRowNote, smsView } from './sms';
 
 /** «حالا»ی طرح: دوشنبه 13 مهر 1405، 11:20 تهران. */
 const NOW = new Date('2026-10-05T07:50:00Z');
@@ -117,5 +117,34 @@ describe('پیامک سفارش تازهٔ چاپخانه (۷٫۶)', () => {
     );
     expect(text(paymentSmsView(failed('unconfigured'), true, NOW)!.text)).toBe('نرفت: کلید API یا شناسهٔ قالب sms.ir خالی است یا خوانده نشد، امروز 11:10');
     expect(text(partnerSmsView(failed('rejected:401'), true, NOW)!.text)).toBe('نرفت: پنل پیامک نپذیرفت (کد 401)، امروز 11:10');
+  });
+});
+
+describe('پیامک پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۲)', () => {
+  const failed = (error: string) => sms({ status: 'failed', sentAt: null, error });
+  const live = { latest: true, seen: false };
+
+  it('رفت، و نرفت با «دوباره بفرست» فقط برای آخرین پاسخ پیامک‌دار و تا مشتری ندیده', () => {
+    expect(text(replySmsView(sms(), live, NOW)!.text)).toBe('به 0915 234 5678 رفت، امروز 11:10');
+    const down = replySmsView(failed('unavailable'), live, NOW)!;
+    expect([down.state, down.resendable, text(down.text)]).toEqual(['failed', true, 'نرفت: پنل پیامک جواب نداد، امروز 11:10']);
+    const seen = replySmsView(failed('unavailable'), { latest: true, seen: true }, NOW)!;
+    expect([seen.resendable, text(seen.text)]).toEqual([false, 'نرفت: پنل پیامک جواب نداد، امروز 11:10؛ مشتری پاسخ را دیده، پس دوباره لازم نیست.']);
+    const older = replySmsView(failed('unavailable'), { latest: false, seen: false }, NOW)!;
+    expect([older.resendable, text(older.text)]).toEqual([false, 'نرفت: پنل پیامک جواب نداد، امروز 11:10؛ پاسخ تازه‌تر پیامک خودش را دارد.']);
+    // معلوم نیست: نقطهٔ ته جمله جای «؛» را می‌دهد.
+    const stuck = new Date(AT.getTime() + SMS_STUCK_MS + 1);
+    expect(text(replySmsView(sms({ status: 'sending', sentAt: null }), { latest: true, seen: true }, stuck)!.text)).toBe(
+      'معلوم نیست به 0915 234 5678 رفت یا نه: فرستادنش نیمه‌کاره ماند، امروز 11:10؛ مشتری پاسخ را دیده، پس دوباره لازم نیست.',
+    );
+    // رفته که دیده شد هم همان «رفت»، بی یادداشت.
+    expect(text(replySmsView(sms(), { latest: false, seen: true }, NOW)!.text)).toBe('به 0915 234 5678 رفت، امروز 11:10');
+    expect(replySmsView(null, live, NOW)).toBeNull();
+  });
+
+  it('«کلید خالی» نام قالب پیامک پاسخ را می‌برد', () => {
+    expect(text(replySmsView(failed('unconfigured'), live, NOW)!.text)).toBe(
+      'نرفت: کلید API یا شناسهٔ قالب پیامک پاسخ پشتیبانی خالی است یا خوانده نشد، امروز 11:10',
+    );
   });
 });

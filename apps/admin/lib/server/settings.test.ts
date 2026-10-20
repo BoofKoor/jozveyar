@@ -249,11 +249,12 @@ describe('نمای صفحه', () => {
       ['SMS_OTP_TEMPLATE', 'empty', null, null, false, null, null],
       ['SMS_PAID_TEMPLATE', 'empty', null, null, false, null, null],
       ['SMS_TRACKING_TEMPLATE', 'empty', null, null, false, null, null],
-      // ۷٫۶: قالب پیامک چاپخانه، پیش از کد پذیرنده (ترتیب `SERVICE_KEYS`).
+      // ۷٫۶: قالب پیامک چاپخانه، و ۱۲٫۱: قالب پاسخ پشتیبانی، پیش از کد پذیرنده (ترتیب `SERVICE_KEYS`).
       ['SMS_PARTNER_TEMPLATE', 'empty', null, null, false, null, null],
+      ['SMS_SUPPORT_TEMPLATE', 'empty', null, null, false, null, null],
       ['PAYMENT_MERCHANT_ID', 'panel', 'c2d8', 'سارا', true, '0000', null],
     ]);
-    expect(view.keys[5]!.seen).toBe(keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed));
+    expect(view.keys[6]!.seen).toBe(keySeenOf(secrets.rows.get('PAYMENT_MERCHANT_ID')!.sealed));
     expect(view.keys[0]!.seen).toBe('none');
     expect(leaks(PANEL_VALUE, view)).toBe(false);
     expect(leaks(ENV_VALUE, view)).toBe(false);
@@ -672,7 +673,7 @@ describe('کلیدها', () => {
       { name: 'SMS_OTP_TEMPLATE', to: 'empty' },
     ]);
     const view = await panel.overview(OWNER);
-    expect(view.ok && view.value.keys.map((k) => k.source)).toEqual(['env', 'empty', 'empty', 'empty', 'empty', 'env']);
+    expect(view.ok && view.value.keys.map((k) => k.source)).toEqual(['env', 'empty', 'empty', 'empty', 'empty', 'empty', 'env']);
   });
 });
 

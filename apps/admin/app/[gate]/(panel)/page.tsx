@@ -17,6 +17,7 @@ import { availabilityView } from '../../../lib/partners';
 import { can } from '../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../lib/server/context';
 import { otpCapAlert } from '../../../lib/settings';
+import { oldestText } from '../../../lib/support';
 
 export const metadata: Metadata = { title: 'پیشخوان' };
 
@@ -27,6 +28,24 @@ function OrderLinks({ gate, numbers, query = '' }: { gate: string; numbers: read
       {i === 0 ? '' : i === numbers.length - 1 ? ' و ' : '، '}
       <Link className="jy-link" href={`${panelPath(gate, `/orders/${n}`)}${query}`}>
         <span className="num">{n}</span>
+      </Link>
+    </Fragment>
+  ));
+}
+
+/** «سفارش 10027»، «سؤال کلی مریم کاظمی»: گفت‌وگوهایی که پیامک پاسخشان نرفت، هر کدام پیوند گفت‌وگوی خودش (۱۲٫۱). */
+function ThreadLinks({ gate, threads }: { gate: string; threads: readonly { threadId: number; orderNumber: number | null; customer: string | null }[] }) {
+  return threads.map((thread, i) => (
+    <Fragment key={thread.threadId}>
+      {i === 0 ? '' : i === threads.length - 1 ? ' و ' : '، '}
+      <Link className="jy-link" href={panelPath(gate, `/support/${thread.threadId}`)}>
+        {thread.orderNumber === null ? (
+          `«سؤال کلی» ${thread.customer ?? ''}`.trim()
+        ) : (
+          <>
+            سفارش <span className="num">{thread.orderNumber}</span>
+          </>
+        )}
       </Link>
     </Fragment>
   ));
@@ -82,7 +101,7 @@ export default async function Dashboard({
 }) {
   const { gate } = await params;
   const query = await searchParams;
-  const { orders, settings, reviews } = requirePanel(gate);
+  const { orders, settings, reviews, support } = requirePanel(gate);
   const session = await requireSession(gate);
   const now = new Date();
   const head = (
@@ -100,8 +119,15 @@ export default async function Dashboard({
   if (!result.ok) return head;
   const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked, partners: board, assignment } = result.value;
   // هشدارهای پیامک (۷٫۱) و وضعیت مسیر خرید روی سایت (۷٫۵): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
-  // نظرهای تازه (۱۲٫۳): فقط مالک (`reviews.manage`)؛ برای بقیه null.
-  const [sms, checkout, pendingReviews] = await Promise.all([settings.smsAlerts(session), settings.checkoutStatus(session), reviews.pendingCount(session)]);
+  // نظرهای تازه (۱۲٫۳): فقط مالک (`reviews.manage`)؛ و پیام‌های بی پاسخ و پیامک پاسخی که نرفت (۱۲٫۱): مالک و متصدی (`support.reply`)؛ برای بقیه null.
+  const [sms, checkout, pendingReviews, supportAlerts] = await Promise.all([
+    settings.smsAlerts(session),
+    settings.checkoutStatus(session),
+    reviews.pendingCount(session),
+    support.alerts(session),
+  ]);
+  const unanswered = supportAlerts && supportAlerts.open.count > 0 ? supportAlerts.open : null;
+  const replySmsFailed = supportAlerts?.smsFailed ?? [];
   const live = liveAlert(checkout, now);
   // درگاه آماده نیست (کد ۱۱۵ یا کد پذیرنده) و سایت `live` آماده است: مشتری تازه «موقتاً متوقف» می‌بیند (سؤال‌های ۱۳۹ و ۱۶۶).
   const pausedByGateway = checkout?.readiness.ready === true;
@@ -185,6 +211,8 @@ export default async function Dashboard({
       ) : null}
 
       {live ||
+      unanswered ||
+      replySmsFailed.length > 0 ||
       closed.length > 0 ||
       alerts.failedPdf.length > 0 ||
       unreturned > 0 ||
@@ -221,6 +249,18 @@ export default async function Dashboard({
                     .
                   </>
                 ) : null}
+              </span>
+            </p>
+          ) : null}
+          {unanswered ? (
+            // پیام‌های بی پاسخ پشتیبانی (۱۲٫۱، سؤال ۳۱۵؛ طرح «هشدار پیشخوان»، بالای هشدارها): مالک و متصدی.
+            <p className="jy-note jy-note--warning" data-alert="support">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                <Link className="jy-link" href={panelPath(gate, '/support')}>
+                  <span className="num">{formatNumber(unanswered.count)}</span> پیام پشتیبانی
+                </Link>{' '}
+                بی پاسخ است{unanswered.oldestWaiting ? `؛ قدیمی‌ترین از ${oldestText(unanswered.oldestWaiting, now)}` : ''}.
               </span>
             </p>
           ) : null}
@@ -459,6 +499,16 @@ export default async function Dashboard({
                   </Fragment>
                 ))}{' '}
                 نرفت؛ از کارت «چاپخانه»{alerts.partnerSmsFailed.length === 1 ? '' : 'ی هر کدام'} دوباره بفرست.
+              </span>
+            </p>
+          ) : null}
+          {replySmsFailed.length > 0 ? (
+            // پیامک پاسخ پشتیبانی که نرفت (۱۲٫۱، سؤال ۳۱۲؛ مثل ۷٫۶): مالک و متصدی، تا مشتری همان پاسخ را ندیده؛ «دوباره بفرست» در خود گفت‌وگو.
+            <p className="jy-note jy-note--warning" data-alert="reply-sms">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                پیامک پاسخ {replySmsFailed.length === 1 ? 'گفت‌وگوی ' : 'گفت‌وگوهای '}
+                <ThreadLinks gate={gate} threads={replySmsFailed} /> نرفت؛ از {replySmsFailed.length === 1 ? 'همان' : 'هر'} گفت‌وگو دوباره بفرست.
               </span>
             </p>
           ) : null}

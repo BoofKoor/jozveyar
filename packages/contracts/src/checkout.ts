@@ -122,6 +122,22 @@ export const otpVerifySchema = z.object({
   code: z.string().min(1).max(20),
 });
 
+/**
+ * پیام مشتری به پشتیبانی (`POST /api/account/messages`، برش ۱۲٫۱، ADR-068، سؤال‌های ۳۰۹ و ۳۱۰): شناسهٔ فرم (هر فرم یک پیام)، متن، و مقصد:
+ * سفارشی با شماره‌اش، «سؤال کلی»، یا گفت‌وگویی که هست. سقف خام گشاده‌تر از سقف ۱٬۰۰۰ نویسه است، چون فاصله و خط خالی پیش از شمردن
+ * می‌روند (سرور).
+ */
+export const supportMessageSchema = z.object({
+  requestId: z.string().uuid(),
+  body: z.string().max(4000),
+  to: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('order'), number: z.number().int().positive().max(999_999_999) }),
+    z.object({ kind: z.literal('general') }),
+    z.object({ kind: z.literal('thread'), id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
+  ]),
+});
+export type SupportMessageRequest = z.infer<typeof supportMessageSchema>;
+
 /** تصمیمی که صفحهٔ درگاه نمونه ثبت می‌کند؛ برگشت از درگاه همین را می‌خواند، نه پارامتر نشانی را. */
 export const mockDecisionSchema = z.object({ decision: z.enum(['success', 'failure', 'cancel']) });
 export type MockDecision = z.infer<typeof mockDecisionSchema>['decision'];
@@ -245,6 +261,18 @@ export type CheckoutErrorCode =
   | 'invalid_rating'
   /** متن نظر از سقف بلندتر است (برش ۱۲٫۳)؛ همراه `max`. */
   | 'review_too_long'
+  /** پیام به پشتیبانی (برش ۱۲٫۱، ADR-068، سؤال ۳۱۰): متن پس از یکدست شدن خالی است. */
+  | 'message_empty'
+  /** متن پیام از سقف بلندتر است؛ همراه `max`. */
+  | 'message_too_long'
+  /** ۱۰ پیام در یک ساعت گذشته (سؤال ۳۱۰). ۴۲۹. */
+  | 'message_rate'
+  /** پیامی که گفت‌وگوی چهارمی را «باز» کند (سؤال ۳۱۰). ۴۰۹. */
+  | 'open_threads'
+  /** همین فرم پیش‌تر با متن دیگری رسید (دو کلیک یکی است، فرم کهنه نه). ۴۰۹. */
+  | 'stale_form'
+  /** «سؤال کلی» از شماره‌ای که هیچ سفارشی ندارد (سؤال ۳۰۶): راهش «تماس». ۴۰۹. */
+  | 'no_orders'
   | 'unavailable';
 
 /** یک بخش جزوه در صفحهٔ سفارش: نام فایل و صفحه‌هایی که سرور شمرد. */
@@ -362,6 +390,19 @@ export interface OrderViewDetails {
    * زیر فیلد نشان می‌دهد و نوشتن نظر همین را روی ردیف منجمد می‌کند.
    */
   reviewForm: OrderViewReviewForm | null;
+  /**
+   * گفت‌وگوی پشتیبانی همین سفارش (برش ۱۲٫۱، ADR-068، سؤال ۳۰۹) برای کارت «سؤالی دربارهٔ این سفارش داری؟»: حالش و پاسخی که صاحب سفارش هنوز
+   * ندیده؛ null یعنی هنوز پیامی نداده.
+   */
+  thread: OrderViewThread | null;
+}
+
+/** گفت‌وگوی یک سفارش برای صاحبش (برش ۱۲٫۱). */
+export interface OrderViewThread {
+  id: number;
+  status: 'open' | 'answered' | 'closed';
+  /** پاسخی که هنوز ندیده: «پاسخ تازه». */
+  unseen: boolean;
 }
 
 /** نام کوچک و شهر (یا استان) صاحب سفارش، همان که روی صفحهٔ اصلی می‌آید (برش ۱۲٫۳). */

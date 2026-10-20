@@ -29,13 +29,14 @@ const rowOf = (name: ServiceKeyName, value = VALUE, context = serviceKeyContext(
 });
 
 describe('کلیدهای سرویس‌ها', () => {
-  it('فقط شش نام (۷٫۱: دو قالب تازه؛ ۷٫۶: قالب چاپخانه)، به ترتیب صفحه؛ نه حالت خرید، نه آداپتورها، نه رمزهای خود سرور', () => {
+  it('فقط هفت نام (۷٫۱: دو قالب تازه؛ ۷٫۶: قالب چاپخانه؛ ۱۲٫۱: قالب پاسخ پشتیبانی)، به ترتیب صفحه؛ نه حالت خرید، نه آداپتورها، نه رمزهای خود سرور', () => {
     expect(SERVICE_KEYS).toEqual([
       'SMS_API_KEY',
       'SMS_OTP_TEMPLATE',
       'SMS_PAID_TEMPLATE',
       'SMS_TRACKING_TEMPLATE',
       'SMS_PARTNER_TEMPLATE',
+      'SMS_SUPPORT_TEMPLATE',
       'PAYMENT_MERCHANT_ID',
     ]);
     for (const name of SERVICE_KEYS) expect(isServiceKeyName(name)).toBe(true);

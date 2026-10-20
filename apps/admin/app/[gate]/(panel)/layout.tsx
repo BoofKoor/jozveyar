@@ -4,7 +4,7 @@ import { PanelNav } from '../../../components/PanelNav';
 import { panelPath } from '../../../lib/gate';
 import { roleLabel } from '../../../lib/messages';
 import { can } from '../../../lib/server/auth';
-import { requireSession } from '../../../lib/server/context';
+import { requirePanel, requireSession } from '../../../lib/server/context';
 import { logoutAction } from '../actions';
 
 /**
@@ -14,13 +14,19 @@ import { logoutAction } from '../actions';
  * ردیف (طرح برش ۶). حسابدار (۹٫۴) «پیشخوان»، «سفارش‌ها» و «گزارش‌ها». «گزارش‌ها» (۱۰٫۲، سؤال ۲۷۶) به گزارش تولید می‌رود: مالک در
  * بخش‌های مالک، و حسابدار و کاربر چاپخانه در ردیف؛ گزارش ارسال با چیپ همان صفحه، و برای حسابدار، که «ارسال» ندارد، زبانهٔ «گزارش‌ها»
  * روی گزارش ارسال هم جاری است. «تخفیف‌ها» (۱۱٫۴) برای مالک پس از «تعرفه» و برای حسابدار پس از «گزارش‌ها»، و «محتوای سایت» (۱۱٫۱) برای مالک
- * پس از «گزارش‌ها» و از ۱۱٫۳ برای متصدی در ردیف پس از «تعرفه»، با نوار اعلان (سؤال ۲۸۲). هر صفحه هم خودش نشست و مجوز را می‌سنجد: چیدمان با
- * رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود.
+ * پس از «گزارش‌ها» و از ۱۱٫۳ برای متصدی در ردیف پس از «تعرفه»، با نوار اعلان (سؤال ۲۸۲). «پشتیبانی» (۱۲٫۱، سؤال ۳۱۳) پس از «سفارش‌ها»، با شمار
+ * گفت‌وگوهای «باز»: متصدی در ردیف، و مالک اول بخش‌های خودش با «ارسال» پس از آن (در گوشی زیر «بیشتر»، با همان شمار روی «بیشتر»). هر صفحه هم
+ * خودش نشست و مجوز را می‌سنجد: چیدمان با رفتن از صفحه‌ای به صفحهٔ دیگر دوباره اجرا نمی‌شود، پس شمار با هر کار فرم (که هدایت می‌کند) و هر
+ * بار کردن کامل تازه می‌شود، و فهرست خود صندوق همیشه تازه است.
  */
 export default async function PanelLayout({ children, params }: { children: React.ReactNode; params: Promise<{ gate: string }> }) {
   const { gate } = await params;
   const session = await requireSession(gate);
+  const { support } = requirePanel(gate);
   const home = panelPath(gate);
+  const open = await support.openSummary(session);
+  const supportTab = open ? [{ href: panelPath(gate, '/support'), label: 'پشتیبانی', count: open.count }] : [];
+  const ship = can(session, 'shipments.import') ? [{ href: panelPath(gate, '/shipments'), label: 'ارسال' }] : [];
   const tariff = can(session, 'tariff.read') ? [{ href: panelPath(gate, '/tariff'), label: 'تعرفه' }] : [];
   const reports = can(session, 'reports.production')
     ? [
@@ -45,10 +51,9 @@ export default async function PanelLayout({ children, params }: { children: Reac
   const primary = [
     { href: home, label: 'پیشخوان' },
     ...(can(session, 'orders.read') ? [{ href: panelPath(gate, '/orders'), label: 'سفارش‌ها' }] : []),
-    ...(can(session, 'shipments.import') ? [{ href: panelPath(gate, '/shipments'), label: 'ارسال' }] : []),
-    ...(ownerOnly.length > 0 ? [] : [...reports, ...discounts, ...tariff, ...content]),
+    ...(ownerOnly.length > 0 ? [] : [...supportTab, ...ship, ...reports, ...discounts, ...tariff, ...content]),
   ];
-  const owner = ownerOnly.length > 0 ? [...tariff, ...discounts, ...reports, ...content, ...ownerOnly] : [];
+  const owner = ownerOnly.length > 0 ? [...supportTab, ...ship, ...tariff, ...discounts, ...reports, ...content, ...ownerOnly] : [];
 
   return (
     <>

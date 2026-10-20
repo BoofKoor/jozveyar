@@ -683,6 +683,34 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       const rating = typeof detail.rating === 'number' ? [' (', { ltr: String(detail.rating) }, ' از ', { ltr: '5' }, ')'] : [];
       return { badge: null, text: merged(['نظر سفارش ', ...orderRef(detail), ...rating, done]) };
     }
+    case 'support.reply':
+    case 'support.close':
+    case 'support.sms_resend': {
+      // پشتیبانی (۱۲٫۱، سؤال ۳۱۶): گفت‌وگوی کدام سفارش، یا «سؤال کلی» کدام مشتری؛ متن پیام هرگز. رویداد پاسخ در همان تراکنش پاسخ نوشته می‌شود،
+      // پیش از فرستادن پیامک، پس فقط می‌گوید پیامک ساخته شد یا لازم نبود؛ رفت یا نرفتش در خود گفت‌وگوست.
+      const customer = str(detail.customer);
+      const topic: Segment[] =
+        typeof detail.orderNumber === 'number'
+          ? ['گفت‌وگوی سفارش ', ...orderRef(detail), ...(customer ? [` (${customer})`] : [])]
+          : [`گفت‌وگوی «سؤال کلی»${customer ? ` ${customer}` : ''}`];
+      if (event.action === 'support.close') return { badge: null, text: merged([...topic, ' بسته شد']) };
+      if (event.action === 'support.sms_resend') {
+        return {
+          badge: null,
+          text: merged([
+            'پیامک پاسخ ',
+            ...topic,
+            ' دوباره به ',
+            ltrOf(detail.mobile),
+            detail.outcome === 'sent' ? ' فرستاده شد و رفت' : ' فرستاده شد و باز نرفت',
+          ]),
+        };
+      }
+      return {
+        badge: null,
+        text: merged(['پاسخ به ', ...topic, detail.sms === 'queued' ? '؛ با پیامک پاسخ' : '؛ بی پیامک تازه، خبر پاسخ قبلی هنوز دیده نشده بود']),
+      };
+    }
     default:
       return { badge: null, text: [event.action] };
   }
@@ -734,7 +762,7 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
  * سؤال ۲۷۹) زیر «گزارش‌ها»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
  * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱)، نوار اعلان (۱۱٫۳) و لوگو و بنر (۱۱٫۲) زیر «محتوای سایت»، پس از
- * «تعرفه»، به ترتیب طرح.
+ * «تعرفه»، و پاسخ، بستن و «دوباره بفرست» پشتیبانی (۱۲٫۱، سؤال ۳۱۶) زیر «پشتیبانی» پس از آن، به ترتیب طرح.
  */
 export const EVENT_KINDS = [
   { kind: '', label: 'همه' },
@@ -744,6 +772,7 @@ export const EVENT_KINDS = [
   { kind: 'shipments', label: 'ارسال' },
   { kind: 'tariff', label: 'تعرفه' },
   { kind: 'content', label: 'محتوای سایت' },
+  { kind: 'support', label: 'پشتیبانی' },
   { kind: 'settings', label: 'تنظیمات و کلیدها' },
   { kind: 'partners', label: 'چاپخانه‌ها' },
   { kind: 'admins', label: 'ادمین‌ها' },

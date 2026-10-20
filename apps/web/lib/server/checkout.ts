@@ -27,6 +27,7 @@ import {
   type OrderViewReview,
   type OrderViewReviewForm,
   type Place,
+  type OrderViewThread,
   type PlacedOrder,
   type Recipient,
 } from '@jozveyar/contracts/checkout';
@@ -180,6 +181,8 @@ export async function orderView(
   token: string,
   user: AuthUser | null,
   at: Date,
+  /** گفت‌وگوی پشتیبانی همین سفارش برای صاحبش (برش ۱۲٫۱)؛ بی آن هیچ. */
+  threadOf: (userId: string, orderId: string) => Promise<OrderViewThread | null> = async () => null,
 ): Promise<Result<OrderView>> {
   if (!TOKEN.test(token)) return fail(404, 'not_found');
   const found = await orders.details(token.toLowerCase());
@@ -279,6 +282,7 @@ export async function orderView(
     review: reviewView(found.review),
     // «از جزوه راضی بودی؟» (۱۲٫۳): «تحویل پست شد» و هنوز هیچ نظری؛ پاک‌شده هم یعنی داشت.
     reviewForm: order.status === 'handed_to_post' && found.review === null ? reviewAttribution(order) : null,
+    thread: await threadOf(user.userId, order.id),
   };
   return ok(view);
 }

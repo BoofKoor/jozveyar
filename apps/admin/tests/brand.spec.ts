@@ -238,7 +238,10 @@ test.describe.serial('لوگو و بنر (۱۱٫۲)', () => {
       const logoBox = await phone.locator('.site-logo.site-idle img').boundingBox();
       expect(logoBox!.height).toBeLessThanOrEqual(56);
       expect(logoBox!.height).toBeGreaterThan(20);
-      await expect(phone.getByRole('navigation', { name: 'پیوندهای صفحه' }).getByRole('link', { name: 'سؤال‌ها' })).toBeVisible();
+      // از ۱۲٫۱ پیوندهای گوشی «تعرفه» و «سفارش‌های من» است، نه «سؤال‌ها».
+      for (const name of ['تعرفه', 'سفارش‌های من']) {
+        await expect(phone.getByRole('navigation', { name: 'پیوندهای صفحه' }).getByRole('link', { name })).toBeVisible();
+      }
       expect(await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
       await narrow.close();
     }
