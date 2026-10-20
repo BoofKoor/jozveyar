@@ -147,7 +147,7 @@ test.describe.serial('پنل ادمین', () => {
     await expect(page.locator('.ad-user')).toContainText('علی محمدی · متصدی');
     // از ۶٫۱ «ارسال» کنار «سفارش‌ها»؛ «تعرفه»ی متصدی در همان ردیف (طرح برش ۶)، از ۱۱٫۳ «محتوای سایت» با نوار اعلان، و از ۱۲٫۱ «پشتیبانی» پس از
     // «سفارش‌ها» (بی گفت‌وگوی باز، بی شمار).
-    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'تعرفه', 'محتوای سایت']);
+    await expect(page.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'موجودی کاغذ', 'تعرفه', 'محتوای سایت']);
     for (const path of ['/admins', '/events', '/admins/new', '/settings']) {
       await page.goto(at(path));
       await expect(page.getByRole('heading', { name: 'این بخش فقط برای مالک است' })).toBeVisible();

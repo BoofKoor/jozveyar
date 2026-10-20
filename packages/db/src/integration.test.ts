@@ -151,6 +151,8 @@ import { createReportExportStore, RENDER_REPORT_JOB } from './exports.js';
 import { REPORT_EXPORT_MAX_BYTES, reportExports } from './schema.js';
 import { createSettlementStore, shareRialsOf, type LedgerInput, type SettlementRange } from './settlement.js';
 import { partnerLedger } from './schema.js';
+import { createInventoryStore, type MoveInput, type StockItem } from './inventory.js';
+import { paperStockItems, paperStockMoves } from './schema.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -174,8 +176,9 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 /** سفارش‌ها و هر چه به آنها بسته است؛ پرداخت cascade ندارد (سابقهٔ پول بی‌صدا پاک نمی‌شود). */
 async function clearOrders({ db }: Database) {
-  // بازپرداخت پاک‌نشدنی است (0032)، مسدودی موبایل هم (0050)، گفت‌وگوی پشتیبانی و پیام‌هایش هم (0058)، و دفتر تسویهٔ چاپخانه‌ها هم (0060)؛
-  // TRUNCATE تریگر ردیفی ندارد.
+  // بازپرداخت پاک‌نشدنی است (0032)، مسدودی موبایل هم (0050)، گفت‌وگوی پشتیبانی و پیام‌هایش هم (0058)، دفتر تسویهٔ چاپخانه‌ها هم (0060)،
+  // و موجودی کاغذ هم (0062؛ ردیف چاپ به سفارش اشاره می‌کند)؛ TRUNCATE تریگر ردیفی ندارد.
+  await db.execute(sql`TRUNCATE paper_stock_moves, paper_stock_items`);
   await db.execute(sql`TRUNCATE refunds`);
   await db.execute(sql`TRUNCATE partner_ledger`);
   await db.execute(sql`TRUNCATE mobile_blocks`);
@@ -3266,7 +3269,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -3329,11 +3332,14 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها، از ۱۲٫۲ مسدود کردن موبایل مشتری، از ۱۱٫۳ نوار اعلان و از
       // ۱۲٫۱ پیام‌های پشتیبانی (سؤال ۳۱۳؛ حسابدار و چاپخانه نه)؛ چاپخانه فقط دیدن،
       // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، از ۱۰٫۲ گزارش تولید خودش (بی
-      // مبلغ)، و از ۱۰٫۳ صورت‌حساب تسویهٔ خودش. هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید و تسویه هم نه (سؤال‌های ۲۰۱ و ۳۹۹). صریح، نه از کد.
+      // مبلغ)، و از ۱۰٫۳ صورت‌حساب تسویهٔ خودش. هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید و تسویه هم نه (سؤال‌های ۲۰۱ و ۳۹۹). از ۱۰٫۴ موجودی
+      // کاغذ برای متصدی و چاپخانه، دیدن و ثبت (سؤال ۴۱۵)؛ حسابدار نه. صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'content.bar',
         'customers.block',
         'files.download',
+        'inventory.manage',
+        'inventory.read',
         'orders.address',
         'orders.assign',
         'orders.cancel',
@@ -3351,6 +3357,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect([...ADMIN_ROLES.operator.permissions].sort()).toEqual(await read('operator'));
       expect(await read('print_partner')).toEqual([
         'files.download',
+        'inventory.manage',
+        'inventory.read',
         'orders.read',
         'orders.status',
         'partners.availability',
@@ -3446,6 +3454,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'content.bar',
         'customers.block',
         'files.download',
+        'inventory.manage',
+        'inventory.read',
         'orders.address',
         'orders.assign',
         'orders.cancel',
@@ -3788,7 +3798,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -4267,7 +4277,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -5318,7 +5328,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5702,7 +5712,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -6182,7 +6192,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -6798,6 +6808,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
           roles: ['print_partner'],
           permissions: [
             'files.download',
+            'inventory.manage',
+            'inventory.read',
             'orders.read',
             'orders.status',
             'partners.availability',
@@ -7634,7 +7646,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -8010,7 +8022,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -8529,7 +8541,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -10312,7 +10324,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
@@ -10790,7 +10802,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -11665,6 +11677,440 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         } finally {
           await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, noor));
         }
+      });
+    });
+
+    /**
+     * موجودی کاغذ (برش ۱۰٫۴، ADR-070): همان سفارش‌سازی گزارش تولید (`paidOrder`، تخصیص پرداخت: مشهد به «چاپ نور»، تهران به «چاپخانهٔ
+     * جزوه‌یار»). تعرفهٔ فعال همان پایه است (فقط تحریر A4)، پس قلم گلاسهٔ A5 با SQL می‌نشیند؛ تریگر به تعرفهٔ فعال کاری ندارد.
+     */
+    describe('موجودی کاغذ روی پستگرس (برش ۱۰٫۴)', () => {
+      const inventory = () => createInventoryStore(conn);
+      const event = (action: string) => ({ adminUserId: owner, action, targetType: 'paper_stock', at: NOW });
+      const TAHRIR = 'تحریر ۸۰ گرم';
+      const balanceOf = async (itemId: string) =>
+        Number(
+          (await conn.db.execute<{ b: string }>(sql`SELECT coalesce(sum(delta_sheets), 0)::text AS b FROM paper_stock_moves WHERE item_id = ${itemId}`))[0]!
+            .b,
+        );
+      const movesOf = (itemId: string) =>
+        conn.db.select().from(paperStockMoves).where(eq(paperStockMoves.itemId, itemId)).orderBy(asc(paperStockMoves.id));
+      const stockEvents = (actions: string[]) =>
+        conn.db.select().from(adminEvents).where(inArray(adminEvents.action, actions)).orderBy(asc(adminEvents.id));
+
+      async function trackTahrir(partnerId = noor, countedSheets = 1_000, thresholdSheets: number | null = null): Promise<StockItem> {
+        const result = await inventory().track(ALL_ORDERS, {
+          partnerId,
+          paperTypeId: 'tahrir80',
+          paperSize: 'a4',
+          countedSheets,
+          thresholdSheets,
+          requestId: randomUUID(),
+          at: NOW,
+          event: event('inventory.track'),
+        });
+        if (!result.ok) throw new Error(`پیگیری شروع نشد: ${result.reason}`);
+        return result.item;
+      }
+      /** قلم گلاسهٔ A5 با SQL (تعرفهٔ فعال گلاسه ندارد) و شمارش اولش از همان `record`. */
+      async function glossyA5(partnerId = noor, sheets = 500): Promise<string> {
+        const [item] = await conn.db
+          .insert(paperStockItems)
+          .values({ printPartnerId: partnerId, paperTypeId: 'glossy', paperSize: 'a5', createdBy: owner, createdAt: NOW })
+          .returning({ id: paperStockItems.id });
+        const counted = await inventory().record(ALL_ORDERS, {
+          itemId: item!.id,
+          kind: 'count',
+          sheets,
+          note: 'شمارش اول',
+          requestId: randomUUID(),
+          at: NOW,
+          event: event('inventory.count'),
+        });
+        expect(counted.ok).toBe(true);
+        return item!.id;
+      }
+      const glossyJozve = { pages: 10, sides: 'single' as const, size: 'a5' as const, paper: 'glossy', binding: 'staple' };
+
+      beforeEach(async () => {
+        // سفارش‌ها و موجودی (`clearOrders`)، و رویدادها؛ همه پاک‌نشدنی‌اند و TRUNCATE تریگر ردیفی ندارد.
+        await clearOrders(conn);
+        await conn.db.execute(sql`TRUNCATE admin_events`);
+      });
+
+      it('برگ هر کاغذ و اندازهٔ سفارش از ریز قیمت منجمد: برگ × نسخهٔ هر جزوه، همان «برگ» گزارش تولید', async () => {
+        // تحریر A4 دورو ۲۱ صفحه در دو نسخه (۱۱ × ۲)، گلاسهٔ A5 یکرو ۱۰ صفحه، و تحریر A4 یکرو ۸ صفحه در سه نسخه (۸ × ۳).
+        const order = await paidOrder([{ pages: 21, copies: 2 }, glossyJozve, { pages: 8, copies: 3, sides: 'single' }], { place: MASHHAD });
+        const rows = await conn.db.execute<{ paper_type_id: string; paper_size: string; sheets: string }>(
+          sql`SELECT paper_type_id, paper_size::text AS paper_size, sheets::text AS sheets FROM order_paper_sheets(${order.id}) ORDER BY 1, 2`,
+        );
+        expect(rows.map((row) => [row.paper_type_id, row.paper_size, Number(row.sheets)])).toEqual([
+          ['glossy', 'a5', 10],
+          ['tahrir80', 'a4', 46],
+        ]);
+        const [report] = await production().orders(ALL_ORDERS, { by: 'number', from: order.orderNumber, to: order.orderNumber }, null);
+        expect(report!.items.map((item) => item.sheets * item.copies)).toEqual([22, 10, 24]);
+      });
+
+      it('«شروع چاپ» از قلم‌های چاپخانهٔ همان سفارش کم می‌کند؛ برگرداندن برمی‌گرداند، و لغو پس از شروع چاپ و برگشت لغو نه', async () => {
+        const tahrir = await trackTahrir();
+        const glossy = await glossyA5();
+        const elsewhere = await trackTahrir(first, 300);
+        const order = await paidOrder([{ pages: 21, copies: 2 }, glossyJozve], { place: MASHHAD });
+        expect(order.printPartnerId).toBe(noor);
+        expect((await change(order, 'paid', 'printing')).ok).toBe(true);
+        expect([await balanceOf(tahrir.id), await balanceOf(glossy), await balanceOf(elsewhere.id)]).toEqual([978, 490, 300]);
+        const [printRow] = (await movesOf(tahrir.id)).filter((row) => row.kind === 'print');
+        expect(printRow).toMatchObject({ deltaSheets: -22, orderId: order.id, createdBy: null, requestId: null, note: null, undoes: null });
+
+        // برگرداندن به «در صف چاپ»: همان برگ‌ها، با ردیفی که همان ردیف چاپ را برمی‌گرداند.
+        expect((await change(order, 'printing', 'paid', 'اشتباه زدم')).ok).toBe(true);
+        expect([await balanceOf(tahrir.id), await balanceOf(glossy)]).toEqual([1_000, 500]);
+        expect((await movesOf(tahrir.id)).filter((row) => row.kind === 'unprint')).toMatchObject([
+          { deltaSheets: 22, orderId: order.id, undoes: printRow!.id, createdBy: null },
+        ]);
+
+        // دوباره شروع چاپ، بعد لغو: کاغذ مصرف شده و برنمی‌گردد؛ برگشت لغو به «در حال چاپ» هم دوباره کم نمی‌کند.
+        expect((await change(order, 'paid', 'printing')).ok).toBe(true);
+        expect((await change(order, 'printing', 'cancelled', 'مشتری نخواست')).ok).toBe(true);
+        expect(await balanceOf(tahrir.id)).toBe(978);
+        expect((await change(order, 'cancelled', 'printing', 'لغو اشتباه بود')).ok).toBe(true);
+        expect(await balanceOf(tahrir.id)).toBe(978);
+        // «تحویل پست شد» و برگشتش هیچ؛ برگرداندن به صف فقط ردیف چاپی را برمی‌گرداند که هنوز برنگشته.
+        expect((await change(order, 'printing', 'handed_to_post')).ok).toBe(true);
+        expect((await change(order, 'handed_to_post', 'printing', 'کد اشتباه')).ok).toBe(true);
+        expect(await balanceOf(tahrir.id)).toBe(978);
+        expect((await change(order, 'printing', 'paid', 'هنوز چاپ نشده')).ok).toBe(true);
+        expect((await movesOf(tahrir.id)).map((row) => [row.kind, row.deltaSheets])).toEqual([
+          ['count', 1_000],
+          ['print', -22],
+          ['unprint', 22],
+          ['print', -22],
+          ['unprint', 22],
+        ]);
+        expect(await balanceOf(elsewhere.id)).toBe(300);
+      });
+
+      it('سفارشی که از «لغو شد» به صف برگردد هم برگ‌های چاپ‌شده‌اش را پس می‌گیرد؛ سفارش چاپخانهٔ دیگر و کاغذ پیگیری‌نشده هیچ', async () => {
+        const tahrir = await trackTahrir();
+        const order = await paidOrder([{ pages: 30, copies: 4 }], { place: MASHHAD });
+        // هر راهی، حتی UPDATE مستقیم؛ و تغییری که وضعیت را عوض نمی‌کند هیچ.
+        await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, order.id));
+        expect(await balanceOf(tahrir.id)).toBe(940);
+        await conn.db.update(orders).set({ status: 'printing' }).where(eq(orders.id, order.id));
+        expect(await balanceOf(tahrir.id)).toBe(940);
+        await conn.db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, order.id));
+        expect(await balanceOf(tahrir.id)).toBe(940);
+        await conn.db.update(orders).set({ status: 'paid' }).where(eq(orders.id, order.id));
+        expect(await balanceOf(tahrir.id)).toBe(1_000);
+
+        const tehranOrder = await paidOrder([{ pages: 40 }], { place: TEHRAN });
+        expect(tehranOrder.printPartnerId).toBe(first);
+        expect((await change(tehranOrder, 'paid', 'printing')).ok).toBe(true);
+        const glossyOnly = await paidOrder([glossyJozve], { place: MASHHAD });
+        expect((await change(glossyOnly, 'paid', 'printing')).ok).toBe(true);
+        expect(await conn.db.select().from(paperStockMoves).where(inArray(paperStockMoves.orderId, [tehranOrder.id, glossyOnly.id]))).toEqual([]);
+        expect(await balanceOf(tahrir.id)).toBe(1_000);
+      });
+
+      it('محافظ‌ها: ردیف خودکار فقط از تریگر، شکل هر نوع، شمارش از موجودی همان لحظه، و دفتر و قلم فقط افزودنی', async () => {
+        const tahrir = await trackTahrir();
+        const order = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        const manual = (values: Partial<typeof paperStockMoves.$inferInsert>) =>
+          rejectedConstraint(
+            conn.db
+              .insert(paperStockMoves)
+              .values({ itemId: tahrir.id, kind: 'purchase', deltaSheets: 10, createdBy: owner, requestId: randomUUID(), ...values }),
+          );
+        const automatic = { orderId: order.id, createdBy: null, requestId: null };
+        expect(await manual({ kind: 'print', deltaSheets: -10, ...automatic })).toBe('paper_stock_moves_automatic');
+        expect(await manual({ kind: 'unprint', deltaSheets: 10, undoes: 1, ...automatic })).toBe('paper_stock_moves_automatic');
+        expect(await manual({ deltaSheets: -10 })).toBe('paper_stock_moves_shape');
+        expect(await manual({ kind: 'waste', deltaSheets: -10 })).toBe('paper_stock_moves_shape');
+        expect(await manual({ kind: 'waste', deltaSheets: 10, note: 'خیس شد' })).toBe('paper_stock_moves_shape');
+        expect(await manual({ kind: 'count', countedSheets: 5 })).toBe('paper_stock_moves_shape');
+        expect(await manual({ kind: 'count', countedSheets: -1, note: 'شمارش' })).toBe('paper_stock_moves_shape');
+        expect(await manual({ orderId: order.id })).toBe('paper_stock_moves_shape');
+        expect(await manual({ requestId: null })).toBe('paper_stock_moves_shape');
+        expect(await manual({ countedSheets: 10 })).toBe('paper_stock_moves_shape');
+        expect(await manual({ deltaSheets: 100_000_001 })).toBe('paper_stock_moves_shape');
+        expect(await manual({ note: ' جای خالی' })).toBe('paper_stock_moves_note');
+        expect(await manual({ note: 'ی'.repeat(301) })).toBe('paper_stock_moves_note');
+        expect(await manual({ kind: 'waste', deltaSheets: -10, note: 'خیس شد' })).toBeUndefined();
+        expect(await manual({ note: 'ی'.repeat(300) })).toBeUndefined();
+        // شمارش: هر چه کد بفرستد، تغییر همان شمرده منهای موجودی همان لحظه است.
+        expect(await manual({ kind: 'count', deltaSheets: 999, countedSheets: 700, note: 'شمارش ماه' })).toBeUndefined();
+        const last = (await movesOf(tahrir.id)).at(-1)!;
+        expect(last).toMatchObject({ kind: 'count', countedSheets: 700, deltaSheets: 700 - (1_000 - 10 + 10) });
+        expect(await balanceOf(tahrir.id)).toBe(700);
+        expect(await manual({ requestId: last.requestId })).toBe('paper_stock_moves_request');
+
+        expect(await rejectedConstraint(conn.db.update(paperStockMoves).set({ note: 'دیگر' }).where(eq(paperStockMoves.id, last.id)))).toBe(
+          'paper_stock_moves_append_only',
+        );
+        expect(await rejectedConstraint(conn.db.delete(paperStockMoves).where(eq(paperStockMoves.id, last.id)))).toBe('paper_stock_moves_append_only');
+        expect(await rejectedConstraint(conn.db.delete(paperStockItems).where(eq(paperStockItems.id, tahrir.id)))).toBe('paper_stock_items_no_delete');
+        expect(await rejectedConstraint(conn.db.update(paperStockItems).set({ paperSize: 'a5' }).where(eq(paperStockItems.id, tahrir.id)))).toBe(
+          'paper_stock_items_frozen',
+        );
+        expect(await rejectedConstraint(conn.db.update(paperStockItems).set({ printPartnerId: first }).where(eq(paperStockItems.id, tahrir.id)))).toBe(
+          'paper_stock_items_frozen',
+        );
+        expect(await rejectedConstraint(conn.db.update(paperStockItems).set({ thresholdSheets: 200 }).where(eq(paperStockItems.id, tahrir.id)))).toBeUndefined();
+
+        const item = (values: Partial<typeof paperStockItems.$inferInsert>) =>
+          rejectedConstraint(
+            conn.db.insert(paperStockItems).values({ printPartnerId: noor, paperTypeId: 'tahrir80', paperSize: 'a3', createdBy: owner, ...values }),
+          );
+        expect(await item({ paperTypeId: 'Tahrir80' })).toBe('paper_stock_items_paper');
+        expect(await item({ paperTypeId: 't' })).toBe('paper_stock_items_paper');
+        expect(await item({ thresholdSheets: -1 })).toBe('paper_stock_items_threshold');
+        expect(await item({ thresholdSheets: 10_000_001 })).toBe('paper_stock_items_threshold');
+        expect(await item({ paperSize: 'a4' })).toBe('paper_stock_items_key');
+      });
+
+      it('ردیف خودکار نادرست از درون تریگر هم رد می‌شود: برگشت جز همان ردیف چاپ با همان برگ‌ها، یک بار، و چاپ برای سفارش چاپخانهٔ دیگر', async () => {
+        const tahrir = await trackTahrir();
+        const order = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        const other = await paidOrder([{ pages: 20 }], { place: TEHRAN });
+        expect((await change(order, 'paid', 'printing')).ok).toBe(true);
+        const [counted, printRow] = await movesOf(tahrir.id);
+        /** درج از درون تریگری آزمایشی (عمق دو)، در تراکنشی که همیشه برمی‌گردد. شناسه‌ها از خود پایگاه داده‌اند. */
+        const injected = (values: string) =>
+          rejectedConstraint(
+            conn.db.transaction(async (tx) => {
+              await tx.execute(sql.raw('CREATE TABLE stock_inject (x int)'));
+              await tx.execute(
+                sql.raw(`CREATE FUNCTION stock_inject() RETURNS trigger LANGUAGE plpgsql AS $$
+                  BEGIN INSERT INTO paper_stock_moves (item_id, kind, delta_sheets, order_id, undoes) VALUES (${values}); RETURN NULL; END $$`),
+              );
+              await tx.execute(sql.raw('CREATE TRIGGER stock_inject AFTER INSERT ON stock_inject FOR EACH ROW EXECUTE FUNCTION stock_inject()'));
+              await tx.execute(sql.raw('INSERT INTO stock_inject VALUES (1)'));
+              throw new Error('برگرد');
+            }),
+          );
+        expect(await injected(`'${tahrir.id}', 'unprint', 5, '${order.id}', ${printRow!.id}`)).toBe('paper_stock_moves_undo');
+        expect(await injected(`'${tahrir.id}', 'unprint', 1000, '${order.id}', ${counted!.id}`)).toBe('paper_stock_moves_undo');
+        expect(await injected(`'${tahrir.id}', 'unprint', 10, '${other.id}', ${printRow!.id}`)).toBe('paper_stock_moves_undo');
+        expect(await injected(`'${tahrir.id}', 'print', -5, '${other.id}', NULL`)).toBe('paper_stock_moves_order');
+        // درست از درون تریگر پذیرفته است (تراکنش با همان خطای آزمایشی برمی‌گردد).
+        expect(await injected(`'${tahrir.id}', 'unprint', 10, '${order.id}', ${printRow!.id}`)).toBeUndefined();
+        // پس از برگرداندن واقعی، همان ردیف چاپ دوباره برنمی‌گردد.
+        expect((await change(order, 'printing', 'paid', 'اشتباه')).ok).toBe(true);
+        expect(await injected(`'${tahrir.id}', 'unprint', 10, '${order.id}', ${printRow!.id}`)).toBe('paper_stock_moves_undoes');
+      });
+
+      it('قفل قلم در خود محافظ: شمارش مستقیم، بی ذخیره‌گاه، پشت «شروع چاپ» هم‌زمان همان قلم می‌ماند', async () => {
+        const tahrir = await trackTahrir();
+        const order = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        const codeOf = (error: unknown) => (error as { cause?: { code?: string } }).cause?.code ?? (error as { code?: string }).code;
+        // «شروع چاپ» در تراکنشی باز می‌ماند (ردیف چاپ نوشته و قلم قفل)؛ شمارش از اتصال دیگر تا ۳۰۰ میلی‌ثانیه پشت قفل قلم صبر می‌کند و نمی‌رسد.
+        // بی قفل، شمارش موجودی را بی ردیف چاپی می‌خواند که هنوز commit نشده، و پس از commit موجودی ۱۰ برگ کمتر از شمرده می‌ماند.
+        const counted = await conn.db
+          .transaction(async (tx) => {
+            await tx.update(orders).set({ status: 'printing' }).where(eq(orders.id, order.id));
+            const outcome = await conn.db
+              .transaction(async (other) => {
+                await other.execute(sql`SET LOCAL lock_timeout = '300ms'`);
+                await other
+                  .insert(paperStockMoves)
+                  .values({ itemId: tahrir.id, kind: 'count', deltaSheets: 0, countedSheets: 900, note: 'شمارش ماه', createdBy: owner, requestId: randomUUID() });
+                return 'inserted';
+              })
+              .catch(codeOf);
+            throw Object.assign(new Error('rollback'), { outcome });
+          })
+          .catch((error: { outcome?: string }) => error.outcome);
+        expect(counted).toBe('55P03');
+        expect(await balanceOf(tahrir.id)).toBe(1_000);
+      });
+
+      it('شروع پیگیری: یک قلم برای هر کاغذ و اندازه، فقط از تعرفهٔ فعال، هر فرم یک قلم، محدوده، و رویداد بی یادداشت', async () => {
+        expect(await inventory().papers()).toEqual([{ id: 'tahrir80', name: TAHRIR, sizes: ['a4'] }]);
+        const requestId = randomUUID();
+        const input = {
+          partnerId: noor,
+          paperTypeId: 'tahrir80',
+          paperSize: 'a4' as const,
+          countedSheets: 2_500,
+          thresholdSheets: 1_000,
+          requestId,
+          at: NOW,
+          event: event('inventory.track'),
+        };
+        const created = await inventory().track(ALL_ORDERS, input);
+        expect(created).toMatchObject({
+          ok: true,
+          duplicate: false,
+          item: { partnerId: noor, paperTypeId: 'tahrir80', paperSize: 'a4', paperName: TAHRIR, inTariff: true, balanceSheets: 2_500, thresholdSheets: 1_000 },
+        });
+        const id = created.ok ? created.item.id : '';
+        expect(await inventory().track(ALL_ORDERS, input)).toMatchObject({ ok: true, duplicate: true, item: { id } });
+        expect(await inventory().track(ALL_ORDERS, { ...input, countedSheets: 10 })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await inventory().track(ALL_ORDERS, { ...input, requestId: randomUUID() })).toEqual({ ok: false, reason: 'exists', itemId: id });
+        expect(await inventory().track(ALL_ORDERS, { ...input, requestId: randomUUID(), paperTypeId: 'glossy' })).toEqual({
+          ok: false,
+          reason: 'paper_not_found',
+        });
+        expect(await inventory().track(ALL_ORDERS, { ...input, requestId: randomUUID(), paperSize: 'a5' })).toEqual({
+          ok: false,
+          reason: 'paper_not_found',
+        });
+        expect(await inventory().track({ kind: 'partner', partnerId: noor }, { ...input, requestId: randomUUID(), partnerId: first })).toEqual({
+          ok: false,
+          reason: 'not_found',
+        });
+        // کاربر همان چاپخانه می‌تواند.
+        const own = await inventory().track({ kind: 'partner', partnerId: first }, { ...input, requestId: randomUUID(), partnerId: first });
+        expect(own).toMatchObject({ ok: true, item: { partnerId: first, balanceSheets: 2_500 } });
+
+        expect(await movesOf(id)).toMatchObject([
+          { kind: 'count', countedSheets: 2_500, deltaSheets: 2_500, note: 'شمارش اول', createdBy: owner, requestId },
+        ]);
+        const events = await stockEvents(['inventory.track']);
+        expect(events).toHaveLength(2);
+        expect(events[0]!.detail).toEqual({
+          item: id,
+          partner: { id: noor, name: 'چاپ نور' },
+          paper: { id: 'tahrir80', name: TAHRIR },
+          size: 'a4',
+          countedSheets: 2_500,
+          thresholdSheets: 1_000,
+        });
+      });
+
+      it('ورود، ضایعات و شمارش: هر فرم یک ردیف، موجودی پس از هر ردیف، محدوده، و رویداد بی یادداشت', async () => {
+        const item = await trackTahrir(noor, 1_000);
+        const base = (over: Partial<MoveInput>): MoveInput => ({
+          itemId: item.id,
+          kind: 'purchase',
+          sheets: 500,
+          note: null,
+          requestId: randomUUID(),
+          at: NOW,
+          event: event('inventory.purchase'),
+          ...over,
+        });
+        expect(await inventory().record(ALL_ORDERS, base({ note: 'خرید از پخش صبا' }))).toMatchObject({
+          ok: true,
+          duplicate: false,
+          move: { kind: 'purchase', deltaSheets: 500, balanceSheets: 1_500, createdBy: owner, createdByName: 'الهام فرجی' },
+          item: { balanceSheets: 1_500 },
+        });
+        const waste = base({ kind: 'waste', sheets: 40, note: 'گیر کردن کاغذ', event: event('inventory.waste') });
+        const wasted = await inventory().record(ALL_ORDERS, waste);
+        expect(wasted).toMatchObject({ ok: true, duplicate: false, move: { kind: 'waste', deltaSheets: -40, balanceSheets: 1_460 } });
+        const wasteId = wasted.ok ? wasted.move.id : 0;
+        expect(await inventory().record(ALL_ORDERS, waste)).toMatchObject({ ok: true, duplicate: true, move: { id: wasteId } });
+        expect(await inventory().record(ALL_ORDERS, { ...waste, sheets: 41 })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await inventory().record(ALL_ORDERS, { ...waste, note: 'دلیل دیگر' })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await inventory().record(ALL_ORDERS, { ...waste, kind: 'purchase' })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await inventory().record(ALL_ORDERS, base({ kind: 'count', sheets: 1_450, note: 'شمارش هفتگی', event: event('inventory.count') }))).toMatchObject({
+          ok: true,
+          move: { kind: 'count', countedSheets: 1_450, deltaSheets: -10, balanceSheets: 1_450 },
+          item: { balanceSheets: 1_450 },
+        });
+        expect(await inventory().record({ kind: 'partner', partnerId: first }, base({}))).toEqual({ ok: false, reason: 'not_found' });
+        expect(await inventory().record(ALL_ORDERS, base({ itemId: randomUUID() }))).toEqual({ ok: false, reason: 'not_found' });
+
+        const events = await stockEvents(['inventory.purchase', 'inventory.waste', 'inventory.count']);
+        expect(events.map((row) => row.action)).toEqual(['inventory.purchase', 'inventory.waste', 'inventory.count']);
+        expect(events[1]!.detail).toEqual({
+          item: item.id,
+          partner: { id: noor, name: 'چاپ نور' },
+          paper: { id: 'tahrir80', name: TAHRIR },
+          size: 'a4',
+          deltaSheets: -40,
+          balanceSheets: 1_460,
+        });
+        expect(events[2]!.detail).toMatchObject({ deltaSheets: -10, countedSheets: 1_450, balanceSheets: 1_450 });
+        expect(JSON.stringify(events.map((row) => row.detail))).not.toMatch(/پخش صبا|گیر کردن|شمارش هفتگی/);
+      });
+
+      it('آستانه: فقط وقتی عوض شود رویداد دارد، و در محدوده', async () => {
+        const item = await trackTahrir(noor, 1_000);
+        const set = (thresholdSheets: number | null, scope: PanelScope = ALL_ORDERS) =>
+          inventory().setThreshold(scope, { itemId: item.id, thresholdSheets, at: NOW, event: event('inventory.threshold') });
+        expect(await set(800)).toMatchObject({ ok: true, changed: true, item: { thresholdSheets: 800 } });
+        expect(await set(800)).toMatchObject({ ok: true, changed: false });
+        expect(await set(null, { kind: 'partner', partnerId: noor })).toMatchObject({ ok: true, changed: true, item: { thresholdSheets: null } });
+        expect(await set(5, { kind: 'partner', partnerId: first })).toEqual({ ok: false, reason: 'not_found' });
+        expect((await stockEvents(['inventory.threshold'])).map((row) => row.detail)).toMatchObject([
+          { item: item.id, from: null, to: 800 },
+          { item: item.id, from: 800, to: null },
+        ]);
+      });
+
+      it('نمای کلی، صفحهٔ چاپخانه و قلم: نیاز صف، ردیف‌ها با موجودی پس از هر کدام و «برگشت»، صفحه‌ها و محدوده', async () => {
+        const tahrir = await trackTahrir(noor, 100, 50);
+        const queued = await paidOrder([{ pages: 30, copies: 2 }], { place: MASHHAD });
+        const printing = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        expect((await change(printing, 'paid', 'printing')).ok).toBe(true);
+        expect((await change(printing, 'printing', 'paid', 'اشتباه')).ok).toBe(true);
+        expect((await change(printing, 'paid', 'printing')).ok).toBe(true);
+        expect(queued.status).toBe('paid');
+        // چاپخانهٔ غیرفعالی که قلمی ندارد در نمای کلی نیست؛ چاپخانه پاک نمی‌شود، پس تا TRUNCATE بخش بعد می‌ماند.
+        await conn.db.insert(printPartners).values({ name: 'چاپ قدیم', ...MASHHAD, deactivatedAt: NOW });
+
+        const overview = await inventory().overview(ALL_ORDERS);
+        expect(overview.map((row) => [row.partner.name, row.items.length])).toEqual([
+          ['چاپخانهٔ جزوه‌یار', 0],
+          ['چاپ نور', 1],
+        ]);
+        expect(overview[1]!.items[0]).toMatchObject({ id: tahrir.id, balanceSheets: 90, thresholdSheets: 50, queued: { orders: 1, sheets: 30 } });
+        expect((await inventory().partner(ALL_ORDERS, noor))!.items).toEqual(overview[1]!.items);
+
+        const view = (await inventory().item(ALL_ORDERS, tahrir.id, { limit: 50, offset: 0 }))!;
+        expect(view.partner).toMatchObject({ id: noor, name: 'چاپ نور', cityName: 'مشهد', active: true });
+        expect(view.total).toBe(4);
+        expect(view.moves.map((row) => [row.kind, row.deltaSheets, row.balanceSheets, row.orderNumber, row.undone])).toEqual([
+          ['print', -10, 90, printing.orderNumber, false],
+          ['unprint', 10, 100, printing.orderNumber, false],
+          ['print', -10, 90, printing.orderNumber, true],
+          ['count', 100, 100, null, false],
+        ]);
+        expect((await inventory().item(ALL_ORDERS, tahrir.id, { limit: 2, offset: 2 }))!.moves.map((row) => [row.kind, row.balanceSheets])).toEqual([
+          ['print', 90],
+          ['count', 100],
+        ]);
+
+        // محدوده: کاربر چاپخانهٔ دیگر نه قلم را می‌بیند نه چاپخانه را؛ کاربر همین چاپخانه فقط خودش.
+        expect(await inventory().item({ kind: 'partner', partnerId: first }, tahrir.id, { limit: 50, offset: 0 })).toBeNull();
+        expect(await inventory().partner({ kind: 'partner', partnerId: first }, noor)).toBeNull();
+        expect((await inventory().overview({ kind: 'partner', partnerId: noor })).map((row) => row.partner.id)).toEqual([noor]);
+        expect(await inventory().partner(ALL_ORDERS, randomUUID())).toBeNull();
+      });
+
+      it('هشدار: منفی، زیر آستانه و کمتر از نیاز صف، فقط چاپخانهٔ فعال و در محدوده', async () => {
+        const low = await trackTahrir(noor, 40, 100);
+        const negative = await trackTahrir(first, 10);
+        const jozveyar = await paidOrder([{ pages: 40 }], { place: TEHRAN });
+        expect((await change(jozveyar, 'paid', 'printing')).ok).toBe(true);
+        const flags = (alerts: Awaited<ReturnType<ReturnType<typeof inventory>['alerts']>>) =>
+          alerts.map((alert) => [alert.partner.name, alert.item.id, alert.negative, alert.belowThreshold, alert.shortForQueue]);
+        expect(flags(await inventory().alerts(ALL_ORDERS))).toEqual([
+          ['چاپخانهٔ جزوه‌یار', negative.id, true, false, false],
+          ['چاپ نور', low.id, false, true, false],
+        ]);
+        expect(flags(await inventory().alerts({ kind: 'partner', partnerId: noor }))).toEqual([['چاپ نور', low.id, false, true, false]]);
+
+        // چاپخانهٔ غیرفعال هشدار ندارد (بی سفارش باز غیرفعال می‌شود).
+        await conn.db.update(printPartners).set({ deactivatedAt: NOW }).where(eq(printPartners.id, noor));
+        try {
+          expect(flags(await inventory().alerts(ALL_ORDERS))).toEqual([['چاپخانهٔ جزوه‌یار', negative.id, true, false, false]]);
+          expect((await inventory().overview(ALL_ORDERS)).map((row) => [row.partner.name, row.partner.active])).toEqual([
+            ['چاپخانهٔ جزوه‌یار', true],
+            ['چاپ نور', false],
+          ]);
+        } finally {
+          await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, noor));
+        }
+
+        // آستانهٔ خالی و موجودی کافی: هیچ؛ سفارشی در صف که بیش از موجودی می‌خواهد: «کمتر از نیاز صف».
+        await inventory().setThreshold(ALL_ORDERS, { itemId: low.id, thresholdSheets: null, at: NOW, event: event('inventory.threshold') });
+        expect(flags(await inventory().alerts({ kind: 'partner', partnerId: noor }))).toEqual([]);
+        await paidOrder([{ pages: 100 }], { place: MASHHAD });
+        expect(flags(await inventory().alerts({ kind: 'partner', partnerId: noor }))).toEqual([['چاپ نور', low.id, false, false, true]]);
       });
     });
   });

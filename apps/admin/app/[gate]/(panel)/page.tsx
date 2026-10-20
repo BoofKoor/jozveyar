@@ -13,6 +13,7 @@ import { liveAlert } from '../../../lib/checkout';
 import { dayText, whenText } from '../../../lib/format';
 import { panelPath } from '../../../lib/gate';
 import { statsSegs } from '../../../lib/orders';
+import { alertReason, itemLabel, sheetsNumber } from '../../../lib/inventory';
 import { availabilityView } from '../../../lib/partners';
 import { can } from '../../../lib/server/auth';
 import { requirePanel, requireSession } from '../../../lib/server/context';
@@ -101,7 +102,7 @@ export default async function Dashboard({
 }) {
   const { gate } = await params;
   const query = await searchParams;
-  const { orders, settings, reviews, support, settlement } = requirePanel(gate);
+  const { orders, settings, reviews, support, settlement, inventory } = requirePanel(gate);
   const session = await requireSession(gate);
   const now = new Date();
   const head = (
@@ -121,14 +122,17 @@ export default async function Dashboard({
   // هشدارهای پیامک (۷٫۱) و وضعیت مسیر خرید روی سایت (۷٫۵): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
   // نظرهای تازه (۱۲٫۳): فقط مالک (`reviews.manage`)؛ و پیام‌های بی پاسخ و پیامک پاسخی که نرفت (۱۲٫۱): مالک و متصدی (`support.reply`)؛ برای بقیه null.
   // درصد سهم تعیین‌نشده (۱۰٫۳، سؤال ۳۹۵): فقط مالک، که درصد را می‌گذارد؛ برای بقیه null.
-  const [sms, checkout, pendingReviews, supportAlerts, unsetShares] = await Promise.all([
+  // کاغذ کم (۱۰٫۴، سؤال ۴۱۳): مالک، متصدی و کاربر چاپخانه (فقط خودش)؛ حسابدار null.
+  const [sms, checkout, pendingReviews, supportAlerts, unsetShares, stockAlerts] = await Promise.all([
     settings.smsAlerts(session),
     settings.checkoutStatus(session),
     reviews.pendingCount(session),
     support.alerts(session),
     settlement.unsetShares(session),
+    inventory.alerts(session),
   ]);
   const noShare = unsetShares ?? [];
+  const stock = stockAlerts ?? [];
   const unanswered = supportAlerts && supportAlerts.open.count > 0 ? supportAlerts.open : null;
   const replySmsFailed = supportAlerts?.smsFailed ?? [];
   const live = liveAlert(checkout, now);
@@ -225,6 +229,7 @@ export default async function Dashboard({
       alerts.held.length > 0 ||
       alerts.unassigned.length > 0 ||
       noShare.length > 0 ||
+      stock.length > 0 ||
       alerts.reviewRows > 0 ||
       alerts.smsFailed.length > 0 ||
       alerts.paidSmsFailed.length > 0 ||
@@ -481,6 +486,37 @@ export default async function Dashboard({
               </span>
             </p>
           ) : null}
+          {stock.map((alert) => {
+            // کاغذ کم (۱۰٫۴، سؤال ۴۱۳): منفی و کمتر از نیاز صف خطا، چون کاغذ سفارش‌های صف همین حالا کم است؛ زیر آستانه هشدار.
+            const reason = alertReason(alert);
+            const tone = reason === 'low' ? 'warning' : 'error';
+            return (
+              <p key={alert.item.id} className={`jy-note jy-note--${tone}`} data-alert="stock">
+                <span className={`jy-icon jy-icon-${tone}`} aria-hidden="true" />
+                <span>
+                  <Link className="jy-link" href={panelPath(gate, `/inventory/${alert.partner.id}/${alert.item.id}`)}>
+                    {itemLabel(alert.item)}
+                  </Link>{' '}
+                  {alert.partner.name}:{' '}
+                  {reason === 'negative' ? (
+                    <>
+                      موجودی <span className="num">{sheetsNumber(alert.item.balanceSheets)}</span> برگ است؛ ورود یا شمارش ثبت نشده.
+                    </>
+                  ) : reason === 'short' ? (
+                    <>
+                      فقط <span className="num">{formatNumber(alert.item.balanceSheets)}</span> برگ مانده و سفارش‌های در صف{' '}
+                      <span className="num">{formatNumber(alert.item.queued.sheets)}</span> برگ می‌خواهند.
+                    </>
+                  ) : (
+                    <>
+                      فقط <span className="num">{formatNumber(alert.item.balanceSheets)}</span> برگ مانده؛ آستانه{' '}
+                      <span className="num">{formatNumber(alert.item.thresholdSheets ?? 0)}</span> برگ است.
+                    </>
+                  )}
+                </span>
+              </p>
+            );
+          })}
           {alerts.reviewRows > 0 ? (
             // صف تأیید (۶٫۲)، فقط مالک و متصدی.
             <p className="jy-note jy-note--warning" data-alert="review">

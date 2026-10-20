@@ -24,6 +24,7 @@ import {
   createRefundStore,
   createReportExportStore,
   createSettlementStore,
+  createInventoryStore,
   createReviewStore,
   createSecretStore,
   createSettingsStore,
@@ -64,6 +65,7 @@ import { createPanelReport, type PanelReport } from './report';
 import { createPanelReviews, type PanelReviews } from './reviews';
 import { createPanelSettings, type PanelSettings } from './settings';
 import { createPanelSettlement, type PanelSettlement } from './settlement';
+import { createPanelInventory, type PanelInventory } from './inventory';
 import { createPanelShipments, type PanelShipments } from './shipments';
 import { createPanelSupport, type PanelSupport } from './support';
 import { createPanelTariff, type PanelTariff } from './tariff';
@@ -80,6 +82,7 @@ interface Panel {
   report: PanelReport;
   production: PanelProduction;
   settlement: PanelSettlement;
+  inventory: PanelInventory;
   exports: PanelExports;
   templates: PanelTemplates;
   discounts: PanelDiscounts;
@@ -177,6 +180,8 @@ function build(config: AdminConfig): Panel {
     // گزارش تولید (۱۰٫۲، ADR-061): مالک، حسابدار و کاربر چاپخانه (فقط خودش، بی مبلغ).
     production,
     settlement,
+    // موجودی کاغذ (۱۰٫۴، ADR-070): مالک و متصدی همه، کاربر چاپخانه خودش؛ بی کد تازه.
+    inventory: createPanelInventory({ store: createInventoryStore(getDb()), secret: config.secret }),
     // خروجی اکسل و PDF گزارش‌ها (۱۰٫۲): PDF را کارگر می‌سازد و فقط خواهنده، با همان دسترسی امروز، دانلودش می‌کند.
     exports: createPanelExports({ store: createReportExportStore(getDb()), events: admins, production, report, settlement, secret: config.secret }),
     // قالب برگه‌ها (۹٫۲، ADR-057): فقط مالک؛ فعال کردن با همان کد تازهٔ ورود. پیش‌نمایش را کارگر می‌سازد و پنل فقط فایلش را می‌خواند.

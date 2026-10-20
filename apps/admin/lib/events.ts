@@ -642,6 +642,34 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
       const kind = detail.kind === 'payment' ? 'پرداخت' : 'اصلاح';
       return { badge: null, text: merged([`${kind} `, ...money, ` ${name}، روز `, ...day, '، باطل شد']) };
     }
+    case 'inventory.track':
+    case 'inventory.purchase':
+    case 'inventory.waste':
+    case 'inventory.count':
+    case 'inventory.threshold': {
+      // موجودی کاغذ (۱۰٫۴، سؤال ۴۱۸): کاغذ، اندازه، چاپخانه و برگ؛ یادداشت و دلیل نه (در صفحهٔ همان کاغذند).
+      const partner = (detail.partner ?? {}) as { name?: unknown };
+      const paper = (detail.paper ?? {}) as { id?: unknown; name?: unknown };
+      const what = `${str(paper.name) || str(paper.id)} ${str(detail.size).toUpperCase()} «${str(partner.name)}»`;
+      const sheets = (value: unknown): Segment[] =>
+        typeof value === 'number' ? [{ ltr: value < 0 ? `−${formatNumber(-value)}` : formatNumber(value) }, ' برگ'] : [];
+      const balance = ['؛ موجودی ', ...sheets(detail.balanceSheets)];
+      if (event.action === 'inventory.track') {
+        const threshold = typeof detail.thresholdSheets === 'number' ? ['، آستانه ', ...sheets(detail.thresholdSheets)] : [];
+        return { badge: null, text: merged([`پیگیری ${what} شروع شد با `, ...sheets(detail.countedSheets), ...threshold]) };
+      }
+      if (event.action === 'inventory.purchase') return { badge: null, text: merged(['ورود ', ...sheets(detail.deltaSheets), ` به ${what}`, ...balance]) };
+      if (event.action === 'inventory.waste') {
+        const delta = typeof detail.deltaSheets === 'number' ? -detail.deltaSheets : null;
+        return { badge: null, text: merged(['ضایعات ', ...sheets(delta), ` از ${what}`, ...balance]) };
+      }
+      if (event.action === 'inventory.count') {
+        const delta = typeof detail.deltaSheets === 'number' && detail.deltaSheets !== 0 ? [' (', ...sheets(detail.deltaSheets), ')'] : [];
+        return { badge: null, text: merged([`شمارش ${what}: `, ...sheets(detail.countedSheets), ...delta]) };
+      }
+      const limit = (value: unknown): Segment[] => (typeof value === 'number' ? sheets(value) : ['بی آستانه']);
+      return { badge: null, text: merged([`آستانهٔ ${what}: `, ...limit(detail.from), ' ← ', ...limit(detail.to)]) };
+    }
     case 'discounts.create':
       // کد تخفیف (۱۱٫۴، سؤال ۳۰۴): متن کد، بی مبلغ؛ شرط‌ها در صفحهٔ همان کد است.
       return { badge: null, text: ['کد تخفیف ', ltrOf(detail.code), ' ساخته شد'] };
@@ -801,7 +829,7 @@ export function byDay(lines: readonly EventLine[]): { day: string; at: Date; lin
  * همان سفارش است، پس زیر «سفارش»؛ کارهای صف تأیید و کنار گذاشتن یک کد (۶٫۲) زیر «ارسال»، هر چند هدفشان سفارش است (تصمیم ۸۷)؛ و
  * پیامک پرداخت، استعلام و بازپرداخت زیر «پرداخت و بازپرداخت» (سؤال ۱۴۱)، و آزمایش کلید زیر «تنظیمات و کلیدها». خروجی گزارش‌ها (۱۰٫۲،
  * سؤال ۲۷۹) زیر «گزارش‌ها»، دفتر تسویهٔ چاپخانه‌ها (۱۰٫۳، سؤال ۴۰۲) زیر «تسویه» پس از آن (درصد سهم کار روی چاپخانه است، پس زیر
- * «چاپخانه‌ها»)، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
+ * «چاپخانه‌ها»)، موجودی کاغذ (۱۰٫۴، سؤال ۴۱۸) زیر «موجودی کاغذ» پس از «تسویه»، کدهای تخفیف (۱۱٫۴، سؤال ۳۰۴) زیر «تخفیف‌ها»، مسدودی موبایل مشتری (۱۲٫۲، سؤال ۳۲۰) زیر «مشتری‌ها»، و تصمیم
  * روی نظر مشتری‌ها (۱۲٫۳) زیر «نظرها»، آخر. انتشار متن‌های سایت (۱۱٫۱)، نوار اعلان (۱۱٫۳) و لوگو و بنر (۱۱٫۲) زیر «محتوای سایت»، پس از
  * «تعرفه»، و پاسخ، بستن و «دوباره بفرست» پشتیبانی (۱۲٫۱، سؤال ۳۱۶) زیر «پشتیبانی» پس از آن، به ترتیب طرح.
  */
@@ -819,6 +847,7 @@ export const EVENT_KINDS = [
   { kind: 'admins', label: 'ادمین‌ها' },
   { kind: 'reports', label: 'گزارش‌ها' },
   { kind: 'settlements', label: 'تسویه' },
+  { kind: 'inventory', label: 'موجودی کاغذ' },
   { kind: 'discounts', label: 'تخفیف‌ها' },
   { kind: 'customers', label: 'مشتری‌ها' },
   { kind: 'reviews', label: 'نظرها' },

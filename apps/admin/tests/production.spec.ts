@@ -341,7 +341,7 @@ test.describe.serial('گزارش تولید و خروجی‌ها (۱۰٫۲)', ()
     const { page, problems } = who.partner;
     await page.goto(at('/'));
     // «ارسال» فایل پست خودش است (۶٫۲).
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'گزارش‌ها']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'موجودی کاغذ', 'گزارش‌ها']);
     // چاپخانهٔ دیگری در نشانی هم همان محدودهٔ خودش است.
     const defaultId = (await sql<{ id: string }[]>`SELECT id FROM print_partners WHERE is_default`)[0]!.id;
     await page.goto(at(`/reports?nfrom=${a.number}&nto=${c.number}&p=${defaultId}`));
