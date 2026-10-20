@@ -37,6 +37,7 @@ export * from './shipments.js';
 export * from './report.js';
 export * from './production.js';
 export * from './exports.js';
+export * from './settlement.js';
 export * from './tariff.js';
 export * from './templates.js';
 export * from './content.js';

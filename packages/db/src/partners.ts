@@ -13,6 +13,9 @@
  *   شماره در رویداد پوشیده است و پوشاندنش با سرویس پنل (`detail` رویداد)، نه اینجا.
  * - **در دسترس بودن** (برش ۱۰٫۱، سؤال ۲۰۰): «باز»، «شلوغ» یا «تعطیل از … تا …» با یادداشت، زیر همان قفل و از همان که ادمین دید؛ مالک،
  *   متصدی و کاربر خود چاپخانه (مجوز و محدوده در سرویس پنل). فقط سفارش‌های بعدی را جابه‌جا می‌کند (`rankPartners`)؛ روی برگه نیست.
+ * - **درصد سهم** (برش ۱۰٫۳، سؤال ۳۹۱): فقط مالک، زیر همان قفل و از همان که دید. فقط سپردن‌های بعدی را عوض می‌کند: سهم هر تخصیص را خود
+ *   پایگاه داده هنگام درج منجمد می‌کند (`order_assignments_share`)، و تخصیص در پرداخت و پنل ردیف چاپخانه را پیش از درج `FOR SHARE` می‌گیرد،
+ *   پس درصد تازه یا پیش از آن تخصیص است یا پس از آن.
  */
 
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
@@ -61,6 +64,8 @@ export interface PartnerView {
   closedFrom: Date | null;
   closedUntil: Date | null;
   availabilityNote: string | null;
+  /** درصد سهم (برش ۱۰٫۳)، صدم درصد؛ null یعنی تعیین نشده. */
+  shareBp: number | null;
 }
 
 /** در دسترس بودن یک چاپخانه (برش ۱۰٫۱): «تعطیل» با هر دو روز، بقیه بی روز؛ یادداشت فقط برای شلوغ و تعطیل. */
@@ -126,6 +131,11 @@ export interface PartnerStore {
     next: AvailabilityState;
     event: AdminEventInput;
   }): Promise<'ok' | 'same' | 'not_found' | 'inactive' | 'changed'>;
+  /**
+   * درصد سهم تازه (برش ۱۰٫۳، سؤال ۳۹۱)، صدم درصد، از همان که مالک دید (`seen`؛ وگرنه `changed`)، با رویداد در همان تراکنش (از و به)؛ بی
+   * تغییر `same` و بی رویداد. غیرفعال هم، چون دوباره فعال می‌شود؛ پاک کردن درصد نه، چون «سهمی ندارد» همان ۰ است.
+   */
+  setShare(input: { id: string; seen: number | null; next: number; event: AdminEventInput }): Promise<'ok' | 'same' | 'not_found' | 'changed'>;
 }
 
 /** دو حالت در دسترس بودن یکی‌اند؟ */
@@ -181,6 +191,7 @@ export function createPartnerStore({ db }: Database): PartnerStore {
         closedFrom: printPartners.closedFrom,
         closedUntil: printPartners.closedUntil,
         availabilityNote: printPartners.availabilityNote,
+        shareBp: printPartners.shareBp,
       })
       .from(printPartners)
       .innerJoin(provinces, eq(provinces.id, printPartners.provinceId))
@@ -374,6 +385,25 @@ export function createPartnerStore({ db }: Database): PartnerStore {
               from: availabilityDetail(current),
               to: availabilityDetail(next),
             },
+          }),
+        );
+        return 'ok' as const;
+      });
+    },
+
+    async setShare({ id, seen, next, event }) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${PARTNERS_LOCK})`);
+        const [partner] = await tx.select().from(printPartners).where(eq(printPartners.id, id)).limit(1).for('update');
+        if (!partner) return 'not_found' as const;
+        if (partner.shareBp !== seen) return 'changed' as const;
+        if (partner.shareBp === next) return 'same' as const;
+        await tx.update(printPartners).set({ shareBp: next }).where(eq(printPartners.id, id));
+        await tx.insert(adminEvents).values(
+          adminEventRow({
+            ...event,
+            targetId: id,
+            detail: { ...(event.detail as Record<string, unknown> | undefined), name: partner.name, from: partner.shareBp, to: next },
           }),
         );
         return 'ok' as const;

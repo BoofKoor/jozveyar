@@ -114,6 +114,7 @@ const order = (orderNumber: number, items: ProductionItem[], over: Partial<Produ
   paidAt: new Date('2026-10-14T06:30:00Z'),
   totalRials: 1_000_000n,
   partner: JOZVEYAR,
+  shareRials: null,
   items,
   ...over,
 });
@@ -123,14 +124,20 @@ const ORDERS: ProductionOrder[] = [
   order(10027, [
     item({ pageCount: 21, copies: 2, files: 2, bwSides: 21, sheets: 11 }),
     item({ seq: 2, pageCount: 10, sidesMode: 'single', paperSize: 'a5', bindingTypeId: 'staple', bindingName: 'منگنه', colorSides: 10, bwSides: 0, sheets: 10, papers: [{ id: 'glossy', name: 'گلاسه' }], ready: false }),
-  ], { totalRials: 2_500_005n }),
+  ], { totalRials: 2_500_005n, shareRials: 1_625_000n }),
   // جزوهٔ کلفت دو جلدی، سه نسخه، پیش چاپ نور، در حال چاپ.
-  order(10028, [item({ pageCount: 1700, copies: 3, bwSides: 1700, sheets: 850, volumes: 2 })], { status: 'printing', partner: NOOR, totalRials: 30_000_000n }),
+  order(10028, [item({ pageCount: 1700, copies: 3, bwSides: 1700, sheets: 850, volumes: 2 })], {
+    status: 'printing',
+    partner: NOOR,
+    totalRials: 30_000_000n,
+    shareRials: 19_500_000n,
+  }),
   // ترکیبی (رنگی و سیاه‌سفید) با دو کاغذ: «چند کاغذ». پیش از ۵٫۱ پست شد، پس فایل چاپ ندارد؛ ولی «هنوز آماده نیست» فقط «در صف چاپ» است.
   order(10029, [
     item({ pageCount: 7, colorSides: 2, bwSides: 5, sheets: 4, papers: [{ id: 'tahrir80', name: 'تحریر ۸۰ گرم' }, { id: 'glossy', name: 'گلاسه' }], ready: false }),
   ], { status: 'handed_to_post', partner: null, totalRials: 700_000n }),
   order(10030, [item()], { status: 'cancelled', totalRials: 1_200_000n }),
+  // سپرده وقتی چاپخانه درصد سهم نداشت (۱۰٫۳): بی سهم.
   order(10031, [item({ ready: false })], { totalRials: 900_000n }),
 ];
 
@@ -175,6 +182,12 @@ describe('جمع‌های گزارش تولید (سؤال‌های ۲۷۳ تا �
       ['p-2', 'چاپ نور · مشهد', 1, 1, 3, 5100, 2550, 30_000_000n],
       ['none', 'بی چاپخانه', 1, 1, 1, 7, 4, 700_000n],
     ]);
+    // سهم چاپخانه (۱۰٫۳، سؤال ۴۰۱): جمع سهم منجمد سفارش‌ها؛ سفارش بی سهم چاپخانه‌دار جدا شمرده می‌شود، و «بی چاپخانه» نه.
+    expect(report.partners.map((row) => [row.key, row.shareRials, row.unshared])).toEqual([
+      ['p-1', 1_625_000n, 1],
+      ['p-2', 19_500_000n, 0],
+      ['none', 0n, 0],
+    ]);
     // ۱۰۰۲۸ در حال چاپ است: فایل چاپش هر چه باشد آماده شمرده می‌شود.
     expect(report.notReady).toEqual([10027, 10031]);
     expect(orderBindingsText(ORDERS[0]!)).toBe('طلق و سیم × 2، منگنه × 1');
@@ -205,11 +218,13 @@ describe('سند خروجی گزارش تولید (سؤال‌های ۲۷۷ و �
       '⏳ 2 سفارش هنوز آماده نیست (فایل چاپ ساخته نشده): 10027، 10031',
       '1 سفارش لغوشده در بازه، در هیچ جمعی نیست: 10030 (پرداخت مشتری 120,000 تومان)',
     ]);
-    expect(doc.stats.at(-1)).toEqual({ label: 'مبلغ (تومان)', value: 250_001 + 3_000_000 + 70_000 + 90_000 });
+    expect(doc.stats.at(-2)).toEqual({ label: 'مبلغ (تومان)', value: 250_001 + 3_000_000 + 70_000 + 90_000 });
+    expect(doc.stats.at(-1)).toEqual({ label: 'سهم چاپخانه (تومان)', value: 162_500 + 1_950_000 });
     expect(doc.tables.map((t) => t.title)).toEqual(['جزوه‌ها', 'صحافی', 'اندازه و کاغذ', 'چاپخانه‌ها']);
     expect(doc.tables[0]!.total).toEqual(['جمع', 5, 2, 8, 17 + 5162]);
     expect(doc.tables[2]!.rows[1]).toEqual(['A4', 'چند کاغذ', 1, 4]);
-    expect(doc.tables[3]!.rows[0]).toEqual(['چاپخانهٔ جزوه‌یار · تهران', 2, 3, 4, 72, 42, 340_001]);
+    expect(doc.tables[3]!.rows[0]).toEqual(['چاپخانهٔ جزوه‌یار · تهران', 2, 3, 4, 72, 42, 340_001, 162_500]);
+    expect(doc.tables[3]!.rows[2]).toEqual(['بی چاپخانه', 1, 1, 1, 7, 4, 70_000, null]);
     expect(doc.detail!.rows.map((row) => row[0])).toEqual([10027, 10028, 10029, 10031]);
     expect(doc.detail!.rows[0]).toEqual([
       10027,
@@ -225,8 +240,11 @@ describe('سند خروجی گزارش تولید (سؤال‌های ۲۷۷ و �
       'طلق و سیم × 2، منگنه × 1',
       'هنوز نه',
       250_001,
+      162_500,
     ]);
-    expect(doc.detail!.columns.at(-1)).toEqual({ label: 'مبلغ (تومان)', numeric: true });
+    expect(doc.detail!.rows.at(-1)!.at(-1)).toBeNull();
+    expect(doc.detail!.columns.at(-2)).toEqual({ label: 'مبلغ (تومان)', numeric: true });
+    expect(doc.detail!.columns.at(-1)).toEqual({ label: 'سهم چاپخانه (تومان)', numeric: true });
   });
 
   it('بی مبلغ (کاربر چاپخانه): نه کاشی، نه ستون، نه مبلغ لغوشده؛ با یک چاپخانه جدول چاپخانه‌ها نیست', () => {
@@ -259,7 +277,8 @@ describe('سند به اکسل و PDF', () => {
       tables: { columns: { numeric: boolean }[]; rows: string[][]; total: string[] | null }[];
       detail: { rows: string[][]; note: string | null };
     };
-    expect(context.stats.at(-1)).toEqual({ label: 'مبلغ (تومان)', value: '3,410,001' });
+    expect(context.stats.at(-2)).toEqual({ label: 'مبلغ (تومان)', value: '3,410,001' });
+    expect(context.stats.at(-1)).toEqual({ label: 'سهم چاپخانه (تومان)', value: '2,112,500' });
     expect(context.tables[0]!.columns.map((c) => c.numeric)).toEqual([false, true, true, true, true]);
     expect(context.tables[0]!.total).toEqual(['جمع', '5', '2', '8', '5,179']);
     expect(context.detail.rows[1]![8]).toBe('5,100');

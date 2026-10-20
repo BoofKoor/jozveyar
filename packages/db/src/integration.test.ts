@@ -149,6 +149,8 @@ import { createTicketTemplateStore, PREVIEW_TICKET_TEMPLATE_JOB, TEMPLATE_TARGET
 import { createProductionReportStore, type ProductionOrder } from './production.js';
 import { createReportExportStore, RENDER_REPORT_JOB } from './exports.js';
 import { REPORT_EXPORT_MAX_BYTES, reportExports } from './schema.js';
+import { createSettlementStore, shareRialsOf, type LedgerInput, type SettlementRange } from './settlement.js';
+import { partnerLedger } from './schema.js';
 
 /**
  * نام محدودیتی که پستگرس رد کرده.
@@ -172,8 +174,10 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 /** سفارش‌ها و هر چه به آنها بسته است؛ پرداخت cascade ندارد (سابقهٔ پول بی‌صدا پاک نمی‌شود). */
 async function clearOrders({ db }: Database) {
-  // بازپرداخت پاک‌نشدنی است (0032)، مسدودی موبایل هم (0050)، و گفت‌وگوی پشتیبانی و پیام‌هایش هم (0058)؛ TRUNCATE تریگر ردیفی ندارد.
+  // بازپرداخت پاک‌نشدنی است (0032)، مسدودی موبایل هم (0050)، گفت‌وگوی پشتیبانی و پیام‌هایش هم (0058)، و دفتر تسویهٔ چاپخانه‌ها هم (0060)؛
+  // TRUNCATE تریگر ردیفی ندارد.
   await db.execute(sql`TRUNCATE refunds`);
+  await db.execute(sql`TRUNCATE partner_ledger`);
   await db.execute(sql`TRUNCATE mobile_blocks`);
   await db.execute(sql`TRUNCATE support_messages, support_threads`);
   await db.delete(payments);
@@ -3262,7 +3266,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -3324,8 +3328,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       // متصدی از ۵٫۳ لغو و مبلغ را با مجوز خودشان دارد، از ۶٫۱ ورود فایل پست (نه برگرداندنش)، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت
       // گزینه‌های تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها، از ۱۲٫۲ مسدود کردن موبایل مشتری، از ۱۱٫۳ نوار اعلان و از
       // ۱۲٫۱ پیام‌های پشتیبانی (سؤال ۳۱۳؛ حسابدار و چاپخانه نه)؛ چاپخانه فقط دیدن،
-      // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۲ گزارش تولید خودش (بی
-      // مبلغ). هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید هم نه (سؤال ۲۰۱). صریح، نه از کد.
+      // وضعیت و دانلود (ADR-042)، از ۶٫۲ ورود فایل پست خودش، نه صف، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، از ۱۰٫۲ گزارش تولید خودش (بی
+      // مبلغ)، و از ۱۰٫۳ صورت‌حساب تسویهٔ خودش. هیچ‌کدام گزارش ارسال نه؛ متصدی گزارش تولید و تسویه هم نه (سؤال‌های ۲۰۱ و ۳۹۹). صریح، نه از کد.
       expect(await read('operator')).toEqual([
         'content.bar',
         'customers.block',
@@ -3351,11 +3355,12 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.status',
         'partners.availability',
         'reports.production',
+        'settlements.read',
         'shipments.import',
       ]);
       expect([...ADMIN_ROLES.print_partner.permissions].sort()).toEqual(await read('print_partner'));
-      // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، از ۱۰٫۲ گزارش تولید، و از ۱۱٫۴ دیدن کدهای تخفیف؛ بی
-      // وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
+      // حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، از ۱۰٫۲ گزارش تولید، از ۱۱٫۴ دیدن کدهای تخفیف، و از
+      // ۱۰٫۳ تسویهٔ چاپخانه‌ها با ثبت پرداخت و اصلاح؛ بی وضعیت، دانلود، تعرفه، تنظیمات، ادمین‌ها و درصد سهم چاپخانه‌ها.
       expect(await read('accountant')).toEqual([
         'discounts.read',
         'orders.money',
@@ -3364,6 +3369,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         'orders.refund',
         'reports.production',
         'reports.read',
+        'settlements.manage',
+        'settlements.read',
       ]);
       expect([...ADMIN_ROLES.accountant.permissions].sort()).toEqual(await read('accountant'));
       await conn.db.insert(rolePermissions).values({ roleId: 'operator', permissionId: 'secrets.edit' });
@@ -3572,7 +3579,17 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await store.findSession(ali.sessionHash)).toMatchObject({
         revokedAt: null,
         roles: ['accountant'],
-        permissions: ['discounts.read', 'orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read'],
+        permissions: [
+          'discounts.read',
+          'orders.money',
+          'orders.notes',
+          'orders.read',
+          'orders.refund',
+          'reports.production',
+          'reports.read',
+          'settlements.manage',
+          'settlements.read',
+        ],
       });
       expect((await roleEvents()).map((e) => [e.adminUserId, e.targetType, e.targetId, e.ipHash, e.detail])).toEqual([
         [sara.userId, 'admin', ali.userId, 'ip', { username: 'ali', from: ['operator'], to: 'accountant' }],
@@ -3771,7 +3788,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -4250,7 +4267,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -5301,7 +5318,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5685,7 +5702,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -6165,7 +6182,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -6779,7 +6796,15 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         ]);
         expect(await store.findSession(hashes.hasan)).toMatchObject({
           roles: ['print_partner'],
-          permissions: ['files.download', 'orders.read', 'orders.status', 'partners.availability', 'reports.production', 'shipments.import'],
+          permissions: [
+            'files.download',
+            'orders.read',
+            'orders.status',
+            'partners.availability',
+            'reports.production',
+            'settlements.read',
+            'shipments.import',
+          ],
           partner: { id: noor, name: 'چاپ نور' },
         });
         expect(await store.findSession(hashes.ali)).toMatchObject({ roles: ['operator'], partner: null });
@@ -7609,7 +7634,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -7985,7 +8010,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -8504,7 +8529,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -10287,7 +10312,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
@@ -10765,7 +10790,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -10830,6 +10855,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         paidAt: tehran('2026-10-12 10:00'),
         totalRials: BigInt(aFrozen.total),
         partner: { id: first, name: 'چاپخانهٔ جزوه‌یار', cityName: 'تهران' },
+        shareRials: null,
         items: [
           {
             seq: 1,
@@ -11049,6 +11075,597 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect(await rejectedConstraint(conn.db.insert(jobs).values({ kind: RENDER_REPORT_JOB, reportExportId: other, payload: {} }))).toBe(
         'jobs_report_export_kind',
       );
+    });
+
+    /**
+     * تسویهٔ چاپخانه‌ها (برش ۱۰٫۳، ADR-069): همان سفارش‌سازی گزارش تولید (`paidOrder`، تخصیص پرداخت: مشهد به «چاپ نور»، تهران به «چاپخانهٔ
+     * جزوه‌یار»)، با سفارش‌های پاک‌شده در آغاز.
+     */
+    describe('تسویهٔ چاپخانه‌ها روی پستگرس (برش ۱۰٫۳)', () => {
+      const HOUR = 3_600_000;
+      const settlement = () => createSettlementStore(conn);
+      const partners = () => createPartnerStore(conn);
+      const NOOR_ONLY: PanelScope = { kind: 'partner', partnerId: '' };
+      const scopeOf = (partnerId: string): PanelScope => ({ kind: 'partner', partnerId });
+      const MEHR: SettlementRange = { from: MEHR_21, until: MEHR_22 };
+      let clerk = '';
+
+      const shareOf = async (partnerId: string) =>
+        (await conn.db.select({ bp: printPartners.shareBp }).from(printPartners).where(eq(printPartners.id, partnerId)))[0]!.bp;
+      const setShare = async (partnerId: string, next: number, at = NOW) =>
+        partners().setShare({
+          id: partnerId,
+          seen: await shareOf(partnerId),
+          next,
+          event: { adminUserId: owner, action: 'partners.share', targetType: 'partner', at },
+        });
+      /** تخصیص‌های یک سفارش، به ترتیب. */
+      const assignmentsOf = async (order: { id: string }) =>
+        conn.db
+          .select({ to: orderAssignments.toPartnerId, bp: orderAssignments.shareBp, rials: orderAssignments.shareRials })
+          .from(orderAssignments)
+          .where(eq(orderAssignments.orderId, order.id))
+          .orderBy(asc(orderAssignments.id));
+      const subtotalOf = async (order: { id: string }) =>
+        BigInt((await conn.db.select({ subtotal: orders.subtotalRials }).from(orders).where(eq(orders.id, order.id)))[0]!.subtotal);
+      const moveAt = (order: { id: string }, from: OrderStatus, to: OrderStatus, at: Date) =>
+        panelStore().changeStatus(ALL_ORDERS, {
+          orderId: order.id,
+          from,
+          to,
+          at,
+          adminUserId: owner,
+          note: to === 'cancelled' ? { reason: 'لغو' } : null,
+          event: { adminUserId: owner, action: 'orders.status', targetType: 'order', targetId: order.id, at },
+        });
+      /** «در حال چاپ» و «تحویل پست شد» در یک لحظه. */
+      async function handedAt(order: { id: string }, at: Date) {
+        expect((await moveAt(order, 'paid', 'printing', at)).ok).toBe(true);
+        expect((await moveAt(order, 'printing', 'handed_to_post', at)).ok).toBe(true);
+      }
+      const move = (order: { id: string }, from: string | null, to: string) =>
+        panelStore().assignPartner(ALL_ORDERS, {
+          orderId: order.id,
+          from,
+          to,
+          at: NOW,
+          adminUserId: owner,
+          reason: 'جابه‌جایی آزمایشی',
+          event: { adminUserId: owner, action: 'orders.assign', targetType: 'order', targetId: order.id, at: NOW },
+        });
+      const ledgerInput = (overrides: Partial<LedgerInput> & { seen: number }): LedgerInput => ({
+        partnerId: noor,
+        kind: 'payment',
+        amountRials: 1_000_000n,
+        day: MEHR_21,
+        period: null,
+        tracking: null,
+        note: null,
+        orderNumber: null,
+        requestId: randomUUID(),
+        at: NOW,
+        event: { adminUserId: owner, action: 'settlements.payment', targetType: 'partner', targetId: noor, at: NOW },
+        ...overrides,
+      });
+      const versionOf = async (partnerId = noor) =>
+        (await settlement().statement(ALL_ORDERS, partnerId, MEHR))!.version;
+
+      beforeAll(async () => {
+        await clearOrders(conn);
+        await conn.db.update(printPartners).set({ shareBp: null });
+        const [admin] = await conn.db.insert(adminUsers).values({ username: 'clerk103', displayName: 'نگار امینی' }).returning();
+        clerk = admin!.id;
+        Object.assign(NOOR_ONLY, { partnerId: noor });
+      });
+
+      afterAll(async () => {
+        await clearOrders(conn);
+        await conn.db.update(printPartners).set({ shareBp: null });
+      });
+
+      it('سهم منجمد هر تخصیص: درصد همان لحظه، گرد به تومان، با جابه‌جایی آخرین تخصیص، و هر چه کد بفرستد نادیده', async () => {
+        // درصد تعیین نشده: سفارش بی سهم.
+        const unshared = await paidOrder([{ pages: 30 }], { place: MASHHAD });
+        expect(await assignmentsOf(unshared)).toEqual([{ to: noor, bp: null, rials: null }]);
+
+        // درصد ۶۵ از همان که مالک دید، با رویداد؛ بار دوم همان «same» و بی رویداد؛ از درصد کهنه «changed».
+        const at = new Date(NOW.getTime() + 1_000);
+        expect(await setShare(noor, 6_500, at)).toBe('ok');
+        expect(await setShare(noor, 6_500)).toBe('same');
+        expect(
+          await partners().setShare({ id: noor, seen: null, next: 7_000, event: { adminUserId: owner, action: 'partners.share', at: NOW } }),
+        ).toBe('changed');
+        expect(await partners().setShare({ id: randomUUID(), seen: null, next: 1, event: { adminUserId: owner, action: 'partners.share', at: NOW } })).toBe(
+          'not_found',
+        );
+        expect(await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'partners.share'), eq(adminEvents.at, at)))).toEqual([
+          expect.objectContaining({ adminUserId: owner, targetId: noor, detail: { name: 'چاپ نور', from: null, to: 6_500 } }),
+        ]);
+        expect((await partners().find(noor))!.shareBp).toBe(6_500);
+
+        const order = await paidOrder([{ pages: 100, copies: 3 }], { place: MASHHAD });
+        const base = await subtotalOf(order);
+        expect(await assignmentsOf(order)).toEqual([{ to: noor, bp: 6_500, rials: Number(shareRialsOf(base, 6_500)) }]);
+        // پایه همان جمع چاپ، کاغذ و صحافی پیش از تخفیف است، نه مبلغ پرداخت.
+        const [money] = await conn.db.select({ total: orders.totalRials, shipping: orders.shippingRials }).from(orders).where(eq(orders.id, order.id));
+        expect(money!.shipping).toBeGreaterThan(0);
+        expect(BigInt(money!.total)).not.toBe(base);
+
+        // درصد تازه سهم سفارش سپرده‌شده را عوض نمی‌کند؛ جابه‌جایی به چاپخانهٔ بی درصد سفارش را بی سهم می‌کند، و برگشت درصد امروز را می‌گیرد.
+        expect(await setShare(noor, 7_000)).toBe('ok');
+        expect((await assignmentsOf(order))[0]).toEqual({ to: noor, bp: 6_500, rials: Number(shareRialsOf(base, 6_500)) });
+        expect((await move(order, noor, first)).ok).toBe(true);
+        expect((await move(order, first, noor)).ok).toBe(true);
+        expect(await assignmentsOf(order)).toEqual([
+          { to: noor, bp: 6_500, rials: Number(shareRialsOf(base, 6_500)) },
+          { to: first, bp: null, rials: null },
+          { to: noor, bp: 7_000, rials: Number(shareRialsOf(base, 7_000)) },
+        ]);
+
+        // گرد کردن: چند درصد با همان پایه، و ۰ («سهمی ندارد») و ۱۰۰ درصد، همه برابر تابع پیش‌نمایش.
+        for (const bp of [1, 3_333, 9_999, 10_000, 0, 4_250]) {
+          expect(await setShare(first, bp)).toBe('ok');
+          const current = (await conn.db.select({ partner: orders.printPartnerId }).from(orders).where(eq(orders.id, order.id)))[0]!.partner;
+          expect((await move(order, current, current === noor ? first : noor)).ok).toBe(true);
+          if (current === first) expect((await move(order, noor, first)).ok).toBe(true);
+          const last = (await assignmentsOf(order)).at(-1)!;
+          expect(last).toEqual({ to: first, bp, rials: Number(shareRialsOf(base, bp)) });
+        }
+
+        // کد نمی‌تواند سهم بفرستد: ردیفی که با سهم ساختگی درج شود سهم امروز چاپخانه را می‌گیرد.
+        const forged = await paidOrder([{ pages: 12 }], { place: MASHHAD });
+        await conn.db.transaction(async (tx) => {
+          await tx.update(orders).set({ printPartnerId: first }).where(eq(orders.id, forged.id));
+          await tx.insert(orderAssignments).values({
+            orderId: forged.id,
+            fromPartnerId: noor,
+            toPartnerId: first,
+            at: NOW,
+            actor: 'admin',
+            adminUserId: owner,
+            reason: 'ساختگی',
+            shareBp: 10_000,
+            shareRials: 990_000_000,
+          });
+        });
+        expect((await assignmentsOf(forged)).at(-1)).toEqual({ to: first, bp: 4_250, rials: Number(shareRialsOf(await subtotalOf(forged), 4_250)) });
+
+        // دیوارها: درصد بیرون از ۰ تا ۱۰۰؛ و بی تریگر، سهم نیمه یا ریال ناگرد.
+        expect(await rejectedConstraint(conn.db.update(printPartners).set({ shareBp: 10_001 }).where(eq(printPartners.id, noor)))).toBe(
+          'print_partners_share',
+        );
+        expect(await rejectedConstraint(conn.db.update(printPartners).set({ shareBp: -1 }).where(eq(printPartners.id, noor)))).toBe(
+          'print_partners_share',
+        );
+        await conn.db.execute(sql`ALTER TABLE order_assignments DISABLE TRIGGER order_assignments_share`);
+        try {
+          const raw = (values: { shareBp: number | null; shareRials: number | null }) =>
+            rejectedConstraint(
+              conn.db.transaction(async (tx) => {
+                await tx.update(orders).set({ printPartnerId: noor }).where(eq(orders.id, forged.id));
+                await tx.insert(orderAssignments).values({
+                  orderId: forged.id,
+                  fromPartnerId: first,
+                  toPartnerId: noor,
+                  at: NOW,
+                  actor: 'admin',
+                  adminUserId: owner,
+                  reason: 'بی تریگر',
+                  ...values,
+                });
+                throw new Error('rollback');
+              }),
+            );
+          expect(await raw({ shareBp: 6_500, shareRials: null })).toBe('order_assignments_share');
+          expect(await raw({ shareBp: null, shareRials: 1_000 })).toBe('order_assignments_share');
+          expect(await raw({ shareBp: 6_500, shareRials: 1_005 })).toBe('order_assignments_share');
+          expect(await raw({ shareBp: 10_001, shareRials: 1_000 })).toBe('order_assignments_share');
+          expect(await raw({ shareBp: 6_500, shareRials: -10 })).toBe('order_assignments_share');
+          expect(await raw({ shareBp: 6_500, shareRials: 1_000 })).toBeUndefined();
+        } finally {
+          await conn.db.execute(sql`ALTER TABLE order_assignments ENABLE TRIGGER order_assignments_share`);
+        }
+      });
+
+      it('صورت‌حساب: مانده پیش از بازه، پایان بازه و امروز؛ «تحویل پست شد»ها، لغو پس از چاپ، در راه، و دفتر با باطل‌شده', async () => {
+        await clearOrders(conn);
+        await conn.db.update(printPartners).set({ shareBp: null });
+        const unsharedHanded = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        await handedAt(unsharedHanded, new Date(MEHR_21.getTime() + 2 * HOUR));
+        expect(await setShare(noor, 6_000)).toBe('ok');
+        const before = await paidOrder([{ pages: 40 }], { place: MASHHAD });
+        await handedAt(before, new Date(MEHR_20.getTime() + 10 * HOUR));
+        const inRange = await paidOrder([{ pages: 60, copies: 2 }], { place: MASHHAD });
+        // درست نیمه‌شب آغاز بازه، و یک ثانیه پیش از پایانش.
+        await handedAt(inRange, MEHR_21);
+        const edge = await paidOrder([{ pages: 10 }], { place: MASHHAD });
+        await handedAt(edge, new Date(MEHR_22.getTime() - 1_000));
+        const after = await paidOrder([{ pages: 16 }], { place: MASHHAD });
+        await handedAt(after, MEHR_22);
+        const printing = await paidOrder([{ pages: 24 }], { place: MASHHAD });
+        expect((await moveAt(printing, 'paid', 'printing', NOW)).ok).toBe(true);
+        const queued = await paidOrder([{ pages: 8 }], { place: MASHHAD });
+        const cancelledPrinting = await paidOrder([{ pages: 50 }], { place: MASHHAD });
+        expect((await moveAt(cancelledPrinting, 'paid', 'printing', MEHR_21)).ok).toBe(true);
+        expect((await moveAt(cancelledPrinting, 'printing', 'cancelled', new Date(MEHR_21.getTime() + HOUR))).ok).toBe(true);
+        const cancelledQueued = await paidOrder([{ pages: 18 }], { place: MASHHAD });
+        expect((await moveAt(cancelledQueued, 'paid', 'cancelled', new Date(MEHR_21.getTime() + HOUR))).ok).toBe(true);
+        // سفارش چاپخانهٔ دیگر در صورت‌حساب «چاپ نور» نیست.
+        const theirs = await paidOrder([{ pages: 30 }]);
+        await handedAt(theirs, new Date(MEHR_21.getTime() + HOUR));
+
+        const share = async (order: { id: string }) => shareRialsOf(await subtotalOf(order), 6_000);
+        let version = 0;
+        const write = async (overrides: Partial<LedgerInput>) => {
+          const result = await settlement().record(ledgerInput({ seen: version, ...overrides }));
+          expect(result.ok).toBe(true);
+          version += 1;
+          return result.ok ? result.entry : null!;
+        };
+        const paidBefore = await write({ amountRials: 300_000n, day: MEHR_20, tracking: 'PY-1' });
+        const paidIn = await write({
+          amountRials: 450_000n,
+          day: MEHR_21,
+          period: { from: MEHR_20, until: MEHR_21 },
+          tracking: '803114',
+          note: 'کارت به کارت',
+        });
+        const bonus = await write({ kind: 'adjustment', amountRials: 120_000n, day: MEHR_21, note: 'هزینهٔ پست مهر' });
+        const penalty = await write({
+          kind: 'adjustment',
+          amountRials: -80_000n,
+          day: new Date(MEHR_22.getTime() - 1_000),
+          note: 'نیمی از چاپ لغوشده',
+          orderNumber: cancelledPrinting.orderNumber,
+        });
+        const wrong = await write({ amountRials: 999_990n, day: MEHR_21, note: 'اشتباه' });
+        const voided = await settlement().voidEntry({
+          partnerId: noor,
+          id: wrong.id,
+          reason: 'دو بار ثبت شد',
+          seen: version,
+          at: NOW,
+          event: { adminUserId: owner, action: 'settlements.void', targetType: 'partner', targetId: noor, at: NOW },
+        });
+        expect(voided).toMatchObject({ ok: true, already: false });
+        version += 1;
+        const paidAfter = await write({ amountRials: 100_000n, day: MEHR_22 });
+
+        const statement = (await settlement().statement(ALL_ORDERS, noor, MEHR))!;
+        expect(statement.partner).toEqual({ id: noor, name: 'چاپ نور', cityName: 'مشهد', active: true, isDefault: false, shareBp: 6_000 });
+        expect(statement.handed.map((row) => row.orderNumber)).toEqual([inRange, unsharedHanded, edge].map((o) => o.orderNumber));
+        expect(statement.handed[0]).toEqual({
+          orderNumber: inRange.orderNumber,
+          status: 'handed_to_post',
+          paidAt: tehran('2026-10-12 10:00'),
+          at: MEHR_21,
+          baseRials: await subtotalOf(inRange),
+          shareBp: 6_000,
+          shareRials: await share(inRange),
+        });
+        expect(statement.handed[1]).toMatchObject({ orderNumber: unsharedHanded.orderNumber, shareBp: null, shareRials: null });
+        expect(statement.cancelledAfterPrint).toEqual([
+          expect.objectContaining({
+            orderNumber: cancelledPrinting.orderNumber,
+            status: 'cancelled',
+            at: new Date(MEHR_21.getTime() + HOUR),
+            shareRials: await share(cancelledPrinting),
+          }),
+        ]);
+        expect(statement.inFlight.map((row) => [row.orderNumber, row.status, row.at])).toEqual([
+          [printing.orderNumber, 'printing', null],
+          [queued.orderNumber, 'paid', null],
+        ]);
+        expect(statement.ledger.map((entry) => entry.id)).toEqual([paidIn.id, bonus.id, wrong.id, penalty.id]);
+        expect(statement.ledger.find((entry) => entry.id === wrong.id)!.voided).toEqual({
+          at: NOW,
+          by: owner,
+          byName: 'الهام فرجی',
+          reason: 'دو بار ثبت شد',
+        });
+        expect(statement.ledger[0]).toEqual({
+          id: paidIn.id,
+          partnerId: noor,
+          kind: 'payment',
+          amountRials: 450_000n,
+          day: MEHR_21,
+          period: { from: MEHR_20, until: MEHR_21 },
+          tracking: '803114',
+          note: 'کارت به کارت',
+          orderNumber: null,
+          createdAt: NOW,
+          createdBy: owner,
+          createdByName: 'الهام فرجی',
+          voided: null,
+        });
+        expect(statement.ledger.find((entry) => entry.id === penalty.id)!.orderNumber).toBe(cancelledPrinting.orderNumber);
+
+        const opening = (await share(before)) - 300_000n;
+        expect(statement.openingRials).toBe(opening);
+        const closing = opening + (await share(inRange)) + (await share(edge)) + 120_000n - 80_000n - 450_000n;
+        expect(statement.closingRials).toBe(closing);
+        expect(statement.balanceRials).toBe(closing + (await share(after)) - 100_000n);
+        expect(statement.version).toBe(version);
+        expect(paidBefore.tracking).toBe('PY-1');
+        expect(paidAfter.day).toEqual(MEHR_22);
+
+        // نمای کلی: همان ماندهٔ امروز، در راه، بی سهم و آخرین پرداخت باطل‌نشده.
+        const overview = await settlement().overview(ALL_ORDERS);
+        // پیش‌فرض، بعد فعال، بعد غیرفعال (چاپخانه‌ای که بخش گزارش تولید غیرفعال کرد).
+        expect(overview.slice(0, 2).map((row) => row.id)).toEqual([first, noor]);
+        expect(overview.slice(2).map((row) => [row.active, row.balanceRials])).toEqual(overview.slice(2).map(() => [false, 0n]));
+        expect(overview[1]).toEqual({
+          id: noor,
+          name: 'چاپ نور',
+          cityName: 'مشهد',
+          active: true,
+          isDefault: false,
+          shareBp: 6_000,
+          balanceRials: statement.balanceRials,
+          inFlight: { orders: 2, shareRials: (await share(printing)) + (await share(queued)) },
+          unshared: 1,
+          lastPayment: { day: MEHR_22, amountRials: 100_000n },
+        });
+        expect(overview[0]).toMatchObject({ id: first, shareBp: null, balanceRials: 0n, unshared: 1, lastPayment: null });
+
+        // محدوده: کاربر «چاپ نور» فقط خودش؛ چاپخانهٔ دیگر همان «نیست».
+        expect((await settlement().overview(NOOR_ONLY)).map((row) => row.id)).toEqual([noor]);
+        expect((await settlement().statement(NOOR_ONLY, noor, MEHR))!.balanceRials).toBe(statement.balanceRials);
+        expect(await settlement().statement(NOOR_ONLY, first, MEHR)).toBeNull();
+        expect(await settlement().statement(scopeOf(first), noor, MEHR)).toBeNull();
+        expect(await settlement().statement(ALL_ORDERS, randomUUID(), MEHR)).toBeNull();
+
+        // سفارش اصلاح: هر سفارشی که روزی به همین چاپخانه سپرده شد؛ سفارش چاپخانهٔ دیگر نه.
+        expect(await settlement().adjustable(noor, cancelledQueued.orderNumber)).toMatchObject({ status: 'cancelled', shareRials: await share(cancelledQueued) });
+        expect(await settlement().adjustable(noor, theirs.orderNumber)).toBeNull();
+        expect(await settlement().adjustable(first, theirs.orderNumber)).toMatchObject({ status: 'handed_to_post', shareBp: null });
+        expect(await settlement().adjustable(noor, 99_999_999)).toBeNull();
+        expect((await settlement().entry(noor, paidIn.id))!.amountRials).toBe(450_000n);
+        expect(await settlement().entry(first, paidIn.id)).toBeNull();
+      });
+
+      it('ثبت پرداخت و اصلاح: رویداد بی متن، دو کلیک یک ردیف، فرم کهنه، شناسهٔ فرم دیگر، و سفارشی که مال این چاپخانه نبود', async () => {
+        await clearOrders(conn);
+        const order = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        const elsewhere = await paidOrder([{ pages: 20 }]);
+        const seen = await versionOf();
+        const at = new Date(NOW.getTime() + 7_000);
+        const input = ledgerInput({
+          seen,
+          amountRials: 2_500_000n,
+          period: { from: MEHR_20, until: MEHR_22 },
+          tracking: 'TR-77',
+          note: 'تسویهٔ هفتهٔ اول',
+          at,
+          event: { adminUserId: owner, action: 'settlements.payment', targetType: 'partner', targetId: noor, at },
+        });
+        const written = await settlement().record(input);
+        expect(written).toMatchObject({ ok: true, duplicate: false, entry: { amountRials: 2_500_000n, tracking: 'TR-77' } });
+        const events = await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'settlements.payment'), eq(adminEvents.at, at)));
+        expect(events).toEqual([
+          expect.objectContaining({
+            adminUserId: owner,
+            targetType: 'partner',
+            targetId: noor,
+            detail: {
+              entry: written.ok ? written.entry.id : 0,
+              partner: { id: noor, name: 'چاپ نور' },
+              amountRials: 2_500_000,
+              day: MEHR_21.toISOString(),
+              period: { from: MEHR_20.toISOString(), until: MEHR_22.toISOString() },
+            },
+          }),
+        ]);
+        // دو کلیک: همان ردیف، بی ردیف و رویداد دوم؛ همان شناسه با مبلغ دیگر «conflict».
+        expect(await settlement().record(input)).toMatchObject({ ok: true, duplicate: true, entry: { id: written.ok ? written.entry.id : 0 } });
+        expect(await settlement().record({ ...input, amountRials: 2_500_010n })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await settlement().record({ ...input, event: { ...input.event, adminUserId: clerk } })).toEqual({ ok: false, reason: 'conflict' });
+        expect(await conn.db.select().from(partnerLedger).where(eq(partnerLedger.requestId, input.requestId))).toHaveLength(1);
+        expect((await settlement().byRequest(input.requestId))?.id).toBe(written.ok ? written.entry.id : 0);
+        expect(await settlement().byRequest(randomUUID())).toBeNull();
+        expect(await settlement().version(noor)).toBe(seen + 1);
+        expect(await settlement().version(randomUUID())).toBeNull();
+        expect(await conn.db.select().from(adminEvents).where(and(eq(adminEvents.action, 'settlements.payment'), eq(adminEvents.at, at)))).toHaveLength(1);
+        // فرم کهنه: دفتر از وقتی دیده شد یکی بالا رفته.
+        expect(await settlement().record(ledgerInput({ seen }))).toEqual({ ok: false, reason: 'changed' });
+        expect(await settlement().record(ledgerInput({ seen: seen + 1, partnerId: randomUUID() }))).toEqual({ ok: false, reason: 'not_found' });
+
+        // اصلاح برای سفارش: فقط سفارشی که روزی به همین چاپخانه سپرده شد؛ جابه‌جاشده هم.
+        const adjust = (orderNumber: number, version: number) =>
+          settlement().record(
+            ledgerInput({
+              seen: version,
+              kind: 'adjustment',
+              amountRials: -50_000n,
+              note: 'برگهٔ خراب',
+              orderNumber,
+              event: { adminUserId: clerk, action: 'settlements.adjust', targetType: 'partner', targetId: noor, at: NOW },
+            }),
+          );
+        expect(await adjust(elsewhere.orderNumber, seen + 1)).toEqual({ ok: false, reason: 'order_not_found' });
+        expect(await adjust(99_999_999, seen + 1)).toEqual({ ok: false, reason: 'order_not_found' });
+        expect((await move(order, noor, first)).ok).toBe(true);
+        const adjusted = await adjust(order.orderNumber, seen + 1);
+        expect(adjusted).toMatchObject({ ok: true, entry: { kind: 'adjustment', amountRials: -50_000n, orderNumber: order.orderNumber, createdBy: clerk } });
+        expect(await conn.db.select({ detail: adminEvents.detail }).from(adminEvents).where(eq(adminEvents.action, 'settlements.adjust'))).toEqual([
+          { detail: expect.objectContaining({ amountRials: -50_000, orderNumber: order.orderNumber }) },
+        ]);
+        expect(JSON.stringify(events[0]!.detail)).not.toContain('TR-77');
+        expect(JSON.stringify(events[0]!.detail)).not.toContain('تسویهٔ هفتهٔ اول');
+      });
+
+      it('باطل کردن: یک بار با دلیل، دو کلیک یکی، باطل دیگری گفته می‌شود، فرم کهنه، و ردیف چاپخانهٔ دیگر نه', async () => {
+        await clearOrders(conn);
+        const seen = await versionOf();
+        const written = await settlement().record(ledgerInput({ seen, amountRials: 700_000n }));
+        if (!written.ok) throw new Error('ثبت نشد');
+        const at = new Date(NOW.getTime() + 9_000);
+        const voidInput = {
+          partnerId: noor,
+          id: written.entry.id,
+          reason: 'مبلغ اشتباه',
+          seen: seen + 1,
+          at,
+          event: { adminUserId: owner, action: 'settlements.void', targetType: 'partner', targetId: noor, at },
+        };
+        expect(await settlement().voidEntry({ ...voidInput, seen })).toEqual({ ok: false, reason: 'changed' });
+        expect(await settlement().voidEntry({ ...voidInput, partnerId: first })).toEqual({ ok: false, reason: 'not_found' });
+        expect(await settlement().voidEntry({ ...voidInput, id: written.entry.id + 1_000 })).toEqual({ ok: false, reason: 'not_found' });
+        const done = await settlement().voidEntry(voidInput);
+        expect(done).toMatchObject({ ok: true, already: false, entry: { voided: { at, by: owner, reason: 'مبلغ اشتباه' } } });
+        expect(await versionOf()).toBe(seen + 2);
+        expect(await settlement().voidEntry(voidInput)).toMatchObject({ ok: true, already: true });
+        expect(await settlement().voidEntry({ ...voidInput, reason: 'دلیل دیگر' })).toMatchObject({ ok: false, reason: 'already_voided' });
+        expect(await settlement().voidEntry({ ...voidInput, event: { ...voidInput.event, adminUserId: clerk } })).toMatchObject({
+          ok: false,
+          reason: 'already_voided',
+        });
+        expect(await conn.db.select({ detail: adminEvents.detail }).from(adminEvents).where(and(eq(adminEvents.action, 'settlements.void'), eq(adminEvents.at, at)))).toEqual([
+          { detail: { entry: written.entry.id, partner: { id: noor, name: 'چاپ نور' }, kind: 'payment', amountRials: 700_000, day: MEHR_21.toISOString() } },
+        ]);
+        // باطل‌شده در مانده نیست.
+        expect((await settlement().statement(ALL_ORDERS, noor, MEHR))!.balanceRials).toBe(0n);
+      });
+
+      it('سفارش جابه‌جاشده: سهم صورت‌حساب و گزارش تولید همان آخرین تخصیص؛ «آخرین پرداخت» نمای کلی باطل‌نشده', async () => {
+        await clearOrders(conn);
+        await conn.db.update(printPartners).set({ shareBp: null });
+        expect(await setShare(noor, 6_000)).toBe('ok');
+        expect(await setShare(first, 5_000)).toBe('ok');
+        const order = await paidOrder([{ pages: 40 }], { place: MASHHAD });
+        // نور ۶۰٪، جزوه‌یار ۵۰٪، و دوباره نور با درصد تازهٔ ۷۰٪: اولین و آخرین تخصیص هر دو «چاپ نور»اند، با دو سهم.
+        expect((await move(order, noor, first)).ok).toBe(true);
+        expect(await setShare(noor, 7_000)).toBe('ok');
+        expect((await move(order, first, noor)).ok).toBe(true);
+        expect((await assignmentsOf(order)).map((row) => [row.to, row.bp])).toEqual([
+          [noor, 6_000],
+          [first, 5_000],
+          [noor, 7_000],
+        ]);
+        await handedAt(order, new Date(MEHR_21.getTime() + HOUR));
+        const base = await subtotalOf(order);
+        const latest = shareRialsOf(base, 7_000);
+        expect(latest).not.toBe(shareRialsOf(base, 6_000));
+
+        const statement = (await settlement().statement(ALL_ORDERS, noor, MEHR))!;
+        expect(statement.handed).toEqual([expect.objectContaining({ orderNumber: order.orderNumber, shareBp: 7_000, shareRials: latest })]);
+        expect(statement.balanceRials).toBe(latest);
+        const [row] = await production().orders(ALL_ORDERS, { by: 'number', from: order.orderNumber, to: order.orderNumber }, null);
+        expect(row!.shareRials).toBe(latest);
+
+        // پرداختی که پس از همه ثبت و باطل شد نه در مانده است و نه «آخرین پرداخت».
+        const kept = await settlement().record(ledgerInput({ seen: 0, amountRials: 100_000n, day: MEHR_21 }));
+        const later = await settlement().record(ledgerInput({ seen: 1, amountRials: 200_000n, day: MEHR_22 }));
+        expect(kept.ok && later.ok).toBe(true);
+        const voided = await settlement().voidEntry({
+          partnerId: noor,
+          id: later.ok ? later.entry.id : 0,
+          reason: 'دو بار ثبت شد',
+          seen: 2,
+          at: NOW,
+          event: { adminUserId: owner, action: 'settlements.void', targetType: 'partner', targetId: noor, at: NOW },
+        });
+        expect(voided).toMatchObject({ ok: true, already: false });
+        expect((await settlement().overview(ALL_ORDERS)).find((partner) => partner.id === noor)).toMatchObject({
+          balanceRials: latest - 100_000n,
+          lastPayment: { day: MEHR_21, amountRials: 100_000n },
+        });
+      });
+
+      it('دیوارهای دفتر (0060 و CHECKها): فقط افزودنی، باطل یک بار، سفارشِ همین چاپخانه، و شکل هر ردیف', async () => {
+        await clearOrders(conn);
+        const order = await paidOrder([{ pages: 20 }], { place: MASHHAD });
+        const theirs = await paidOrder([{ pages: 20 }]);
+        const row = (values: Partial<typeof partnerLedger.$inferInsert>) =>
+          conn.db.insert(partnerLedger).values({
+            printPartnerId: noor,
+            kind: 'payment',
+            amountRials: 10_000,
+            day: MEHR_21,
+            createdBy: owner,
+            requestId: randomUUID(),
+            ...values,
+          });
+        expect(await rejectedConstraint(row({ voidedAt: NOW, voidedBy: owner, voidReason: 'از اول' }))).toBe('partner_ledger_insert_state');
+        expect(await rejectedConstraint(row({ kind: 'adjustment', note: 'دلیل', orderId: theirs.id }))).toBe('partner_ledger_order');
+        expect(await rejectedConstraint(row({ kind: 'adjustment', note: 'دلیل', orderId: order.id }))).toBeUndefined();
+
+        const [kept] = await row({}).returning({ id: partnerLedger.id });
+        const where = eq(partnerLedger.id, kept!.id);
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ amountRials: 20_000 }).where(where))).toBe('partner_ledger_frozen');
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ note: 'بعداً' }).where(where))).toBe('partner_ledger_frozen');
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ day: MEHR_22 }).where(where))).toBe('partner_ledger_frozen');
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ printPartnerId: first }).where(where))).toBe('partner_ledger_frozen');
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ createdBy: clerk }).where(where))).toBe('partner_ledger_frozen');
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ voidedAt: NOW }).where(where))).toBe('partner_ledger_void');
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ voidedAt: NOW, voidedBy: owner, voidReason: ' ' }).where(where))).toBe(
+          'partner_ledger_void',
+        );
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ voidedAt: NOW, voidedBy: owner, voidReason: 'اشتباه' }).where(where))).toBeUndefined();
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ voidedAt: NOW, voidedBy: clerk, voidReason: 'دوباره' }).where(where))).toBe(
+          'partner_ledger_void_once',
+        );
+        expect(await rejectedConstraint(conn.db.update(partnerLedger).set({ voidedAt: null, voidedBy: null, voidReason: null }).where(where))).toBe(
+          'partner_ledger_void_once',
+        );
+        expect(await rejectedConstraint(conn.db.delete(partnerLedger).where(where))).toBe('partner_ledger_append_only');
+
+        // شکل: پرداخت مثبت و بی سفارش؛ اصلاح غیرصفر با دلیل، بی «بابت» و کد پیگیری؛ ریال گرد و زیر سقف.
+        expect(await rejectedConstraint(row({ kind: 'refund' }))).toBe('partner_ledger_kind');
+        expect(await rejectedConstraint(row({ amountRials: -10_000 }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ amountRials: 0 }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ orderId: order.id }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ amountRials: 10_005 }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ amountRials: 100_000_000_010 }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ amountRials: 100_000_000_000 }))).toBeUndefined();
+        expect(await rejectedConstraint(row({ kind: 'adjustment', amountRials: 0, note: 'هیچ' }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ kind: 'adjustment', amountRials: -10_000 }))).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ kind: 'adjustment', amountRials: -10_000, note: 'کم', tracking: 'X' }))).toBe('partner_ledger_shape');
+        expect(
+          await rejectedConstraint(row({ kind: 'adjustment', amountRials: -10_000, note: 'کم', periodFrom: MEHR_20, periodUntil: MEHR_21 })),
+        ).toBe('partner_ledger_shape');
+        expect(await rejectedConstraint(row({ kind: 'adjustment', amountRials: -100_000_000_010, note: 'زیاد' }))).toBe('partner_ledger_shape');
+        // «بابت»: هر دو یا هیچ، رو به جلو، تا ۴۰۰ روز.
+        expect(await rejectedConstraint(row({ periodFrom: MEHR_20 }))).toBe('partner_ledger_period');
+        expect(await rejectedConstraint(row({ periodFrom: MEHR_21, periodUntil: MEHR_21 }))).toBe('partner_ledger_period');
+        expect(await rejectedConstraint(row({ periodFrom: MEHR_20, periodUntil: new Date(MEHR_20.getTime() + 401 * DAY) }))).toBe('partner_ledger_period');
+        expect(await rejectedConstraint(row({ periodFrom: MEHR_20, periodUntil: new Date(MEHR_20.getTime() + 400 * DAY) }))).toBeUndefined();
+        // متن‌ها: تمیز و در سقف.
+        expect(await rejectedConstraint(row({ tracking: 'x'.repeat(41) }))).toBe('partner_ledger_texts');
+        expect(await rejectedConstraint(row({ tracking: ' 803114' }))).toBe('partner_ledger_texts');
+        expect(await rejectedConstraint(row({ tracking: '' }))).toBe('partner_ledger_texts');
+        expect(await rejectedConstraint(row({ note: 'ی'.repeat(301) }))).toBe('partner_ledger_texts');
+        expect(await rejectedConstraint(row({ note: 'یادداشت ' }))).toBe('partner_ledger_texts');
+        expect(await rejectedConstraint(row({ tracking: 'x'.repeat(40), note: 'ی'.repeat(300) }))).toBeUndefined();
+        expect(await rejectedConstraint(row({ requestId: (await conn.db.select({ id: partnerLedger.requestId }).from(partnerLedger).where(where))[0]!.id }))).toBe(
+          'partner_ledger_request',
+        );
+
+        // خروجی PDF صورت‌حساب همان جدول خروجی‌هاست.
+        expect(
+          await rejectedConstraint(
+            conn.db.insert(reportExports).values({ report: 'settlement', context: {}, fileName: 'tasvie-noor.pdf', money: false, requestedBy: owner }),
+          ),
+        ).toBeUndefined();
+        await conn.db.delete(reportExports).where(eq(reportExports.report, 'settlement'));
+      });
+
+      it('چاپخانه‌های فعال بی درصد برای هشدار پیشخوان؛ ۰ درصد تعیین‌شده است، و غیرفعال نه', async () => {
+        await clearOrders(conn);
+        await conn.db.update(printPartners).set({ shareBp: null });
+        expect(await settlement().unsetShares()).toEqual([
+          { id: first, name: 'چاپخانهٔ جزوه‌یار' },
+          { id: noor, name: 'چاپ نور' },
+        ]);
+        expect(await setShare(first, 0)).toBe('ok');
+        expect(await settlement().unsetShares()).toEqual([{ id: noor, name: 'چاپ نور' }]);
+        await conn.db.update(printPartners).set({ deactivatedAt: NOW }).where(eq(printPartners.id, noor));
+        try {
+          expect(await settlement().unsetShares()).toEqual([]);
+        } finally {
+          await conn.db.update(printPartners).set({ deactivatedAt: null }).where(eq(printPartners.id, noor));
+        }
+      });
     });
   });
   describe('متن‌های سایت روی پستگرس (برش ۱۱٫۱)', () => {

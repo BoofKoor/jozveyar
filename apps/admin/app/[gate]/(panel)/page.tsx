@@ -101,7 +101,7 @@ export default async function Dashboard({
 }) {
   const { gate } = await params;
   const query = await searchParams;
-  const { orders, settings, reviews, support } = requirePanel(gate);
+  const { orders, settings, reviews, support, settlement } = requirePanel(gate);
   const session = await requireSession(gate);
   const now = new Date();
   const head = (
@@ -120,12 +120,15 @@ export default async function Dashboard({
   const { tiles, alerts, queue, open, slaDays, bounds, stats, untracked, partners: board, assignment } = result.value;
   // هشدارهای پیامک (۷٫۱) و وضعیت مسیر خرید روی سایت (۷٫۵): فقط مالک و متصدی؛ سرویس خودش می‌سنجد.
   // نظرهای تازه (۱۲٫۳): فقط مالک (`reviews.manage`)؛ و پیام‌های بی پاسخ و پیامک پاسخی که نرفت (۱۲٫۱): مالک و متصدی (`support.reply`)؛ برای بقیه null.
-  const [sms, checkout, pendingReviews, supportAlerts] = await Promise.all([
+  // درصد سهم تعیین‌نشده (۱۰٫۳، سؤال ۳۹۵): فقط مالک، که درصد را می‌گذارد؛ برای بقیه null.
+  const [sms, checkout, pendingReviews, supportAlerts, unsetShares] = await Promise.all([
     settings.smsAlerts(session),
     settings.checkoutStatus(session),
     reviews.pendingCount(session),
     support.alerts(session),
+    settlement.unsetShares(session),
   ]);
+  const noShare = unsetShares ?? [];
   const unanswered = supportAlerts && supportAlerts.open.count > 0 ? supportAlerts.open : null;
   const replySmsFailed = supportAlerts?.smsFailed ?? [];
   const live = liveAlert(checkout, now);
@@ -221,6 +224,7 @@ export default async function Dashboard({
       alerts.verifiedUnused.length > 0 ||
       alerts.held.length > 0 ||
       alerts.unassigned.length > 0 ||
+      noShare.length > 0 ||
       alerts.reviewRows > 0 ||
       alerts.smsFailed.length > 0 ||
       alerts.paidSmsFailed.length > 0 ||
@@ -456,6 +460,24 @@ export default async function Dashboard({
                   : oneUnassigned
                     ? 'چاپخانه ندارد؛ یکی را برایش انتخاب کن.'
                     : 'چاپخانه ندارند؛ برای هر کدام یکی انتخاب کن.'}
+              </span>
+            </p>
+          ) : null}
+          {noShare.length > 0 ? (
+            // درصد سهم تعیین‌نشده (۱۰٫۳، سؤال ۳۹۵): سفارشی که حالا سپرده شود بی سهم است و بعداً فقط با «اصلاح» درست می‌شود.
+            <p className="jy-note jy-note--warning" data-alert="share">
+              <span className="jy-icon jy-icon-warning" aria-hidden="true" />
+              <span>
+                درصد سهم{' '}
+                {noShare.map((partner, i) => (
+                  <span key={partner.id}>
+                    {i === 0 ? '' : i === noShare.length - 1 ? ' و ' : '، '}
+                    <Link className="jy-link" href={panelPath(gate, `/partners/${partner.id}/share`)}>
+                      {partner.name}
+                    </Link>
+                  </span>
+                ))}{' '}
+                تعیین نشده؛ سفارش‌هایی که حالا به {noShare.length === 1 ? 'آن' : 'آن‌ها'} سپرده شوند بی سهم‌اند. اگر سهمی ندارد، 0 بگذار.
               </span>
             </p>
           ) : null}

@@ -16,7 +16,7 @@ import { adminEvents, jobs, reportExports } from './schema.js';
 export const RENDER_REPORT_JOB = 'render_report';
 
 /** گزارش‌هایی که خروجی PDF دارند. */
-export type ReportExportKind = 'production' | 'shipping';
+export type ReportExportKind = 'production' | 'shipping' | 'settlement';
 
 /** حال یک خروجی، بی بایت‌های PDF. */
 export interface ReportExportView {

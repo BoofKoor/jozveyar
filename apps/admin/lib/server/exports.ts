@@ -19,6 +19,7 @@ import { can, ipHashOf, type AdminSession } from './auth';
 import type { DownloadFile } from './orders';
 import type { ExportDocument, PanelProduction, ProductionParams } from './production';
 import type { PanelReport } from './report';
+import type { PanelSettlement } from './settlement';
 import { fail, ok, type Result } from './result';
 import { xlsxBytes, xlsxFileName } from './xlsx';
 
@@ -28,17 +29,23 @@ export interface PanelExportsDeps {
   events: { logEvent(event: AdminEventInput): Promise<void> };
   production: PanelProduction;
   report: PanelReport;
+  /** صورت‌حساب تسویهٔ یک چاپخانه (۱۰٫۳). */
+  settlement: PanelSettlement;
   /** `SESSION_SECRET`، برای HMAC نشانی IP در رویداد. */
   secret: string;
   now?: () => Date;
 }
 
-/** پارامترهای نشانی هر گزارش: گزارش تولید بازه و چاپخانه، گزارش ارسال ماه. */
+/** پارامترهای نشانی هر گزارش: گزارش تولید بازه و چاپخانه، گزارش ارسال ماه، و صورت‌حساب تسویه (۱۰٫۳) بازه و چاپخانه (`p`). */
 export type ExportParams = ProductionParams & { month?: string };
 
-export const REPORT_PERMISSION: Record<ReportExportKind, AdminPermission> = { production: 'reports.production', shipping: 'reports.read' };
+export const REPORT_PERMISSION: Record<ReportExportKind, AdminPermission> = {
+  production: 'reports.production',
+  shipping: 'reports.read',
+  settlement: 'settlements.read',
+};
 
-export const isReportKind = (value: string): value is ReportExportKind => value === 'production' || value === 'shipping';
+export const isReportKind = (value: string): value is ReportExportKind => value in REPORT_PERMISSION;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -57,6 +64,7 @@ export function createPanelExports(deps: PanelExportsDeps) {
   const { store } = deps;
 
   function documentOf(session: AdminSession, kind: ReportExportKind, params: ExportParams): Promise<Result<ExportDocument>> {
+    if (kind === 'settlement') return deps.settlement.document(session, { d: params.d, from: params.from, to: params.to, p: params.p });
     return kind === 'production' ? deps.production.document(session, params) : deps.report.document(session, { month: params.month });
   }
 

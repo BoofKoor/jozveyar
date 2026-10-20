@@ -414,6 +414,20 @@
       "when": 1792434048424,
       "tag": "0058_support_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792445719035,
+      "tag": "0059_partner_settlement",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1792445721283,
+      "tag": "0060_partner_settlement_guards",
+      "breakpoints": true
     }
   ]
 }

@@ -57,10 +57,28 @@ const OPERATOR_PERMISSIONS = [
   'tariff.read',
 ];
 // از ۱۰٫۲ گزارش تولید خودش، بی مبلغ.
-const PARTNER_PERMISSIONS = ['files.download', 'orders.read', 'orders.status', 'partners.availability', 'reports.production', 'shipments.import'];
-// حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، از ۱۰٫۲ گزارش تولید، و از ۱۱٫۴ دیدن کدهای تخفیف؛ بی
-// وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
-const ACCOUNTANT_PERMISSIONS = ['discounts.read', 'orders.money', 'orders.notes', 'orders.read', 'orders.refund', 'reports.production', 'reports.read'];
+const PARTNER_PERMISSIONS = [
+  'files.download',
+  'orders.read',
+  'orders.status',
+  'partners.availability',
+  'reports.production',
+  'settlements.read',
+  'shipments.import',
+];
+// حسابدار (۹٫۴، سؤال ۱۹۷): مبلغ و پرداخت، بازپرداخت، یادداشت و گزارش ارسال، از ۱۰٫۲ گزارش تولید، از ۱۱٫۴ دیدن کدهای تخفیف، و از ۱۰٫۳
+// تسویهٔ چاپخانه‌ها با ثبت پرداخت و اصلاح؛ بی وضعیت، دانلود، تعرفه، تنظیمات و ادمین‌ها.
+const ACCOUNTANT_PERMISSIONS = [
+  'discounts.read',
+  'orders.money',
+  'orders.notes',
+  'orders.read',
+  'orders.refund',
+  'reports.production',
+  'reports.read',
+  'settlements.manage',
+  'settlements.read',
+];
 
 /** argon2 جدا در `password.test.ts`؛ اینجا همان قرارداد، سریع، با شمارش صدازدن‌ها. */
 function fakePasswords() {

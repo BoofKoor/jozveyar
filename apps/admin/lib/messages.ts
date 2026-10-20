@@ -11,6 +11,29 @@ export function keyUnavailableText(service: string): string {
 }
 
 export const MESSAGES: Record<AdminErrorCode, string> = {
+  // تسویهٔ چاپخانه‌ها (۱۰٫۳)
+  partner_share_changed: 'درصد سهم این چاپخانه همین حالا جای دیگری عوض شد؛ درصد تازه را ببین و اگر هنوز لازم است، دوباره بگذار.',
+  share_invalid: 'درصد را عددی از 0 تا 100 بنویس، با تا دو رقم اعشار؛ مثلاً 65 یا 62.5.',
+  share_code_required: 'کد برنامهٔ تأیید را بنویس؛ درصد سهم کد تازه می‌خواهد.',
+  settlement_changed:
+    'از وقتی این صفحه را باز کردی، پرداخت، اصلاح یا باطلی برای همین چاپخانه ثبت شده؛ صورت‌حساب تازه را ببین و اگر هنوز لازم است، دوباره ثبت کن.',
+  settlement_form_used: 'این فرم پیش‌تر با چیز دیگری فرستاده شد؛ صورت‌حساب را دوباره باز کن و از نو ثبت کن.',
+  settlement_order_not_found: 'این سفارش هرگز به همین چاپخانه سپرده نشده؛ شماره را ببین، یا خالی بگذار.',
+  settlement_entry_not_found: 'این ردیف دفتر پیدا نشد.',
+  settlement_already_voided: 'این ردیف همین حالا باطل شده است؛ دلیل و کسی که باطلش کرد در صورت‌حساب است.',
+  settlement_code_required: 'کد برنامهٔ تأیید را بنویس؛ هر ثبت در دفتر تسویه کد تازه می‌خواهد.',
+  settlement_amount_invalid: 'مبلغ را به تومان و با رقم بنویس، از 1 تا 10,000,000,000 تومان؛ مثلاً 2,500,000.',
+  settlement_day_invalid: 'روز را به شکل 1405/07/22 بنویس.',
+  settlement_day_future: 'روز نمی‌تواند پس از امروز باشد.',
+  settlement_period_invalid: '«بابت» را به شکل 1405/07/01 بنویس.',
+  settlement_period_order: 'روز آخر «بابت» پیش از روز اولش است.',
+  settlement_period_long: '«بابت» تا 400 روز.',
+  settlement_tracking_invalid: 'کد پیگیری فقط رقم، حرف لاتین و خط تیره است، تا 40 نویسه.',
+  settlement_note_too_long: 'یادداشت حداکثر 300 نویسه باشد.',
+  settlement_reason_required: 'دلیل را بنویس؛ در صورت‌حساب چاپخانه دیده می‌شود.',
+  settlement_reason_too_long: 'دلیل حداکثر 300 نویسه باشد.',
+  settlement_direction: '«به سود چاپخانه» یا «به زیان چاپخانه» را انتخاب کن.',
+  settlement_order_invalid: 'شمارهٔ سفارش را با رقم بنویس، مثلاً 10027؛ یا خالی بگذار.',
   // مسدودی موبایل مشتری (۱۲٫۲)
   invalid_block_mobile: 'شمارهٔ موبایل درست نیست؛ 11 رقم است و با 09 شروع می‌شود.',
   mobile_already_blocked: 'این شماره همین حالا مسدود است؛ دلیل و کسی که مسدودش کرد در فهرست «شماره‌های مسدود» است.',
