@@ -433,6 +433,7 @@ describe('رویدادها', () => {
       'ادمین‌ها',
       'گزارش‌ها',
       'تسویه',
+      'موجودی کاغذ',
       'تخفیف‌ها',
       'مشتری‌ها',
       'نظرها',
@@ -451,6 +452,7 @@ describe('رویدادها', () => {
       'admins',
       'reports',
       'settlements',
+      'inventory',
       'discounts',
       'customers',
       'reviews',
@@ -666,6 +668,35 @@ describe('رویدادها', () => {
       false,
       true,
     ]);
+  });
+
+  it('موجودی کاغذ (۱۰٫۴، سؤال ۴۱۸): کاغذ، اندازه، چاپخانه و برگ، با منفی؛ بی یادداشت و دلیل؛ چیپ «موجودی کاغذ»', () => {
+    const base = { item: 'i-1', partner: { id: 'p-2', name: 'چاپ نور' }, paper: { id: 'tahrir80', name: 'تحریر ۸۰ گرم' }, size: 'a4' };
+    const stock = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'partner', detail: { ...base, ...detail } });
+    expect(
+      eventLines([
+        stock('inventory.track', { countedSheets: 2_500, thresholdSheets: 1_000 }),
+        stock('inventory.track', { countedSheets: 0, thresholdSheets: null }),
+        stock('inventory.purchase', { deltaSheets: 500, balanceSheets: 3_000 }),
+        stock('inventory.waste', { deltaSheets: -40, balanceSheets: 2_960 }),
+        stock('inventory.count', { deltaSheets: -10, countedSheets: 2_950, balanceSheets: 2_950 }),
+        stock('inventory.count', { deltaSheets: 0, countedSheets: 2_950, balanceSheets: 2_950 }),
+        stock('inventory.waste', { deltaSheets: -100, balanceSheets: -60 }),
+        stock('inventory.threshold', { from: null, to: 800 }),
+        stock('inventory.threshold', { from: 800, to: null }),
+      ]).map((line) => line.text),
+    ).toEqual([
+      ['پیگیری تحریر ۸۰ گرم A4 «چاپ نور» شروع شد با ', { ltr: '2,500' }, ' برگ، آستانه ', { ltr: '1,000' }, ' برگ'],
+      ['پیگیری تحریر ۸۰ گرم A4 «چاپ نور» شروع شد با ', { ltr: '0' }, ' برگ'],
+      ['ورود ', { ltr: '500' }, ' برگ به تحریر ۸۰ گرم A4 «چاپ نور»؛ موجودی ', { ltr: '3,000' }, ' برگ'],
+      ['ضایعات ', { ltr: '40' }, ' برگ از تحریر ۸۰ گرم A4 «چاپ نور»؛ موجودی ', { ltr: '2,960' }, ' برگ'],
+      ['شمارش تحریر ۸۰ گرم A4 «چاپ نور»: ', { ltr: '2,950' }, ' برگ (', { ltr: '−10' }, ' برگ)'],
+      ['شمارش تحریر ۸۰ گرم A4 «چاپ نور»: ', { ltr: '2,950' }, ' برگ'],
+      ['ضایعات ', { ltr: '100' }, ' برگ از تحریر ۸۰ گرم A4 «چاپ نور»؛ موجودی ', { ltr: '−60' }, ' برگ'],
+      ['آستانهٔ تحریر ۸۰ گرم A4 «چاپ نور»: بی آستانه ← ', { ltr: '800' }, ' برگ'],
+      ['آستانهٔ تحریر ۸۰ گرم A4 «چاپ نور»: ', { ltr: '800' }, ' برگ ← بی آستانه'],
+    ]);
+    expect([inEventKind('inventory.count', 'inventory'), inEventKind('inventory.track', 'partners')]).toEqual([true, false]);
   });
 
   it('کد تخفیف (۱۱٫۴، سؤال ۳۰۴): ساخته شد، خاموش و روشن شد، و ویرایش با نام شرط‌ها؛ متن کد جدا و بی مبلغ؛ چیپ «تخفیف‌ها»', () => {

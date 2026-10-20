@@ -36,12 +36,14 @@ const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 200;
 // لغو و مبلغ از ۵٫۳ مجوز خودشان را دارند؛ متصدی هر دو را، از ۶٫۱ ورود فایل پست، از ۶٫۲ صف تأیید، از ۸٫۴ خاموش موقت گزینه‌های
 // تعرفه، از ۹٫۳ یادداشت داخلی، از ۱۰٫۱ در دسترس بودن چاپخانه‌ها، از ۱۲٫۲ مسدود کردن موبایل مشتری، از ۱۱٫۳ نوار اعلان و از ۱۲٫۱ پیام‌های
-// پشتیبانی. چاپخانه دیدن، وضعیت و دانلود
-// (ADR-042)، از ۶٫۲ ورود فایل پست خودش، و از ۱۰٫۱ «شلوغ» و «تعطیل» خودش.
+// پشتیبانی، و از ۱۰٫۴ موجودی کاغذ. چاپخانه دیدن، وضعیت و دانلود
+// (ADR-042)، از ۶٫۲ ورود فایل پست خودش، از ۱۰٫۱ «شلوغ» و «تعطیل» خودش، و از ۱۰٫۴ موجودی کاغذ خودش.
 const OPERATOR_PERMISSIONS = [
   'content.bar',
   'customers.block',
   'files.download',
+  'inventory.manage',
+  'inventory.read',
   'orders.address',
   'orders.assign',
   'orders.cancel',
@@ -59,6 +61,8 @@ const OPERATOR_PERMISSIONS = [
 // از ۱۰٫۲ گزارش تولید خودش، بی مبلغ.
 const PARTNER_PERMISSIONS = [
   'files.download',
+  'inventory.manage',
+  'inventory.read',
   'orders.read',
   'orders.status',
   'partners.availability',

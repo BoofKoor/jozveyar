@@ -2332,6 +2332,108 @@ export const partnerLedger = pgTable(
   ],
 );
 
+/* ──────────────────────────── موجودی کاغذ (برش ۱۰٫۴، ADR-070) ──────────────────────────── */
+
+/** بزرگ‌ترین شمار برگ یک ردیف موجودی، شمارش یا آستانه: ده میلیون برگ (بیست هزار بند). */
+export const PAPER_STOCK_MAX_SHEETS = 10_000_000;
+/** بزرگ‌ترین تغییر یک ردیف: چاپ یک سفارش بزرگ (۳۰ جزوه × ۱٬۰۰۰ نسخه × ۱٬۵۰۰ برگ) هم جا می‌شود. */
+export const PAPER_STOCK_MAX_DELTA = 100_000_000;
+
+/**
+ * یک قلم موجودی (برش ۱۰٫۴، ADR-070؛ سؤال ۲۰۴، پاسخ «همهٔ چاپخانه‌ها»): یک کاغذ تعرفه در یک اندازه، در یک چاپخانه، به **برگ**. قلم فقط
+ * وقتی هست که کسی پیگیری‌اش را با شمارش اول شروع کند؛ «شروع چاپ» فقط از قلمی کم می‌کند که هست. کاغذ با شناسهٔ پایدار تعرفه
+ * (`paper_types.id`) است، بی کلید خارجی: جدول کاغذ نسخه‌دار است و شناسه از نسخه‌ای به نسخهٔ بعد می‌ماند. موجودی جمع `delta_sheets`
+ * ردیف‌های `paper_stock_moves` است، نه ستونی که عوض شود. پاک نمی‌شود و جز آستانه عوض نمی‌شود (`paper_stock_items_guard`، 0062).
+ */
+export const paperStockItems = pgTable(
+  'paper_stock_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    printPartnerId: uuid('print_partner_id')
+      .notNull()
+      .references(() => printPartners.id),
+    paperTypeId: text('paper_type_id').notNull(),
+    paperSize: paperSize('paper_size').notNull(),
+    /** آستانهٔ هشدار پیشخوان، برگ؛ null یعنی بی آستانه. */
+    thresholdSheets: integer('threshold_sheets'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('paper_stock_items_key').on(t.printPartnerId, t.paperTypeId, t.paperSize),
+    /** همان شکل شناسهٔ کاغذ ویرایشگر تعرفه (`OPTION_ID` پنل). */
+    check('paper_stock_items_paper', sql`${t.paperTypeId} ~ '^[a-z][a-z0-9_]{1,39}$'`),
+    check(
+      'paper_stock_items_threshold',
+      sql`${t.thresholdSheets} IS NULL OR ${t.thresholdSheets} BETWEEN 0 AND ${sql.raw(String(PAPER_STOCK_MAX_SHEETS))}`,
+    ),
+  ],
+);
+
+/**
+ * ردیف‌های موجودی هر قلم (برش ۱۰٫۴، ADR-070)، فقط افزودنی: `purchase` ورود (مثبت)، `waste` ضایعات (منفی، با دلیل)، `count` شمارش (موجودی
+ * واقعی؛ تغییر را خود پایگاه داده از موجودی همان لحظه می‌نشاند)، و دو ردیف خودکار که فقط تریگر وضعیت سفارش می‌نویسد: `print` با «شروع
+ * چاپ» (منفی، برگ × نسخهٔ جزوه‌های همان کاغذ و اندازه) و `unprint` با برگرداندن «در حال چاپ» به «در صف چاپ» (همان برگ‌ها، یک بار برای هر
+ * ردیف چاپ). هر فرم یک ردیف (`request_id`). محافظ‌ها در 0062: `paper_stock_moves_guard` و `orders_paper_stock`.
+ */
+export const paperStockMoves = pgTable(
+  'paper_stock_moves',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => paperStockItems.id),
+    kind: text('kind').notNull(),
+    /** تغییر موجودی، برگ. */
+    deltaSheets: integer('delta_sheets').notNull(),
+    /** فقط شمارش: موجودی شمرده‌شده. */
+    countedSheets: integer('counted_sheets'),
+    /** چاپ و برگشت: سفارشی که برگ‌ها برایش بود. */
+    orderId: uuid('order_id').references(() => orders.id),
+    /** برگشت: ردیف چاپی که برمی‌گرداند. */
+    undoes: bigint('undoes', { mode: 'number' }),
+    /** یادداشت ورود (اختیاری) یا دلیل ضایعات و شمارش (لازم)، ۱ تا ۳۰۰ نویسه. */
+    note: text('note'),
+    /** ادمین ردیف دستی؛ ردیف خودکار هیچ. */
+    createdBy: uuid('created_by').references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** شناسهٔ فرم ردیف دستی: دو کلیک یک ردیف، همان فرم با چیز دیگر «فرم کهنه». */
+    requestId: uuid('request_id'),
+  },
+  (t) => [
+    index('paper_stock_moves_item').on(t.itemId, t.id),
+    index('paper_stock_moves_order').on(t.orderId),
+    uniqueIndex('paper_stock_moves_request').on(t.requestId),
+    uniqueIndex('paper_stock_moves_undoes').on(t.undoes),
+    foreignKey({ columns: [t.undoes], foreignColumns: [t.id], name: 'paper_stock_moves_undoes_fk' }),
+    check('paper_stock_moves_kind', sql`${t.kind} IN ('purchase', 'waste', 'count', 'print', 'unprint')`),
+    /**
+     * هر نوع شکل خودش را دارد: دستی‌ها با ادمین و شناسهٔ فرم و بی سفارش؛ ضایعات و شمارش با دلیل؛ خودکارها با سفارش و بی ادمین، فرم و
+     * یادداشت؛ برگشت با ردیف چاپی که برمی‌گرداند.
+     */
+    check(
+      'paper_stock_moves_shape',
+      sql`abs(${t.deltaSheets}) <= ${sql.raw(String(PAPER_STOCK_MAX_DELTA))}
+       AND ((${t.kind} IN ('purchase', 'waste', 'count') AND ${t.createdBy} IS NOT NULL AND ${t.requestId} IS NOT NULL
+             AND ${t.orderId} IS NULL AND ${t.undoes} IS NULL
+             AND ((${t.kind} = 'purchase' AND ${t.deltaSheets} > 0 AND ${t.countedSheets} IS NULL)
+               OR (${t.kind} = 'waste' AND ${t.deltaSheets} < 0 AND ${t.countedSheets} IS NULL AND ${t.note} IS NOT NULL)
+               OR (${t.kind} = 'count' AND ${t.countedSheets} BETWEEN 0 AND ${sql.raw(String(PAPER_STOCK_MAX_SHEETS))}
+                   AND ${t.note} IS NOT NULL)))
+         OR (${t.kind} IN ('print', 'unprint') AND ${t.orderId} IS NOT NULL AND ${t.createdBy} IS NULL AND ${t.requestId} IS NULL
+             AND ${t.note} IS NULL AND ${t.countedSheets} IS NULL
+             AND ((${t.kind} = 'print' AND ${t.deltaSheets} < 0 AND ${t.undoes} IS NULL)
+               OR (${t.kind} = 'unprint' AND ${t.deltaSheets} > 0 AND ${t.undoes} IS NOT NULL))))`,
+    ),
+    check(
+      'paper_stock_moves_note',
+      sql`${t.note} IS NULL OR (length(${t.note}) BETWEEN 1 AND 300 AND ${t.note} = btrim(${t.note}))`,
+    ),
+  ],
+);
+
 /* ──────────────────────────── متن‌های سایت (برش ۱۱٫۱) ──────────────────────────── */
 
 /** شش متنی که مالک از پنل عوض می‌کند (ADR-065، سؤال ۲۸۳)؛ همان `CONTENT_KINDS` در `@jozveyar/content`. */

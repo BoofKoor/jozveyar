@@ -1822,3 +1822,68 @@ export async function partnerShareAction(_state: FormState, form: FormData): Pro
   if (result.error === 'partner_share_changed' && UUID_RE.test(id)) redirect(`${panelPath(gate, `/partners/${id}/share`)}?e=${result.error}&${doneMark()}`);
   redirect(`${panelPath(gate, '/partners')}?e=${result.error}&${doneMark()}`);
 }
+
+/* ───────────────────────── موجودی کاغذ (برش ۱۰٫۴، ADR-070) ───────────────────────── */
+
+/** صفحهٔ یک چاپخانه یا یک قلم موجودی، فقط با شناسهٔ درست؛ وگرنه نمای کلی. */
+function inventoryHome(gate: string, partnerId: string, itemId?: string): string {
+  if (!UUID_RE.test(partnerId)) return panelPath(gate, '/inventory');
+  if (itemId && UUID_RE.test(itemId)) return panelPath(gate, `/inventory/${partnerId}/${itemId}`);
+  return panelPath(gate, `/inventory/${partnerId}`);
+}
+
+/** خطاهایی که فرم‌های موجودی همان‌جا، زیر فیلد خودشان، نشان می‌دهند. */
+const INVENTORY_FORM_ERRORS: readonly AdminErrorCode[] = [
+  'stock_kind_invalid',
+  'stock_sheets_invalid',
+  'stock_count_invalid',
+  'stock_note_required',
+  'stock_note_too_long',
+  'stock_paper_invalid',
+  'stock_threshold_invalid',
+  'stock_paper_not_found',
+  'stock_item_exists',
+];
+
+/** «کاغذ تازه» (برش ۱۰٫۴، سؤال ۴۰۵): قلم با شمارش اول؛ به صفحهٔ همان قلم. */
+export async function inventoryTrackAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { inventory } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const partnerId = field(form, 'partner');
+  const values = { paper: field(form, 'paper').slice(0, 50), counted: field(form, 'counted').slice(0, 30), threshold: field(form, 'threshold').slice(0, 30) };
+  const result = await inventory.track(session, partnerId, { ...values, request: field(form, 'request') }, await requestIp());
+  if (result.ok) redirect(withQuery(inventoryHome(gate, partnerId, result.value.itemId), `done=track&${doneMark()}`));
+  if (INVENTORY_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(inventoryHome(gate, partnerId), `e=${result.error}&${doneMark()}`));
+}
+
+/** «ثبت» یک قلم (برش ۱۰٫۴، سؤال ۴۰۹): ورود، ضایعات یا شمارش. */
+export async function inventoryMoveAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { inventory } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const partnerId = field(form, 'partner');
+  const itemId = field(form, 'item');
+  const values = { kind: field(form, 'kind').slice(0, 10), sheets: field(form, 'sheets').slice(0, 30), note: field(form, 'note').slice(0, 700) };
+  const result = await inventory.record(session, partnerId, itemId, { ...values, request: field(form, 'request') }, await requestIp());
+  const home = inventoryHome(gate, partnerId, itemId);
+  if (result.ok) redirect(withQuery(home, `done=${values.kind}&move=${result.value.moveId}&${doneMark()}`));
+  if (INVENTORY_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(home, `e=${result.error}&${doneMark()}`));
+}
+
+/** آستانهٔ یک قلم (برش ۱۰٫۴، سؤال ۴۱۳)؛ خالی یعنی بی آستانه. */
+export async function inventoryThresholdAction(_state: FormState, form: FormData): Promise<FormState> {
+  const gate = field(form, 'gate');
+  const { inventory } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const partnerId = field(form, 'partner');
+  const itemId = field(form, 'item');
+  const values = { threshold: field(form, 'threshold').slice(0, 30) };
+  const result = await inventory.threshold(session, partnerId, itemId, values, await requestIp());
+  const home = inventoryHome(gate, partnerId, itemId);
+  if (result.ok) redirect(withQuery(home, `done=${result.value.changed ? 'threshold' : 'threshold_same'}&${doneMark()}`));
+  if (INVENTORY_FORM_ERRORS.includes(result.error)) return failure(result, values);
+  redirect(withQuery(home, `e=${result.error}&${doneMark()}`));
+}

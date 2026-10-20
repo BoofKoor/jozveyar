@@ -280,7 +280,23 @@ export type AdminErrorCode =
   | 'settlement_reason_required'
   | 'settlement_reason_too_long'
   | 'settlement_direction'
-  | 'settlement_order_invalid';
+  | 'settlement_order_invalid'
+  /**
+   * موجودی کاغذ (۱۰٫۴): چاپخانه یا قلمی که (در این محدوده) نیست، قلمی که همین حالا پیگیری می‌شود، کاغذی که تعرفهٔ فعال در آن اندازه ندارد، فرمی
+   * که با چیز دیگری فرستاده شده، و خطای هر فیلد فرم‌ها زیر خودش.
+   */
+  | 'stock_partner_not_found'
+  | 'stock_item_not_found'
+  | 'stock_item_exists'
+  | 'stock_paper_not_found'
+  | 'stock_form_used'
+  | 'stock_kind_invalid'
+  | 'stock_sheets_invalid'
+  | 'stock_count_invalid'
+  | 'stock_note_required'
+  | 'stock_note_too_long'
+  | 'stock_paper_invalid'
+  | 'stock_threshold_invalid';
 
 export type Failure = { ok: false; status: number; error: AdminErrorCode } & Record<string, unknown>;
 export type Result<T> = { ok: true; value: T } | Failure;

@@ -428,6 +428,20 @@
       "when": 1792445721283,
       "tag": "0060_partner_settlement_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1792512725860,
+      "tag": "0061_paper_stock",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792512738720,
+      "tag": "0062_paper_stock_guards",
+      "breakpoints": true
     }
   ]
 }

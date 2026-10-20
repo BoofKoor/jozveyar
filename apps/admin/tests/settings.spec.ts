@@ -150,7 +150,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
 
   test('متصدی نه زبانه دارد، نه صفحه («فقط مالک» با متن طرح)؛ مالک کارت‌ها با عددهای پایگاه داده، و کلید .env فقط با ۴ نویسهٔ آخر', async () => {
     await operatorPage.goto(at());
-    await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'تعرفه', 'محتوای سایت']);
+    await expect(operatorPage.getByRole('navigation', { name: 'بخش‌های پنل' }).getByRole('link')).toHaveText(['پیشخوان', 'سفارش‌ها', 'پشتیبانی', 'ارسال', 'موجودی کاغذ', 'تعرفه', 'محتوای سایت']);
     await operatorPage.goto(at('/settings'));
     await expect(operatorPage.getByRole('heading', { name: NO_ACCESS })).toBeVisible();
     await expect(operatorPage.locator('.ad-noaccess .ad-lead')).toHaveText(
@@ -162,7 +162,7 @@ test.describe.serial('تنظیمات و کلیدها در پنل', () => {
     await page.goto(at());
     const nav = page.getByRole('navigation', { name: 'بخش‌های پنل' });
     // «تعرفه»ی مالک از ۶٫۱ با بخش‌های مالک: در دسکتاپ کنارشان، در گوشی زیر «بیشتر» (طرح برش ۶).
-    await expect(nav.locator('.ad-nav__wide')).toHaveText(['پشتیبانی', 'ارسال', 'تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
+    await expect(nav.locator('.ad-nav__wide')).toHaveText(['پشتیبانی', 'ارسال', 'موجودی کاغذ', 'تعرفه', 'تخفیف‌ها', 'گزارش‌ها', 'محتوای سایت', 'تنظیمات', 'چاپخانه‌ها', 'ادمین‌ها', 'رویدادها']);
     await nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' }).click();
     await expect(page.getByRole('heading', { name: 'تنظیمات', level: 1 })).toBeVisible();
     await expect(nav.locator('.ad-nav__wide', { hasText: 'تنظیمات' })).toHaveAttribute('aria-current', 'page');

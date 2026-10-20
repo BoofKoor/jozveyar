@@ -528,7 +528,7 @@ test.describe.serial('تسویهٔ چاپخانه‌ها (۱۰٫۳)', () => {
     const { page, problems } = who.partner;
     const shareA = shareOf(a.subtotalRials);
     await page.goto(at('/'));
-    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'گزارش‌ها']);
+    await expect(nav(page)).toHaveText(['پیشخوان', 'سفارش‌ها', 'ارسال', 'موجودی کاغذ', 'گزارش‌ها']);
     await nav(page).filter({ hasText: 'گزارش‌ها' }).click();
     await expect(reportsNav(page)).toHaveText(['گزارش تولید', 'تسویه']);
     await reportsNav(page).filter({ hasText: 'تسویه' }).click();
@@ -571,7 +571,7 @@ test.describe.serial('تسویهٔ چاپخانه‌ها (۱۰٫۳)', () => {
       await expect(page.getByRole('heading', { name: 'این بخش برای چاپخانه باز نیست' }), path).toBeVisible();
     }
     await expect(page.locator('.ad-noaccess .ad-lead')).toHaveText(
-      `سفارش‌هایی که به ${NAVID} سپرده شده‌اند در «سفارش‌ها»ست، و گزارش تولید و صورت‌حساب تسویه‌شان در «گزارش‌ها». لغو، ویرایش نشانی، پیام مشتری‌ها، تعرفه و بقیه با جزوه‌یار است.`,
+      `سفارش‌هایی که به ${NAVID} سپرده شده‌اند در «سفارش‌ها»ست، گزارش تولید و صورت‌حساب تسویه‌شان در «گزارش‌ها»، و موجودی کاغذت در «موجودی کاغذ». لغو، ویرایش نشانی، پیام مشتری‌ها، تعرفه و بقیه با جزوه‌یار است.`,
     );
     // خروجی PDF حسابدار فقط برای خودش است.
     expect((await page.goto(at(pdfUrl)))?.status()).toBe(404);
