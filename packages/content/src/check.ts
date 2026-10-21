@@ -5,6 +5,7 @@
  */
 
 import { FAQ_MAX_ITEMS, fieldsOf, readPath, type AnyContent, type ContentKind, type FaqContent, type FieldFormat } from './kinds.js';
+import type { BlockIssueCode } from './blocks.js';
 import { parseInline, parseMarkdown, type InlineFormat, type MarkdownIssueCode } from './markdown.js';
 
 export type ContentIssueCode =
@@ -26,7 +27,15 @@ export type ContentIssueCode =
   | 'bar_href'
   | 'bar_link_text'
   /** بنر صفحهٔ اصلی (۱۱٫۲، `checkBanner`): پیوند به جای دیگر. */
-  | 'banner_href';
+  | 'banner_href'
+  /** صفحه‌های فرود (۱۵٫۲، `checkPage`): شکل نشانی، نام رزرو، نشانی صفحهٔ دیگر، پیوند به صفحه‌ای که روی سایت نیست، و گزینهٔ میزی که تعرفه ندارد. */
+  | 'slug_format'
+  | 'slug_reserved'
+  | 'slug_taken'
+  | 'link_not_live'
+  | 'desk_option'
+  /** بلوک زندهٔ ناشناس یا نادرست (`parseBlock`). */
+  | BlockIssueCode;
 
 export interface ContentIssue {
   /** مسیر فیلد (نام فیلد فرم)؛ «items» برای شمار سؤال‌ها. */
@@ -41,6 +50,8 @@ export interface ContentIssue {
   /** سقف و شمار امروز، برای `too_long`. */
   max?: number;
   length?: number;
+  /** شمار با عدد امروز جای‌نگهدارها، نه نوشته (عنوان و توضیح گوگل صفحه‌ها، ۱۵٫۲). */
+  measured?: true;
 }
 
 /** آغاز یک خط برای خطا: بی نشانهٔ تیتر و فهرست، تا سه واژه، با «…» اگر بیشتر دارد. */

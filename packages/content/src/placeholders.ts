@@ -21,9 +21,23 @@ export const PLACEHOLDERS = [
 
 export type PlaceholderName = (typeof PLACEHOLDERS)[number];
 
-export type PlaceholderValues = Readonly<Record<PlaceholderName, string>>;
+/**
+ * دو جای‌نگهدار که فقط صفحه‌های فرود و «تعرفه» دارند (۱۵٫۲، سؤال‌های ۴۳۳ و ۴۶۲)، در متن، تیتر و عنوان و توضیح گوگلشان هم: سال شمسی امروز و
+ * روز فعال شدن تعرفهٔ فعال («15 مهر 1405»). متن‌های ۱۱٫۱ ندارندشان (`placeholder_not_here`)، تا جدول جای‌نگهدارهای آنجا همان ده بماند.
+ */
+export const PAGE_PLACEHOLDERS = ['سال', 'تغییر_قیمت'] as const;
+
+export type PagePlaceholderName = (typeof PAGE_PLACEHOLDERS)[number];
+export type AnyPlaceholderName = PlaceholderName | PagePlaceholderName;
+
+/** مقدار امروز هر جای‌نگهدار؛ دو جای‌نگهدار صفحه‌ها فقط در رسم و سنجش همان صفحه‌ها هست (`pageValues`). */
+export type PlaceholderValues = Readonly<Record<PlaceholderName, string>> & Readonly<Partial<Record<PagePlaceholderName, string>>>;
+
+/** مقدارهای صفحه‌های فرود و «تعرفه»: ده جای‌نگهدار و دو جای‌نگهدار خودشان. */
+export type PageValues = Readonly<Record<AnyPlaceholderName, string>>;
 
 export const isPlaceholder = (name: string): name is PlaceholderName => (PLACEHOLDERS as readonly string[]).includes(name);
+export const isPagePlaceholder = (name: string): name is PagePlaceholderName => (PAGE_PLACEHOLDERS as readonly string[]).includes(name);
 
 /**
  * منبع هر جای‌نگهدار، برای ستون «از کجا»ی ویرایشگر و برای «به‌روز شده در» قوانین و حریم خصوصی: تنظیمی که عوضش متن را عوض می‌کند. نرخ‌ها،
@@ -40,6 +54,12 @@ export const PLACEHOLDER_SOURCES: Readonly<Record<PlaceholderName, { source: str
   نرخ_رنگی_یکرو: { source: 'همان، یکرو', setting: null },
   صحافی_از: { source: 'کمترین قیمت صحافی پیش‌فرض (طلق و سیم)', setting: null },
   کرایه_از: { source: 'کمترین کرایهٔ پست', setting: null },
+};
+
+/** منبع دو جای‌نگهدار صفحه‌ها، برای همان جدول ویرایشگر صفحه‌ها. */
+export const PAGE_PLACEHOLDER_SOURCES: Readonly<Record<PagePlaceholderName, { source: string }>> = {
+  سال: { source: 'سال شمسی امروز' },
+  تغییر_قیمت: { source: 'روز فعال شدن تعرفهٔ فعال' },
 };
 
 /** شکل یکدست برای مقایسه: فاصله، نیم‌فاصله، خط تیره و زیرخط همه یک «_». */
@@ -63,13 +83,14 @@ function distance(a: string, b: string): number {
  * جای‌نگهداری که منظور نوشته‌ای ناشناس بوده: همان نام با فاصله یا نیم‌فاصلهٔ دیگر؛ وگرنه نزدیک‌ترین نامی که واژه‌ای از آن را دارد
  * («{روزهای_نگهداری}» ← «{روزهای_فایل}»)؛ وگرنه نامی با دست‌بالا سه نویسه فرق. null یعنی حدسی نیست.
  */
-export function suggestPlaceholder(written: string): PlaceholderName | null {
+export function suggestPlaceholder(written: string, page = false): AnyPlaceholderName | null {
   const name = folded(written);
   if (!name) return null;
-  const exact = PLACEHOLDERS.find((candidate) => folded(candidate) === name);
+  const names: readonly AnyPlaceholderName[] = page ? [...PLACEHOLDERS, ...PAGE_PLACEHOLDERS] : PLACEHOLDERS;
+  const exact = names.find((candidate) => folded(candidate) === name);
   if (exact) return exact;
   const words = new Set(name.split('_'));
-  const ranked = PLACEHOLDERS.map((candidate) => ({
+  const ranked = names.map((candidate) => ({
     candidate,
     shared: folded(candidate)
       .split('_')

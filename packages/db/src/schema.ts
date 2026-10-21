@@ -2503,6 +2503,179 @@ export const siteContentDrafts = pgTable(
   ],
 );
 
+/* ──────────────────────────── صفحه‌های فرود و «تعرفه» (برش ۱۵٫۲) ──────────────────────────── */
+
+/** نوع صفحه (ADR-071): صفحهٔ فرود با نشانی خودش، یا «تعرفه» با نشانی ثابت `/tarefe` (یکی). */
+export const sitePageKind = pgEnum('site_page_kind', ['landing', 'tariff']);
+
+/** برداشتن صفحهٔ فرود از سایت (سؤال ۴۶۶): «پیدا نشد» (۴۰۴) یا «به صفحهٔ دیگری» (۳۰۱). */
+export const sitePageRemoval = pgEnum('site_page_removal', ['gone', 'moved']);
+
+/** بزرگ‌ترین JSON یک صفحه؛ متن صفحه تا ۲۰٬۰۰۰ نویسه و ده سؤال است، یعنی زیر ۶۰ کیلوبایت. */
+export const SITE_PAGE_MAX_BYTES = 128 * 1024;
+
+/** شکل نشانی صفحه، همان `SLUG_PATTERN` در `@jozveyar/content`. */
+const SLUG_SHAPE = sql.raw(`'^[a-z0-9]+(-[a-z0-9]+)*$'`);
+
+/**
+ * نام‌های رزرو نشانی صفحه‌های فرود، همان `RESERVED_SLUGS` در `@jozveyar/content` (سؤال ۴۳۱): مسیرهای امروز سایت، فایل‌های ریشه، مسیرهای
+ * برش ۱۵، و `chap-jozve`. تست یکپارچگی برابری دو فهرست را می‌سنجد.
+ */
+export const RESERVED_PAGE_SLUGS = [
+  'about',
+  'admin',
+  'api',
+  'apple-icon',
+  'articles',
+  'chap-jozve',
+  'contact',
+  'favicon',
+  'fonts',
+  'icon',
+  'icons',
+  'img',
+  'manifest',
+  'media',
+  'opengraph-image',
+  'order',
+  'orders',
+  'pay',
+  'preview',
+  'privacy',
+  'robots',
+  'sitemap',
+  'tarefe',
+  'terms',
+] as const;
+
+/**
+ * هر صفحهٔ فرود، و «تعرفه» (برش ۱۵٫۲، ADR-071): فقط هویت؛ نشانی، متن و حال روی سایت در نسخه‌ها و پیش‌نویس است. صفحه‌ای که هرگز نسخه‌ای
+ * نداشت با دور انداختن پیش‌نویسش پاک می‌شود، و صفحه‌ای که نسخه دارد هرگز (`site_pages_guard`، 0064). «تعرفه» یکی است و با اولین ذخیره ساخته
+ * می‌شود؛ تا آن روز متن پیش‌فرض کد روی سایت است.
+ */
+export const sitePages = pgTable(
+  'site_pages',
+  {
+    id: serial('id').primaryKey(),
+    kind: sitePageKind('kind').notNull(),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('site_pages_one_tariff').on(t.kind).where(sql`${t.kind} = 'tariff'`)],
+);
+
+/**
+ * نشانی‌هایی که هر صفحهٔ فرود یک بار روی سایت داشت (سؤال ۴۳۱): نشانی‌ای که یک بار مال صفحه‌ای شد برای همیشه مال همان است، تا نشانی قبلی
+ * با ۳۰۱ به نشانی امروز همان صفحه برود و هرگز صفحهٔ دیگری نشود. با انتشار نسخه نوشته می‌شود و عوض و پاک نمی‌شود (`site_page_slugs_guard`).
+ */
+export const sitePageSlugs = pgTable(
+  'site_page_slugs',
+  {
+    slug: text('slug').primaryKey(),
+    pageId: integer('page_id')
+      .notNull()
+      .references(() => sitePages.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('site_page_slugs_page').on(t.pageId),
+    check('site_page_slugs_shape', sql`${t.slug} ~ ${SLUG_SHAPE} AND length(${t.slug}) BETWEEN 2 AND 60`),
+    check('site_page_slugs_reserved', sql`${t.slug} NOT IN (${sql.raw(RESERVED_PAGE_SLUGS.map((slug) => `'${slug}'`).join(', '))})`),
+  ],
+);
+
+/**
+ * نسخه‌های هر صفحه (سؤال‌های ۴۳۷ و ۴۶۵ و ۴۶۶): هر انتشار، برگرداندن، و برداشتن یک ردیف، پشت‌سرهم در هر صفحه. صفحه از `live_from` روی سایت
+ * است (زمان‌دار یعنی آینده)، و حال امروزش آخرین نسخه‌ای است که `live_from`ش رسیده و پس گرفته نشده. `content` خالی یعنی برداشتن (`removal`)
+ * در صفحهٔ فرود، و برگشت به متن پیش‌فرض در «تعرفه» (`restored_from` = ۰). هیچ نسخه‌ای پاک نمی‌شود و تنها تغییر «پس گرفتن» زمان‌دار است، یک
+ * بار و فقط پیش از رسیدنش (`site_page_versions_guard`، 0064).
+ */
+export const sitePageVersions = pgTable(
+  'site_page_versions',
+  {
+    id: serial('id').primaryKey(),
+    pageId: integer('page_id')
+      .notNull()
+      .references(() => sitePages.id),
+    /** شمارهٔ نسخه در همان صفحه، از ۱ و پشت‌سرهم. */
+    version: integer('version').notNull(),
+    /**
+     * نشانی صفحه در این نسخه، بی «/»؛ «تعرفه» همیشه `tarefe` (`site_page_versions_tariff`)، و صفحهٔ فرود فقط نشانی‌ای که همین صفحه گرفته
+     * (`site_page_versions_slug_claim`، با شکل و نام‌های رزرو `site_page_slugs`). برداشتن، نشانی‌ای که برداشته شد.
+     */
+    slug: text('slug').notNull(),
+    /** متن (`LandingContent` یا `TariffPageContent`)؛ null یعنی برداشتن، یا متن پیش‌فرض «تعرفه». */
+    content: jsonb('content'),
+    /** نسخه‌ای که «برگرداندن» از آن آمد؛ ۰ متن پیش‌فرض «تعرفه»، null انتشار پیش‌نویس یا برداشتن. */
+    restoredFrom: integer('restored_from'),
+    removal: sitePageRemoval('removal'),
+    /** مقصد ۳۰۱ برداشتن؛ null با `moved` یعنی صفحهٔ اصلی. */
+    movedTo: integer('moved_to').references(() => sitePages.id),
+    /** روی سایت از این زمان؛ همان `created_at` یعنی «همین حالا». */
+    liveFrom: timestamp('live_from', { withTimezone: true }).notNull().defaultNow(),
+    withdrawnAt: timestamp('withdrawn_at', { withTimezone: true }),
+    withdrawnBy: uuid('withdrawn_by').references(() => adminUsers.id),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('site_page_versions_version').on(t.pageId, t.version),
+    index('site_page_versions_slug').on(t.slug),
+    check('site_page_versions_number', sql`${t.version} >= 1`),
+    check(
+      'site_page_versions_content',
+      sql`${t.content} IS NULL OR (jsonb_typeof(${t.content}) = 'object' AND octet_length(${t.content}::text) <= ${sql.raw(String(SITE_PAGE_MAX_BYTES))})`,
+    ),
+    /** متن خالی فقط برداشتن یا متن پیش‌فرض؛ برداشتن بی متن و بی برگرداندن، و مقصد فقط با «به صفحهٔ دیگری» و نه خود صفحه. */
+    check(
+      'site_page_versions_shape',
+      sql`(${t.restoredFrom} IS NULL OR ${t.restoredFrom} >= 0)
+          AND (${t.content} IS NOT NULL OR ${t.removal} IS NOT NULL OR ${t.restoredFrom} IS NOT DISTINCT FROM 0)
+          AND (${t.removal} IS NULL OR (${t.content} IS NULL AND ${t.restoredFrom} IS NULL))
+          AND (${t.restoredFrom} IS DISTINCT FROM 0 OR ${t.content} IS NULL)
+          AND (${t.movedTo} IS NULL OR (${t.removal} = 'moved' AND ${t.movedTo} <> ${t.pageId}))`,
+    ),
+    /** روی سایت نه پیش از ساختن؛ «پس گرفتن» با کسی که گرفت، و فقط پیش از رسیدن. */
+    check(
+      'site_page_versions_times',
+      sql`${t.liveFrom} >= ${t.createdAt}
+          AND (${t.withdrawnAt} IS NULL) = (${t.withdrawnBy} IS NULL)
+          AND (${t.withdrawnAt} IS NULL OR (${t.withdrawnAt} >= ${t.createdAt} AND ${t.withdrawnAt} < ${t.liveFrom}))`,
+    ),
+  ],
+);
+
+/**
+ * پیش‌نویس هر صفحه (سؤال ۴۶۲): یکی برای هر صفحه، تا انتشار یا «دور انداختن»؛ روی سایت نیست و با خطا هم ذخیره می‌شود (نشانی رزرو هم). انتشار
+ * فقط بی خطاست (سرویس پنل). `base_version` آخرین نسخهٔ صفحه هنگام ساختن پیش‌نویس است.
+ */
+export const sitePageDrafts = pgTable(
+  'site_page_drafts',
+  {
+    pageId: integer('page_id')
+      .primaryKey()
+      .references(() => sitePages.id, { onDelete: 'cascade' }),
+    content: jsonb('content').notNull(),
+    baseVersion: integer('base_version').notNull(),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => adminUsers.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'site_page_drafts_content',
+      sql`jsonb_typeof(${t.content}) = 'object' AND octet_length(${t.content}::text) <= ${sql.raw(String(SITE_PAGE_MAX_BYTES))}`,
+    ),
+    check('site_page_drafts_times', sql`${t.updatedAt} >= ${t.createdAt}`),
+  ],
+);
+
 /* ──────────────────────────── تصویرهای سایت (برش ۱۱٫۲) ──────────────────────────── */
 
 /** نوع تصویر سایت (برش ۱۱٫۲، ADR-067): لوگو (با نشان اختیاری برای آیکون‌ها) و بنر صفحهٔ اصلی (با تصویر گوشی اختیاری). */

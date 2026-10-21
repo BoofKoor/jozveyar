@@ -8,8 +8,9 @@
 
 import { Fragment, type ReactNode } from 'react';
 
+import { PageBlock, type BlockData } from './blocksRender.js';
 import { parseInline, parseMarkdown, type InlineFormat, type InlineNode, type LinkChild } from './markdown.js';
-import type { PlaceholderValues } from './placeholders.js';
+import type { AnyPlaceholderName, PlaceholderValues } from './placeholders.js';
 
 /** واژهٔ لاتین (با نقطه، @، خط تیره و رقم درونش) یا عدد؛ چند واژهٔ لاتین با یک فاصله یک تکه‌اند («Save As»). */
 const TOKEN = /([A-Za-z][A-Za-z0-9]*(?:[.@_\-/:+]+[A-Za-z0-9]+)*(?: [A-Za-z][A-Za-z0-9]*(?:[.@_\-/:+]+[A-Za-z0-9]+)*)*|\d+(?:[.,]\d+)*)/;
@@ -39,8 +40,8 @@ export interface RenderOptions {
   inert?: boolean;
 }
 
-function Value({ name, options }: { name: keyof PlaceholderValues; options: RenderOptions }): ReactNode {
-  const text = <TextContent text={options.values[name]} />;
+function Value({ name, options }: { name: AnyPlaceholderName; options: RenderOptions }): ReactNode {
+  const text = <TextContent text={options.values[name] ?? ''} />;
   return options.live ? <span className={options.live}>{text}</span> : text;
 }
 
@@ -87,9 +88,9 @@ export function InlineNodes({ nodes, options, strong = 'b' }: { nodes: readonly 
   return out;
 }
 
-/** یک فیلد یک‌خطی یا یک‌بندی. */
-export function InlineText({ text, format, options }: { text: string; format: InlineFormat; options: RenderOptions }): ReactNode {
-  return <InlineNodes nodes={parseInline(text, format).nodes} options={options} />;
+/** یک فیلد یک‌خطی یا یک‌بندی؛ `page` با دو جای‌نگهدار صفحه‌های فرود و «تعرفه» (۱۵٫۲). */
+export function InlineText({ text, format, options, page }: { text: string; format: InlineFormat; options: RenderOptions; page?: boolean }): ReactNode {
+  return <InlineNodes nodes={parseInline(text, format, { page: page === true }).nodes} options={options} />;
 }
 
 /**
@@ -159,20 +160,26 @@ export function HeroTitle({ text, options, clause }: { text: string; options: Re
   ));
 }
 
-/** متن صفحه: تیترها (`h2` در سایت، `h3` در پیش‌نمایش پنل)، بندها و فهرست‌ها. */
+/**
+ * متن صفحه: تیترها (`h2` در سایت، `h3` در پیش‌نمایش پنل)، بندها و فهرست‌ها. با `blocks` (صفحه‌های فرود و «تعرفه»، ۱۵٫۲) بلوک‌های زنده و دو
+ * جای‌نگهدار صفحه‌ها هم، با تعرفهٔ امروز.
+ */
 export function MarkdownBlocks({
   text,
   options,
   heading = 'h2',
   headingClass,
+  blocks,
 }: {
   text: string;
   options: RenderOptions;
   heading?: 'h2' | 'h3';
   headingClass?: string;
+  blocks?: BlockData;
 }): ReactNode {
   const Heading = heading;
-  return parseMarkdown(text).blocks.map((block, i) => {
+  return parseMarkdown(text, { page: blocks !== undefined }).blocks.map((block, i) => {
+    if (block.type === 'block') return blocks ? <PageBlock key={i} raw={block.raw} data={blocks} /> : null;
     if (block.type === 'heading') {
       return (
         <Heading key={i} className={headingClass}>
@@ -198,3 +205,5 @@ export function MarkdownBlocks({
     );
   });
 }
+
+export * from './blocksRender.js';

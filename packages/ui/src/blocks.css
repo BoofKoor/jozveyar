@@ -1,0 +1,119 @@
+/*
+ * ===== بلوک‌های زنده و جدول‌های تعرفه (برش ۱۵٫۲، ADR-071؛ طرح تأییدشدهٔ docs/ui/mockups/seo.html، سؤال‌های ۴۵۶ و ۴۵۷) =====
+ * «قیمت نمونه» (`lp-sample`)، جدول‌های چاپ، صحافی، ارسال و تخفیف (`tf-table`) و جملهٔ زیرشان (`tf-note`): در صفحه‌های فرود، «تعرفه» و پیش‌نمایش
+ * صفحه‌ها در پنل، با همان اجزای `@jozveyar/content/render`. اینجاست (نه `apps/web/app`) چون پیش‌نمایش پنل همان را می‌خواهد، مثل `pages.css`.
+ * رنگ فقط توکن، فقط logical properties.
+ */
+@layer components {
+  /* یک بلوک در متن صفحه: فاصله با بند پیش و پس از آن */
+  .lp-block,
+  .lp-sample {
+    margin-block: 20px;
+  }
+  .lp-block > * + *,
+  .lp-block > div + div {
+    margin-block-start: 20px;
+  }
+
+  /* قیمت نمونه: کارت سفید با ردیف‌های خلاصهٔ سفارش؛ زیرش با ارسال به هر منطقه، و «از تعرفهٔ امروز» */
+  .lp-sample {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 26rem;
+  }
+  .lp-sample__title {
+    font-weight: 600;
+    line-height: 1.7;
+  }
+  .lp-sample__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-block-start: 4px;
+  }
+  .lp-sample__rows > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: var(--text-small);
+  }
+  .lp-sample__rows dd {
+    white-space: nowrap;
+  }
+  .lp-sample__rows .lp-sample__total {
+    padding-block-start: 8px;
+    border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-base);
+    font-weight: 600;
+  }
+  .lp-sample__ship {
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .lp-sample__foot {
+    padding-block-start: 8px;
+    border-block-start: 1px solid var(--color-green-100);
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .lp-sample--off .lp-sample__foot {
+    padding-block-start: 0;
+    border-block-start: 0;
+  }
+  .lp-samples {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+    gap: 16px;
+  }
+  .lp-samples .lp-sample {
+    max-width: none;
+    margin-block: 0;
+  }
+
+  /* جدول‌های تعرفه: ستون عدد به ته، سرستون کم‌رنگ؛ عرض تا ۴۰rem */
+  .tf-table {
+    width: 100%;
+    max-width: 40rem;
+    font-size: var(--text-small);
+    border-collapse: collapse;
+  }
+  .tf-table caption {
+    padding-block-end: 8px;
+    text-align: start;
+    font-size: var(--text-base);
+    font-weight: 600;
+  }
+  .tf-table th,
+  .tf-table td {
+    padding: 10px 12px;
+    border-block-end: 1px solid var(--color-green-100);
+    text-align: start;
+    font-weight: 400;
+  }
+  .tf-table thead th {
+    font-weight: 600;
+    color: var(--color-muted);
+    border-block-end-color: var(--color-line);
+  }
+  .tf-table tbody th {
+    font-weight: 600;
+  }
+  .tf-table .tf-end {
+    text-align: end;
+  }
+  .tf-note {
+    max-width: 40rem;
+    margin-block-start: 8px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  @media (max-width: 520px) {
+    .tf-table th,
+    .tf-table td {
+      padding-inline: 8px;
+    }
+  }
+}

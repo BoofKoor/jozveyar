@@ -7,6 +7,7 @@
 
 export * from './bar.js';
 export * from './banner.js';
+export * from './blocks.js';
 export * from './check.js';
 export * from './contact.js';
 export * from './defaults.js';
@@ -14,4 +15,5 @@ export * from './diff.js';
 export * from './facts.js';
 export * from './kinds.js';
 export * from './markdown.js';
+export * from './pages.js';
 export * from './placeholders.js';
