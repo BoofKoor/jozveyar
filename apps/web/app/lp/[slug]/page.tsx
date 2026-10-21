@@ -1,5 +1,5 @@
 import type { Metadata, ResolvingMetadata } from 'next';
-import { notFound, permanentRedirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import { SLUG_MAX, SLUG_PATTERN } from '@jozveyar/content';
 import { InlineText, PageSections, type BlockData } from '@jozveyar/content/render';
@@ -37,9 +37,9 @@ interface Props {
 }
 
 /**
- * جواب این نشانی: صفحهٔ فرود روی سایت، یا ۳۰۱ (نشانی قبلی یا صفحهٔ برداشته «به صفحهٔ دیگری»؛ میان‌افزار پیش از این می‌فرستدش، و این پشتیبان
- * دقیقه‌ای است که فهرست میان‌افزار هنوز کهنه است)، یا null یعنی ۴۰۴ (همان دقیقه، پس از برداشتن). نشانی‌ای که شکل نشانی صفحه‌ها را ندارد اصلاً از
- * پایگاه داده پرسیده نمی‌شود.
+ * جواب این نشانی: صفحهٔ فرود روی سایت، یا انتقال (نشانی قبلی یا صفحهٔ برداشته «به صفحهٔ دیگری»؛ میان‌افزار پیش از این ۳۰۱ می‌فرستدش، و این
+ * پشتیبان دقیقه‌ای است که فهرست میان‌افزار هنوز کهنه است)، یا null یعنی ۴۰۴ (همان دقیقه، پس از برداشتن). نشانی‌ای که شکل نشانی صفحه‌ها را ندارد
+ * اصلاً از پایگاه داده پرسیده نمی‌شود.
  */
 async function resolveLanding(slug: string) {
   if (slug.length > SLUG_MAX || !SLUG_PATTERN.test(slug)) return null;
@@ -80,7 +80,8 @@ export default async function LandingPage({ params }: Props) {
   const { slug } = await params;
   const landing = await resolveLanding(slug);
   if (!landing) notFound();
-  if ('redirect' in landing) permanentRedirect(landing.redirect);
+  // ۳۰۷، نه ۳۰۱ یا ۳۰۸: نسخهٔ ISR همین انتقال تا یک دقیقه می‌ماند و نشانی شاید در همان دقیقه برگردد؛ ۳۰۷ را مرورگر نگه نمی‌دارد، پس نمی‌چرخد.
+  if ('redirect' in landing) redirect(landing.redirect);
   const { content } = landing;
   const [{ tariff, files, values }, published] = await Promise.all([sitePageContext(), sitePublished()]);
   const home = liveText('home', published).content;

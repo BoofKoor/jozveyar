@@ -185,6 +185,8 @@ test.describe('نشانی صفحه‌ها (۱۵٫۲)', () => {
     const response = await request.get('/chap-jozve', { maxRedirects: 0 });
     expect(response.status()).toBe(301);
     expect(new URL(response.headers().location!, 'http://127.0.0.1').pathname).toBe('/');
+    // ۳۰۱ میان‌افزار کش‌نشدنی است: نشانی صفحه‌ها برگشت‌پذیر است، و مرورگر ۳۰۱ بی سرآیند کش را برای همیشه نگه می‌دارد.
+    expect(response.headers()['cache-control']).toBe('no-store');
   });
 
   test('نشانی‌ای که صفحه‌ای ندارد، با شکل نشانی صفحه‌ها یا بی آن: ۴۰۴ فارسی، noindex و بی canonical', async ({ request }) => {

@@ -37,6 +37,7 @@ import {
 import type { AdminErrorCode, Failure } from '../../lib/server/result';
 import { filterOf } from '../../lib/server/reviews';
 import { faqOpOf } from '../../lib/server/content';
+import { pageFaqOpOf } from '../../lib/server/pages';
 
 export interface FormState {
   error?: AdminErrorCode;
@@ -1472,6 +1473,128 @@ export async function publishContentAction(_state: FormState, form: FormData): P
     redirect(`${panelPath(gate, `/content/${encodeURIComponent(kind)}/publish`)}?${query}e=${result.error}`);
   }
   return failure(result);
+}
+
+/* ───────────────────────── صفحه‌های فرود و «تعرفه» (۱۵٫۲) ───────────────────────── */
+
+/** نشانی ویرایشگر یک صفحه با پیامش؛ `open` سؤالی را که کار فهرست جابه‌جا یا افزود باز نگه می‌دارد (مثل ۱۱٫۱). */
+function pageEditor(gate: string, param: string, query: string, open: number | null = null): string {
+  const base = panelPath(gate, `/content/pages/${encodeURIComponent(param)}`);
+  return `${base}?${query}&${doneMark()}${open === null ? '' : `&open=${open}`}`;
+}
+
+/**
+ * «ذخیره و پیش‌نمایش» و «انتشار…» یک صفحه (۱۵٫۲، سؤال ۴۶۲)، و کار فهرست سؤال‌ها، بی JS. صفحهٔ تازه با اولین ذخیره شماره می‌گیرد و ویرایشگر به
+ * نشانی خودش می‌رود. پیش‌نویس با خطا هم ذخیره می‌شود؛ «انتشار…» بی خطا به صفحهٔ انتشار می‌رود. بی کد تازه: پیش‌نویس روی سایت نیست.
+ */
+export async function savePageAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { pages } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const param = field(form, 'page');
+  const op = pageFaqOpOf(field(form, 'op'));
+  const faqCount = Number(field(form, 'faqCount')) || 0;
+  const result = await pages.save(session, param, { field: (name) => field(form, name), faqCount, op }, await requestIp());
+  if (!result.ok) redirect(pageEditor(gate, param, `e=${result.error}`));
+  const target = result.value.param ?? param;
+  if (!result.value.draft) redirect(pageEditor(gate, target, target === 'new' ? 'empty=1' : 'same=1'));
+  if (field(form, 'intent') === 'publish' && !op && result.value.issues.length === 0) {
+    redirect(panelPath(gate, `/content/pages/${encodeURIComponent(target)}/publish`));
+  }
+  const open = !op ? null : op.op === 'add' ? faqCount : op.op === 'up' ? op.index - 1 : op.op === 'down' ? op.index + 1 : null;
+  redirect(pageEditor(gate, target, 'saved=1', open));
+}
+
+/** «دور انداختن پیش‌نویس» یک صفحه، پس از تأیید ویرایشگر؛ صفحه‌ای که هرگز منتشر نشد با آن می‌رود و فهرست پیامش را می‌گوید. */
+export async function discardPageAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { pages } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const param = field(form, 'page');
+  const result = await pages.discard(session, param);
+  if (result.ok && result.value.deleted) redirect(`${panelPath(gate, '/content/pages')}?done=deleted&${doneMark()}`);
+  redirect(pageEditor(gate, param, result.ok ? 'discarded=1' : `e=${result.error}`));
+}
+
+/** «پس گرفتن زمان‌دار» (۱۵٫۲، سؤال ۴۶۵)، بی کد؛ برگشت به ویرایشگر، که حالا متن زمان‌دار را پیش‌نویس دارد. */
+export async function withdrawPageAction(form: FormData): Promise<void> {
+  const gate = field(form, 'gate');
+  const { pages } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const param = field(form, 'page');
+  const result = await pages.withdraw(session, param, { version: field(form, 'version') }, await requestIp());
+  redirect(pageEditor(gate, param, result.ok ? `withdrawn=${result.value.version}` : `e=${result.error}`));
+}
+
+export interface PageFormState extends FormState {
+  /** فیلد خطا: «کی»، روز، ساعت، راه برداشتن، مقصد، یا کد برنامهٔ تأیید. */
+  field?: 'when' | 'day' | 'hour' | 'mode' | 'to' | 'code';
+}
+
+/** خطاهایی که صفحهٔ انتشار یا برداشتن را با حال تازه از نو باز می‌کنند؛ بقیه کنار همان فیلد می‌مانند. */
+const PAGE_PAGE_ERRORS: AdminErrorCode[] = [
+  'page_changed',
+  'page_unchanged',
+  'page_invalid',
+  'page_no_draft',
+  'page_not_found',
+  'page_pending',
+  'page_slug_taken',
+  'page_not_live',
+  'page_remove_linked',
+  'forbidden',
+];
+
+function pageFormFailure(result: Failure, values: Record<string, string>): PageFormState {
+  const at = typeof result.field === 'string' ? (result.field as PageFormState['field']) : undefined;
+  const codeError = result.error === 'wrong_code' || result.error === 'code_used';
+  return { ...failure(result, values), ...(at ? { field: at } : codeError ? { field: 'code' as const } : {}) };
+}
+
+/**
+ * انتشار یک صفحه، همین حالا یا زمان‌دار، یا برگرداندن نسخه‌ای قبلی یا متن پیش‌فرض «تعرفه»، با کد تازه (۱۵٫۲، سؤال ۴۶۵): خطای روز، ساعت و کد
+ * همین‌جا؛ چیزی که همین حالا عوض شد به همان صفحه با پیامش. موفق به «نسخه‌ها»ی همان صفحه با نسخهٔ تازه.
+ */
+export async function publishPageAction(_state: PageFormState, form: FormData): Promise<PageFormState> {
+  const gate = field(form, 'gate');
+  const { pages } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const param = field(form, 'page');
+  const from = field(form, 'from');
+  const input = {
+    from,
+    version: field(form, 'version'),
+    seen: field(form, 'seen'),
+    when: field(form, 'when'),
+    day: field(form, 'day'),
+    hour: field(form, 'hour'),
+    code: form.get('code'),
+  };
+  const result = await pages.publish(session, param, input, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, `/content/pages/${encodeURIComponent(result.value.param)}/versions`)}?done=${result.value.version}`);
+  if (PAGE_PAGE_ERRORS.includes(result.error)) {
+    const query = from && from !== 'draft' ? `from=${encodeURIComponent(from)}&` : '';
+    redirect(`${panelPath(gate, `/content/pages/${encodeURIComponent(param)}/publish`)}?${query}e=${result.error}&${doneMark()}`);
+  }
+  return pageFormFailure(result, { when: input.when.slice(0, 8), day: input.day.slice(0, 20), hour: input.hour.slice(0, 10) });
+}
+
+/**
+ * «از سایت بردار» با کد تازه (۱۵٫۲، سؤال ۴۶۶): خطای راه، مقصد و کد همین‌جا؛ چیزی که همین حالا عوض شد به همان صفحه با پیامش. موفق به فهرست
+ * صفحه‌ها با پیام.
+ */
+export async function removePageAction(_state: PageFormState, form: FormData): Promise<PageFormState> {
+  const gate = field(form, 'gate');
+  const { pages } = requirePanel(gate);
+  const session = await requireSession(gate);
+  const param = field(form, 'page');
+  const input = { version: field(form, 'version'), mode: field(form, 'mode'), to: field(form, 'to'), code: form.get('code') };
+  const result = await pages.remove(session, param, input, await requestIp());
+  if (result.ok) redirect(`${panelPath(gate, '/content/pages')}?done=removed&${doneMark()}`);
+  if (PAGE_PAGE_ERRORS.includes(result.error)) {
+    redirect(`${panelPath(gate, `/content/pages/${encodeURIComponent(param)}/remove`)}?e=${result.error}&${doneMark()}`);
+  }
+  return pageFormFailure(result, { mode: input.mode.slice(0, 8), to: input.to.slice(0, 12) });
 }
 
 /* ───────────────────────── نوار اعلان (۱۱٫۳) ───────────────────────── */

@@ -17,8 +17,8 @@ import { tidyInputFa } from '@jozveyar/text/input';
 
 import { parseBlock, sampleQuote, vocabularyOf, type BlockIssueCode, type SampleOff } from './blocks.js';
 import { lineExcerpt, type ContentIssue } from './check.js';
-import type { FaqItem, Seo } from './kinds.js';
-import { tidyMarkdown } from './kinds.js';
+import type { AnyContent, ContentKind, FaqItem, Seo } from './kinds.js';
+import { faqCountOf, fieldsOf, readPath, tidyMarkdown } from './kinds.js';
 import { inlineText, linksIn, parseInline, parseMarkdown, type InlineFormat } from './markdown.js';
 import type { PageValues } from './placeholders.js';
 
@@ -435,6 +435,39 @@ export function checkPage(kind: SitePageKind, content: AnyPageContent, ctx: Page
   }
   if (kind === 'landing') issues.push(...presetIssues((content as LandingContent).desk, ctx.priceList));
   return { issues, warnings };
+}
+
+/* ───────────────────────── پیوندها ───────────────────────── */
+
+const INLINE_FORMATS: readonly string[] = ['plain', 'line', 'emphasis', 'paragraph'] satisfies InlineFormat[];
+
+/** مسیر پیوندهای درونی یک فیلد (بی `#…` و `?…`)؛ `tel:` و `mailto:` نه. */
+function fieldLinkPaths(format: string, value: string, page: boolean): string[] {
+  if (!value) return [];
+  const hrefs =
+    format === 'markdown'
+      ? linksIn(parseMarkdown(value, { page }).blocks).map((link) => link.href)
+      : INLINE_FORMATS.includes(format)
+        ? parseInline(value, format as InlineFormat, { page }).nodes.flatMap((node) => (node.type === 'link' ? [node.href] : []))
+        : [];
+  return hrefs.flatMap((href) => {
+    const path = linkPath(href);
+    return path === null ? [] : [path];
+  });
+}
+
+/**
+ * مسیر هر پیوند درونی یک صفحه، یکتا: «از سایت بردار…» تا وقتی متنی روی سایت یا زمان‌دار به صفحه پیوند دارد «پیدا نشد» را می‌بندد (سؤال ۴۶۶).
+ */
+export function pageLinkPaths(kind: SitePageKind, content: AnyPageContent): string[] {
+  const paths = pageFieldsOf(kind, content.faq.length).flatMap((spec) => fieldLinkPaths(spec.format, readPagePath(content, spec.name), true));
+  return [...new Set(paths)];
+}
+
+/** همان برای متن‌های سایت (۱۱٫۱): صفحهٔ اصلی، سؤال‌ها، قوانین و بقیه هم به صفحه‌های فرود پیوند می‌دهند. */
+export function contentLinkPaths(kind: ContentKind, content: AnyContent): string[] {
+  const paths = fieldsOf(kind, faqCountOf(content)).flatMap((spec) => fieldLinkPaths(spec.format, readPath(content, spec.name), false));
+  return [...new Set(paths)];
 }
 
 /** مقدار رشته‌ای یک مسیر فیلد صفحه («faq.1.a»، «seo.title»). */

@@ -96,6 +96,14 @@ export function pageStateAt(versions: readonly SitePageVersionRow[], at: Date): 
   };
 }
 
+/**
+ * این نشانی در لحظهٔ `at` یا پیش از آن نشانی نسخه‌ای روی سایت بوده است. نشانی‌ای که فقط زمان‌داری در راه یا پس‌گرفته گرفت هرگز روی سایت نبود: ۴۰۴
+ * است، نه ۳۰۱ به نشانی امروز؛ وگرنه ساعت انتشار جهت همان ۳۰۱ را برمی‌گرداند و مرورگری که ۳۰۱ اول را نگه داشته بود میان دو نشانی می‌چرخید.
+ */
+export function slugWasOnSite(versions: readonly SitePageVersionRow[], slug: string, at: Date): boolean {
+  return versions.some((row) => row.slug === slug && row.withdrawnAt === null && row.liveFrom <= at);
+}
+
 /** صفحه‌ای که همین حالا با متن روی سایت است. */
 export interface LivePage {
   pageId: number;
@@ -135,7 +143,10 @@ export type PagePublishSource =
 
 export type PageWriteOutcome =
   | { ok: true; version: number }
-  | { ok: false; reason: 'stale' | 'draft_changed' | 'not_found' | 'noop' | 'slug_taken' | 'pending' | 'not_live' | 'live' };
+  | { ok: false; reason: 'stale' | 'draft_changed' | 'not_found' | 'noop' | 'slug_taken' | 'pending' | 'not_live' | 'live' | 'bad_target' };
+
+/** مقصد ۳۰۱ برداشتن: صفحهٔ فرودی که همین حالا روی سایت است، «تعرفه» (که همیشه روی سایت است، با متن پیش‌فرض هم)، یا null یعنی صفحهٔ اصلی. */
+export type RemovalTarget = number | 'tariff' | null;
 
 export interface SitePageStore {
   /** همهٔ صفحه‌ها با نسخه‌ها و پیش‌نویسشان؛ فهرست پنل و سنجش پیوندها. */
@@ -153,14 +164,17 @@ export interface SitePageStore {
   slugOwner(slug: string): Promise<number | null>;
   /** پیش‌نویس تازه یا همان پیش‌نویس با متن تازه؛ بی `pageId` صفحهٔ فرود تازه، و «تعرفه» با اولین ذخیره ساخته می‌شود. */
   saveDraft(input: { pageId: number | null; kind: SitePageKind; content: unknown; actor: PageActor; at: Date }): Promise<{ pageId: number; draft: SitePageDraftRow }>;
-  /** دور انداختن پیش‌نویس؛ صفحه‌ای که هرگز نسخه‌ای نداشت هم پاک می‌شود. */
+  /** دور انداختن پیش‌نویس؛ صفحهٔ فرودی که هرگز نسخه‌ای نداشت هم پاک می‌شود («تعرفه» نه: یکی است و شاید مقصد ۳۰۱ باشد). */
   discardDraft(pageId: number): Promise<{ discarded: boolean; deleted: boolean }>;
   /** انتشار، همین حالا (`liveFrom` = `at`) یا زمان‌دار، زیر قفل، از آخرین نسخه‌ای که صفحه دید. */
   publish(input: { pageId: number; expectedVersion: number; source: PagePublishSource; liveFrom: Date; actor: PageActor; at: Date }): Promise<PageWriteOutcome>;
   /** پس گرفتن زمان‌دار، بی کد؛ متنش اگر پیش‌نویسی نیست پیش‌نویس می‌شود. */
   withdraw(input: { pageId: number; version: number; actor: PageActor; at: Date }): Promise<PageWriteOutcome>;
-  /** برداشتن صفحه‌ای که همین حالا روی سایت است: «پیدا نشد» یا «به صفحهٔ دیگری» (null یعنی صفحهٔ اصلی). */
-  remove(input: { pageId: number; expectedVersion: number; mode: SitePageRemoval; movedTo: number | null; actor: PageActor; at: Date }): Promise<PageWriteOutcome>;
+  /**
+   * برداشتن صفحه‌ای که همین حالا روی سایت است: «پیدا نشد» یا «به صفحهٔ دیگری». مقصد زیر همان قفل سنجیده می‌شود (`bad_target`)، و «تعرفه»ای که
+   * هرگز ذخیره نشده با همین کار ساخته می‌شود، چون مقصد ۳۰۱ ردیف صفحه است.
+   */
+  remove(input: { pageId: number; expectedVersion: number; mode: SitePageRemoval; movedTo: RemovalTarget; actor: PageActor; at: Date }): Promise<PageWriteOutcome>;
 }
 
 export function createSitePageStore({ db }: Database): SitePageStore {
@@ -226,9 +240,11 @@ export function createSitePageStore({ db }: Database): SitePageStore {
     if (pageId === null || hops > MAX_HOPS) return '/';
     const detail = all.get(pageId);
     if (!detail) return '/';
+    // «تعرفه» همیشه روی سایت است، بی نسخه هم (متن پیش‌فرض).
+    if (detail.page.kind === 'tariff') return `/${TARIFF_PAGE_SLUG}`;
     const { live } = pageStateAt(detail.versions, at);
     if (!live) return null;
-    if (live.content !== null || detail.page.kind === 'tariff') return `/${live.slug}`;
+    if (live.content !== null) return `/${live.slug}`;
     if (live.removal === 'moved') return targetOf(live.movedTo, all, at, hops + 1);
     return null;
   }
@@ -239,7 +255,7 @@ export function createSitePageStore({ db }: Database): SitePageStore {
     const owner = pages.find((detail) => detail.slugs.includes(slug));
     if (!owner) return { kind: 'none' };
     const { live } = pageStateAt(owner.versions, at);
-    if (!live) return { kind: 'none' };
+    if (!live || !slugWasOnSite(owner.versions, slug, at)) return { kind: 'none' };
     if (live.content !== null) {
       if (live.slug === slug) {
         return { kind: 'page', page: { pageId: owner.page.id, kind: owner.page.kind, slug, content: live.content, version: live.version, since: live.liveFrom } };
@@ -268,6 +284,33 @@ export function createSitePageStore({ db }: Database): SitePageStore {
 
   async function versionsOf(tx: Tx, pageId: number): Promise<SitePageVersionRow[]> {
     return versionRows(tx).where(eq(sitePageVersions.pageId, pageId)).orderBy(desc(sitePageVersions.version));
+  }
+
+  /**
+   * مقصد ۳۰۱ زیر قفل، با نشانی‌اش برای رویداد: null صفحهٔ اصلی؛ «تعرفه» شمارهٔ ردیفش، که اگر هرگز ذخیره نشده همین‌جا ساخته می‌شود؛ و صفحهٔ فرود
+   * فقط اگر خود صفحه نیست و همین حالا با متن روی سایت است، وگرنه ۳۰۱ به جایی می‌رفت که «پیدا نشد» است. false یعنی مقصد نادرست.
+   */
+  async function targetIn(
+    tx: Tx,
+    movedTo: RemovalTarget,
+    pageId: number,
+    actor: PageActor,
+    at: Date,
+  ): Promise<{ id: number | null; path: string } | false> {
+    if (movedTo === null) return { id: null, path: '/' };
+    const tariffPath = `/${TARIFF_PAGE_SLUG}`;
+    if (movedTo === 'tariff') {
+      const [existing] = await tx.select({ id: sitePages.id }).from(sitePages).where(eq(sitePages.kind, 'tariff'));
+      if (existing) return { id: existing.id, path: tariffPath };
+      const [created] = await tx.insert(sitePages).values({ kind: 'tariff', createdBy: actor.adminUserId, createdAt: at }).returning({ id: sitePages.id });
+      return { id: created!.id, path: tariffPath };
+    }
+    if (movedTo === pageId) return false;
+    const [page] = await tx.select({ kind: sitePages.kind }).from(sitePages).where(eq(sitePages.id, movedTo));
+    if (!page) return false;
+    if (page.kind === 'tariff') return { id: movedTo, path: tariffPath };
+    const { live } = pageStateAt(await versionsOf(tx, movedTo), at);
+    return live && live.content !== null ? { id: movedTo, path: `/${live.slug}` } : false;
   }
 
   const event = (tx: Tx, actor: PageActor, at: Date, action: string, pageId: number, detail: Record<string, unknown>) =>
@@ -374,8 +417,9 @@ export function createSitePageStore({ db }: Database): SitePageStore {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${PAGES_LOCK})`);
         const removed = await tx.delete(sitePageDrafts).where(eq(sitePageDrafts.pageId, pageId)).returning({ pageId: sitePageDrafts.pageId });
         const [version] = await tx.select({ id: sitePageVersions.id }).from(sitePageVersions).where(eq(sitePageVersions.pageId, pageId)).limit(1);
+        const [page] = await tx.select({ kind: sitePages.kind }).from(sitePages).where(eq(sitePages.id, pageId));
         let deleted = false;
-        if (!version) {
+        if (!version && page?.kind === 'landing') {
           const gone = await tx.delete(sitePages).where(eq(sitePages.id, pageId)).returning({ id: sitePages.id });
           deleted = gone.length > 0;
         }
@@ -487,6 +531,8 @@ export function createSitePageStore({ db }: Database): SitePageStore {
           const state = pageStateAt(versions, at);
           if (state.pending) return { ok: false, reason: 'pending' };
           if (!state.live || state.live.content === null) return { ok: false, reason: 'not_live' };
+          const target = mode === 'moved' ? await targetIn(tx, movedTo, pageId, actor, at) : null;
+          if (target === false) return { ok: false, reason: 'bad_target' };
           const version = locked.latest + 1;
           await tx.insert(sitePageVersions).values({
             pageId,
@@ -494,7 +540,7 @@ export function createSitePageStore({ db }: Database): SitePageStore {
             slug: state.live.slug,
             content: null,
             removal: mode,
-            movedTo: mode === 'moved' ? movedTo : null,
+            movedTo: target?.id ?? null,
             liveFrom: at,
             createdBy: actor.adminUserId,
             createdAt: at,
@@ -504,7 +550,9 @@ export function createSitePageStore({ db }: Database): SitePageStore {
             version,
             slug: state.live.slug,
             mode,
-            to: mode === 'moved' ? movedTo : null,
+            to: target?.id ?? null,
+            // نشانی مقصد همان لحظه، تا «رویدادها» بی خواندن دوباره بگوید به کجا رفت.
+            toPath: target?.path ?? null,
           });
           return { ok: true, version };
         }),

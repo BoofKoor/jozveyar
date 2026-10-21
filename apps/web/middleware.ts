@@ -55,5 +55,13 @@ export async function middleware(request: NextRequest) {
   if (!decision) return NextResponse.next();
   const url = request.nextUrl.clone();
   url.pathname = decision.to;
-  return decision.kind === 'redirect' ? NextResponse.redirect(url, 301) : NextResponse.rewrite(url);
+  if (decision.kind === 'rewrite') return NextResponse.rewrite(url);
+  /*
+   * ۳۰۱ این نشانی‌ها برگشت‌پذیر است (صفحه به نشانی قبلی‌اش برمی‌گردد، صفحهٔ برداشته دوباره منتشر می‌شود)، و مرورگر ۳۰۱ بی سرآیند کش را برای همیشه
+   * نگه می‌دارد: یا میان دو نشانی می‌چرخید (ERR_TOO_MANY_REDIRECTS) یا صفحهٔ برگشته را هرگز نمی‌دید. «دائمی» بودن برای گوگل از خود کد ۳۰۱ است، نه
+   * از کش.
+   */
+  const response = NextResponse.redirect(url, 301);
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }

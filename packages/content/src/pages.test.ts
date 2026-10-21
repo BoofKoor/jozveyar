@@ -23,17 +23,21 @@ import {
   type SampleSpec,
 } from './blocks.js';
 import { PageBlock, SampleCard } from './blocksRender.js';
+import { defaultContent } from './defaults.js';
+import { pageDiff } from './diff.js';
 import { factsOf, pageValues, placeholderValues } from './facts.js';
 import { blockText, linksIn, parseInline, parseMarkdown } from './markdown.js';
 import {
   RESERVED_SLUGS,
   canonicalPage,
   checkPage,
+  contentLinkPaths,
   defaultTariffPage,
   emptyLanding,
   landingOf,
   linkPath,
   pageFromFields,
+  pageLinkPaths,
   slugProblem,
   tidyPage,
   tidySlug,
@@ -366,6 +370,69 @@ describe('خواندن، فرم و یکدست کردن', () => {
     expect([page.slug, page.name]).toEqual(['print-pdf', 'پرینت 1']);
     expect(canonicalPage('landing', page)).toBe(canonicalPage('landing', { ...page }));
     expect(canonicalPage('landing', page)).not.toBe(canonicalPage('landing', { ...page, inFooter: false }));
+  });
+});
+
+describe('پیوندهای یک متن (سؤال ۴۶۶)', () => {
+  it('صفحه: هر فیلد، بی `#…` و `?…`، یکتا؛ `tel:` و `mailto:` نه', () => {
+    const page: LandingContent = {
+      ...LANDING,
+      body: '[تعرفه](/tarefe#print) و [باز](/tarefe?x=1).\n\n- [ارسال](/ersal)\n\n[[قیمت: 200 صفحه]]',
+      faq: [{ q: 'پ', a: '[تماس](tel:09121234567) یا [سؤال‌ها](/#faq).' }],
+    };
+    expect(pageLinkPaths('landing', page)).toEqual(['/tarefe', '/ersal', '/']);
+    expect(pageLinkPaths('tariff', { ...defaultTariffPage(), faq: [{ q: 'پ', a: 'در [پرینت PDF](/print-pdf).' }] })).toEqual(['/print-pdf']);
+  });
+
+  it('متن‌های سایت (۱۱٫۱): متن صفحه، پاسخ‌ها و جملهٔ زیر تیتر', () => {
+    const terms = { ...defaultContent('terms', FACTS), body: 'بند [پرینت ارزان](/print-arzan).' };
+    expect(contentLinkPaths('terms', terms)).toEqual(['/print-arzan']);
+    expect(contentLinkPaths('faq', { items: [{ q: 'پ', a: '[صحافی](/sahafi)' }, { q: 'د', a: 'بی پیوند' }] })).toEqual(['/sahafi']);
+  });
+});
+
+describe('«چه عوض می‌شود» صفحه (سؤال ۴۶۵)', () => {
+  const desk = (preset: LandingContent['desk']) => (preset.color === 'color' ? 'رنگی' : 'پیش‌فرض سایت');
+
+  it('نشانی، تیتر، بند عوض‌شدهٔ متن با تیتر بخشش، سؤال تازه، میز و پاورقی؛ بقیه «همان»', () => {
+    const after: LandingContent = {
+      ...LANDING,
+      slug: 'print-pdf-online',
+      title: 'پرینت PDF، با صحافی و ارسال',
+      body: LANDING.body.replace('بند با', 'بند تازه با'),
+      faq: [...LANDING.faq, { q: 'چند جلد؟', a: 'تا {سال}.' }],
+      desk: { ...LANDING.desk, color: '' },
+      inFooter: false,
+    };
+    const diff = pageDiff('landing', LANDING, after, VALUES, { deskText: desk });
+    expect(diff.changes.map((change) => change.section)).toEqual([
+      'نشانی',
+      'تیتر صفحه',
+      'PDF همان‌طور چاپ می‌شود',
+      'سؤال 2: چند جلد؟',
+      'میز سفارش',
+      'در پاورقی',
+    ]);
+    expect(diff.changes[0]).toEqual({ section: 'نشانی', before: [{ text: '/print-pdf', mark: 'del' }], after: [{ text: '/print-pdf-online', mark: 'ins' }] });
+    // جای‌نگهدار صفحه‌ها با عدد امروز، مثل خود سایت.
+    expect(diff.changes[3]!.after).toEqual([{ text: 'تا 1405.' }]);
+    expect(diff.unchanged).toEqual(['نام کوتاه', 'جملهٔ زیر تیتر', 'بقیهٔ متن صفحه', 'عنوان گوگل', 'توضیح گوگل']);
+    expect(diff.reordered).toBe(false);
+  });
+
+  it('بلوک زنده همان‌طور که نوشته شد؛ «تعرفه» بی نشانی، متن، میز و پاورقی', () => {
+    const body = LANDING.body.replace('200 صفحه', '300 صفحه');
+    const diff = pageDiff('landing', LANDING, { ...LANDING, body }, VALUES, { deskText: desk });
+    expect(diff.changes).toEqual([
+      {
+        section: 'PDF همان‌طور چاپ می‌شود',
+        before: [{ text: '[[قیمت: ' }, { text: '200', mark: 'del' }, { text: ' صفحه، سیاه‌سفید، دورو، طلق و سیم]]' }],
+        after: [{ text: '[[قیمت: ' }, { text: '300', mark: 'ins' }, { text: ' صفحه، سیاه‌سفید، دورو، طلق و سیم]]' }],
+      },
+    ]);
+    const tariff = defaultTariffPage();
+    const moved = pageDiff('tariff', tariff, { ...tariff, faq: [...tariff.faq].reverse() }, VALUES, { deskText: desk });
+    expect([moved.changes, moved.reordered, moved.unchanged]).toEqual([[], true, ['تیتر صفحه', 'جملهٔ زیر تیتر', 'عنوان گوگل', 'توضیح گوگل']]);
   });
 });
 

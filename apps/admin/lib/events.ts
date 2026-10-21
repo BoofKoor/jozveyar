@@ -708,6 +708,43 @@ function describe(event: AdminEventView): Pick<EventLine, 'badge' | 'text'> {
             : [`${title} منتشر شد`];
       return { badge: null, text: merged([...done, '، نسخهٔ ', { ltr: String(detail.version) }, '، با کد تازه']) };
     }
+    case 'content.page_publish': {
+      // صفحه‌های فرود و «تعرفه» (۱۵٫۲، سؤال ۴۶۵): نشانی و نسخه، بی خود متن؛ زمان‌دار با روز و ساعتش، برگرداندن با نسخه‌ای که برگشت، و نشانی
+      // قبلی‌ای که از این پس ۳۰۱ است. انتشار همیشه با کد تازه است.
+      const page: Segment[] = detail.kind === 'tariff' ? ['صفحهٔ «تعرفه»'] : ['صفحهٔ ', { ltr: `/${str(detail.slug)}` }];
+      const scheduled = typeof detail.scheduled === 'string' ? new Date(detail.scheduled) : null;
+      const done: Segment[] =
+        detail.restored === 0
+          ? [scheduled ? ' به متن پیش‌فرض برمی‌گردد' : ' به متن پیش‌فرض برگشت']
+          : typeof detail.restored === 'number'
+            ? [' به نسخهٔ ', { ltr: String(detail.restored) }, scheduled ? ' برمی‌گردد' : ' برگشت']
+            : [scheduled ? ' زمان‌دار شد' : ' منتشر شد'];
+      const when: Segment[] = scheduled ? [`، روی سایت ${formatJalaliWeekday(scheduled)}، ساعت ${formatTehranTime(scheduled)}`] : [];
+      const moved: Segment[] =
+        typeof detail.from === 'string' ? ['؛ ', { ltr: `/${detail.from}` }, scheduled ? ' از همان ساعت به نشانی تازه می‌رود' : ' از این پس به نشانی تازه می‌رود'] : [];
+      return { badge: null, text: merged([...page, ...done, ...when, '، نسخهٔ ', { ltr: String(detail.version) }, '، با کد تازه', ...moved]) };
+    }
+    case 'content.page_withdraw': {
+      // پس گرفتن زمان‌دار (۱۵٫۲): بی کد، و متنش پیش‌نویس می‌شود.
+      const scheduled = typeof detail.scheduled === 'string' ? new Date(detail.scheduled) : null;
+      return {
+        badge: null,
+        text: merged([
+          'زمان‌دار صفحهٔ ',
+          { ltr: `/${str(detail.slug)}` },
+          ' (نسخهٔ ',
+          { ltr: String(detail.version) },
+          scheduled ? `، برای ${formatJalaliWeekday(scheduled)}، ساعت ${formatTehranTime(scheduled)}` : '',
+          ') پس گرفته شد',
+        ]),
+      };
+    }
+    case 'content.page_remove': {
+      // برداشتن صفحه (۱۵٫۲، سؤال ۴۶۶): «پیدا نشد»، یا ۳۰۱ به نشانی‌ای که مقصد همان لحظه داشت؛ همیشه با کد تازه.
+      const to: Segment[] =
+        detail.mode === 'gone' ? ['، «پیدا نشد»'] : detail.toPath === '/' || detail.toPath === null ? ['، به صفحهٔ اصلی'] : ['، به ', { ltr: str(detail.toPath) }];
+      return { badge: null, text: merged(['صفحهٔ ', { ltr: `/${str(detail.slug)}` }, ' از سایت برداشته شد', ...to, '، با کد تازه']) };
+    }
     case 'content.bar': {
       // نوار اعلان (۱۱٫۳، سؤال ۲۹۴): کار و بازهٔ نوار تازه، بی متن (متن در جزئیات رویداد می‌ماند، چون نوار نسخه ندارد).
       const after = (detail.after ?? {}) as { mode?: unknown; from?: unknown; until?: unknown };
