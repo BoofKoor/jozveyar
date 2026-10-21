@@ -25,6 +25,7 @@ import {
   type SampleResult,
   type ShippingTable,
 } from './blocks.js';
+import { NameText, TextContent } from './textContent.js';
 
 /** آنچه بلوک‌ها از سایت امروز لازم دارند. */
 export interface BlockData {
@@ -99,7 +100,7 @@ function PaperText({ papers }: { papers: readonly PaperNote[] }): ReactNode {
     return (
       <Fragment key={paper.name}>
         {i > 0 ? ' ' : null}
-        کاغذ {paper.name}
+        کاغذ <NameText text={paper.name} />
         {free ? (
           '، بی هزینهٔ جدا.'
         ) : (
@@ -172,7 +173,7 @@ export function BindingTableView({ table, caption = 'hidden', live }: { table: B
     <table className="tf-table">
       <caption className={caption === 'hidden' ? 'sr-only' : undefined}>
         {caption === 'hidden' ? 'قیمت صحافی ' : 'صحافی '}
-        {table.name}
+        <NameText text={table.name} />
         {size ? (
           <>
             ، <bdi>{size}</bdi>
@@ -310,8 +311,16 @@ function SampleTitle({ result }: { result: SampleResult }) {
           ، <bdi>{PAPER_SIZES[size].label}</bdi>
         </>
       ) : null}
-      {spec.paper ? `، ${paperName}` : null}
-      {spec.binding ? `، ${bindingName}` : null}
+      {spec.paper ? (
+        <>
+          ، <NameText text={paperName} />
+        </>
+      ) : null}
+      {spec.binding ? (
+        <>
+          ، <NameText text={bindingName} />
+        </>
+      ) : null}
       {spec.copies > 1 ? (
         <>
           ، <Num value={spec.copies} /> نسخه
@@ -323,14 +332,18 @@ function SampleTitle({ result }: { result: SampleResult }) {
 
 /** «جزوهٔ 100 صفحه‌ای، A5 و دورو» برای نمونه‌ای که امروز قیمت ندارد: همان که نوشته شد. */
 function OffTitle({ raw }: { raw: string }) {
-  return <p className="lp-sample__title">{raw.replace(/^قیمت\s*[:：]\s*/, 'جزوهٔ ')}</p>;
+  return (
+    <p className="lp-sample__title">
+      <TextContent text={raw.replace(/^قیمت\s*[:：]\s*/, 'جزوهٔ ')} />
+    </p>
+  );
 }
 
 /**
  * کارت «قیمت نمونه» (سؤال ۴۵۶): چاپ، کاغذ اگر نرخ دارد، صحافی با برگ و جلد، تخفیف اگر پله‌ای رسید، جمع، و با ارسال به هر منطقه؛ زیرش «از تعرفهٔ
  * امروز». گزینه‌ای که امروز نیست، همان کارت با «فعلاً ارائه نمی‌شود.» بی عدد.
  */
-export function SampleCard({ raw, result, data }: { raw: string; result: SampleResult; data: BlockData }) {
+export function SampleCard({ raw, result, data, foot = true }: { raw: string; result: SampleResult; data: BlockData; foot?: boolean }) {
   if (!result.ok) {
     return (
       <div className="jy-card lp-sample lp-sample--off" data-sample="off">
@@ -403,6 +416,19 @@ export function SampleCard({ raw, result, data }: { raw: string; result: SampleR
             </dd>
           </div>
         ) : null}
+        {breakdown.roundingRials !== 0 ? (
+          // گام گرد کردن تعرفه (۸٫۴)؛ بی این ردیف، ردیف‌ها با جمع نمی‌خواندند.
+          <div>
+            <dt>گرد کردن</dt>
+            <dd>
+              <span className={live ? `num ${live}` : 'num'}>
+                {breakdown.roundingRials < 0 ? '−' : ''}
+                {formatTomans(Math.abs(breakdown.roundingRials), false)}
+              </span>{' '}
+              تومان
+            </dd>
+          </div>
+        ) : null}
         <div className="lp-sample__total">
           <dt>جمع</dt>
           <dd>
@@ -424,17 +450,19 @@ export function SampleCard({ raw, result, data }: { raw: string; result: SampleR
           تومان
         </p>
       ) : null}
-      <p className="lp-sample__foot">
-        از تعرفهٔ امروز؛ با تعرفهٔ تازه خودش عوض می‌شود.
-        {data.tariffHref ? (
-          <>
-            {' '}
-            <a className="jy-link" href={data.tariffHref}>
-              همهٔ قیمت‌ها
-            </a>
-          </>
-        ) : null}
-      </p>
+      {foot ? (
+        <p className="lp-sample__foot">
+          از تعرفهٔ امروز؛ با تعرفهٔ تازه خودش عوض می‌شود.
+          {data.tariffHref ? (
+            <>
+              {' '}
+              <a className="jy-link" href={data.tariffHref}>
+                همهٔ قیمت‌ها
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

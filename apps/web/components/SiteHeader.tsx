@@ -17,6 +17,10 @@ import { SiteLogo } from './SiteLogo';
  * globals.css)، بی JS.
  *
  * لوگو از ۱۱٫۲ لوگوی مالک است اگر روی سایت گذاشته (`SiteLogo`)، با کلاس `site-logo--custom` که کوچک شدنش را در پهنای کم می‌گذارد.
+ *
+ * از ۱۵٫۲ (سؤال ۴۵۱، طرح `seo.html`) «تعرفه» صفحهٔ خودش است (`/tarefe`)، نه لنگر صفحهٔ اصلی، و پیوند صفحه یا بخش جاری `aria-current` دارد. سربرگ
+ * در layout است و نمی‌داند کدام صفحه است، پس هر کدام دو پیوند دارد: عادی، و `site-nav__cur` با `aria-current` که CSS فقط با نشانهٔ همان صفحه
+ * (`data-tarefe`، `data-account`) نشانش می‌دهد؛ `display: none` از درخت دسترسی هم بیرون است، پس صفحه‌خوان یکی را می‌خواند. بی JS.
  */
 export function SiteHeader({ logo }: { logo: MediaFile | null }) {
   const custom = logo ? ' site-logo--custom' : '';
@@ -33,11 +37,19 @@ export function SiteHeader({ logo }: { logo: MediaFile | null }) {
           <a className="site-nav__how" href="/#how">
             چطور کار می‌کند
           </a>
-          <a href="/#tariff">تعرفه</a>
+          <a className="site-nav__tariff" href="/tarefe">
+            تعرفه
+          </a>
+          <a className="site-nav__tariff site-nav__cur" href="/tarefe" aria-current="page">
+            تعرفه
+          </a>
           <a className="site-nav__faq" href="/#faq">
             سؤال‌ها
           </a>
           <a className="site-nav__orders" href="/orders">
+            سفارش‌های من
+          </a>
+          <a className="site-nav__orders site-nav__cur" href="/orders" aria-current="true">
             سفارش‌های من
           </a>
         </nav>

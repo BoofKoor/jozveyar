@@ -17,15 +17,16 @@ import {
   contentOf,
   defaultContent,
   factsOf,
+  isPagePlaceholder,
   parseInline,
   parseMarkdown,
   placeholdersIn,
+  type AnyPlaceholderName,
   type ContentByKind,
   type ContentFacts,
   type ContentKind,
   type InlineFormat,
   type PageContent,
-  type PlaceholderName,
 } from '@jozveyar/content';
 import { createSiteContentStore, getDb, type SiteContentStore } from '@jozveyar/db';
 import { parseJalaliNumeric } from '@jozveyar/text';
@@ -130,7 +131,7 @@ export function homeSettings(home: ContentByKind['home'], faq: ContentByKind['fa
   return settingsOf(fields.flatMap(([text, format]) => placeholdersIn(parseInline(text, format).nodes)));
 }
 
-/** تنظیم پشت هر جای‌نگهدار، هر کدام یک بار. */
-function settingsOf(names: readonly PlaceholderName[]): string[] {
-  return [...new Set(names.flatMap((name) => (PLACEHOLDER_SOURCES[name].setting ? [PLACEHOLDER_SOURCES[name].setting!] : [])))];
+/** تنظیم پشت هر جای‌نگهدار، هر کدام یک بار؛ دو جای‌نگهدار صفحه‌ها (سال و روز تغییر قیمت، ۱۵٫۲) تنظیم ندارند. */
+export function settingsOf(names: readonly AnyPlaceholderName[]): string[] {
+  return [...new Set(names.flatMap((name) => (isPagePlaceholder(name) ? [] : PLACEHOLDER_SOURCES[name].setting ? [PLACEHOLDER_SOURCES[name].setting!] : [])))];
 }

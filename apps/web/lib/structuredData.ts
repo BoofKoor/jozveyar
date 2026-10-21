@@ -83,3 +83,20 @@ export function homeGraph({ siteUrl, logo, contact, faq }: HomeGraphInput) {
 export function jsonLd(data: unknown): string {
   return JSON.stringify(data).replace(/</g, '\\u003c');
 }
+
+/**
+ * مسیر دیدنی برای گوگل (برش ۱۵٫۲، سؤال‌های ۴۲۷ و ۴۵۳): همان پله‌های `Crumbs` صفحه، با نشانی مطلق؛ پلهٔ آخر خود صفحه است. گوگل مسیر را به جای
+ * نشانی در نتیجه نشان می‌دهد.
+ */
+export function breadcrumbGraph(siteUrl: string, items: readonly { name: string; path: string }[]) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: items.map((item, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: item.name,
+      item: item.path === '/' ? siteUrl : `${siteUrl}${item.path}`,
+    })),
+  };
+}

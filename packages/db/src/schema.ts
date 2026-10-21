@@ -2534,6 +2534,7 @@ export const RESERVED_PAGE_SLUGS = [
   'icon',
   'icons',
   'img',
+  'lp',
   'manifest',
   'media',
   'opengraph-image',

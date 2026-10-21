@@ -29,22 +29,34 @@ export type StaticPageKind = keyof typeof STATIC_PAGES;
  */
 export const ACCOUNT_PAGE = { path: '/orders', label: 'سفارش‌های من' } as const satisfies StaticPage;
 
+/** «تعرفه» (برش ۱۵٫۲، سؤال ۴۵۷): اول گروه «چاپ جزوه»ی پاورقی و پیوند سربرگ. */
+export const TARIFF_PAGE = { path: '/tarefe', label: 'تعرفه' } as const satisfies StaticPage;
+
 /** همان openGraph پایهٔ layout؛ صفحه‌ای که openGraph خودش را دارد جای کل آن را می‌گیرد، پس این‌ها را هم باید بدهد. */
 export const SITE_OPEN_GRAPH = { type: 'website', locale: 'fa_IR', siteName: 'جزوه‌یار' } as const;
 
-/** پیوندهای پاورقی در دو گروه طرح؛ «تماس» فقط وقتی راهی برای تماس هست (`hasContact`)، و از ۱۲٫۱ «سفارش‌های من» اول «جزوه‌یار». */
-export function footerGroups(contact: boolean): { heading: string; pages: StaticPage[] }[] {
+export interface FooterGroup {
+  heading: string;
+  pages: StaticPage[];
+  /** گروهی که تا ۱۲ پیوند دارد، در دو ستون (`site-foot__many`). */
+  many?: true;
+}
+
+/**
+ * پیوندهای پاورقی؛ «تماس» فقط وقتی راهی برای تماس هست (`hasContact`)، و از ۱۲٫۱ «سفارش‌های من» اول «جزوه‌یار». از ۱۵٫۲ (سؤال ۴۵۲، طرح `seo.html`)
+ * سه گروه: «جزوه‌یار»، «چاپ جزوه» («تعرفه» و صفحه‌های فرودی که مالک «در پاورقی» گذاشته، `footerLandings`) و «قوانین».
+ */
+export function footerGroups(contact: boolean, landings: readonly StaticPage[] = []): FooterGroup[] {
   return [
     { heading: 'جزوه‌یار', pages: [ACCOUNT_PAGE, STATIC_PAGES.about, ...(contact ? [STATIC_PAGES.contact] : [])] },
+    { heading: 'چاپ جزوه', pages: [TARIFF_PAGE, ...landings], many: true },
     { heading: 'قوانین', pages: [STATIC_PAGES.terms, STATIC_PAGES.privacy] },
   ];
 }
 
-/** صفحه‌های ثابت نقشهٔ سایت، همان‌ها که پاورقی دارد، جز «سفارش‌های من». */
+/** صفحه‌های ثابت نقشهٔ سایت، به ترتیب پاورقی: «سفارش‌های من» خصوصی است، و «تعرفه» و صفحه‌های فرود ردیف خودشان را دارند (`app/sitemap.ts`). */
 export function sitemapPages(contact: boolean): StaticPage[] {
-  return footerGroups(contact)
-    .flatMap(({ pages }) => pages)
-    .filter((page) => page.path !== ACCOUNT_PAGE.path);
+  return [STATIC_PAGES.about, ...(contact ? [STATIC_PAGES.contact] : []), STATIC_PAGES.terms, STATIC_PAGES.privacy];
 }
 
 /**

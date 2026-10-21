@@ -86,7 +86,9 @@ test.describe('قدم‌های سفارش', () => {
     const steps = page.getByRole('navigation', { name: 'قدم‌های سفارش' }).getByRole('listitem');
     await expect(steps).toHaveText(['1جزوه و قیمت', '2آدرس', '3پرداخت']);
     await expect(steps.first()).toHaveAttribute('aria-current', 'step');
-    await expect(page.locator('[aria-current]')).toHaveCount(1);
+    // دیدنی‌ها: از ۱۵٫۲ سربرگ برای «تعرفه» و «سفارش‌های من» همزاد `aria-current` دارد که فقط در صفحهٔ خودشان نشان داده می‌شود (`display: none`،
+    // بیرون از درخت دسترسی).
+    await expect(page.locator('[aria-current]:visible')).toHaveCount(1);
   });
 });
 

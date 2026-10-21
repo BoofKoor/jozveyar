@@ -388,7 +388,8 @@ describe('رسم', () => {
     );
     const off = html(createElement(PageBlock, { raw: 'قیمت: 100 صفحه، A5، دورو', data }));
     expect(off).toContain('data-sample="off"');
-    expect(off).toContain('جزوهٔ 100 صفحه، A5، دورو');
+    // همان که نوشته شد، با عدد در `.num` و واژهٔ لاتین در `bdi`، مثل همهٔ متن‌ها.
+    expect(off).toContain('جزوهٔ <span class="num">100</span> صفحه، <bdi>A5</bdi>، دورو');
     expect(off).toContain('فعلاً ارائه نمی‌شود.');
   });
 

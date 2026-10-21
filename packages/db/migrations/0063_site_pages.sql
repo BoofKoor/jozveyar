@@ -16,7 +16,7 @@ CREATE TABLE "site_page_slugs" (
 	"page_id" integer NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "site_page_slugs_shape" CHECK ("site_page_slugs"."slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length("site_page_slugs"."slug") BETWEEN 2 AND 60),
-	CONSTRAINT "site_page_slugs_reserved" CHECK ("site_page_slugs"."slug" NOT IN ('about', 'admin', 'api', 'apple-icon', 'articles', 'chap-jozve', 'contact', 'favicon', 'fonts', 'icon', 'icons', 'img', 'manifest', 'media', 'opengraph-image', 'order', 'orders', 'pay', 'preview', 'privacy', 'robots', 'sitemap', 'tarefe', 'terms'))
+	CONSTRAINT "site_page_slugs_reserved" CHECK ("site_page_slugs"."slug" NOT IN ('about', 'admin', 'api', 'apple-icon', 'articles', 'chap-jozve', 'contact', 'favicon', 'fonts', 'icon', 'icons', 'img', 'lp', 'manifest', 'media', 'opengraph-image', 'order', 'orders', 'pay', 'preview', 'privacy', 'robots', 'sitemap', 'tarefe', 'terms'))
 );
 --> statement-breakpoint
 CREATE TABLE "site_page_versions" (

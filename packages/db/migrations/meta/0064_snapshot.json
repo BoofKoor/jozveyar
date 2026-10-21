@@ -7610,7 +7610,7 @@
         },
         "site_page_slugs_reserved": {
           "name": "site_page_slugs_reserved",
-          "value": "\"site_page_slugs\".\"slug\" NOT IN ('about', 'admin', 'api', 'apple-icon', 'articles', 'chap-jozve', 'contact', 'favicon', 'fonts', 'icon', 'icons', 'img', 'manifest', 'media', 'opengraph-image', 'order', 'orders', 'pay', 'preview', 'privacy', 'robots', 'sitemap', 'tarefe', 'terms')"
+          "value": "\"site_page_slugs\".\"slug\" NOT IN ('about', 'admin', 'api', 'apple-icon', 'articles', 'chap-jozve', 'contact', 'favicon', 'fonts', 'icon', 'icons', 'img', 'lp', 'manifest', 'media', 'opengraph-image', 'order', 'orders', 'pay', 'preview', 'privacy', 'robots', 'sitemap', 'tarefe', 'terms')"
         }
       },
       "isRLSEnabled": false

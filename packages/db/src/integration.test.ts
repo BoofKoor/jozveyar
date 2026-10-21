@@ -12314,12 +12314,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       expect((await store().detail(pageId))!.draft).toBeNull();
       expect(await store().live(NOW)).toEqual([{ pageId, kind: 'landing', slug: 'print-pdf', content: page('print-pdf'), version: 1, since: NOW }]);
       expect(await store().resolve('print-pdf', NOW)).toMatchObject({ kind: 'page', page: { pageId, slug: 'print-pdf', version: 1 } });
+      expect(await store().routes(NOW)).toEqual({ redirects: new Map(), pages: new Set(['print-pdf']) });
 
       // نشانی تازه: قبلی برای همیشه ۳۰۱ به تازه.
       await store().saveDraft({ pageId, kind: 'landing', content: page('print-pdf-online'), actor: actor(), at: later(1) });
       expect(await publish(1, 'print-pdf-online', () => true, later(1))).toEqual({ ok: true, version: 2 });
       expect(await store().resolve('print-pdf', later(2))).toEqual({ kind: 'redirect', to: '/print-pdf-online' });
-      expect(await store().redirects(later(2))).toEqual(new Map([['print-pdf', '/print-pdf-online']]));
+      expect(await store().routes(later(2))).toEqual({ redirects: new Map([['print-pdf', '/print-pdf-online']]), pages: new Set(['print-pdf-online']) });
       expect((await store().detail(pageId))!.slugs).toEqual(['print-pdf', 'print-pdf-online']);
       expect(await store().slugOwner('print-pdf')).toBe(pageId);
 
@@ -12413,7 +12414,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
       // مقصد هم برداشته شد و به صفحهٔ اصلی رفت: دو پرش به `/`.
       expect(await store().remove({ pageId: sahafi, expectedVersion: 1, mode: 'moved', movedTo: null, actor: actor(), at: later(3) })).toEqual({ ok: true, version: 2 });
       expect(await store().resolve('print-arzan', later(4))).toEqual({ kind: 'redirect', to: '/' });
-      expect(await store().redirects(later(4))).toEqual(new Map([['print-arzan', '/'], ['sahafi', '/']]));
+      expect(await store().routes(later(4))).toEqual({ redirects: new Map([['print-arzan', '/'], ['sahafi', '/']]), pages: new Set() });
       expect(await store().live(later(4))).toEqual([]);
       // برداشته را دوباره برداشتن نه؛ انتشار دوباره همان نشانی را برمی‌گرداند و دیگر ۳۰۱ نیست.
       expect(await store().remove({ pageId: sahafi, expectedVersion: 2, mode: 'gone', movedTo: null, actor: actor(), at: later(5) })).toEqual({ ok: false, reason: 'not_live' });
@@ -12440,6 +12441,8 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
         store().publish({ pageId, expectedVersion, source, liveFrom: later(2), actor: actor(), at: later(2) });
       expect(await publish(0, { type: 'draft', content: tariff, slug: 'whatever', verify: () => true })).toEqual({ ok: true, version: 1 });
       expect((await store().live(later(3))).map((row) => [row.kind, row.slug])).toEqual([['tariff', 'tarefe']]);
+      // «تعرفه» مسیر ثابت سایت است، نه صفحه‌ای که میان‌افزار رسمش را به مسیر صفحه‌های فرود بفرستد.
+      expect(await store().routes(later(3))).toEqual({ redirects: new Map(), pages: new Set() });
       expect(await publish(1, { type: 'default' })).toEqual({ ok: true, version: 2 });
       expect(await publish(2, { type: 'default' })).toEqual({ ok: false, reason: 'noop' });
       expect(await store().live(later(3))).toEqual([]);

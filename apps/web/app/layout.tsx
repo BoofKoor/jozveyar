@@ -9,6 +9,7 @@ import { PREVIEW_BAR_SCRIPT } from '../lib/previewBar';
 import { siteBar } from '../lib/server/bar';
 import { siteBrand } from '../lib/server/brand';
 import { liveText, sitePublished } from '../lib/server/content';
+import { footerLandings, siteLivePages } from '../lib/server/pages';
 import { SITE_OPEN_GRAPH } from '../lib/staticPages';
 import './globals.css';
 
@@ -68,9 +69,12 @@ export const viewport: Viewport = {
  *
  * نوار پیش‌نمایش مالک (برش ۷٫۵، `lib/previewBar.ts`): اسکریپت کوچک درون HTML، ته بدنه، که فقط با کوکی نشانهٔ `jy_pv` می‌پرسد و نوار را
  * اول بدنه می‌گذارد؛ باندل اولیه همان می‌ماند.
+ *
+ * گروه «چاپ جزوه»ی پاورقی (۱۵٫۲، سؤال ۴۵۲) صفحه‌های فرودی را دارد که مالک «در پاورقی» گذاشته و همین حالا روی سایت‌اند (`siteLivePages`، همان
+ * خواندنِ صفحه‌های فرود و «تعرفه» در همین رسم).
  */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [published, bar, brand] = await Promise.all([sitePublished(), siteBar(), siteBrand()]);
+  const [published, bar, brand, live] = await Promise.all([sitePublished(), siteBar(), siteBrand(), siteLivePages()]);
   const contact = liveText('contact', published).content;
   const logo = brand?.logo ?? null;
   return (
@@ -80,7 +84,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {bar ? <SiteBar view={bar} /> : null}
         <SiteHeader logo={logo} />
         <div className="site-grow">{children}</div>
-        <SiteFooter intro={contact.footerIntro} legal={contact.footerLegal} contact={hasContact(contact)} logo={logo} />
+        <SiteFooter intro={contact.footerIntro} legal={contact.footerLegal} contact={hasContact(contact)} landings={footerLandings(live)} logo={logo} />
         <script dangerouslySetInnerHTML={{ __html: PREVIEW_BAR_SCRIPT }} />
       </body>
     </html>

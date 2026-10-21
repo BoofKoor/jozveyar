@@ -66,6 +66,11 @@ interface Props {
   rules: FileRules;
   /** `accept` ورودی فایل، فقط خانواده‌های روشن؛ روی سرور ساخته شده (`acceptOf`)، تا فهرست پسوندها در باندل اولیه نیاید. */
   accept: string;
+  /**
+   * پیش‌فرض میز صفحهٔ فرود (برش ۱۵٫۲، سؤال ۴۵۵): تنظیم کامل جزوهٔ اول، روی سرور فقط با گزینه‌های امروز تعرفه ساخته شده (`presetConfig`)؛ مشتری
+   * عوضش می‌کند. بی آن پیش‌فرض‌های سایت (`INITIAL_CONFIG` رابط پس از فایل).
+   */
+  initialConfig?: OrderConfig | null;
 }
 
 /**
@@ -81,10 +86,10 @@ interface Props {
  * می‌مانند و React دوباره نمی‌سازدشان. نشانه با خود رابط پس از فایل می‌آید: اگر تکه هنوز نرسیده،
  * کارت بارگذاری تا رسیدنش سر جایش است، نه صفحه‌ای نیمه‌خالی.
  */
-export function OrderFlow({ hero, upload, trust, more, children, rules, accept }: Props) {
+export function OrderFlow({ hero, upload, trust, more, children, rules, accept, initialConfig = null }: Props) {
   const jozve = useJozve(rules);
-  // پیش‌فرض‌ها از تعرفه‌اند و رابط پس از فایل می‌گذاردشان؛ حالت اینجاست تا با «از اول» نرود.
-  const [config, setConfig] = useState<OrderConfig | null>(null);
+  // پیش‌فرض‌ها از تعرفه‌اند و رابط پس از فایل می‌گذاردشان؛ حالت اینجاست تا با «از اول» نرود. صفحهٔ فرود پیش‌فرض خودش را می‌دهد (۱۵٫۲).
+  const [config, setConfig] = useState<OrderConfig | null>(initialConfig);
   const [loaded, setLoaded] = useState<DeskModule | null>(null);
   const [failed, setFailed] = useState(false);
   /*

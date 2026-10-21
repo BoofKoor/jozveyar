@@ -1,6 +1,6 @@
 /**
  * صفحه‌های فرود و «تعرفه» (برش ۱۵٫۲، ADR-071؛ سؤال‌های ۴۳۱، ۴۳۷ و ۴۶۱ تا ۴۶۶): هویت هر صفحه، پیش‌نویس، نسخه‌های پاک‌نشدنی (هر انتشار، برگرداندن
- * و برداشتن)، و نشانی‌هایی که هر صفحه یک بار گرفت. سایت حال امروز هر صفحه را از اینجا می‌خواند (`live`، `resolve`، `redirects`)، و پنل پیش‌نویس را
+ * و برداشتن)، و نشانی‌هایی که هر صفحه یک بار گرفت. سایت حال امروز هر صفحه را از اینجا می‌خواند (`live`، `resolve`، `routes`)، و پنل پیش‌نویس را
  * ذخیره و منتشر می‌کند، همین حالا یا زمان‌دار، و برمی‌دارد.
  *
  * مثل `content.ts` فقط خواندن و نوشتن است؛ شکل متن، سنجش، مجوز و کد تازه در سرویس پنل (`apps/admin/lib/server/pages.ts`) و `@jozveyar/content`.
@@ -107,6 +107,14 @@ export interface LivePage {
   since: Date;
 }
 
+/** نشانی‌های میان‌افزار سایت در یک لحظه. */
+export interface SiteRoutes {
+  /** هر نشانی‌ای که ۳۰۱ است، به مقصدش. */
+  redirects: Map<string, string>;
+  /** نشانی صفحه‌های فرودی که همین حالا روی سایت‌اند؛ «تعرفه» نه، که مسیر ثابت سایت است. */
+  pages: Set<string>;
+}
+
 /** جواب سایت برای `/<نشانی>`. */
 export type SlugResolution =
   | { kind: 'page'; page: LivePage }
@@ -139,8 +147,8 @@ export interface SitePageStore {
   live(at: Date): Promise<LivePage[]>;
   /** جواب سایت برای یک نشانی صفحهٔ فرود در لحظهٔ `at`. */
   resolve(slug: string, at: Date): Promise<SlugResolution>;
-  /** هر نشانی‌ای که امروز ۳۰۱ است، به مقصدش. */
-  redirects(at: Date): Promise<Map<string, string>>;
+  /** آنچه میان‌افزار سایت با هر نشانی می‌کند: ۳۰۱ به مقصدش، یا رسم صفحهٔ فرود. */
+  routes(at: Date): Promise<SiteRoutes>;
   /** صفحه‌ای که این نشانی مال اوست. */
   slugOwner(slug: string): Promise<number | null>;
   /** پیش‌نویس تازه یا همان پیش‌نویس با متن تازه؛ بی `pageId` صفحهٔ فرود تازه، و «تعرفه» با اولین ذخیره ساخته می‌شود. */
@@ -312,16 +320,17 @@ export function createSitePageStore({ db }: Database): SitePageStore {
 
     resolve: (slug, at) => resolveIn(slug, at),
 
-    async redirects(at) {
+    async routes(at) {
       const pages = await details(db, null);
-      const map = new Map<string, string>();
+      const routes: SiteRoutes = { redirects: new Map(), pages: new Set() };
       for (const detail of pages) {
         for (const slug of detail.slugs) {
           const found = await resolveIn(slug, at, pages);
-          if (found.kind === 'redirect') map.set(slug, found.to);
+          if (found.kind === 'redirect') routes.redirects.set(slug, found.to);
+          else if (found.kind === 'page' && found.page.kind === 'landing') routes.pages.add(slug);
         }
       }
-      return map;
+      return routes;
     },
 
     async slugOwner(slug) {

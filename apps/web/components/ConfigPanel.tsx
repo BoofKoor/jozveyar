@@ -49,6 +49,10 @@ interface Props {
    * بررسی همهٔ صفحه‌ها. رنگ برای کل جزوه یکی انتخاب می‌شود (ADR-030).
    */
   colorHint: Sentence;
+  /**
+   * ماشین‌حساب «تعرفه» (۱۵٫۲، سؤال ۴۵۸): ردیف صحافی تک‌گزینه نه، چون ماشین‌حساب اندازه، کاغذ و صحافیِ بی‌انتخاب را یک خط کنار هم می‌گوید.
+   */
+  bare?: boolean;
 }
 
 interface Option<T extends string> {
@@ -253,7 +257,7 @@ function ReplacedHint({ replacement, priceList, sheets }: { replacement: Replace
  * ۸٫۳). از ۸٫۲ درون کارت همان جزوه است (سؤال ۲۱۷)، پس سرش را کارت می‌گذارد (`JozveSettings`)؛ در هر لحظه فقط یکی روی صفحه
  * است، پس شناسه‌ها یکتا می‌مانند.
  */
-export function ConfigPanel({ config, effective, replaced, pageCount, onChange, priceList, quoteFor, colorHint, paused }: Props) {
+export function ConfigPanel({ config, effective, replaced, pageCount, onChange, priceList, quoteFor, colorHint, paused, bare = false }: Props) {
   const set = <K extends keyof OrderConfig>(key: K, value: OrderConfig[K]) => onChange({ ...config, [key]: value });
   const current = quoteFor(config);
 
@@ -404,6 +408,8 @@ export function ConfigPanel({ config, effective, replaced, pageCount, onChange, 
         >
           {hint('bindingTypeId')}
         </Tiles>
+      ) : bare ? (
+        loneHint('bindingTypeId')
       ) : (
         // یک گزینه: متن، نه انتخابی که انتخاب نیست
         <div className="home-field home-row">

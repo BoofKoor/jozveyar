@@ -5,14 +5,15 @@ import { HeroTitle, InlineText } from '@jozveyar/content/render';
 
 import { Faq } from '../components/Faq';
 import { HomeBanner } from '../components/HomeBanner';
+import { HomePromises } from '../components/HomePromises';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
 import { Reviews } from '../components/Reviews';
 import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
 import { organizationLogo } from '../lib/brand';
-import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
 import { acceptOf } from '../lib/fileRules';
+import { RESTORE_SCRIPT } from '../lib/restoreScript';
 import { siteBanner, siteBrand } from '../lib/server/brand';
 import { contentFacts, liveText, sitePublished } from '../lib/server/content';
 import { siteFiles } from '../lib/server/fileRules';
@@ -32,13 +33,6 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jozveyar.com';
 export const revalidate = 60;
 
 /**
- * پیش از رسم (۳د، ADR-036): اگر این زبانه پیش‌نویس سفارش دارد، صفحه از همان اولین رسم حالت سفارش است و کارت
- * بارگذاری «در حال برگرداندن جزوه…»، نه لحظه‌ای صفحهٔ اول. چند بایت درون HTML، نه در باندل؛ حافظهٔ بستهٔ سایت یعنی
- * صفحهٔ معمول.
- */
-const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})&&document.documentElement.setAttribute(${JSON.stringify(RESTORING_ATTR)},'')}catch(e){}`;
-
-/**
  * عنوان و توضیح گوگل صفحهٔ اصلی از «صفحهٔ اصلی» پنل (۱۱٫۱، سؤال ۲۸۳)، بی «| جزوه‌یار» الگوی layout؛ openGraph همان دو، با تصویر اشتراک
  * بالادست (`parent`)، مثل صفحه‌های ثابت. canonical خودش (۱۵٫۱، سؤال ۴۲۸): layout دیگر canonical پیش‌فرض ندارد، تا صفحه‌ای که canonical
  * نگذارد خودش را تکراری صفحهٔ اصلی اعلام نکند.
@@ -55,9 +49,6 @@ export async function generateMetadata(_props: unknown, parent: ResolvingMetadat
     openGraph: { ...SITE_OPEN_GRAPH, title: seo.title, description: seo.description, url: '/', images },
   };
 }
-
-/** نماد هر نوید، به ترتیب طرح؛ آیکون جزو طرح است و از پنل عوض نمی‌شود (سؤال ۲۸۳). */
-const PROMISE_ICONS = ['tag', 'truck', 'lock'] as const;
 
 /**
  * صفحهٔ اصلی — هم لندینگ سئو است و هم ابزار سفارش. طرح ز (docs/UI.md، ۴الف و ۴ب؛ چیدمان در
@@ -137,25 +128,7 @@ export default async function HomePage() {
             </div>
           }
           upload={<UploadCard formats={files.rules.formats} />}
-          trust={
-            <ul className="home-trust">
-              {home.promises.map((promise, i) => (
-                <li key={i}>
-                  <span className="home-trust__ic">
-                    <span className={`jy-icon jy-icon-${PROMISE_ICONS[i]}`} aria-hidden="true" />
-                  </span>
-                  <span className="home-trust__t">
-                    <b>
-                      <InlineText text={promise.title} format="line" options={options} />
-                    </b>
-                    <span>
-                      <InlineText text={promise.sub} format="line" options={options} />
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          }
+          trust={<HomePromises promises={home.promises} values={values} />}
           more={
             <>
               {banner ? <HomeBanner banner={banner} /> : null}

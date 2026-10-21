@@ -279,6 +279,12 @@ export function Tariff({ priceList: list, paused: pausedSetting }: { priceList: 
           به‌علاوهٔ ارسال.
         </span>
       </p>
+      {/* صفحهٔ «تعرفه» با ماشین‌حساب بی فایل (۱۵٫۲، سؤال ۴۵۷): همهٔ اندازه‌ها، صحافی‌ها و وزن‌ها آنجاست. */}
+      <p className="tf-note">
+        <a className="jy-link lp-more" href="/tarefe" data-testid="tariff-more">
+          همهٔ قیمت‌ها و ماشین‌حساب بی فایل
+        </a>
+      </p>
     </section>
   );
 }

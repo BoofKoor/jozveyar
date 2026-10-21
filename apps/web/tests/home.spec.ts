@@ -188,7 +188,7 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
     const order: string[] = [];
     // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد.
     const footer = footerGroups(hasContact(defaultContent('contact'))).flatMap(({ pages }) => pages.map(({ label }) => label));
-    for (let i = 0; i < 8 + questions.length + footer.length; i++) {
+    for (let i = 0; i < 9 + questions.length + footer.length; i++) {
       await page.keyboard.press('Tab');
       order.push(
         await page.evaluate(() => {
@@ -206,6 +206,8 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
       'سفارش‌های من',
       'jozve-file',
       'بر اساس تعداد برگ',
+      // از ۱۵٫۲ زیر تعرفه پیوند صفحهٔ «تعرفه» (سؤال ۴۵۷).
+      'همهٔ قیمت‌ها و ماشین‌حساب بی فایل',
       ...questions.map((q) => q.trim()),
       ...footer,
       'نماد اعتماد الکترونیکی',

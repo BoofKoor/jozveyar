@@ -33,8 +33,9 @@ export const SLUG_MAX = 60;
 export const TARIFF_SLUG = 'tarefe';
 
 /**
- * نام‌های رزرو (سؤال ۴۳۱): هر مسیر امروز سایت، فایل‌های ریشهٔ `public/`، مسیرهای برش ۱۵ (تعرفه و مقاله‌ها)، و `chap-jozve` که «چاپ جزوه»
- * خود صفحهٔ اصلی است (با ۳۰۱ به `/`). همان فهرست در CHECK `site_page_slugs_reserved` پایگاه داده است (0064).
+ * نام‌های رزرو (سؤال ۴۳۱): هر مسیر امروز سایت، فایل‌های ریشهٔ `public/`، مسیرهای برش ۱۵ (تعرفه و مقاله‌ها)، `lp` که مسیر درونی صفحه‌های
+ * فرود است (میان‌افزار سایت)، و `chap-jozve` که «چاپ جزوه» خود صفحهٔ اصلی است (با ۳۰۱ به `/`). همان فهرست در CHECK `site_page_slugs_reserved`
+ * پایگاه داده است (0063).
  */
 export const RESERVED_SLUGS: readonly string[] = [
   'about',
@@ -49,6 +50,7 @@ export const RESERVED_SLUGS: readonly string[] = [
   'icon',
   'icons',
   'img',
+  'lp',
   'manifest',
   'media',
   'opengraph-image',
