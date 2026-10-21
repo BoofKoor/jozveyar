@@ -10,7 +10,7 @@ import { DEFAULT_SETTINGS } from '@jozveyar/db';
 import { SEED_PRICE_LIST } from '@jozveyar/pricing/seed';
 
 import { SEED_TARIFF } from '../tariff';
-import { loadTariff, siteTariff } from './tariff';
+import { loadTariff, siteTariff, siteTariffChangedAt } from './tariff';
 
 const V2: PriceList = { ...SEED_PRICE_LIST, version: 2, label: 'نسخهٔ دوم', printRates: { a4: { single: { color: 30_000, bw: 20_000 }, double: { color: 30_000, bw: 20_000 } } } };
 const NONE = { sizes: [], papers: [], bindings: [] };
@@ -85,5 +85,30 @@ describe('تعرفهٔ صفحهٔ اصلی', () => {
     const down = new Error('connect ECONNREFUSED 127.0.0.1:5432');
     await expect(siteTariff({ DATABASE_URL: DB }, () => source({}, down))).rejects.toBe(down);
     expect(error).toHaveBeenCalledWith(expect.stringContaining('صفحهٔ اصلی'), down);
+  });
+});
+
+describe('آخرین تغییر تعرفه در نقشهٔ سایت (۱۵٫۱)', () => {
+  const ACTIVATED = new Date('2026-10-18T06:30:00Z');
+
+  it('با پایگاه داده زمان فعال شدن تعرفهٔ فعال؛ build و بی پایگاه داده هیچ، بی خواندن', async () => {
+    const read = vi.fn(async () => ACTIVATED);
+    expect(await siteTariffChangedAt({ DATABASE_URL: DB }, read)).toBe(ACTIVATED);
+    expect(read).toHaveBeenCalledTimes(1);
+    read.mockClear();
+    expect(await siteTariffChangedAt({ DATABASE_URL: DB, NEXT_PHASE: 'phase-production-build' }, read)).toBeNull();
+    expect(await siteTariffChangedAt({}, read)).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('خطای پایگاه داده بالا می‌رود، بلند در لاگ، تا ISR نقشهٔ قبلی را نگه دارد', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const down = new Error('connect ECONNREFUSED 127.0.0.1:5432');
+    await expect(
+      siteTariffChangedAt({ DATABASE_URL: DB }, async () => {
+        throw down;
+      }),
+    ).rejects.toBe(down);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('نقشهٔ سایت'), down);
   });
 });

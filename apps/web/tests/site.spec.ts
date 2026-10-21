@@ -2,7 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { contactLead, contactRows, defaultContent, hasContact } from '@jozveyar/content';
+import { DEFAULT_REVISED, contactLead, contactRows, defaultContent, hasContact } from '@jozveyar/content';
+import { parseJalaliNumeric } from '@jozveyar/text';
 
 /**
  * هویت در سایت (docs/UI.md، قدم ۳): سربرگ و پاورقی با لوگوی بی‌شعار، حالت سفارش، نشانک، آیکون گوشی،
@@ -295,6 +296,58 @@ test.describe('آیکون گوشی، manifest و تصویر اشتراک', () =>
     // همین تصویر را سرور خودمان می‌دهد؛ دامنهٔ تولید از اینجا در دسترس نیست.
     expect(pngSize(await getPng(request, url.pathname + url.search))).toBe('1200×630');
   });
+
+  test('لوگوی سازمان در دادهٔ گوگل (۱۵٫۱): نشانی مطلق دامنهٔ canonical، همان آیکون مربع ۵۱۲ manifest', async ({ request }) => {
+    const html = await (await request.get('/')).text();
+    const canonical = new URL(/<link rel="canonical" href="([^"]+)"/.exec(html)![1]!);
+    const [org] = ldGraph(html);
+    const logo = new URL((org!.logo as { url: string }).url);
+    expect(logo.origin).toBe(canonical.origin);
+    expect(org!.logo).toMatchObject({ '@type': 'ImageObject', width: 512, height: 512 });
+    expect(logo.pathname).toBe('/icons/icon-512.png');
+    expect(pngSize(await getPng(request, logo.pathname))).toBe('512×512');
+  });
+});
+
+/** گراف دادهٔ ساختاریافتهٔ یک صفحه: یک اسکریپت `application/ld+json`، با «<» به شکل `\u003c`. */
+function ldGraph(html: string): Record<string, unknown>[] {
+  const scripts = [...html.matchAll(/<script type="application\/ld\+json">([^<]*)<\/script>/g)].map(([, json]) => JSON.parse(json!));
+  expect(scripts).toHaveLength(1);
+  return scripts[0]['@graph'];
+}
+
+test.describe('سئو پایه (۱۵٫۱)', () => {
+  test('صفحهٔ اصلی: canonical خودش، بی keywords، و یک گراف با سازمان، نام سایت، خدمت و همان سؤال‌های صفحه', async ({ page, request }) => {
+    const html = await (await request.get('/')).text();
+    const canonical = new URL(/<link rel="canonical" href="([^"]+)"/.exec(html)![1]!);
+    expect(canonical.pathname).toBe('/');
+    expect(html).not.toContain('name="keywords"');
+
+    const graph = ldGraph(html);
+    expect(graph.map((node) => node['@type'])).toEqual(['Organization', 'WebSite', 'Service', 'FAQPage']);
+    const [org, site, , faq] = graph;
+    // نام سایت در نتیجه‌های گوگل: نشانی وب‌سایت صفحهٔ اصلی است، با «/».
+    expect(site).toMatchObject({ name: 'جزوه‌یار', alternateName: ['جزوه یار', 'Jozveyar'], url: `${canonical.origin}/`, inLanguage: 'fa-IR' });
+    expect(site!.publisher).toEqual({ '@id': org!['@id'] });
+    // شبکه‌ها و راه تماس فقط آنچه صفحهٔ «تماس» دارد.
+    const social = contactRows(CONTACT).flatMap((row) => (row.kind === 'social' ? [row.href] : []));
+    if (social.length > 0) expect(org!.sameAs).toEqual(social);
+    else expect(org).not.toHaveProperty('sameAs');
+
+    await page.goto('/');
+    const questions = await page.locator('#faq summary').allTextContents();
+    const entities = faq!.mainEntity as { name: string; acceptedAnswer: { text: string } }[];
+    expect(entities.map(({ name }) => name)).toEqual(questions.map((q) => q.trim()));
+    for (const { acceptedAnswer } of entities) expect(acceptedAnswer.text).not.toMatch(/[{}*]/);
+  });
+
+  test('صفحه‌های خصوصی و ۴۰۴ canonical صفحهٔ اصلی را ندارند؛ layout دیگر canonical پیش‌فرض نمی‌دهد', async ({ request }) => {
+    for (const path of ['/orders', '/no-such-page']) {
+      const html = await (await request.get(path)).text();
+      expect(html, path).not.toContain('rel="canonical"');
+      expect(html, path).toContain('noindex');
+    }
+  });
 });
 
 test.describe('۴۰۴', () => {
@@ -426,10 +479,20 @@ test.describe('صفحه‌های ثابت', () => {
     await expect(section.getByRole('link', { name: 'تماس' })).toHaveAttribute('href', '/contact');
   });
 
-  test('نقشهٔ سایت: صفحهٔ اصلی و صفحه‌های ثابت، به ترتیب پاورقی', async ({ request }) => {
+  test('نقشهٔ سایت: صفحهٔ اصلی و صفحه‌های ثابت، به ترتیب پاورقی؛ «آخرین تغییر» فقط وقتی معلوم است (۱۵٫۱)', async ({ request }) => {
     const xml = await (await request.get('/sitemap.xml')).text();
-    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => new URL(loc!).pathname);
-    expect(locs).toEqual(['/', ...STATIC_PAGES.map(({ path }) => path)]);
+    const urls = [...xml.matchAll(/<url>([\s\S]*?)<\/url>/g)].map(([, url]) => ({
+      path: new URL(/<loc>([^<]+)<\/loc>/.exec(url!)![1]!).pathname,
+      lastmod: /<lastmod>([^<]+)<\/lastmod>/.exec(url!)?.[1] ?? null,
+    }));
+    expect(urls.map(({ path }) => path)).toEqual(['/', ...STATIC_PAGES.map(({ path }) => path)]);
+    // بی پایگاه داده: قوانین و حریم خصوصی روز متن پیش‌فرضشان را دارند (همان «به‌روز شده»ی صفحه)، و بقیه نامعلوم‌اند، نه «همین حالا».
+    const lastmod = Object.fromEntries(urls.map(({ path, lastmod }) => [path, lastmod]));
+    expect(lastmod).toEqual({
+      ...Object.fromEntries(urls.map(({ path }) => [path, null])),
+      '/terms': parseJalaliNumeric(DEFAULT_REVISED.terms)!.toISOString(),
+      '/privacy': parseJalaliNumeric(DEFAULT_REVISED.privacy)!.toISOString(),
+    });
   });
 
   test('پاورقی: دو گروه طرح با همهٔ صفحه‌ها؛ بی جزوه همان زبانه', async ({ page }) => {

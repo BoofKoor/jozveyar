@@ -20,6 +20,10 @@ export const revalidate = 60;
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jozveyar.com';
 
+/**
+ * پایهٔ متادیتای همهٔ صفحه‌ها. canonical پیش‌فرض و `keywords` ندارد (۱۵٫۱، سؤال ۴۲۸): هر صفحهٔ ایندکس‌شدنی canonical خودش را می‌دهد، و صفحه‌ای
+ * که ندهد بی canonical است، نه تکراری صفحهٔ اصلی؛ و `keywords` را گوگل نمی‌خواند.
+ */
 const SITE_METADATA = {
   metadataBase: new URL(SITE_URL),
   title: {
@@ -29,7 +33,6 @@ const SITE_METADATA = {
   description:
     'فایل جزوه‌ات را بینداز، قیمت را فوری ببین. چاپ و صحافی جزوه با ارسال به سراسر ایران، بدون ثبت‌نام و بدون پر کردن فرم.',
   applicationName: 'جزوه‌یار',
-  keywords: ['چاپ جزوه', 'صحافی جزوه', 'چاپ آنلاین', 'طلق و سیم', 'چاپ پایان‌نامه'],
   // صفحه‌های ثابت openGraph خودشان را دارند (`pageMetadata`)؛ پایه‌اش یک منبع است.
   openGraph: {
     ...SITE_OPEN_GRAPH,
@@ -37,7 +40,6 @@ const SITE_METADATA = {
     description: 'فایل را بینداز، قیمت را فوری ببین. بدون ثبت‌نام.',
   },
   robots: { index: true, follow: true },
-  alternates: { canonical: '/' },
 } satisfies Metadata;
 
 /**

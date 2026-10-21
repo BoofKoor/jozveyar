@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SiteBanner, SiteLogo } from '@jozveyar/contracts';
 import type { SiteImageFileMeta } from '@jozveyar/db';
 
-import { BRAND_SHARE_ALT, manifestIcons, siteIcons, siteShareImage } from '../brand';
+import { BRAND_SHARE_ALT, manifestIcons, organizationLogo, siteIcons, siteShareImage } from '../brand';
 import { BUILD_PHASE } from './tariff';
 import { loadSiteBanner, loadSiteBrand, mediaPath, readSiteBanner, readSiteBrand, type BrandSource } from './brand';
 
@@ -156,11 +156,13 @@ describe('نشانک، تصویر اشتراک و manifest', () => {
       '/icons/icon-512.png any',
       '/icons/icon-512.png maskable',
     ]);
+    // لوگوی سازمان در دادهٔ ساختاریافته (۱۵٫۱): همان آیکون مربع ۵۱۲.
+    expect(organizationLogo(null)).toEqual({ url: '/icons/icon-512.png', width: 512, height: 512 });
   });
 
   it('لوگوی مالک: فقط فایل‌های خودش، هیچ فایل برند کنارش', async () => {
     const brand = (await loadSiteBrand(source({ logoValue: { imageId: 7 }, published: { 7: LOGO_FILES } })))!;
-    const all = JSON.stringify([siteIcons(brand), siteShareImage(brand), manifestIcons(brand)]);
+    const all = JSON.stringify([siteIcons(brand), siteShareImage(brand), manifestIcons(brand), organizationLogo(brand)]);
     for (const url of ['/favicon.ico', '/icon.svg', '/apple-icon.png', '/opengraph-image.png', '/icons/']) expect(all).not.toContain(`"${url}`);
     expect(siteIcons(brand)).toEqual({
       icon: [
@@ -175,5 +177,6 @@ describe('نشانک، تصویر اشتراک و manifest', () => {
       `/media/${sha('d')}.png 512x512 any`,
       `/media/${sha('d')}.png 512x512 maskable`,
     ]);
+    expect(organizationLogo(brand)).toEqual({ url: `/media/${sha('d')}.png`, width: 512, height: 512 });
   });
 });

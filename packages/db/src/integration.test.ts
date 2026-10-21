@@ -35,7 +35,7 @@ import { mobileBlocks, orderReviews } from './schema.js';
 import { discountCodes, discountTiers } from './schema.js';
 import { DISCOUNT_TIERS_MAX, TIER_PERCENT_MAX } from '@jozveyar/contracts';
 import { runMigrations } from './migrate.js';
-import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
+import { activePriceListActivatedAt, loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
 import {
   bindingRateBands,
   cities,
@@ -240,6 +240,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     expect(() => priceListSchema.parse(SEED_PRICE_LIST)).not.toThrow();
     const fromDb = await loadActivePriceList(conn);
     expect(() => priceListSchema.parse(fromDb)).not.toThrow();
+  });
+
+  it('زمان فعال شدن تعرفهٔ فعال، «آخرین تغییر» صفحهٔ اصلی در نقشهٔ سایت (برش ۱۵٫۱)', async () => {
+    const [head] = await conn.db.select({ at: priceLists.activatedAt }).from(priceLists).where(eq(priceLists.isActive, true));
+    const at = await activePriceListActivatedAt(conn);
+    expect(at).toBeInstanceOf(Date);
+    expect(at).toEqual(head!.at);
   });
 
   it('قیمت از پایگاه داده همان قیمت از seed است', async () => {

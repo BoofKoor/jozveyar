@@ -23,7 +23,9 @@ import {
   type ContentByKind,
   type ContentFacts,
   type ContentKind,
+  type InlineFormat,
   type PageContent,
+  type PlaceholderName,
 } from '@jozveyar/content';
 import { createSiteContentStore, getDb, type SiteContentStore } from '@jozveyar/db';
 import { parseJalaliNumeric } from '@jozveyar/text';
@@ -102,6 +104,33 @@ export function contentFacts(tariff: SiteTariff, files: SiteFiles, facts: Pick<S
  * شده؛ نرخ‌ها از تعرفه‌اند و تنظیم ندارند.
  */
 export function pageSettings(page: PageContent): string[] {
-  const used = [...placeholdersIn(parseInline(page.lead, 'line').nodes), ...blockPlaceholders(parseMarkdown(page.body).blocks)];
-  return [...new Set(used.flatMap((name) => (PLACEHOLDER_SOURCES[name].setting ? [PLACEHOLDER_SOURCES[name].setting!] : [])))];
+  return settingsOf([...placeholdersIn(parseInline(page.lead, 'line').nodes), ...blockPlaceholders(parseMarkdown(page.body).blocks)]);
+}
+
+/**
+ * تنظیم‌هایی که متن صفحهٔ اصلی و سؤال‌هایش از آن‌هاست (برش ۱۵٫۱): «آخرین تغییر» صفحهٔ اصلی در نقشهٔ سایت. نرخ‌ها تنظیم ندارند و از تعرفه‌اند
+ * (زمان فعال شدن تعرفه جداست، `siteTariffChangedAt`).
+ */
+export function homeSettings(home: ContentByKind['home'], faq: ContentByKind['faq']): string[] {
+  const fields: [string, InlineFormat][] = [
+    [home.eyebrow, 'line'],
+    [home.title, 'emphasis'],
+    [home.lead, 'line'],
+    [home.howTitle, 'line'],
+    ...home.promises.flatMap((promise): [string, InlineFormat][] => [
+      [promise.title, 'line'],
+      [promise.sub, 'line'],
+    ]),
+    ...home.steps.flatMap((step): [string, InlineFormat][] => [
+      [step.title, 'line'],
+      [step.body, 'paragraph'],
+    ]),
+    ...faq.items.map((item): [string, InlineFormat] => [item.a, 'paragraph']),
+  ];
+  return settingsOf(fields.flatMap(([text, format]) => placeholdersIn(parseInline(text, format).nodes)));
+}
+
+/** تنظیم پشت هر جای‌نگهدار، هر کدام یک بار. */
+function settingsOf(names: readonly PlaceholderName[]): string[] {
+  return [...new Set(names.flatMap((name) => (PLACEHOLDER_SOURCES[name].setting ? [PLACEHOLDER_SOURCES[name].setting!] : [])))];
 }

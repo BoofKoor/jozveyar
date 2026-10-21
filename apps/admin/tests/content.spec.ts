@@ -413,6 +413,10 @@ test.describe.serial('متن‌های سایت (۱۱٫۱)', () => {
       await expect(telegram).toHaveAttribute('href', 'https://t.me/jozveyar_e2e');
       await expect(telegram).toHaveAttribute('target', '_blank');
       await expect(site.locator('footer')).toContainText(LEGAL);
+      // سازمان در دادهٔ گوگل صفحهٔ اصلی (۱۵٫۱): تلگرام همان شبکهٔ صفحهٔ «تماس»، و راه تماس با اولین شماره به شکل بین‌المللی.
+      const ld = () => siteText(site, '/', 'script[type="application/ld+json"]');
+      await expect.poll(ld, ISR).toContain('"sameAs":["https://t.me/jozveyar_e2e"]');
+      expect(await ld()).toContain('"telephone":"+989123456789"');
       await site.close();
     }
   });

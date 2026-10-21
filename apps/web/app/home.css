@@ -71,6 +71,22 @@
     }
   }
 
+  /*
+   * تیتر صفحه (۱۵٫۱، سؤال ۴۲۹): «خط بالای تیتر» و خود تیتر در یک h1، با همان ظاهر پیش از آن. h1 فقط ظرف است: ارتفاع خط متن صفحه را
+   * نگه می‌دارد (خط برچسب همان ارتفاع پیشین بماند)، و هر تکه اندازه و شکستن خط خودش را دارد؛ «؛» میانشان فقط برای صفحه‌خوان و متن خام است.
+   */
+  .home-h1 {
+    line-height: inherit;
+  }
+  .home-h1__sep {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .home-eyebrow {
     display: inline-block;
     padding: 2px 12px;
@@ -80,8 +96,10 @@
     font-size: var(--text-small);
     font-weight: 600;
     line-height: 1.9;
+    text-wrap: pretty;
   }
   .home-title {
+    display: block;
     margin-block-start: 16px;
     font-size: var(--text-display);
     line-height: 1.35;
@@ -519,8 +537,8 @@
   :where([data-restoring] > body) .home-hero__text {
     padding: 0;
   }
-  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-lead, .home-trust, .home-banner, #how, #tariff, #reviews),
-  :where([data-restoring] > body) :is(.home-eyebrow, .home-lead, .home-trust, .home-banner, #how, #tariff, #reviews) {
+  :where(body:has([data-jozve])) :is(.home-eyebrow, .home-h1__sep, .home-lead, .home-trust, .home-banner, #how, #tariff, #reviews),
+  :where([data-restoring] > body) :is(.home-eyebrow, .home-h1__sep, .home-lead, .home-trust, .home-banner, #how, #tariff, #reviews) {
     display: none;
   }
   :where(body:has([data-jozve])) .home-title,
