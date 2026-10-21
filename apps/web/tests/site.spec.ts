@@ -479,13 +479,18 @@ test.describe('صفحه‌های ثابت', () => {
     await expect(section.getByRole('link', { name: 'تماس' })).toHaveAttribute('href', '/contact');
   });
 
-  test('نقشهٔ سایت: صفحهٔ اصلی و صفحه‌های ثابت، به ترتیب پاورقی؛ «آخرین تغییر» فقط وقتی معلوم است (۱۵٫۱)', async ({ request }) => {
+  test('نقشهٔ سایت: صفحهٔ اصلی و صفحه‌های ثابت، به ترتیب پاورقی، هر نشانی همان canonical صفحه‌اش؛ «آخرین تغییر» فقط وقتی معلوم است (۱۵٫۱)', async ({ request }) => {
     const xml = await (await request.get('/sitemap.xml')).text();
-    const urls = [...xml.matchAll(/<url>([\s\S]*?)<\/url>/g)].map(([, url]) => ({
-      path: new URL(/<loc>([^<]+)<\/loc>/.exec(url!)![1]!).pathname,
-      lastmod: /<lastmod>([^<]+)<\/lastmod>/.exec(url!)?.[1] ?? null,
-    }));
+    const urls = [...xml.matchAll(/<url>([\s\S]*?)<\/url>/g)].map(([, url]) => {
+      const loc = /<loc>([^<]+)<\/loc>/.exec(url!)![1]!;
+      return { loc, path: new URL(loc).pathname, lastmod: /<lastmod>([^<]+)<\/lastmod>/.exec(url!)?.[1] ?? null };
+    });
     expect(urls.map(({ path }) => path)).toEqual(['/', ...STATIC_PAGES.map(({ path }) => path)]);
+    // سؤال ۴۲۸: نشانی نقشه حرف به حرف canonical خود صفحه است؛ دو نشانی برای یک صفحه گوگل را میان آن دو سرگردان می‌کند.
+    for (const { loc, path } of urls) {
+      const html = await (await request.get(path)).text();
+      expect(/<link rel="canonical" href="([^"]+)"/.exec(html)?.[1], path).toBe(loc);
+    }
     // بی پایگاه داده: قوانین و حریم خصوصی روز متن پیش‌فرضشان را دارند (همان «به‌روز شده»ی صفحه)، و بقیه نامعلوم‌اند، نه «همین حالا».
     const lastmod = Object.fromEntries(urls.map(({ path, lastmod }) => [path, lastmod]));
     expect(lastmod).toEqual({
