@@ -449,7 +449,7 @@ test.describe.serial('صفحه‌های فرود و «تعرفه» (۱۵٫۲)', 
     await expect(page.locator('main')).toContainText(`/${SLUG} هم همین حالا به این صفحه می‌رود`);
     await expect(page.getByRole('radio', { name: /به صفحهٔ دیگری/ })).toBeChecked();
     await expect(page.getByRole('radio', { name: /پیدا نشد/ })).toBeDisabled();
-    await expect(page.getByLabel('به').locator('option')).toHaveText(['صفحهٔ اصلی', 'تعرفه (/tarefe)', `پرینت ارزان (/${SLUG_B})`]);
+    await expect(page.getByLabel('به', { exact: true }).locator('option')).toHaveText(['صفحهٔ اصلی', 'تعرفه (/tarefe)', `پرینت ارزان (/${SLUG_B})`]);
 
     // فرم دست‌ساز با «پیدا نشد»: سرور هم می‌بندد، پیش از کد.
     await page.getByRole('radio', { name: /پیدا نشد/ }).evaluate((input: HTMLInputElement) => {
@@ -464,7 +464,7 @@ test.describe.serial('صفحه‌های فرود و «تعرفه» (۱۵٫۲)', 
     );
     expect((await versionsOf(SLUG_NEW)).map((row) => row.removal)).toEqual([null, null, null]);
 
-    await page.getByLabel('به').selectOption('tariff');
+    await page.getByLabel('به', { exact: true }).selectOption('tariff');
     await page.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await page.getByRole('button', { name: 'از سایت بردار' }).click();
     await expect(page).toHaveURL(/\/content\/pages\?done=removed/);
@@ -484,7 +484,7 @@ test.describe.serial('صفحه‌های فرود و «تعرفه» (۱۵٫۲)', 
     await page.getByTestId('pages-list').locator(`li[data-page="${pageB}"]`).getByRole('link', { name: 'از سایت بردار…' }).click();
     await expect(page.locator('main')).toContainText('هیچ متنی روی سایت به این صفحه پیوند ندارد.');
     await page.getByRole('radio', { name: /پیدا نشد/ }).check();
-    await expect(page.getByLabel('به')).toBeHidden();
+    await expect(page.getByLabel('به', { exact: true })).toBeHidden();
     await page.getByLabel('کد برنامهٔ تأیید تو').fill(await codeFor(ownerSecret));
     await page.getByRole('button', { name: 'از سایت بردار' }).click();
     await expect(page).toHaveURL(/\/content\/pages\?done=removed/);
@@ -527,8 +527,12 @@ test.describe.serial('صفحه‌های فرود و «تعرفه» (۱۵٫۲)', 
     await expect(page).toHaveURL(/\/content\/pages\/tarefe\?saved=1&n=[0-9a-z]+&open=3$/);
     await expect(items).toHaveCount(4);
     await expect(page.getByTestId('page-issues').locator('li')).toHaveText(['پرسش 4: خالی است.', 'پاسخ 4: خالی است.']);
+    // «انتشار…» تا ذخیرهٔ بی خطا بسته است، مثل ۱۱٫۱: خطا از پیش‌نویس ذخیره‌شده است، نه از آنچه در فرم تایپ شد.
+    await expect(page.getByRole('button', { name: 'انتشار…' })).toBeDisabled();
     await items.nth(3).getByLabel('پرسش').fill(QUESTION);
     await items.nth(3).getByLabel('پاسخ').fill('نه؛ فاکتور رسمی پس از صورت‌حساب رسمی می‌آید.');
+    await page.getByRole('button', { name: 'ذخیره و پیش‌نمایش' }).click();
+    await expect(page.getByTestId('page-issues')).toHaveCount(0);
     await page.getByRole('button', { name: 'انتشار…' }).click();
     await expect(page).toHaveURL(/\/content\/pages\/tarefe\/publish$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('انتشار تعرفه');
