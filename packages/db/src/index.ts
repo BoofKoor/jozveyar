@@ -42,6 +42,7 @@ export * from './inventory.js';
 export * from './tariff.js';
 export * from './templates.js';
 export * from './content.js';
+export * from './pages.js';
 export * from './siteImages.js';
 export * from './settings.js';
 export * from './checkout.js';

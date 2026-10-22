@@ -14,6 +14,7 @@ import { messageOf } from '../../../../lib/messages';
 import { can } from '../../../../lib/server/auth';
 import type { ContentOverviewRow } from '../../../../lib/server/content';
 import { requirePanel, requireSession } from '../../../../lib/server/context';
+import type { PagesOverview } from '../../../../lib/server/pages';
 
 export const metadata: Metadata = { title: 'محتوای سایت' };
 
@@ -38,18 +39,19 @@ export default async function ContentPage({
 }) {
   const { gate } = await params;
   const { done, e } = await searchParams;
-  const { content, images } = requirePanel(gate);
+  const { content, images, pages } = requirePanel(gate);
   const session = await requireSession(gate);
   const texts = can(session, 'content.edit');
   const bars = can(session, 'content.bar');
   if (!texts && !bars) return <NoAccess gate={gate} session={session} />;
-  const [overview, bar, logo, banner] = await Promise.all([
+  const [overview, bar, logo, banner, landing] = await Promise.all([
     texts ? content.overview(session) : null,
     bars ? content.bar(session) : null,
     texts ? images.logo(session) : null,
     bars ? images.banner(session) : null,
+    texts ? pages.overview(session) : null,
   ]);
-  if ([overview, bar, logo, banner].some((result) => result && !result.ok)) return <NoAccess gate={gate} session={session} />;
+  if ([overview, bar, logo, banner, landing].some((result) => result && !result.ok)) return <NoAccess gate={gate} session={session} />;
   const doneText = done ? BAR_DONE[done] : undefined;
 
   return (
@@ -68,6 +70,7 @@ export default async function ContentPage({
         {banner?.ok ? <BannerCard gate={gate} view={banner.value} /> : null}
         {logo?.ok ? <LogoCard gate={gate} view={logo.value} /> : null}
         {overview?.ok ? <TextsCard gate={gate} now={overview.value.now} rows={overview.value.rows} /> : null}
+        {landing?.ok ? <PagesCard gate={gate} overview={landing.value} /> : null}
       </div>
     </>
   );
@@ -107,6 +110,37 @@ function TextsCard({ gate, now, rows }: { gate: string; now: Date; rows: readonl
       <p className="ad-hint ad-gap">
         عنوان و توضیح گوگل هر صفحه در همان ویرایش است. تعرفه، کارت بارگذاری، میز سفارش و مسیر خرید از تعرفه و کد سایت می‌آیند و اینجا نیستند.
       </p>
+    </section>
+  );
+}
+
+/** کارت «صفحه‌ها و مقاله‌ها» (۱۵٫۲، طرح «محتوای سایت»، سؤال ۴۶۱)، فقط مالک: شمار صفحه‌های روی سایت، زمان‌دار و پیش‌نویس، و صفحه‌هایی که هشدار دارند. */
+function PagesCard({ gate, overview }: { gate: string; overview: PagesOverview }) {
+  const { counts, tariff, landings } = overview;
+  const warned = [tariff, ...landings].filter((row) => row.warnings.length + row.blockIssues.length > 0).map((row) => `«${row.name}»`);
+  return (
+    <section className="jy-card" aria-labelledby="pages-card-title" data-testid="content-pages">
+      <div className="jy-card__head">
+        <h2 id="pages-card-title" className="jy-card__title">
+          صفحه‌ها و مقاله‌ها
+        </h2>
+        <span className="jy-card__meta">فقط مالک</span>
+      </div>
+      <p className="ad-meta">
+        <span className="num">{counts.live}</span> صفحه روی سایت، با «تعرفه»؛ <span className="num">{counts.pending}</span> زمان‌دار و{' '}
+        <span className="num">{counts.drafts}</span> پیش‌نویس.
+        {warned.length > 0 ? (
+          <>
+            {' '}
+            {warned.length === 1 ? 'یک' : <span className="num">{warned.length}</span>} هشدار: {warned.join('، ')}.
+          </>
+        ) : null}
+      </p>
+      <div className="ad-actions">
+        <Link href={panelPath(gate, '/content/pages')} className="jy-btn jy-btn--secondary">
+          صفحه‌ها و مقاله‌ها
+        </Link>
+      </div>
     </section>
   );
 }

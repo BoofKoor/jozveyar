@@ -5,8 +5,8 @@ import type { PriceList } from '@jozveyar/contracts';
 import type { CheckoutStatus } from '@jozveyar/contracts/checkout';
 import { MAX_SECTIONS_PER_ITEM } from '@jozveyar/contracts/constants';
 import type { FileRules } from '@jozveyar/contracts/files';
-import { DEFAULT_PAPER_SIZE, minOrderGapRials, pausedOf, quote, type PausedOptions } from '@jozveyar/pricing';
-import { DEFAULT_BINDING_TYPE_ID, DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
+import { minOrderGapRials, pausedOf, quote, type PausedOptions } from '@jozveyar/pricing';
+import { DEFAULT_PAPER_TYPE_ID } from '@jozveyar/pricing/seed';
 import { effectiveConfig, type Replacement } from '../lib/catalog';
 import { formatNumber, formatTomans } from '@jozveyar/text';
 import type { ApiFailure } from '../lib/checkout/api';
@@ -33,7 +33,7 @@ import {
   type DeskLayout,
   type JozveSlot,
 } from '../lib/layout';
-import type { OrderConfig } from '../lib/orderConfig';
+import { INITIAL_CONFIG, type OrderConfig } from '../lib/orderConfig';
 import { serverFailureMessage, uploadRefusalMessage } from '../lib/serverMessages';
 import { pageTariff, pausedLists } from '../lib/tariff';
 import type { JozveHandle } from '../lib/useJozve';
@@ -45,16 +45,6 @@ import { acceptOf } from '../lib/fileRules';
 import { JozveFiles } from './JozveFiles';
 import { OrderSummary, PriceDock, roundUpToToman, type DeskAction } from './OrderSummary';
 import { FlowNav, jozveSpecLabel, type JozveLine } from './checkout/parts';
-
-/** انتخاب‌های پیش‌فرض، از تعرفه: سیاه‌سفید، دورو، A4، یک نسخه. */
-export const INITIAL_CONFIG: OrderConfig = {
-  colorMode: 'bw',
-  sidesMode: 'double',
-  paperSize: DEFAULT_PAPER_SIZE,
-  bindingTypeId: DEFAULT_BINDING_TYPE_ID,
-  paperTypeId: DEFAULT_PAPER_TYPE_ID,
-  copies: 1,
-};
 
 /** مسیر خرید (قدم‌های آدرس و پرداخت): تکهٔ جدای JS، با دادهٔ شهرها؛ فقط وقتی کسی سراغش می‌آید. */
 type CheckoutModule = typeof import('./checkout/Checkout');

@@ -230,6 +230,32 @@ export type AdminErrorCode =
   | 'content_faq_full'
   | 'content_too_large'
   /**
+   * صفحه‌های فرود و «تعرفه» (۱۵٫۲): صفحه یا نسخه پیدا نشد، پیش‌نویسی برای انتشار نیست، متن (پیش‌نویس یا نسخه‌ای که برمی‌گردد) امروز خطا دارد،
+   * همان روی سایت است، صفحه همین حالا جای دیگری عوض شد، زمان‌داری در راه است، نشانی همین حالا مال صفحهٔ دیگری شد، سؤال‌ها به سقف رسیده، متن
+   * از سقف پایگاه داده بزرگ‌تر است؛ «کی روی سایت برود» (راه، روز، ساعت، گذشته، دور)؛ کد خالی؛ زمان‌داری که ساعتش رسید؛ و برداشتن (راه، مقصد،
+   * «پیدا نشد» با پیوندهای روی سایت، و صفحه‌ای که روی سایت نیست).
+   */
+  | 'page_not_found'
+  | 'page_no_draft'
+  | 'page_invalid'
+  | 'page_unchanged'
+  | 'page_changed'
+  | 'page_pending'
+  | 'page_slug_taken'
+  | 'page_faq_full'
+  | 'page_too_large'
+  | 'page_when_invalid'
+  | 'page_day_invalid'
+  | 'page_hour_invalid'
+  | 'page_time_past'
+  | 'page_time_far'
+  | 'page_code_required'
+  | 'page_already_live'
+  | 'page_remove_mode'
+  | 'page_remove_target'
+  | 'page_remove_linked'
+  | 'page_not_live'
+  /**
    * نوار اعلان (۱۱٫۳): نوار همین حالا جای دیگری عوض شد، فرم خطا دارد (هر فیلد زیر خودش)، روشن کردن یا تغییر نوار روشن بی کد، «کی» ناشناس، و
    * خطای روزها (همان قاعدهٔ تعطیلی چاپخانه، با متن نوار).
    */

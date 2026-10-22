@@ -6,9 +6,9 @@
 import type { FileRules, PriceList } from '@jozveyar/contracts';
 import { DEFAULT_PAPER_SIZE } from '@jozveyar/pricing';
 import { DEFAULT_BINDING_TYPE_ID, DEFAULT_SHIPPING_METHOD_ID } from '@jozveyar/pricing/seed';
-import { formatTomans } from '@jozveyar/text';
+import { formatJalali, formatTomans, jalaliYear } from '@jozveyar/text';
 
-import type { PlaceholderValues } from './placeholders.js';
+import type { PageValues, PlaceholderValues } from './placeholders.js';
 
 export interface ContentFacts {
   /** روز کاری تحویل به پست (`order.sla_days`). */
@@ -69,4 +69,16 @@ export function placeholderValues(facts: ContentFacts): PlaceholderValues {
     صحافی_از: tomans(facts.bindingFromRials),
     کرایه_از: tomans(facts.shippingFromRials),
   };
+}
+
+/**
+ * مقدارهای صفحه‌های فرود و «تعرفه» (۱۵٫۲، سؤال ۴۶۲): ده جای‌نگهدار، و `{سال}` (سال شمسی امروز به وقت تهران) و `{تغییر_قیمت}` (روز فعال شدن
+ * تعرفهٔ فعال، «15 مهر 1405»). زمان فعال شدن فقط بی پایگاه داده نامعلوم است (build)، و آن‌جا هیچ صفحهٔ منتشرشده‌ای رسم نمی‌شود: «—».
+ */
+export function pageValues(values: PlaceholderValues, input: { at: Date; priceChangedAt: Date | null }): PageValues {
+  return {
+    ...(values as Readonly<Record<keyof PlaceholderValues, string>>),
+    سال: String(jalaliYear(input.at)),
+    تغییر_قیمت: input.priceChangedAt ? formatJalali(input.priceChangedAt) : '—',
+  } as PageValues;
 }

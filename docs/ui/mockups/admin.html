@@ -33,6 +33,10 @@
   برش ۱۲ (docs/UI.md، قدم ۱۱، «پیش از ۱۲٫۱»؛ سؤال ۲۱۱): زبانهٔ «پشتیبانی» (مالک و متصدی) با شمار پیام‌های بی پاسخ، صندوق با چیپ‌های
   حال و قدیمی‌ترین انتظار اول، گفت‌وگو با پاسخ و پیامک پاسخ، هشدار پیشخوان، کارت «پیام‌های مشتری» در صفحهٔ سفارش، کلید هفتم «تنظیمات»
   (قالب پیامک پاسخ)، و رویدادهای «پشتیبانی». همان گفت‌وگو از چشم مشتری: account.html.
+  برش ۱۵ (docs/UI.md، قدم ۱۲، «پیش از ۱۵٫۲»؛ سؤال‌های ۴۳۱ تا ۴۴۲): «صفحه‌ها و مقاله‌ها» زیر «محتوای سایت»، فقط مالک: فهرست با حال هر صفحه و
+  مقاله (روی سایت، زمان‌دار، پیش‌نویس، هشدار) و نشانی‌های قبلی؛ ویرایش صفحهٔ فرود با نشانی، بلوک‌های زنده، سؤال‌ها، پیش‌فرض میز، پاورقی،
+  مقاله‌های مرتبط و گوگل، و پیش‌نمایش کنارش؛ خطاها و هشدار؛ انتشار همین حالا یا زمان‌دار با کد تازه؛ «از سایت بردار» با ۴۰۴ یا ۳۰۱؛ و ویرایش
+  مقاله با دسته، خلاصه، تصویرها و دعوت پایین. همان‌ها روی سایت: seo.html.
   به زبان کیت: packages/ui/src/base.css و components.css مستقیم بار می‌شوند و توکن‌ها از docs/brand/jozveyar-colors.css
   می‌آیند؛ اینجا هیچ کد رنگی نیست. اجزای تازهٔ کیت نام jy- دارند (دکمهٔ کار برگشت‌ناپذیر، نشان خنثی، آیکون دانلود)؛
   چیدمان پنل ad- است، و صفحهٔ مشتری همان site- و ck- طرح مسیر خرید.
@@ -653,7 +657,7 @@
 .scr, .st { display: none; }
 /* سه پوسته: ورود و ثبت، پنل، صفحهٔ مشتری */
 body:has(:is(#m-login, #m-login-error, #m-login-locked, #m-invite, #m-invite-expired):checked) .scr-auth { display: block; }
-body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped, #m-dash-alerts, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-l91, #m-l91-more, #m-o91, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s12, #m-s12-thread, #m-s12-replied, #m-s12-dash, #m-s12-order, #m-s12-key, #m-s12-events):checked) .scr-shell { display: block; }
+body:has(:is(#m-dash, #m-orders, #m-order, #m-order-edit, #m-order-pdf, #m-order-print, #m-order-handed, #m-order-cancel, #m-order-cancelled, #m-order-unpaid, #m-order-assign, #m-ticket, #m-order-vols, #m-order-purged, #m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report, #m-order-shipped, #m-dash-alerts, #m-order-second, #m-refund, #m-refund-manual, #m-refunding, #m-refunded, #m-refund-failed, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-l91, #m-l91-more, #m-o91, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s15, #m-s15-page, #m-s15-error, #m-s15-publish, #m-s15-remove, #m-s15-article, #m-s12, #m-s12-thread, #m-s12-replied, #m-s12-dash, #m-s12-order, #m-s12-key, #m-s12-events):checked) .scr-shell { display: block; }
 body:has(:is(#m-c-print, #m-c-handed, #m-c-cancelled, #m-c-shipped, #m-c-guest):checked) .scr-site { display: block; }
 
 body:has(#m-login:checked) :is(.st-login, .st-login-any),
@@ -733,6 +737,13 @@ body:has(#m-s11-home:checked) .st-s11-home,
 body:has(#m-s11-faq:checked) .st-s11-faq,
 body:has(#m-s11-contact:checked) .st-s11-contact,
 body:has(#m-s11-bar:checked) .st-s11-bar { display: contents; }
+/* برش ۱۵: صفحه‌ها و مقاله‌ها */
+body:has(#m-s15:checked) .st-s15,
+body:has(#m-s15-page:checked) :is(.st-s15-editor, .st-s15-page),
+body:has(#m-s15-error:checked) :is(.st-s15-editor, .st-s15-error),
+body:has(#m-s15-publish:checked) .st-s15-publish,
+body:has(#m-s15-remove:checked) .st-s15-remove,
+body:has(#m-s15-article:checked) .st-s15-article { display: contents; }
 /* برش ۱۲: پشتیبانی */
 body:has(#m-s12:checked) .st-s12,
 body:has(#m-s12-thread:checked) :is(.st-s12-conv, .st-s12-thread),
@@ -773,8 +784,8 @@ body:has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down,
 body:has(:is(#m-partners, #m-partner-edit):checked) .ad-nav [data-tab='partners'],
 body:has(:is(#m-admins, #m-admin-invite, #m-admin-link):checked) .ad-nav [data-tab='admins'],
 body:has(:is(#m-events, #m-s12-events):checked) .ad-nav [data-tab='events'],
-body:has(:is(#m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar):checked) .ad-nav [data-tab='site'],
-body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s12-key, #m-s12-events, #m-s12, #m-s12-thread, #m-s12-replied, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
+body:has(:is(#m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s15, #m-s15-page, #m-s15-error, #m-s15-publish, #m-s15-remove, #m-s15-article):checked) .ad-nav [data-tab='site'],
+body:has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s15, #m-s15-page, #m-s15-error, #m-s15-publish, #m-s15-remove, #m-s15-article, #m-s12-key, #m-s12-events, #m-s12, #m-s12-thread, #m-s12-replied, #m-ship, #m-ship-reading, #m-ship-error, #m-ship-cols, #m-ship-dup, #m-ship-preview, #m-ship-done, #m-ship-revert, #m-ship-review, #m-ship-report):checked) .ad-nav [data-tab='more'] { color: var(--jy-ink); border-block-end-color: var(--jy-green-600); }
 
 /*
  * نقش: متصدی تعرفه را فقط می‌بیند، و تنظیمات، چاپخانه‌ها، ادمین‌ها و رویدادها را ندارد. چاپخانه (برش ۵، ADR-042) فقط پیشخوان و
@@ -789,9 +800,9 @@ body:has(#r-partner:checked) .prt { display: contents; }
 .ad-facts > div.staff { display: grid; }
 body:has(:is(#r-operator, #r-partner):checked) .st-ownpage { display: none !important; }
 body:has(#r-partner:checked) .st-staffpage { display: none !important; }
-body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s12-key, #m-s12-events):checked) .ad-noaccess { display: block; }
+body:has(#r-operator:checked):has(:is(#m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-ship-revert, #m-ship-report, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s15, #m-s15-page, #m-s15-error, #m-s15-publish, #m-s15-remove, #m-s15-article, #m-s12-key, #m-s12-events):checked) .ad-noaccess { display: block; }
 .ad-noaccess-prt, .ad-notfound { display: none; max-width: 32rem; }
-body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-dash-alerts, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s12, #m-s12-thread, #m-s12-replied, #m-s12-key, #m-s12-events):checked) .ad-noaccess-prt { display: block; }
+body:has(#r-partner:checked):has(:is(#m-tariff, #m-tariff-draft, #m-tariff-invalid, #m-tariff-activate, #m-settings, #m-key-edit, #m-key-tpl, #m-key-rejected, #m-key-down, #m-live-all, #m-live-notready, #m-live-link, #m-live-open, #m-dash-alerts, #m-partners, #m-partner-edit, #m-admins, #m-admin-invite, #m-admin-link, #m-events, #m-order-edit, #m-order-cancel, #m-order-assign, #m-ship-revert, #m-ship-review, #m-ship-report, #m-s11, #m-s11-page, #m-s11-error, #m-s11-publish, #m-s11-versions, #m-s11-home, #m-s11-faq, #m-s11-contact, #m-s11-bar, #m-s15, #m-s15-page, #m-s15-error, #m-s15-publish, #m-s15-remove, #m-s15-article, #m-s12, #m-s12-thread, #m-s12-replied, #m-s12-key, #m-s12-events):checked) .ad-noaccess-prt { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged):checked) .ad-notfound { display: block; }
 body:has(#r-partner:checked):has(:is(#m-order-pdf, #m-order-unpaid, #m-order-vols, #m-order-purged, #m-order-edit, #m-order-cancel, #m-order-assign):checked) :is(.st-o27, .st-order-unpaid, .st-order-vols, .st-order-purged) { display: none; }
 
@@ -868,6 +879,12 @@ body:has(#m-s11-home:checked) .mock [for='m-s11-home'],
 body:has(#m-s11-faq:checked) .mock [for='m-s11-faq'],
 body:has(#m-s11-contact:checked) .mock [for='m-s11-contact'],
 body:has(#m-s11-bar:checked) .mock [for='m-s11-bar'],
+body:has(#m-s15:checked) .mock [for='m-s15'],
+body:has(#m-s15-page:checked) .mock [for='m-s15-page'],
+body:has(#m-s15-error:checked) .mock [for='m-s15-error'],
+body:has(#m-s15-publish:checked) .mock [for='m-s15-publish'],
+body:has(#m-s15-remove:checked) .mock [for='m-s15-remove'],
+body:has(#m-s15-article:checked) .mock [for='m-s15-article'],
 body:has(#m-s12:checked) .mock [for='m-s12'],
 body:has(#m-s12-thread:checked) .mock [for='m-s12-thread'],
 body:has(#m-s12-replied:checked) .mock [for='m-s12-replied'],
@@ -929,6 +946,8 @@ body:has(#r-partner:checked) .mock [for='r-partner'] { background: var(--jy-gree
 .ad-texts__name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 600; }
 .ad-texts__meta { grid-column: 1; font-size: var(--text-small); line-height: 1.7; color: var(--color-muted); overflow-wrap: anywhere; }
 .ad-texts > li > .jy-btn { grid-column: 2; grid-row: 1 / span 2; }
+/* کار دوم یک ردیف (برش ۱۵: «از سایت بردار…») زیر خود ردیف، هدف لمسی ۴۴ */
+.ad-texts > li > .ad-rowact { grid-column: 1; grid-row: 3; justify-self: start; }
 .ad-ed { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .ad-ed > * { min-width: 0; }
 @media (width <= 1080px) { .ad-ed { grid-template-columns: minmax(0, 1fr); } }
@@ -1018,6 +1037,41 @@ textarea.ad-md { min-height: 24rem; font-size: var(--text-small); line-height: 1
 .ad-pvh__how h3 { font-weight: 600; }
 .ad-pvh__how p { font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
 @media (max-width: 520px) { .ad-pv__frame { padding: 16px; } .ad-pvh__title { font-size: var(--text-h3); } }
+/*
+ * برش ۱۵ (docs/UI.md، قدم ۱۲، «پیش از ۱۵٫۲»؛ سؤال‌های ۴۳۱ تا ۴۴۲): «صفحه‌ها و مقاله‌ها» زیر «محتوای سایت»، فقط مالک. همان ویرایشگر ۱۱٫۱ (فرم و
+ * پیش‌نمایش کنار هم)، با نشانی، بلوک‌های زنده، پیش‌فرض میز، پاورقی و مقاله‌های مرتبط، انتشار زمان‌دار و «از سایت بردار». تیک همان ad-check پنل
+ * (ویرایشگر تعرفه). روی سایت: seo.html.
+ */
+.ad-headbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.ad-check { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--color-green-600); cursor: pointer; }
+.ad-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; }
+.ad-toggle:has(.ad-check:disabled) { color: var(--color-muted); cursor: not-allowed; }
+.ad-rel { display: flex; flex-direction: column; }
+.ad-pvc { margin-block-end: 8px; font-size: var(--text-small); color: var(--color-muted); }
+.ad-pvslot { display: flex; align-items: center; gap: 8px; margin-block: 16px; padding: 12px 16px; border: 1px dashed var(--color-green-300); border-radius: var(--radius-md); background: var(--color-green-50); font-size: var(--text-small); color: var(--color-muted); }
+.ad-pvslot .jy-icon { width: 18px; height: 18px; }
+.ad-pvsample { display: flex; flex-direction: column; gap: 4px; max-width: 22rem; margin-block-start: 12px; padding: 12px 16px; border: 1px solid var(--color-line); border-radius: var(--radius-md); }
+.pg-body .ad-pvsample p + p { margin-block-start: 0; }
+.ad-pvsample__t { font-weight: 600; line-height: 1.7; }
+.ad-pvsample__r { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-small); }
+.ad-pvsample__total { padding-block-start: 6px; border-block-start: 1px solid var(--color-line); font-size: var(--text-base); font-weight: 600; }
+.ad-pvsample__foot { font-size: var(--text-small); line-height: 1.8; color: var(--color-muted); }
+.ad-pvsample--off { border-style: dashed; }
+.ad-pvsamples { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 12px; }
+.ad-pvsamples .ad-pvsample { margin: 0; }
+.ad-pvanswer { margin-block-start: 12px; padding: 12px 16px; border-inline-start: 4px solid var(--color-green-600); border-radius: var(--radius-md); background: var(--color-green-50); }
+.ad-pvanswer b { font-weight: 600; }
+.ad-imgs > li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding-block: 12px; }
+.ad-imgs > li + li { border-block-start: 1px solid var(--color-green-100); }
+.ad-imgs__thumb { display: grid; place-items: center; aspect-ratio: 16 / 9; border-radius: var(--radius-sm); background: var(--color-green-100); font-size: var(--text-small); color: var(--color-muted); }
+.ad-imgs__thumb--bad { background: var(--color-error-bg); color: var(--color-error-text); }
+.ad-imgs__body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ad-imgs__name { font-size: var(--text-small); line-height: 1.8; overflow-wrap: anywhere; }
+.ad-imgs__add { margin-block-start: 4px; }
+/* نحو بلوک بلند است و در گوشی باید بشکند؛ جای‌نگهدار کوتاه ۱۱٫۱ نه */
+.ad-phs .ad-table.ad-blocks td:nth-child(n) { white-space: normal; }
+.ad-blocks .ad-ph { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .ad-imgs > li { grid-template-columns: 72px minmax(0, 1fr); } }
 /*
  * برش ۱۲ (docs/UI.md، قدم ۱۱، «پیش از ۱۲٫۱»؛ سؤال ۲۱۱): «پشتیبانی»، مالک و متصدی. زبانه در ردیف اصلی با شمار بی پاسخ‌ها؛ صندوق با چیپ‌های
  * حال و قدیمی‌ترین انتظار اول؛ گفت‌وگو با پیام‌ها و پاسخ در ستون اصلی، و مشتری، سفارش و «بستن» در ستون کنار (در گوشی بالای همه، مثل صفحهٔ
@@ -1126,6 +1180,12 @@ textarea.ad-reply__text { min-height: 9rem; line-height: 1.9; }
   <input type="radio" name="m" id="m-s11-faq" tabindex="-1">
   <input type="radio" name="m" id="m-s11-contact" tabindex="-1">
   <input type="radio" name="m" id="m-s11-bar" tabindex="-1">
+  <input type="radio" name="m" id="m-s15" tabindex="-1">
+  <input type="radio" name="m" id="m-s15-page" tabindex="-1">
+  <input type="radio" name="m" id="m-s15-error" tabindex="-1">
+  <input type="radio" name="m" id="m-s15-publish" tabindex="-1">
+  <input type="radio" name="m" id="m-s15-remove" tabindex="-1">
+  <input type="radio" name="m" id="m-s15-article" tabindex="-1">
   <input type="radio" name="m" id="m-s12" tabindex="-1">
   <input type="radio" name="m" id="m-s12-thread" tabindex="-1">
   <input type="radio" name="m" id="m-s12-replied" tabindex="-1">
@@ -1210,6 +1270,13 @@ textarea.ad-reply__text { min-height: 9rem; line-height: 1.9; }
     <label for="m-s11-faq">سؤال‌ها</label>
     <label for="m-s11-contact">تماس و پاورقی</label>
     <label for="m-s11-bar">نوار اعلان</label>
+    <hr><p>صفحه‌ها و مقاله‌ها (برش ۱۵)</p>
+    <label for="m-s15">صفحه‌ها و مقاله‌ها</label>
+    <label for="m-s15-page">ویرایش صفحه</label>
+    <label for="m-s15-error">خطای صفحه</label>
+    <label for="m-s15-publish">انتشار زمان‌دار</label>
+    <label for="m-s15-remove">از سایت بردار</label>
+    <label for="m-s15-article">ویرایش مقاله</label>
     <hr><p>پشتیبانی (برش ۱۲)</p>
     <label for="m-s12">صندوق</label>
     <label for="m-s12-thread">گفت‌وگو و پاسخ</label>
@@ -3580,6 +3647,419 @@ textarea.ad-reply__text { min-height: 9rem; line-height: 1.9; }
       </section>
     </div>
 
+    <!-- ===================== صفحه‌ها و مقاله‌ها (برش ۱۵، پیش از ۱۵٫۲): فهرست، فقط مالک؛ «امروز» 29 مهر 1405، ساعت 11:20 ===================== -->
+    <div class="st st-s15 st-ownpage">
+      <label for="m-s11" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>محتوای سایت</label>
+      <div class="ad-pagehead">
+        <div>
+          <h1 class="ad-title">صفحه‌ها و مقاله‌ها</h1>
+          <p class="ad-sub">صفحه‌های فرود و مقاله‌های <bdi class="ltr">jozveyar.com</bdi>. هر انتشار نسخه‌ای عوض‌نشدنی است و تا یک دقیقه بعد روی سایت.</p>
+        </div>
+        <div class="ad-headbtns"><label for="m-s15-page" class="jy-btn jy-btn--primary"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span>صفحهٔ تازه</label><label for="m-s15-article" class="jy-btn jy-btn--secondary"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span>مقالهٔ تازه</label></div>
+      </div>
+      <div class="ad-stack">
+        <section class="jy-card" aria-labelledby="t-s15-pages">
+          <div class="jy-card__head">
+            <h2 id="t-s15-pages" class="jy-card__title">صفحه‌های فرود</h2>
+            <span class="jy-card__meta"><span class="num">4</span> روی سایت · <span class="num">1</span> زمان‌دار · <span class="num">7</span> پیش‌نویس</span>
+          </div>
+          <ul class="ad-texts">
+            <li><span class="ad-texts__name">تعرفه <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>روی سایت</span></span><span class="ad-texts__meta"><bdi class="ltr">/tarefe</bdi> · ماشین‌حساب و جدول‌ها از تعرفهٔ فعال؛ تیتر، متن، سؤال‌ها و گوگل از اینجا · نسخهٔ <span class="num">2</span>، <span class="num">26</span> مهر، سارا</span><button type="button" class="jy-btn jy-btn--secondary">ویرایش</button></li>
+            <li><span class="ad-texts__name">پرینت PDF <span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>پیش‌نویس</span></span><span class="ad-texts__meta"><bdi class="ltr">/print-pdf</bdi> · هنوز منتشر نشده · از «ورود پیش‌نویس‌ها»، امروز <span class="num">10:40</span>؛ ویرایش امروز <span class="num">11:05</span></span><label for="m-s15-page" class="jy-btn jy-btn--secondary">ادامهٔ ویرایش</label></li>
+            <li><span class="ad-texts__name">پرینت رنگی <span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>زمان‌دار</span></span><span class="ad-texts__meta"><bdi class="ltr">/print-rangi</bdi> · روی سایت پنجشنبه <span class="num">1</span> آبان، ساعت <span class="num">09:00</span> · با کد تازه، سارا</span><button type="button" class="jy-btn jy-btn--secondary">ویرایش</button></li>
+            <li><span class="ad-texts__name">پرینت ارزان <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>روی سایت</span></span><span class="ad-texts__meta"><bdi class="ltr">/print-arzan</bdi> · در پاورقی · نسخهٔ <span class="num">1</span>، <span class="num">27</span> مهر، سارا</span><button type="button" class="jy-btn jy-btn--secondary">ویرایش</button><label for="m-s15-remove" class="jy-btn jy-btn--text ad-rowact">از سایت بردار…</label></li>
+            <li><span class="ad-texts__name">صحافی <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>روی سایت</span><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span class="num">1</span> هشدار</span></span><span class="ad-texts__meta"><bdi class="ltr">/sahafi</bdi> · بلوک <span class="ad-ph">[[قیمت: 100 صفحه، A5، دورو]]</span>: اندازهٔ <bdi>A5</bdi> امروز در تعرفه نیست، و روی سایت «فعلاً ارائه نمی‌شود» نشان می‌دهد · نسخهٔ <span class="num">1</span>، <span class="num">27</span> مهر</span><button type="button" class="jy-btn jy-btn--secondary">ویرایش</button></li>
+            <li><span class="ad-texts__name">ارسال <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>روی سایت</span></span><span class="ad-texts__meta"><bdi class="ltr">/ersal</bdi> · در پاورقی · نسخهٔ <span class="num">1</span>، <span class="num">27</span> مهر، سارا</span><button type="button" class="jy-btn jy-btn--secondary">ویرایش</button></li>
+            <li><span class="ad-texts__name"><span class="num">6</span> پیش‌نویس دیگر</span><span class="ad-texts__meta">پرینت ورد، پرینت پاورپوینت، دانشجویی، کنکور، معلم و آموزشگاه، و «چاپ جزوه در مشهد» (فقط با چاپخانهٔ همکار در همان شهر)</span><button type="button" class="jy-btn jy-btn--secondary">نشان بده</button></li>
+          </ul>
+        </section>
+
+        <section class="jy-card" aria-labelledby="t-s15-arts">
+          <div class="jy-card__head">
+            <h2 id="t-s15-arts" class="jy-card__title">مقاله‌ها</h2>
+            <span class="jy-card__meta"><span class="num">7</span> روی سایت · <span class="num">1</span> زمان‌دار · <span class="num">4</span> پیش‌نویس</span>
+          </div>
+          <nav class="ad-chips" aria-label="حال مقاله"><a class="ad-chip is-current" href="#" aria-current="page">همه <span class="num">12</span></a><a class="ad-chip" href="#">روی سایت <span class="num">7</span></a><a class="ad-chip" href="#">زمان‌دار <span class="num">1</span></a><a class="ad-chip" href="#">پیش‌نویس <span class="num">4</span></a></nav>
+          <ul class="ad-texts">
+            <li><span class="ad-texts__name">پرینت یکرو یا دورو؟ با حساب قیمت امروز <span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>زمان‌دار</span></span><span class="ad-texts__meta">قیمت و صرفه‌جویی · <bdi class="ltr">/articles/yekro-ya-doro</bdi> · روی سایت پنجشنبه <span class="num">1</span> آبان، ساعت <span class="num">09:00</span></span><label for="m-s15-article" class="jy-btn jy-btn--secondary">ویرایش</label></li>
+            <li><span class="ad-texts__name">پرینت اسکن زرد: رنگی حساب نمی‌شود، ولی تمیز چاپ شدنش با توست <span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>روی سایت</span></span><span class="ad-texts__meta">فایل و اسکن · <bdi class="ltr">/articles/scan-zard</bdi> · نسخهٔ <span class="num">2</span>، <span class="num">28</span> مهر؛ «به‌روز شده» همان روز</span><button type="button" class="jy-btn jy-btn--secondary">ویرایش</button></li>
+            <li><span class="ad-texts__name">جزوهٔ <span class="num">1,100</span> صفحه‌ای: یک جلد یا چند جلد <span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>پیش‌نویس</span></span><span class="ad-texts__meta">صحافی و کاغذ · بی تصویر اشتراک: تصویر برند به جایش</span><button type="button" class="jy-btn jy-btn--secondary">ادامهٔ ویرایش</button></li>
+          </ul>
+        </section>
+
+        <section class="jy-card" aria-labelledby="t-s15-moved">
+          <div class="jy-card__head"><h2 id="t-s15-moved" class="jy-card__title">نشانی‌های قبلی</h2><span class="jy-card__meta">برای همیشه به نشانی تازه</span></div>
+          <ul class="ad-texts">
+            <li><span class="ad-texts__name"><bdi class="ltr">/chap-jozve</bdi> ← صفحهٔ اصلی</span><span class="ad-texts__meta">«چاپ جزوه» خود صفحهٔ اصلی است؛ ثابت سایت، نه از پنل</span></li>
+            <li><span class="ad-texts__name"><bdi class="ltr">/print-arzaan</bdi> ← <bdi class="ltr">/print-arzan</bdi></span><span class="ad-texts__meta">نشانی «پرینت ارزان» پس از انتشار عوض شد، <span class="num">27</span> مهر</span></li>
+          </ul>
+          <p class="ad-hint ad-gap">نشانی‌ای که یک بار روی سایت بود هیچ‌وقت ناخواسته «پیدا نشد» نمی‌شود: یا به نشانی تازه می‌رود، یا با «از سایت بردار» خودت انتخاب می‌کنی.</p>
+        </section>
+      </div>
+    </div>
+
+    <!-- ویرایش صفحهٔ فرود: همان ویرایشگر ۱۱٫۱ با نشانی، بلوک‌های زنده، پیش‌فرض میز، پاورقی و مقاله‌های مرتبط؛ «خطاها» همین صفحه با سه خطا و یک هشدار -->
+    <div class="st st-s15-editor st-ownpage">
+      <label for="m-s15" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>صفحه‌ها و مقاله‌ها</label>
+      <div class="ad-pagehead">
+        <div>
+          <div class="ad-title-row"><h1 class="ad-title">پرینت PDF</h1><span class="jy-badge jy-badge--warning"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span>پیش‌نویس</span></div>
+          <p class="ad-sub"><bdi class="ltr">jozveyar.com/print-pdf</bdi> · هنوز منتشر نشده · از «ورود پیش‌نویس‌ها»، امروز <span class="num">10:40</span></p>
+        </div>
+      </div>
+      <div class="st st-s15-error">
+        <div class="ad-alerts"><div class="jy-note jy-note--error" role="alert">
+          <span class="jy-icon jy-icon-error" aria-hidden="true"></span>
+          <span><b>پیش‌نویس ذخیره شد، ولی تا این سه درست نشوند منتشر نمی‌شود:</b>
+            <ul class="ad-errs">
+              <li>نشانی: <bdi class="ltr">/orders</bdi> مال خود سایت است («سفارش‌های من»). نشانی دیگری بگذار، مثل <bdi class="ltr">print-pdf</bdi>.</li>
+              <li>خط <span class="num">6</span> («اسکن هم PDF است…»): <bdi class="ltr">/articles/scan-zard</bdi> هنوز منتشر نشده. اول آن مقاله را منتشر کن، یا پیوند را بردار.</li>
+              <li>عنوان گوگل با عدد امروز <span class="num">68</span> نویسه است؛ گوگل بیش از حدود <span class="num">60</span> را می‌بُرد. کوتاهش کن.</li>
+            </ul></span>
+        </div>
+        <div class="jy-note jy-note--warning">
+          <span class="jy-icon jy-icon-warning" aria-hidden="true"></span>
+          <span><b>یک هشدار، که انتشار را نمی‌بندد:</b> خط <span class="num">11</span>، بلوک <span class="ad-ph">[[قیمت: 100 صفحه، A5، دورو]]</span>: اندازهٔ <bdi>A5</bdi> امروز در تعرفه نیست. روی سایت به جای قیمت «فعلاً ارائه نمی‌شود» می‌آید، تا روزی که <bdi>A5</bdi> را در تعرفه روشن کنی.</span>
+        </div></div>
+      </div>
+      <div class="ad-ed">
+        <section class="jy-card" aria-labelledby="t-s15-ed">
+          <h2 id="t-s15-ed" class="jy-card__title">صفحه</h2>
+          <div class="ad-form">
+            <fieldset class="ad-fs">
+              <legend>نشانی و تیتر</legend>
+              <div class="jy-field">
+                <label class="jy-label" for="s15-slug">نشانی</label>
+                <div class="st st-s15-page"><div class="ad-prefix"><span class="ad-prefix__t">jozveyar.com/</span><input id="s15-slug" class="jy-input jy-input--ltr" value="print-pdf" aria-describedby="s15-slug-hint"></div></div>
+                <div class="st st-s15-error"><div class="ad-prefix"><span class="ad-prefix__t">jozveyar.com/</span><input id="s15-slug-err" class="jy-input jy-input--ltr" value="orders" aria-invalid="true" aria-label="نشانی" aria-describedby="s15-slug-err-msg s15-slug-hint"></div><p id="s15-slug-err-msg" class="jy-error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span><bdi class="ltr">/orders</bdi> مال خود سایت است.</span></p></div>
+                <p id="s15-slug-hint" class="jy-hint">حرف کوچک لاتین، رقم و خط تیره، آوانگار فارسی (<bdi class="ltr">print-arzan</bdi>، <bdi class="ltr">sahafi</bdi>). پس از انتشار عوضش که کنی، نشانی قبلی برای همیشه به تازه می‌رود.</p>
+              </div>
+              <div class="jy-field"><label class="jy-label" for="s15-title">تیتر صفحه</label><input id="s15-title" class="jy-input" value="پرینت PDF آنلاین، با صحافی و ارسال"></div>
+              <div class="jy-field"><label class="jy-label" for="s15-lead">جملهٔ زیر تیتر</label><textarea id="s15-lead" class="jy-input" rows="2">فایل PDF را بینداز؛ همین مرورگر صفحه‌ها را می‌شمارد و قیمت را همان لحظه می‌گوید، بی ثبت‌نام.</textarea></div>
+              <p class="ad-hint">زیر جمله همان کارت بارگذاری، سه نوید و میز سفارش صفحهٔ اصلی است؛ متن پایین پس از آن‌ها می‌آید.</p>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>متن صفحه</legend>
+              <div class="jy-field">
+                <label class="jy-label sr-only" for="s15-body">متن صفحه</label>
+                <textarea id="s15-body" class="jy-input ad-md" rows="16" aria-describedby="s15-body-hint">## PDF همان‌طور چاپ می‌شود که دیدی
+PDF را همین مرورگر می‌خواند: شمار صفحه‌ها، اندازهٔ کاغذ و صفحه‌های رنگی را می‌گوییم، و رنگی یا سیاه‌سفید چاپ شدنش را خودت انتخاب می‌کنی.
+
+- صفحهٔ افقی می‌چرخد و هر صفحه روی کاغذ A4 جا می‌شود («Fit»)، بی بریده شدن لبه‌ها.
+- چند PDF را با هم بینداز: پشت‌سرهم در یک جزوه با یک صحافی، یا هر کدام جزوهٔ جدا با صحافی خودش.
+- اسکن هم PDF است؛ زمینهٔ زرد یا خاکستری اسکن رنگی حساب نمی‌شود، ولی تمیزش هم نمی‌کنیم: همان‌طور که هست چاپ می‌شود. [بیشتر بخوان](/articles/scan-zard)
+
+## چاپ یک PDF دویست صفحه‌ای چند می‌شود؟
+[[قیمت: 200 صفحه، سیاه‌سفید، دورو، طلق و سیم]]
+
+[[قیمت: 100 صفحه، A5، دورو]]</textarea>
+                <div id="s15-body-hint" class="ad-mdhelp"><span><code>## تیتر</code></span><span><code>- فهرست</code></span><span><code>**پررنگ**</code></span><span><code>[تعرفه](/tarefe)</code> پیوند به صفحه‌ای از همین سایت که روی سایت است</span><span><code>[[تعرفه]]</code> بلوک زنده، در خط خودش</span><span>خط خالی: بند تازه</span></div>
+              </div>
+              <details class="ad-phs" open>
+                <summary>بلوک‌های زنده: جدول و قیمتی که با تعرفه عوض می‌شود<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
+                <table class="ad-table ad-blocks">
+                  <thead><tr><th scope="col">بنویس</th><th scope="col">روی سایت</th><th scope="col">امروز</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="ad-ph">[[تعرفه]]</span></td><td>چاپ هر رو، هر اندازه و رنگ</td><td><bdi>A4</bdi>: <span class="num">1,600</span> و <span class="num">2,000</span></td></tr>
+                    <tr><td><span class="ad-ph">[[صحافی]]</span></td><td>بازه‌های هر صحافی روشن</td><td>طلق و سیم، <span class="num">6</span> بازه</td></tr>
+                    <tr><td><span class="ad-ph">[[ارسال]]</span></td><td>کرایهٔ هر منطقه و وزن</td><td><span class="num">3</span> وزن، <span class="num">2</span> منطقه</td></tr>
+                    <tr><td><span class="ad-ph">[[تخفیف]]</span></td><td>پله‌های تخفیف سفارش بزرگ</td><td>پله‌ای نیست؛ چیزی نشان نمی‌دهد</td></tr>
+                    <tr><td><span class="ad-ph">[[قیمت: 200 صفحه، سیاه‌سفید، دورو، طلق و سیم]]</span></td><td>قیمت یک جزوهٔ نمونه، با همان حساب میز سفارش، و با ارسال به هر منطقه</td><td><span class="num">365,000</span> تومان</td></tr>
+                  </tbody>
+                </table>
+                <p class="ad-hint">در «قیمت» هر چه نگویی پیش‌فرض میز است (سیاه‌سفید، دورو، <bdi>A4</bdi>، تحریر، طلق و سیم، یک نسخه). گزینه‌ای که امروز خاموش است هشدار می‌دهد و روی سایت «فعلاً ارائه نمی‌شود».</p>
+              </details>
+              <details class="ad-phs">
+                <summary>جای‌نگهدارها: عددهایی که خودشان به‌روز می‌مانند<span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary>
+                <p class="ad-hint">همان ده جای‌نگهدار «محتوای سایت»، به‌علاوهٔ <span class="ad-ph">{سال}</span> (امروز <span class="num">1405</span>) و <span class="ad-ph">{تغییر_قیمت}</span> (روز فعال شدن تعرفه، امروز <span class="num">15</span> مهر)، که در عنوان و توضیح گوگل هم کار می‌کنند.</p>
+              </details>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>سؤال‌های این صفحه</legend>
+              <ol class="ad-faq">
+                <li><details><summary><span class="ad-faq__n num">1</span><span class="ad-faq__q">از کجا بفهمم PDFم چند صفحهٔ رنگی دارد؟</span><span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary></details></li>
+                <li><details><summary><span class="ad-faq__n num">2</span><span class="ad-faq__q">صفحه‌های افقی چه می‌شوند؟</span><span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary></details></li>
+                <li><details><summary><span class="ad-faq__n num">3</span><span class="ad-faq__q">چند PDF را یک جزوه کنم یا جدا؟</span><span class="jy-icon jy-icon-chevron" aria-hidden="true"></span></summary></details></li>
+              </ol>
+              <div><button type="button" class="jy-btn jy-btn--secondary"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span>سؤال تازه</button></div>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>میز سفارش این صفحه</legend>
+              <p class="ad-hint">انتخاب از پیش مشتری‌ای که از این صفحه فایل می‌اندازد؛ فقط گزینه‌ای که امروز روشن است، و مشتری عوضش می‌کند.</p>
+              <div class="ad-pair">
+                <div class="jy-field ad-select"><label class="jy-label" for="s15-color">رنگ</label><select id="s15-color" class="jy-input"><option selected>پیش‌فرض (سیاه‌سفید)</option><option>رنگی</option></select></div>
+                <div class="jy-field ad-select"><label class="jy-label" for="s15-sides">یکرو یا دورو</label><select id="s15-sides" class="jy-input"><option selected>پیش‌فرض (دورو)</option><option>یکرو</option></select></div>
+              </div>
+              <p class="ad-hint">اندازه، کاغذ و صحافی امروز یک گزینه دارند، پس انتخابی نیست.</p>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>پیوندها</legend>
+              <label class="ad-toggle"><input class="ad-check" type="checkbox" checked>در پاورقی، گروه «چاپ جزوه»</label>
+              <div class="jy-field">
+                <span class="jy-label" id="s15-rel">مقاله‌های مرتبط <span class="jy-optional">تا <span class="num">3</span></span></span>
+                <ul class="ad-rel" aria-labelledby="s15-rel">
+                  <li><label class="ad-toggle"><input class="ad-check" type="checkbox" checked>پرینت اسکن زرد: رنگی حساب نمی‌شود…</label></li>
+                  <li><label class="ad-toggle"><input class="ad-check" type="checkbox" checked>برگ یا صفحه؟ قیمت چاپ جزوه را درست مقایسه کن</label></li>
+                  <li><label class="ad-toggle"><input class="ad-check" type="checkbox" checked>پرینت یکرو یا دورو؟ با حساب قیمت امروز</label></li>
+                  <li><label class="ad-toggle"><input class="ad-check" type="checkbox" disabled>ده راه ارزان‌تر چاپ کردن جزوه</label></li>
+                </ul>
+                <p class="jy-hint">فقط مقالهٔ روی سایت روی صفحه می‌آید؛ زمان‌دار از روز انتشارش.</p>
+              </div>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>در گوگل</legend>
+              <div class="jy-field">
+                <label class="jy-label" for="s15-seo-t">عنوان</label>
+                <div class="st st-s15-page"><input id="s15-seo-t" class="jy-input" value="پرینت فایل PDF آنلاین، قیمت همان لحظه" aria-describedby="s15-seo-t-hint"><p id="s15-seo-t-hint" class="jy-hint">در گوگل «… | جزوه‌یار» می‌شود · با عدد امروز <span class="num">37</span> از <span class="num">60</span> نویسه</p></div>
+                <div class="st st-s15-error"><input id="s15-seo-t-err" class="jy-input" value="پرینت فایل PDF آنلاین با صحافی طلق و سیم و ارسال پستی، سال {سال}" aria-invalid="true" aria-label="عنوان" aria-describedby="s15-seo-t-err-msg"><p id="s15-seo-t-err-msg" class="jy-error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span><span>با عدد امروز <span class="num">68</span> از <span class="num">60</span> نویسه.</span></p></div>
+              </div>
+              <div class="jy-field">
+                <label class="jy-label" for="s15-seo-d">توضیح</label>
+                <textarea id="s15-seo-d" class="jy-input" rows="3" aria-describedby="s15-seo-d-hint">PDF جزوه را بینداز و قیمت را همان لحظه ببین: چاپ سیاه‌سفید هر رو {نرخ_سیاه_سفید} تومان، صحافی و ارسال پستی به سراسر ایران، بی ثبت‌نام.</textarea>
+                <p id="s15-seo-d-hint" class="jy-hint">با عدد امروز <span class="num">129</span> از <span class="num">160</span> نویسه</p>
+              </div>
+              <div class="ad-serp" aria-label="نمونهٔ نتیجهٔ گوگل">
+                <p class="ad-serp__url"><bdi class="ltr">jozveyar.com › print-pdf</bdi></p>
+                <p class="ad-serp__t">پرینت فایل PDF آنلاین، قیمت همان لحظه | جزوه‌یار</p>
+                <p class="ad-serp__d">PDF جزوه را بینداز و قیمت را همان لحظه ببین: چاپ سیاه‌سفید هر رو <span class="num">1,600</span> تومان، صحافی و ارسال پستی به سراسر ایران، بی ثبت‌نام.</p>
+              </div>
+            </fieldset>
+          </div>
+          <div class="ad-actions">
+            <div class="st st-s15-page"><label for="m-s15-publish" class="jy-btn jy-btn--primary">انتشار…</label></div>
+            <div class="st st-s15-error"><button type="button" class="jy-btn jy-btn--primary" disabled>انتشار…</button></div>
+            <button type="button" class="jy-btn jy-btn--secondary">ذخیره و پیش‌نمایش</button>
+            <button type="button" class="jy-btn jy-btn--text">دور انداختن پیش‌نویس</button>
+          </div>
+          <p class="ad-hint ad-gap">پیش‌نویس تا انتشار یا «دور انداختن» می‌ماند و روی سایت نیست. رقم‌ها لاتین و «ي» و «ك» فارسی می‌شوند.</p>
+        </section>
+
+        <section class="jy-card ad-pv" aria-labelledby="t-s15-pv">
+          <div class="jy-card__head"><h2 id="t-s15-pv" class="jy-card__title">پیش‌نمایش</h2><span class="jy-card__meta">پیش‌نویس، امروز <span class="num">11:18</span></span></div>
+          <div class="st st-s15-page">
+            <div class="ad-pv__frame">
+              <p class="ad-pvc">جزوه‌یار ‹ پرینت PDF</p>
+              <p class="ad-pvh__title">پرینت PDF آنلاین، با صحافی و ارسال</p>
+              <p class="ad-pvh__lead">فایل PDF را بینداز؛ همین مرورگر صفحه‌ها را می‌شمارد و قیمت را همان لحظه می‌گوید، بی ثبت‌نام.</p>
+              <p class="ad-pvslot"><span class="jy-icon jy-icon-upload" aria-hidden="true"></span>کارت بارگذاری، سه نوید و میز سفارش صفحهٔ اصلی</p>
+              <article class="pg-body" aria-label="پیش‌نمایش متن صفحه">
+                <h3 class="ad-pv-h">PDF همان‌طور چاپ می‌شود که دیدی</h3>
+                <p>PDF را همین مرورگر می‌خواند: شمار صفحه‌ها، اندازهٔ کاغذ و صفحه‌های رنگی را می‌گوییم، و رنگی یا سیاه‌سفید چاپ شدنش را خودت انتخاب می‌کنی.</p>
+                <ul>
+                  <li>صفحهٔ افقی می‌چرخد و هر صفحه روی کاغذ <bdi>A4</bdi> جا می‌شود («Fit»)، بی بریده شدن لبه‌ها.</li>
+                  <li>چند PDF را با هم بینداز: پشت‌سرهم در یک جزوه با یک صحافی، یا هر کدام جزوهٔ جدا با صحافی خودش.</li>
+                  <li>اسکن هم PDF است؛ زمینهٔ زرد یا خاکستری اسکن رنگی حساب نمی‌شود، ولی تمیزش هم نمی‌کنیم: همان‌طور که هست چاپ می‌شود. <a class="jy-link" href="#scan-zard">بیشتر بخوان</a></li>
+                </ul>
+                <h3 class="ad-pv-h">چاپ یک PDF دویست صفحه‌ای چند می‌شود؟</h3>
+                <div class="ad-pvsample">
+                  <p class="ad-pvsample__t">جزوهٔ <span class="num">200</span> صفحه‌ای، سیاه‌سفید و دورو، طلق و سیم</p>
+                  <p class="ad-pvsample__r"><span>چاپ <span class="num">200</span> رو</span><span><span class="num ad-live-n">320,000</span> تومان</span></p>
+                  <p class="ad-pvsample__r"><span>صحافی، <span class="num">100</span> برگ</span><span><span class="num ad-live-n">45,000</span> تومان</span></p>
+                  <p class="ad-pvsample__r ad-pvsample__total"><span>جمع</span><span><span class="num ad-live-n">365,000</span> تومان</span></p>
+                  <p class="ad-pvsample__foot">با ارسال: تهران <span class="num ad-live-n">494,500</span> و شهرهای دیگر <span class="num ad-live-n">502,750</span> تومان</p>
+                </div>
+                <div class="ad-pvsample ad-pvsample--off">
+                  <p class="ad-pvsample__t">جزوهٔ <span class="num">100</span> صفحه‌ای، <bdi>A5</bdi> و دورو</p>
+                  <p class="ad-pvsample__foot">فعلاً ارائه نمی‌شود.</p>
+                </div>
+              </article>
+              <p class="ad-pvlabel">سؤال‌ها و مقاله‌های مرتبط</p>
+              <p class="ad-hint"><span class="num">3</span> سؤال این صفحه، و سه کارت مقاله؛ «اسکن زرد» تا انتشار خودش روی صفحه نمی‌آید.</p>
+            </div>
+            <p class="ad-hint ad-gap">عددهای خط‌چین از تعرفهٔ فعال‌اند و با تعرفهٔ تازه خودشان عوض می‌شوند. روی سایت در نقشهٔ سایت و پاورقی هم هست.</p>
+          </div>
+          <div class="st st-s15-error">
+            <p class="jy-note jy-note--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span>پیش‌نمایش پس از درست شدن سه خطا ساخته می‌شود. این صفحه هنوز روی سایت نیست.</span></p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- انتشار صفحهٔ تازه: همین حالا یا زمان‌دار، با کد تازه -->
+    <div class="st st-s15-publish st-ownpage">
+      <label for="m-s15-page" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>پرینت PDF</label>
+      <section class="jy-card" style="max-width: 44rem" aria-labelledby="t-s15-pub">
+        <h1 id="t-s15-pub" class="jy-card__title">انتشار پرینت PDF</h1>
+        <p class="ad-sub">صفحهٔ تازه در <bdi class="ltr">jozveyar.com/print-pdf</bdi>، از پیش‌نویس امروز <span class="num">11:18</span>.</p>
+        <h2 class="ad-h2 ad-gap">چه عوض می‌شود</h2>
+        <ul class="ad-mddiff">
+          <li class="ad-mddiff__new"><span class="ad-mddiff__k">پس از انتشار</span>صفحهٔ «پرینت PDF آنلاین، با صحافی و ارسال»، با <span class="num">2</span> بخش متن، یک بلوک قیمت، <span class="num">3</span> سؤال و <span class="num">2</span> مقالهٔ مرتبط؛ در نقشهٔ سایت و پاورقی («چاپ جزوه»).</li>
+        </ul>
+        <p class="jy-note jy-note--warning ad-gap"><span class="jy-icon jy-icon-warning" aria-hidden="true"></span><span>بلوک <span class="ad-ph">[[قیمت: 100 صفحه، A5، دورو]]</span> روی سایت «فعلاً ارائه نمی‌شود» نشان می‌دهد، چون <bdi>A5</bdi> امروز در تعرفه نیست.</span></p>
+        <fieldset class="ad-fs ad-gap">
+          <legend>کی روی سایت برود</legend>
+          <div class="jy-tiles">
+            <label class="jy-tile"><input class="jy-radio" type="radio" name="s15-when"><span class="jy-tile__title">همین حالا</span><span class="jy-tile__note">تا یک دقیقه بعد روی سایت</span></label>
+            <label class="jy-tile"><input class="jy-radio" type="radio" name="s15-when" checked><span class="jy-tile__title">در روز و ساعت</span><span class="jy-tile__note">به وقت تهران</span></label>
+          </div>
+          <div class="ad-pair">
+            <div class="jy-field"><label class="jy-label" for="s15-day">روز</label><input id="s15-day" class="jy-input jy-input--ltr num" value="1405/08/01" aria-describedby="s15-day-hint"><p id="s15-day-hint" class="jy-hint">پنجشنبه <span class="num">1</span> آبان</p></div>
+            <div class="jy-field"><label class="jy-label" for="s15-hour">ساعت</label><input id="s15-hour" class="jy-input jy-input--ltr num" value="09:00"></div>
+          </div>
+          <p class="ad-hint">تا آن ساعت صفحه نه روی سایت است و نه در نقشهٔ سایت. زمان‌دار را تا پیش از آن بی کد پس می‌گیری؛ پیش‌نویس می‌ماند.</p>
+        </fieldset>
+        <div class="ad-form ad-gap">
+          <div class="jy-field">
+            <label class="jy-label" for="s15-code">کد برنامهٔ تأیید</label>
+            <input id="s15-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-describedby="s15-code-hint">
+            <p id="s15-code-hint" class="jy-hint">صفحه‌ای که به نام جزوه‌یار با مشتری حرف می‌زند، کد تازه می‌خواهد.</p>
+          </div>
+        </div>
+        <div class="ad-actions">
+          <label for="m-s15" class="jy-btn jy-btn--primary">زمان‌دار کن</label>
+          <label for="m-s15-page" class="jy-btn jy-btn--text">برگرد به ویرایش</label>
+        </div>
+      </section>
+    </div>
+
+    <!-- از سایت برداشتن صفحه‌ای که روی سایت است: ۴۰۴ یا ۳۰۱ به صفحه‌ای که مالک انتخاب می‌کند -->
+    <div class="st st-s15-remove st-ownpage">
+      <label for="m-s15" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>صفحه‌ها و مقاله‌ها</label>
+      <section class="jy-card" style="max-width: 44rem" aria-labelledby="t-s15-rm">
+        <h1 id="t-s15-rm" class="jy-card__title">از سایت برداشتن «پرینت ارزان»</h1>
+        <p class="ad-sub"><bdi class="ltr">jozveyar.com/print-arzan</bdi> · روی سایت از <span class="num">27</span> مهر، نسخهٔ <span class="num">1</span></p>
+        <fieldset class="ad-fs ad-gap">
+          <legend>این نشانی پس از برداشتن</legend>
+          <div class="jy-tiles">
+            <label class="jy-tile"><input class="jy-radio" type="radio" name="s15-rm" disabled><span class="jy-tile__title">«پیدا نشد» (<span class="num">404</span>)</span><span class="jy-tile__note">بسته: <span class="num">2</span> مقاله به این صفحه پیوند دارند (پایین)</span></label>
+            <label class="jy-tile"><input class="jy-radio" type="radio" name="s15-rm" checked><span class="jy-tile__title">به صفحهٔ دیگری (<span class="num">301</span>)</span><span class="jy-tile__note">رتبهٔ این نشانی به مقصد می‌رود؛ برای صفحه‌ای که جانشین دارد</span></label>
+          </div>
+          <div class="jy-field ad-select"><label class="jy-label" for="s15-rm-to">به</label><select id="s15-rm-to" class="jy-input"><option>صفحهٔ اصلی</option><option selected>تعرفه (/tarefe)</option><option>صحافی (/sahafi)</option><option>ارسال (/ersal)</option></select></div>
+        </fieldset>
+        <p class="jy-note jy-note--info ad-gap"><span class="jy-icon jy-icon-info" aria-hidden="true"></span><span><span class="num">2</span> مقاله به این صفحه پیوند دارند: «ده راه ارزان‌تر چاپ کردن جزوه» و «پرینت یکرو یا دورو؟» (زمان‌دار). با رفتن به صفحهٔ دیگر پیوندشان به همان‌جا می‌رسد؛ «پیدا نشد» تا وقتی بسته است که پیوندشان را عوض نکرده‌ای، تا هیچ متنی روی سایت به صفحه‌ای که نیست پیوند ندهد. «پیدا نشد» از نقشهٔ سایت و پاورقی هم می‌برد و گوگل کم‌کم از نتیجه‌ها برش می‌دارد.</span></p>
+        <p class="ad-hint ad-gap">نسخه‌ها پاک نمی‌شوند؛ با انتشار دوباره همان نشانی برمی‌گردد و دیگر به جای دیگری نمی‌رود.</p>
+        <div class="ad-form ad-gap">
+          <div class="jy-field">
+            <label class="jy-label" for="s15-rm-code">کد برنامهٔ تأیید</label>
+            <input id="s15-rm-code" class="jy-input jy-input--code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+          </div>
+        </div>
+        <div class="ad-actions">
+          <button type="button" class="jy-btn jy-btn--danger">از سایت بردار</button>
+          <label for="m-s15" class="jy-btn jy-btn--text">انصراف</label>
+        </div>
+      </section>
+    </div>
+
+    <!-- ویرایش مقاله: دسته، خلاصه، تصویرها با کارگر (WebP)، قالب گسترده و دعوت پایین؛ زمان‌دار -->
+    <div class="st st-s15-article st-ownpage">
+      <label for="m-s15" class="ad-back"><span class="jy-icon jy-icon-arrow" aria-hidden="true"></span>صفحه‌ها و مقاله‌ها</label>
+      <div class="ad-pagehead">
+        <div>
+          <div class="ad-title-row"><h1 class="ad-title">پرینت یکرو یا دورو؟ با حساب قیمت امروز</h1><span class="jy-badge jy-badge--info"><span class="jy-icon jy-icon-info" aria-hidden="true"></span>زمان‌دار</span></div>
+          <p class="ad-sub"><bdi class="ltr">jozveyar.com/articles/yekro-ya-doro</bdi> · روی سایت پنجشنبه <span class="num">1</span> آبان، ساعت <span class="num">09:00</span></p>
+        </div>
+        <div class="ad-headbtns"><button type="button" class="jy-btn jy-btn--secondary">پس گرفتن زمان‌دار</button></div>
+      </div>
+      <div class="ad-ed">
+        <section class="jy-card" aria-labelledby="t-s15-art">
+          <h2 id="t-s15-art" class="jy-card__title">مقاله</h2>
+          <div class="ad-form">
+            <fieldset class="ad-fs">
+              <legend>نشانی، تیتر و دسته</legend>
+              <div class="jy-field"><label class="jy-label" for="s15a-slug">نشانی</label><div class="ad-prefix"><span class="ad-prefix__t">jozveyar.com/articles/</span><input id="s15a-slug" class="jy-input jy-input--ltr" value="yekro-ya-doro"></div></div>
+              <div class="jy-field"><label class="jy-label" for="s15a-title">تیتر</label><input id="s15a-title" class="jy-input" value="پرینت یکرو یا دورو؟ با حساب قیمت امروز"></div>
+              <div class="jy-field ad-select"><label class="jy-label" for="s15a-cat">دسته</label><select id="s15a-cat" class="jy-input"><option selected>قیمت و صرفه‌جویی</option><option>فایل و اسکن</option><option>صحافی و کاغذ</option><option>دانشجو، کنکور و کلاس</option><option>سفارش و ارسال</option></select></div>
+              <div class="jy-field"><label class="jy-label" for="s15a-sum">خلاصه</label><textarea id="s15a-sum" class="jy-input" rows="2" aria-describedby="s15a-sum-hint">دورو برگ‌ها را نصف می‌کند؛ با عدد امروز، فرقش در صحافی و کرایه چقدر است و کی یکرو بهتر است.</textarea><p id="s15a-sum-hint" class="jy-hint">زیر تیتر در فهرست مقاله‌ها و کارت‌ها · <span class="num">96</span> از <span class="num">160</span> نویسه</p></div>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>متن</legend>
+              <div class="jy-field">
+                <label class="jy-label sr-only" for="s15a-body">متن مقاله</label>
+                <textarea id="s15a-body" class="jy-input ad-md" rows="18" aria-describedby="s15a-body-hint">**کوتاهش:** دورو تقریباً همیشه کم‌خرج‌تر است. هر روی سیاه‌سفید در یکرو {نرخ_سیاه_سفید_یکرو} و در دورو {نرخ_سیاه_سفید} تومان است، ولی دورو برگ‌ها را نصف می‌کند، پس صحافی و وزن پست کمتر می‌شود.
+
+## فرق قیمت، با عدد امروز
+قیمت چاپ به شمار «رو» است، نه برگ…
+
+[[قیمت: 200 صفحه، سیاه‌سفید، یکرو، طلق و سیم]]
+[[قیمت: 200 صفحه، سیاه‌سفید، دورو، طلق و سیم]]
+
+## جزوهٔ قطور: یک جلد یا دو جلد
+| | یکرو | دورو |
+|---|---|---|
+| برگ و جلد | 1,100 برگ، 2 جلد | 550 برگ، 1 جلد |
+
+![یک جزوهٔ 200 برگی یکرو کنار همان جزوه در دورو](تصویر:1 "همان جزوه، یکرو و دورو")
+
+## کی یکرو بهتر است
+1. وقتی پشت هر برگ را برای یادداشت می‌خواهی.
+2. وقتی کاغذ نازک است و جوهر از پشت پیدا می‌شود.
+
+> نکته: یکرو یا دورو را پس از انداختن فایل هم عوض می‌کنی.</textarea>
+                <div id="s15a-body-hint" class="ad-mdhelp"><span>همهٔ متن صفحه‌ها، به‌علاوهٔ</span><span><code>### زیرتیتر</code></span><span><code>1. فهرست شماره‌دار</code></span><span><code>| جدول |</code></span><span><code>![متن جایگزین](تصویر:1 "زیرنویس")</code></span><span><code>&gt; نکته: …</code></span><span>«فهرست مطالب» با سه <code>##</code> یا بیشتر خودش می‌آید</span></div>
+              </div>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>تصویرها</legend>
+              <ul class="ad-imgs">
+                <li>
+                  <span class="ad-imgs__thumb" aria-hidden="true">تصویر <span class="num">1</span></span>
+                  <div class="ad-imgs__body">
+                    <p class="ad-imgs__name"><span class="jy-badge jy-badge--success"><span class="jy-icon jy-icon-success" aria-hidden="true"></span>ساخته شد</span> <span class="num">1600</span>×<span class="num">900</span> · <bdi>WebP</bdi> در <span class="num">480</span>، <span class="num">800</span> و <span class="num">1200</span> پیکسل، و تصویر اشتراک <span class="num">1200</span>×<span class="num">630</span></p>
+                    <div class="jy-field"><label class="jy-label" for="s15a-alt1">متن جایگزین</label><input id="s15a-alt1" class="jy-input" value="یک جزوهٔ 200 برگی یکرو کنار همان جزوه در دورو"></div>
+                    <label class="ad-toggle"><input class="ad-check" type="checkbox" checked>تصویر اشتراک این مقاله</label>
+                  </div>
+                </li>
+                <li>
+                  <span class="ad-imgs__thumb ad-imgs__thumb--bad" aria-hidden="true">تصویر <span class="num">2</span></span>
+                  <div class="ad-imgs__body">
+                    <p class="ad-imgs__name"><span class="jy-badge jy-badge--error"><span class="jy-icon jy-icon-error" aria-hidden="true"></span>ساخته نشد</span> پهنای تصویر <span class="num">640</span> پیکسل است؛ دست‌کم <span class="num">1200</span> لازم است تا روی هر صفحه‌ای تیز بماند.</p>
+                    <div class="ad-faq__ctl"><button type="button" class="jy-btn jy-btn--text">دور بینداز</button></div>
+                  </div>
+                </li>
+              </ul>
+              <label class="jy-add ad-imgs__add"><input class="sr-only" type="file" accept="image/jpeg,image/png,image/webp"><span class="jy-icon jy-icon-plus" aria-hidden="true"></span><span><b>تصویر تازه</b><small><bdi>JPEG</bdi>، <bdi>PNG</bdi> یا <bdi>WebP</bdi>، تا <span class="num">2</span> مگابایت؛ عکس واقعی کار، نه عکس بانک تصویر</small></span></label>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>پایین مقاله</legend>
+              <div class="jy-field ad-select"><label class="jy-label" for="s15a-cta">دعوت به انداختن فایل، به</label><select id="s15a-cta" class="jy-input"><option>صفحهٔ اصلی</option><option selected>پرینت ارزان (/print-arzan)</option><option>تعرفه (/tarefe)</option></select></div>
+              <div class="jy-field ad-select"><label class="jy-label" for="s15a-rel">مقاله‌های مرتبط</label><select id="s15a-rel" class="jy-input"><option selected>خودکار: هم‌دسته، تازه‌ترین اول</option><option>خودم انتخاب می‌کنم</option></select></div>
+            </fieldset>
+
+            <fieldset class="ad-fs">
+              <legend>در گوگل</legend>
+              <div class="jy-field"><label class="jy-label" for="s15a-seo-t">عنوان</label><input id="s15a-seo-t" class="jy-input" value="پرینت یک رو یا دو رو؟ مقایسهٔ قیمت {سال}"><p class="jy-hint">در گوگل «… | جزوه‌یار» · با عدد امروز <span class="num">39</span> از <span class="num">60</span> نویسه</p></div>
+              <div class="jy-field"><label class="jy-label" for="s15a-seo-d">توضیح</label><textarea id="s15a-seo-d" class="jy-input" rows="2">خالی: همان خلاصه</textarea></div>
+            </fieldset>
+          </div>
+          <div class="ad-actions">
+            <button type="button" class="jy-btn jy-btn--primary">انتشار…</button>
+            <button type="button" class="jy-btn jy-btn--secondary">ذخیره و پیش‌نمایش</button>
+          </div>
+          <p class="ad-hint ad-gap">«نوشتهٔ تیم جزوه‌یار» با پیوند «دربارهٔ ما». تاریخ انتشار همان روز روی سایت رفتن است، و «به‌روز شده» فقط وقتی متن عوض شود، نه با عدد زنده. زمان خواندن از خود متن.</p>
+        </section>
+
+        <section class="jy-card ad-pv" aria-labelledby="t-s15a-pv">
+          <div class="jy-card__head"><h2 id="t-s15a-pv" class="jy-card__title">پیش‌نمایش</h2><span class="jy-card__meta">زمان‌دار، از ذخیرهٔ امروز <span class="num">09:42</span></span></div>
+          <div class="ad-pv__frame">
+            <article class="pg-body" aria-label="پیش‌نمایش مقاله">
+              <p class="ad-pvc">جزوه‌یار ‹ مقاله‌ها ‹ قیمت و صرفه‌جویی</p>
+              <p class="pg-title">پرینت یکرو یا دورو؟ با حساب قیمت امروز</p>
+              <p class="pg-meta">نوشتهٔ تیم جزوه‌یار · <span class="num">1</span> آبان <span class="num">1405</span> · <span class="num">5</span> دقیقه</p>
+              <p class="ad-pvanswer"><b>کوتاهش:</b> دورو تقریباً همیشه کم‌خرج‌تر است. هر روی سیاه‌سفید در یکرو <span class="num ad-live-n">1,600</span> و در دورو <span class="num ad-live-n">1,600</span> تومان است، ولی دورو برگ‌ها را نصف می‌کند، پس صحافی و وزن پست کمتر می‌شود.</p>
+              <p class="ad-pvlabel">در این مقاله</p>
+              <p class="ad-hint"><span class="num">1</span>. فرق قیمت، با عدد امروز · <span class="num">2</span>. جزوهٔ قطور · <span class="num">3</span>. کی یکرو بهتر است</p>
+              <h3 class="ad-pv-h">فرق قیمت، با عدد امروز</h3>
+              <p>قیمت چاپ به شمار «رو» است، نه برگ…</p>
+              <div class="ad-pvsamples">
+                <div class="ad-pvsample"><p class="ad-pvsample__t"><span class="num">200</span> صفحه، یکرو</p><p class="ad-pvsample__r ad-pvsample__total"><span>جمع</span><span><span class="num ad-live-n">370,000</span> تومان</span></p></div>
+                <div class="ad-pvsample"><p class="ad-pvsample__t"><span class="num">200</span> صفحه، دورو</p><p class="ad-pvsample__r ad-pvsample__total"><span>جمع</span><span><span class="num ad-live-n">365,000</span> تومان</span></p></div>
+              </div>
+              <p class="ad-pvslot">تصویر <span class="num">1</span>، با زیرنویس «همان جزوه، یکرو و دورو»</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+
     <!-- ===================== پشتیبانی (برش ۱۲، پیش از ۱۲٫۱): صندوق، ساعت 10:40 ===================== -->
     <div class="st st-s12 st-staffpage">
       <div class="ad-pagehead"><div><h1 class="ad-title">پشتیبانی</h1><p class="ad-sub">پیام مشتری‌ها از «سفارش‌های من». باز به ترتیب انتظار، قدیمی‌ترین اول.</p></div></div>
@@ -3719,6 +4199,15 @@ textarea.ad-reply__text { min-height: 9rem; line-height: 1.9; }
               <li><span class="ad-texts__name">تماس و پاورقی</span><span class="ad-texts__meta">راه‌های تماس و نشانی، و دو جملهٔ پاورقی · منتشرشده <span class="num">11</span> مهر، سارا</span><label for="m-s11-contact" class="jy-btn jy-btn--secondary">ویرایش</label></li>
             </ul>
             <p class="ad-hint ad-gap">عنوان و توضیح گوگل هر صفحه در همان ویرایش است. تعرفه، کارت بارگذاری، میز سفارش و مسیر خرید از تعرفه و کد سایت می‌آیند و اینجا نیستند.</p>
+          </section>
+          <!-- برش ۱۵: صفحه‌های فرود و مقاله‌ها، صفحهٔ خودشان -->
+          <section class="jy-card" aria-labelledby="t-s11-pages">
+            <div class="jy-card__head">
+              <h2 id="t-s11-pages" class="jy-card__title">صفحه‌ها و مقاله‌ها</h2>
+              <span class="jy-card__meta">فقط مالک</span>
+            </div>
+            <p class="ad-meta"><span class="num">4</span> صفحهٔ فرود و <span class="num">7</span> مقاله روی سایت؛ <span class="num">2</span> زمان‌دار و <span class="num">11</span> پیش‌نویس. یک هشدار: «صحافی».</p>
+            <div class="ad-actions"><label for="m-s15" class="jy-btn jy-btn--secondary">صفحه‌ها و مقاله‌ها</label></div>
           </section>
         </div>
       </div>

@@ -2557,6 +2557,11 @@
   .ad-phs .ad-table {
     font-size: var(--text-small);
   }
+  /* نحو بلوک بلند است و در گوشی باید بشکند (طرح «صفحه‌ها و مقاله‌ها»، ۱۵٫۲)؛ جای‌نگهدار کوتاه ۱۱٫۱ نه */
+  .ad-blocks .ad-ph {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .ad-pv__frame {
     padding: 24px;
     background: var(--color-paper);
@@ -3154,5 +3159,65 @@
     .ad-grid--main-first {
       grid-template-areas: 'main' 'side';
     }
+  }
+
+  /*
+   * صفحه‌های فرود و «تعرفه» (برش ۱۵٫۲، طرح «صفحه‌ها و مقاله‌ها (برش ۱۵)»): دکمه‌های سرِ صفحه، کار دوم یک ردیف («از سایت بردار…») زیر خود ردیف با
+   * هدف لمسی ۴۴، تیک «در پاورقی»، و پیش‌نمایش با مسیر دیدنی و جای کارت بارگذاری. روز و ساعت زمان‌دار فقط با «در روز و ساعت» و مقصد ۳۰۱ فقط با
+   * «به صفحهٔ دیگری»، بی JS.
+   */
+  .ad-headbtns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ad-texts > li > .ad-rowact {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: start;
+  }
+  .ad-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  .ad-toggle:has(.ad-check:disabled) {
+    color: var(--color-muted);
+    cursor: not-allowed;
+  }
+  .ad-pvc {
+    margin-block-end: 8px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-pvslot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-block: 16px;
+    padding: 12px 16px;
+    border: 1px dashed var(--color-green-300);
+    border-radius: var(--radius-md);
+    background: var(--color-green-50);
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .ad-pvslot .jy-icon {
+    width: 18px;
+    height: 18px;
+  }
+  .ad-when-form .ad-if-at {
+    display: none;
+  }
+  .ad-when-form:has(.ad-when-at:checked) .ad-if-at {
+    display: grid;
+  }
+  .ad-remove-form .jy-field.ad-if-moved {
+    display: none;
+  }
+  .ad-remove-form:has(.ad-rm-moved:checked) .jy-field.ad-if-moved {
+    display: flex;
   }
 }

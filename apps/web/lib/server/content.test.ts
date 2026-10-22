@@ -14,7 +14,7 @@ import { parseJalaliNumeric } from '@jozveyar/text';
 
 import { SEED_TARIFF } from '../tariff';
 import { AUTH_TTL_MS } from './auth';
-import { contentFacts, liveText, loadPublished, pageSettings } from './content';
+import { contentFacts, homeSettings, liveText, loadPublished, pageSettings } from './content';
 import { SESSION_MAX_AGE } from './context';
 import { BUILD_PHASE } from './tariff';
 
@@ -101,6 +101,31 @@ describe('متن روی سایت (سؤال ۲۸۸)', () => {
     expect(pageSettings(defaultContent('terms')).sort()).toEqual(['file.retention_days', 'order.files_retention_days', 'order.sla_days']);
     expect(pageSettings(defaultContent('privacy')).sort()).toEqual(['file.retention_days', 'order.files_retention_days']);
     expect(pageSettings({ ...defaultContent('about'), lead: 'از {نرخ_رنگی} و {فرمت‌ها}', body: 'متن' })).toEqual(['file.formats']);
+  });
+
+  it('تنظیم‌های صفحهٔ اصلی و سؤال‌هایش (۱۵٫۱): هر فیلد با قالب خودش، هر تنظیم یک بار، و نرخ‌ها هیچ', () => {
+    const home = defaultContent('home');
+    const faq = defaultContent('faq');
+    expect(homeSettings(home, faq).sort()).toEqual(['file.formats', 'file.retention_days', 'order.sla_days']);
+    // هر فیلد را جدا می‌خواند، با قالب خودش: جای‌نگهدار فقط در همان یک فیلد، و تنظیم همان یکی.
+    const bare = {
+      ...home,
+      promises: home.promises.map(() => ({ title: 'نوید', sub: 'خط دوم' })),
+      steps: home.steps.map(() => ({ title: 'قدم', body: 'متن' })),
+    };
+    const only = (patch: Partial<typeof bare>) => homeSettings({ ...bare, ...patch }, { items: [] });
+    expect(only({})).toEqual([]);
+    expect(only({ eyebrow: 'تا {روز_کاری} روز' })).toEqual(['order.sla_days']);
+    expect(only({ title: 'جزوه **{روزهای_فایل} روز**' })).toEqual(['file.retention_days']);
+    expect(only({ lead: '{روزهای_فایل_سفارش} روز' })).toEqual(['order.files_retention_days']);
+    expect(only({ howTitle: '{فرمت‌ها}' })).toEqual(['file.formats']);
+    const [p1, p2, p3] = bare.promises;
+    expect(only({ promises: [{ ...p1!, title: 'تا {روز_کاری} روز' }, p2!, p3!] })).toEqual(['order.sla_days']);
+    expect(only({ promises: [p1!, p2!, { ...p3!, sub: '{روزهای_فایل} روز' }] })).toEqual(['file.retention_days']);
+    const [s1, s2, s3] = bare.steps;
+    expect(only({ steps: [{ ...s1!, title: '{فرمت‌ها}' }, s2!, s3!] })).toEqual(['file.formats']);
+    expect(only({ steps: [s1!, s2!, { ...s3!, body: 'تا {روزهای_فایل_سفارش} روز' }] })).toEqual(['order.files_retention_days']);
+    expect(homeSettings(bare, { items: [{ q: 'پرسش', a: 'سیاه‌سفید {نرخ_سیاه_سفید} تومان، تا {روز_کاری} روز' }] })).toEqual(['order.sla_days']);
   });
 
   it('روزهای دو کوکی متن پیش‌فرض حریم خصوصی همان ثابت‌های کوکی‌ها', () => {

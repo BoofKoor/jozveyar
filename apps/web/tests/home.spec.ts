@@ -188,7 +188,7 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
     const order: string[] = [];
     // پیوندهای پاورقی (۷٫۴) پیش از نشان اینماد.
     const footer = footerGroups(hasContact(defaultContent('contact'))).flatMap(({ pages }) => pages.map(({ label }) => label));
-    for (let i = 0; i < 8 + questions.length + footer.length; i++) {
+    for (let i = 0; i < 9 + questions.length + footer.length; i++) {
       await page.keyboard.press('Tab');
       order.push(
         await page.evaluate(() => {
@@ -206,6 +206,8 @@ test.describe('دسترس‌پذیری پیش از فایل', () => {
       'سفارش‌های من',
       'jozve-file',
       'بر اساس تعداد برگ',
+      // از ۱۵٫۲ زیر تعرفه پیوند صفحهٔ «تعرفه» (سؤال ۴۵۷).
+      'همهٔ قیمت‌ها و ماشین‌حساب بی فایل',
       ...questions.map((q) => q.trim()),
       ...footer,
       'نماد اعتماد الکترونیکی',
@@ -255,7 +257,14 @@ test.describe('تیتر', () => {
       await page.setViewportSize({ width, height: 800 });
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
-      const title = page.getByRole('heading', { level: 1 });
+      // h1 خط بالای تیتر را هم دارد (۱۵٫۱، سؤال ۴۲۹)، با «؛» فقط برای صفحه‌خوان؛ تیتر دیدنی همان تکهٔ دوم است. متن خام (همان که گوگل
+      // می‌خواند) یک جمله است؛ نام دسترس‌پذیر همان، با فاصله‌ای که مرورگر کنار «؛» بیرون از جریان (پس بلوکی) می‌گذارد.
+      const heading = page.getByRole('heading', { level: 1 });
+      await expect(heading).toHaveText('چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران؛ جزوه‌ات را بینداز، قیمت را همین حالا ببین');
+      await expect(heading).toHaveAccessibleName(/^چاپ و صحافی آنلاین جزوه، با ارسال به سراسر ایران ?؛ جزوه‌ات را بینداز، قیمت را همین حالا ببین$/);
+      await expect(heading.locator('.home-h1__sep')).toHaveText('؛ ');
+      expect((await heading.locator('.home-h1__sep').boundingBox())!.width).toBeLessThanOrEqual(1);
+      const title = heading.locator('.home-title');
       await expect(title).toHaveText('جزوه‌ات را بینداز، قیمت را همین حالا ببین');
       await expect(title.locator('mark')).toHaveText('همین حالا');
       const clauses = await title.locator('.home-clause').evaluateAll((elements) =>
@@ -322,10 +331,15 @@ test.describe('زمینه و حالت سفارش', () => {
 
     await dropFile(page);
     for (const selector of hero) await expect(page.locator(selector), selector).toBeHidden();
+    // صفحه‌خوان فقط خود تیتر را می‌شنود: خط بالای تیتر و «؛» با قهرمان رفته‌اند (۱۵٫۱).
     const title = page.getByRole('heading', { level: 1 });
-    await expect(title).toHaveText('جزوه‌ات را بینداز، قیمت را همین حالا ببین');
-    const box = (await title.boundingBox())!;
-    expect(box.width * box.height).toBeLessThanOrEqual(1);
+    await expect(title).toHaveAccessibleName('جزوه‌ات را بینداز، قیمت را همین حالا ببین');
+    // جایی نمی‌گیرد: h1 بی تکهٔ دیدنی است و خود تیتر یک پیکسل بیرون از جریان.
+    const area = await title.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return box.width * box.height;
+    });
+    expect(area).toBeLessThanOrEqual(1);
     await expect(page.locator('#faq')).toBeVisible();
 
     await page.getByRole('button', { name: 'فایل دیگری بینداز' }).click();

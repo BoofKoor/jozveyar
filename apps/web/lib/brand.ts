@@ -39,6 +39,12 @@ export function siteShareImage(brand: SiteBrand | null) {
   return { url: brand.og.src, width: brand.og.width, height: brand.og.height, type: brand.og.type, alt: 'لوگوی جزوه‌یار' };
 }
 
+/** لوگوی سازمان در دادهٔ ساختاریافته (۱۵٫۱): همان آیکون مربع ۵۱۲ manifest، برند یا مالک؛ گوگل لوگوی مربع دست‌کم ۱۱۲ پیکسلی می‌خواهد. */
+export function organizationLogo(brand: SiteBrand | null): { url: string; width: number; height: number } {
+  if (!brand) return { url: '/icons/icon-512.png', width: 512, height: 512 };
+  return { url: brand.icon512.src, width: brand.icon512.width, height: brand.icon512.height };
+}
+
 /** آیکون‌های manifest: ۱۹۲ و ۵۱۲، و همان ۵۱۲ «maskable»، چون تصویر هر دو در دایرهٔ امن است. */
 export function manifestIcons(brand: SiteBrand | null): NonNullable<MetadataRoute.Manifest['icons']> {
   const [small, large] = brand ? [brand.icon192.src, brand.icon512.src] : ['/icons/icon-192.png', '/icons/icon-512.png'];

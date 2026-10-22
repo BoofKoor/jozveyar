@@ -13,8 +13,12 @@
 @import '@jozveyar/ui/pages.css';
 /* نوار اعلان بالای سربرگ و پیام تعطیلی جای آن (۱۱٫۳)؛ در کیت، چون پیش‌نمایش پنل هم همان را دارد. */
 @import '@jozveyar/ui/bar.css';
+/* بلوک‌های زنده و جدول‌های تعرفهٔ صفحه‌های فرود و «تعرفه» (۱۵٫۲)؛ در کیت، چون پیش‌نمایش پنل هم همان را دارد. */
+@import '@jozveyar/ui/blocks.css';
 /* «سفارش‌های من» و پیام به پشتیبانی، از طرح docs/ui/mockups/account.html (۱۲٫۱). */
 @import './account.css';
+/* صفحه‌های فرود، «تعرفه» با ماشین‌حساب و مسیر دیدنی، از طرح docs/ui/mockups/seo.html (۱۵٫۲). */
+@import './landing.css';
 
 /*
  * وزیرمتن، فقط دو وزن، لوکال.
@@ -122,7 +126,20 @@
    * «سفارش‌های من» (۱۲٫۱) در صفحه‌های همان بخش جاری است، با همان زمینهٔ hover (طرح `account.html`). مثل `[data-jozve]` پایین، `:has()`
    * بیرون `:is()` و `:where()` (۳د: کروم آن را درونشان ارزان باطل نمی‌کند).
    */
-  body:has([data-account]) .site-nav__orders {
+  /*
+   * از ۱۵٫۲ «تعرفه» هم (سؤال ۴۵۱)، و پیوند جاری `aria-current` دارد: هر کدام دو پیوند است (SiteHeader.tsx) و با نشانهٔ همان صفحه فقط پیوند
+   * `site-nav__cur` دیده می‌شود.
+   */
+  .site-nav .site-nav__cur {
+    display: none;
+  }
+  body:has([data-account]) .site-nav__orders:not(.site-nav__cur),
+  body:has([data-tarefe]) .site-nav__tariff:not(.site-nav__cur) {
+    display: none;
+  }
+  body:has([data-account]) .site-nav .site-nav__orders.site-nav__cur,
+  body:has([data-tarefe]) .site-nav .site-nav__tariff.site-nav__cur {
+    display: inline-flex;
     background: var(--color-green-100);
     font-weight: 600;
   }
@@ -196,13 +213,30 @@
     object-fit: contain;
   }
   /*
-   * پیوند صفحه‌های ثابت (برش ۷٫۴، طرح قدم ۵): دو گروه، بین معرفی و نشان؛ هر پیوند هدف لمسی ۴۴. در حالت سفارش پیوندهای
-   * زبانهٔ تازه جای همان پیوندها می‌نشینند (`site-idle` و `site-ordering` بالا؛ SiteFooter.tsx).
+   * پیوند صفحه‌های ثابت (برش ۷٫۴، طرح قدم ۵): گروه‌ها بین معرفی و نشان؛ هر پیوند هدف لمسی ۴۴. در حالت سفارش پیوندهای
+   * زبانهٔ تازه جای همان پیوندها می‌نشینند (`site-idle` و `site-ordering` بالا؛ SiteFooter.tsx). از ۱۵٫۲ (طرح `seo.html`، سؤال ۴۵۲)
+   * سه گروه: «جزوه‌یار»، «چاپ جزوه» («تعرفه» و صفحه‌های فرود «در پاورقی»، در دو ستون) و «قوانین»؛ تا ۸۶۰ پیکسل «چاپ جزوه» زیر دو گروه دیگر.
    */
   .site-foot__nav {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, max-content));
-    gap: 4px 48px;
+    grid-template-columns: repeat(3, minmax(0, max-content));
+    gap: 4px 40px;
+  }
+  .site-foot__many ul {
+    columns: 2;
+    column-gap: 32px;
+  }
+  .site-foot__many li {
+    break-inside: avoid;
+  }
+  @media (width <= 860px) {
+    .site-foot__nav {
+      grid-template-columns: repeat(2, minmax(0, max-content));
+    }
+    .site-foot__many {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
   }
   .site-foot__nav h2 {
     font-size: var(--text-small);

@@ -5,21 +5,26 @@ import { HeroTitle, InlineText } from '@jozveyar/content/render';
 
 import { Faq } from '../components/Faq';
 import { HomeBanner } from '../components/HomeBanner';
+import { HomePromises } from '../components/HomePromises';
 import { HowItWorks } from '../components/HowItWorks';
 import { OrderFlow } from '../components/OrderFlow';
 import { Reviews } from '../components/Reviews';
 import { Tariff } from '../components/Tariff';
 import { UploadCard } from '../components/UploadCard';
-import { DRAFT_KEY, RESTORING_ATTR } from '../lib/draftKey';
+import { organizationLogo } from '../lib/brand';
 import { acceptOf } from '../lib/fileRules';
-import { siteBanner } from '../lib/server/brand';
+import { RESTORE_SCRIPT } from '../lib/restoreScript';
+import { siteBanner, siteBrand } from '../lib/server/brand';
 import { contentFacts, liveText, sitePublished } from '../lib/server/content';
 import { siteFiles } from '../lib/server/fileRules';
 import { siteReviews } from '../lib/server/reviews';
 import { siteFacts } from '../lib/server/siteFacts';
 import { siteTariff } from '../lib/server/tariff';
 import { SITE_OPEN_GRAPH } from '../lib/staticPages';
+import { homeGraph, jsonLd } from '../lib/structuredData';
 import { TARIFF_ELEMENT_ID, tariffJson } from '../lib/tariff';
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jozveyar.com';
 
 /**
  * ISR (برش ۴٫۴، ADR-040): صفحه ایستا می‌ماند و دست‌بالا هر ۶۰ ثانیه یک بار با تعرفهٔ فعال پایگاه داده و روز کاری تحویل
@@ -28,15 +33,9 @@ import { TARIFF_ELEMENT_ID, tariffJson } from '../lib/tariff';
 export const revalidate = 60;
 
 /**
- * پیش از رسم (۳د، ADR-036): اگر این زبانه پیش‌نویس سفارش دارد، صفحه از همان اولین رسم حالت سفارش است و کارت
- * بارگذاری «در حال برگرداندن جزوه…»، نه لحظه‌ای صفحهٔ اول. چند بایت درون HTML، نه در باندل؛ حافظهٔ بستهٔ سایت یعنی
- * صفحهٔ معمول.
- */
-const RESTORE_SCRIPT = `try{sessionStorage.getItem(${JSON.stringify(DRAFT_KEY)})&&document.documentElement.setAttribute(${JSON.stringify(RESTORING_ATTR)},'')}catch(e){}`;
-
-/**
  * عنوان و توضیح گوگل صفحهٔ اصلی از «صفحهٔ اصلی» پنل (۱۱٫۱، سؤال ۲۸۳)، بی «| جزوه‌یار» الگوی layout؛ openGraph همان دو، با تصویر اشتراک
- * بالادست (`parent`)، مثل صفحه‌های ثابت.
+ * بالادست (`parent`)، مثل صفحه‌های ثابت. canonical خودش (۱۵٫۱، سؤال ۴۲۸): layout دیگر canonical پیش‌فرض ندارد، تا صفحه‌ای که canonical
+ * نگذارد خودش را تکراری صفحهٔ اصلی اعلام نکند.
  */
 export async function generateMetadata(_props: unknown, parent: ResolvingMetadata): Promise<Metadata> {
   const [images, { seo }] = await Promise.all([
@@ -46,12 +45,10 @@ export async function generateMetadata(_props: unknown, parent: ResolvingMetadat
   return {
     title: { absolute: seo.title },
     description: seo.description,
+    alternates: { canonical: '/' },
     openGraph: { ...SITE_OPEN_GRAPH, title: seo.title, description: seo.description, url: '/', images },
   };
 }
-
-/** نماد هر نوید، به ترتیب طرح؛ آیکون جزو طرح است و از پنل عوض نمی‌شود (سؤال ۲۸۳). */
-const PROMISE_ICONS = ['tag', 'truck', 'lock'] as const;
 
 /**
  * صفحهٔ اصلی — هم لندینگ سئو است و هم ابزار سفارش. طرح ز (docs/UI.md، ۴الف و ۴ب؛ چیدمان در
@@ -75,58 +72,35 @@ const PROMISE_ICONS = ['tag', 'truck', 'lock'] as const;
  * جای‌نگهدار؛ کارت بارگذاری، تعرفه و میز سفارش همان کد سایت‌اند.
  */
 export default async function HomePage() {
-  const [tariff, files, reviews, published, facts, banner] = await Promise.all([
+  const [tariff, files, reviews, published, facts, banner, brand] = await Promise.all([
     siteTariff(),
     siteFiles(),
     siteReviews(),
     sitePublished(),
     siteFacts(),
     siteBanner(),
+    siteBrand(),
   ]);
   const factsNow = contentFacts(tariff, files, facts);
   const values = placeholderValues(factsNow);
   const home = liveText('home', published, factsNow).content;
   const faq = liveText('faq', published, factsNow).content.items;
   const options = { values };
-  const jsonLd = {
-    '@context': 'https://schema.org',
-    '@graph': [
-      {
-        '@type': 'Organization',
-        '@id': 'https://jozveyar.com/#org',
-        name: 'جزوه‌یار',
-        url: 'https://jozveyar.com',
-        areaServed: { '@type': 'Country', name: 'ایران' },
-      },
-      {
-        '@type': 'Service',
-        name: 'چاپ و صحافی جزوه',
-        serviceType: 'چاپ جزوه',
-        provider: { '@id': 'https://jozveyar.com/#org' },
-        areaServed: { '@type': 'Country', name: 'ایران' },
-      },
-      {
-        '@type': 'FAQPage',
-        // همان پرسش و پاسخ، بی قالب و با عدد امروز (سؤال ۲۸۹).
-        mainEntity: faq.map((item) => ({
-          '@type': 'Question',
-          name: item.q,
-          acceptedAnswer: { '@type': 'Answer', text: inlineText(parseInline(item.a, 'paragraph').nodes, values) },
-        })),
-      },
-    ],
-  };
+  // سازمان، نام سایت، خدمت و سؤال‌ها (۱۵٫۱، سؤال ۴۲۷)؛ پرسش و پاسخ همان سؤال‌های صفحه، بی قالب و با عدد امروز (سؤال ۲۸۹).
+  const graph = homeGraph({
+    siteUrl: SITE_URL,
+    logo: organizationLogo(brand),
+    contact: liveText('contact', published).content,
+    faq: faq.map((item) => ({ q: item.q, a: inlineText(parseInline(item.a, 'paragraph').nodes, values) })),
+  });
 
   return (
     <>
       {/* eslint-disable-next-line react/no-danger */}
       <script dangerouslySetInnerHTML={{ __html: RESTORE_SCRIPT }} />
-      <script
-        type="application/ld+json"
-        // پرسش و پاسخ از پنل‌اند (۱۱٫۱): «<» درون JSON هم \u003c، تا هیچ متنی تگ اسکریپت را نبندد.
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
-      />
+      {/* پرسش و پاسخ و شبکه‌ها از پنل‌اند (۱۱٫۱): `jsonLd` «<» را هم \u003c می‌کند، تا هیچ متنی تگ اسکریپت را نبندد. */}
+      {/* eslint-disable-next-line react/no-danger */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(graph) }} />
 
       {/* نام سایت را لوگوی سربرگ می‌گوید. سربرگ و پاورقی در layout است. */}
       <main className="home">
@@ -135,12 +109,18 @@ export default async function HomePage() {
           accept={acceptOf(files.rules.formats)}
           hero={
             <div className="home-hero__text">
-              <p className="home-eyebrow">
-                <InlineText text={home.eyebrow} format="line" options={options} />
-              </p>
-              {/* تیتر فقط سر ویرگول می‌شکند؛ متن در HTML خام همان جمله است (سئو). */}
-              <h1 id="hero-title" className="home-title">
-                <HeroTitle text={home.title} options={options} clause="home-clause" />
+              {/*
+               * «خط بالای تیتر» درون همان h1 است (۱۵٫۱، سؤال ۴۲۹)، با همان ظاهر: تیتر صفحه «چاپ و صحافی آنلاین جزوه» را هم دارد، و «؛» میان دو
+               * تکه فقط برای صفحه‌خوان و متن خام است. تیتر فقط سر ویرگول می‌شکند؛ متن در HTML خام همان جمله است (سئو).
+               */}
+              <h1 id="hero-title" className="home-h1">
+                <span className="home-eyebrow">
+                  <InlineText text={home.eyebrow} format="line" options={options} />
+                </span>
+                <span className="home-h1__sep">؛ </span>
+                <span className="home-title">
+                  <HeroTitle text={home.title} options={options} clause="home-clause" />
+                </span>
               </h1>
               <p className="home-lead">
                 <InlineText text={home.lead} format="line" options={options} />
@@ -148,25 +128,7 @@ export default async function HomePage() {
             </div>
           }
           upload={<UploadCard formats={files.rules.formats} />}
-          trust={
-            <ul className="home-trust">
-              {home.promises.map((promise, i) => (
-                <li key={i}>
-                  <span className="home-trust__ic">
-                    <span className={`jy-icon jy-icon-${PROMISE_ICONS[i]}`} aria-hidden="true" />
-                  </span>
-                  <span className="home-trust__t">
-                    <b>
-                      <InlineText text={promise.title} format="line" options={options} />
-                    </b>
-                    <span>
-                      <InlineText text={promise.sub} format="line" options={options} />
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          }
+          trust={<HomePromises promises={home.promises} values={values} />}
           more={
             <>
               {banner ? <HomeBanner banner={banner} /> : null}

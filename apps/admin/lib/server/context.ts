@@ -12,6 +12,7 @@ import {
   BAR_SETTING,
   LOGO_SETTING,
   REFUND_AUTO_EVERY_MS,
+  activePriceListActivatedAt,
   allClosedWindow,
   createAdminStore,
   createBlockStore,
@@ -32,6 +33,7 @@ import {
   createShippingReportStore,
   createSiteContentStore,
   createSiteImageStore,
+  createSitePageStore,
   createSmsOutbox,
   createSmsStats,
   createSupportStore,
@@ -58,6 +60,7 @@ import { createPanelDiscounts, type PanelDiscounts } from './discounts';
 import { createPanelExports, type PanelExports } from './exports';
 import { createPanelImages, type PanelImages } from './images';
 import { createPanelOrders, type PanelOrders } from './orders';
+import { createPanelPages, loadPageFacts, loadSiteTexts, type PanelPages } from './pages';
 import { createPanelPartners, type PanelPartners } from './partners';
 import { argon2Passwords } from './password';
 import { createPanelProduction, type PanelProduction } from './production';
@@ -89,6 +92,7 @@ interface Panel {
   blocks: PanelBlocks;
   reviews: PanelReviews;
   content: PanelContent;
+  pages: PanelPages;
   images: PanelImages;
   support: PanelSupport;
 }
@@ -205,6 +209,15 @@ function build(config: AdminConfig): Panel {
         const window = allClosedWindow(await createOrderStore(getDb()).partnerHours());
         return window && window.from.getTime() <= now.getTime() && now.getTime() < window.until.getTime() ? window.until : null;
       },
+    }),
+    // صفحه‌های فرود و «تعرفه» (۱۵٫۲، ADR-071): فقط مالک؛ انتشار، زمان‌دار و برداشتن با همان کد تازهٔ ورود، و سنجش و پیش‌نمایش با همان تعرفه،
+    // تنظیم‌ها و صفحه‌های همین حالای سایت. «پیدا نشد» پیوندهای متن‌های ۱۱٫۱، نوار اعلان و بنر را هم می‌شمارد.
+    pages: createPanelPages({
+      store: createSitePageStore(getDb()),
+      facts: (at) => loadPageFacts(createOrderStore(getDb()), () => activePriceListActivatedAt(getDb()), at),
+      siteTexts: (at) => loadSiteTexts({ content: createSiteContentStore(getDb()), settings: createSettingsStore(getDb()) }, at),
+      stepUp: auth.stepUp,
+      secret: config.secret,
     }),
     // لوگو و بنر (۱۱٫۲، ADR-067): لوگو فقط مالک، بنر مالک و متصدی؛ گذاشتن روی سایت با همان کد تازهٔ ورود. فایل‌ها را کارگر می‌سازد
     // (`build_site_image`) و پنل فقط می‌خواندشان.

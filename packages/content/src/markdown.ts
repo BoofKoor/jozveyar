@@ -13,21 +13,37 @@
  *  - `paragraph`: یک بند با پررنگ، پیوند و جای‌نگهدار (پاسخ سؤال‌ها، متن «سه قدم»).
  */
 
-import { isPlaceholder, suggestPlaceholder, type PlaceholderName, type PlaceholderValues } from './placeholders.js';
+import {
+  isPagePlaceholder,
+  isPlaceholder,
+  suggestPlaceholder,
+  type AnyPlaceholderName,
+  type PlaceholderValues,
+} from './placeholders.js';
 
 export type InlineFormat = 'plain' | 'line' | 'emphasis' | 'paragraph';
 
-export type LinkChild = { type: 'text'; text: string } | { type: 'ph'; name: PlaceholderName };
+export type LinkChild = { type: 'text'; text: string } | { type: 'ph'; name: AnyPlaceholderName };
 
 export type InlineNode =
   | { type: 'text'; text: string; bold?: true }
-  | { type: 'ph'; name: PlaceholderName; bold?: true }
+  | { type: 'ph'; name: AnyPlaceholderName; bold?: true }
   | { type: 'link'; href: string; children: LinkChild[]; bold?: true };
 
+/**
+ * `block` فقط در متن صفحه‌های فرود و «تعرفه» (۱۵٫۲، سؤال ۴۶۳، `{ page: true }`): خطی که فقط `[[…]]` است، و `raw` متن درون دو کروشه. اینکه
+ * چه بلوکی است و با تعرفهٔ امروز چه می‌گوید کار `blocks.ts` است.
+ */
 export type Block =
   | { type: 'heading'; line: number; children: InlineNode[] }
   | { type: 'paragraph'; line: number; children: InlineNode[] }
-  | { type: 'list'; line: number; items: { line: number; children: InlineNode[] }[] };
+  | { type: 'list'; line: number; items: { line: number; children: InlineNode[] }[] }
+  | { type: 'block'; line: number; raw: string };
+
+/** متن صفحه‌های فرود و «تعرفه» (۱۵٫۲): بلوک‌های زنده و دو جای‌نگهدار `{سال}` و `{تغییر_قیمت}` هم. */
+export interface ParseOptions {
+  page?: boolean;
+}
 
 export type MarkdownIssueCode =
   | 'html'
@@ -46,7 +62,9 @@ export type MarkdownIssueCode =
   | 'bold_not_here'
   | 'emphasis_twice'
   | 'placeholder_unknown'
-  | 'placeholder_not_here';
+  | 'placeholder_not_here'
+  /** بلوک زنده وسط بند، نه در خط خودش (۱۵٫۲). */
+  | 'block_inline';
 
 export interface MarkdownIssue {
   /** شمارهٔ خط در همان فیلد، از ۱. */
@@ -87,6 +105,7 @@ class InlineParser {
     private readonly base: number,
     private readonly lineAt: (offset: number) => number,
     private readonly issues: MarkdownIssue[],
+    private readonly page = false,
   ) {}
 
   /** هر خطا یک بار در هر خط؛ جای‌نگهدار و پیوند ناشناس یکی برای هر نام و نشانی. */
@@ -130,6 +149,15 @@ class InlineParser {
           continue;
         }
       }
+      if (c === '[' && this.page && text[i + 1] === '[') {
+        const block = /^\[\[[^\]\n]*\]\]/.exec(rest);
+        if (block) {
+          this.issue(i, 'block_inline', { detail: block[0].slice(0, 60) });
+          this.buffer += block[0];
+          i += block[0].length;
+          continue;
+        }
+      }
       if (c === '[') {
         const link = /^\[([^[\]]*)\]\(([^()\s]*)\)/.exec(rest);
         if (link) {
@@ -144,7 +172,7 @@ class InlineParser {
             if (label && href !== null) {
               this.flush();
               const offset = i + 1 + link[1]!.indexOf(label);
-              const children = new InlineParser(label, 'line', this.base + offset, this.lineAt, this.issues)
+              const children = new InlineParser(label, 'line', this.base + offset, this.lineAt, this.issues, this.page)
                 .parse()
                 .map((node): LinkChild => (node.type === 'ph' ? { type: 'ph', name: node.name } : { type: 'text', text: node.type === 'text' ? node.text : '' }));
               this.nodes.push({ type: 'link', href, children, ...(this.bold ? { bold: true as const } : {}) });
@@ -177,11 +205,11 @@ class InlineParser {
         const ph = /^\{([^{}\n]{1,40})\}/.exec(rest);
         if (ph) {
           const name = ph[1]!.trim();
-          if (!isPlaceholder(name)) {
-            const suggestion = suggestPlaceholder(name);
+          if (!isPlaceholder(name) && !isPagePlaceholder(name)) {
+            const suggestion = suggestPlaceholder(name, this.page);
             this.issue(i, 'placeholder_unknown', { detail: name, ...(suggestion ? { suggestion } : {}) });
             this.buffer += ph[0];
-          } else if (this.format === 'plain') {
+          } else if (this.format === 'plain' || (isPagePlaceholder(name) && !this.page)) {
             this.issue(i, 'placeholder_not_here', { detail: name });
             this.buffer += ph[0];
           } else {
@@ -202,14 +230,14 @@ class InlineParser {
 }
 
 /** یک فیلد یک‌خطی یا یک‌بندی؛ خطا همه با خط ۱. */
-export function parseInline(text: string, format: InlineFormat): { nodes: InlineNode[]; issues: MarkdownIssue[] } {
+export function parseInline(text: string, format: InlineFormat, options: ParseOptions = {}): { nodes: InlineNode[]; issues: MarkdownIssue[] } {
   const issues: MarkdownIssue[] = [];
-  const nodes = new InlineParser(text, format, 0, () => 1, issues).parse();
+  const nodes = new InlineParser(text, format, 0, () => 1, issues, options.page === true).parse();
   return { nodes, issues };
 }
 
 /** تکه‌ای چندخطی (بند یا یک قلم فهرست): خط‌ها با یک فاصله یکی می‌شوند و خطای هر جا شمارهٔ خط خودش را دارد. */
-function inlineOf(parts: readonly { line: number; text: string }[], issues: MarkdownIssue[]): InlineNode[] {
+function inlineOf(parts: readonly { line: number; text: string }[], issues: MarkdownIssue[], page = false): InlineNode[] {
   const starts: { offset: number; line: number }[] = [];
   let joined = '';
   for (const part of parts) {
@@ -218,26 +246,30 @@ function inlineOf(parts: readonly { line: number; text: string }[], issues: Mark
     joined += part.text;
   }
   const lineAt = (offset: number) => [...starts].reverse().find((start) => start.offset <= offset)?.line ?? parts[0]!.line;
-  return new InlineParser(joined, 'paragraph', 0, lineAt, issues).parse();
+  return new InlineParser(joined, 'paragraph', 0, lineAt, issues, page).parse();
 }
 
 /** ردیف جدول («| … |»)، یا خط جداکنندهٔ سرستون («---|---»). */
 const TABLE = /^\|.*|^:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/;
 
-/** متن کامل یک صفحه (قوانین، حریم خصوصی، دربارهٔ ما) به بخش‌ها، با خطاهایش. */
-export function parseMarkdown(source: string): { blocks: Block[]; issues: MarkdownIssue[] } {
+/** خط بلوک زنده (۱۵٫۲): فقط `[[…]]`، با متن درونش. */
+const BLOCK_LINE = /^\[\[([^[\]\n]*)\]\]$/;
+
+/** متن کامل یک صفحه (قوانین، حریم خصوصی، دربارهٔ ما؛ از ۱۵٫۲ با `page` صفحه‌های فرود و «تعرفه») به بخش‌ها، با خطاهایش. */
+export function parseMarkdown(source: string, options: ParseOptions = {}): { blocks: Block[]; issues: MarkdownIssue[] } {
+  const page = options.page === true;
   const blocks: Block[] = [];
   const issues: MarkdownIssue[] = [];
   let paragraph: { line: number; text: string }[] = [];
   let list: { line: number; text: string }[][] = [];
 
   const flush = () => {
-    if (paragraph.length > 0) blocks.push({ type: 'paragraph', line: paragraph[0]!.line, children: inlineOf(paragraph, issues) });
+    if (paragraph.length > 0) blocks.push({ type: 'paragraph', line: paragraph[0]!.line, children: inlineOf(paragraph, issues, page) });
     if (list.length > 0) {
       blocks.push({
         type: 'list',
         line: list[0]![0]!.line,
-        items: list.map((item) => ({ line: item[0]!.line, children: inlineOf(item, issues) })),
+        items: list.map((item) => ({ line: item[0]!.line, children: inlineOf(item, issues, page) })),
       });
     }
     paragraph = [];
@@ -256,7 +288,13 @@ export function parseMarkdown(source: string): { blocks: Block[]; issues: Markdo
       flush();
       if (heading[1]!.length !== 2) issue(line, 'heading_level');
       if (!heading[2]) return issue(line, 'heading_empty');
-      blocks.push({ type: 'heading', line, children: inlineOf([{ line, text: heading[2] }], issues) });
+      blocks.push({ type: 'heading', line, children: inlineOf([{ line, text: heading[2] }], issues, page) });
+      return;
+    }
+    const block = page ? BLOCK_LINE.exec(text) : null;
+    if (block) {
+      flush();
+      blocks.push({ type: 'block', line, raw: block[1]!.trim() });
       return;
     }
     if (TABLE.test(text)) {
@@ -296,24 +334,35 @@ export function inlineText(nodes: readonly InlineNode[], values: PlaceholderValu
       node.type === 'text'
         ? node.text
         : node.type === 'ph'
-          ? values[node.name]
-          : node.children.map((child) => (child.type === 'text' ? child.text : values[child.name])).join(''),
+          ? (values[node.name] ?? '')
+          : node.children.map((child) => (child.type === 'text' ? child.text : (values[child.name] ?? ''))).join(''),
     )
     .join('');
 }
 
-/** هر بخش صفحه به متن ساده؛ فهرست، یک خط برای هر قلم. */
+/** هر بخش صفحه به متن ساده؛ فهرست، یک خط برای هر قلم، و بلوک زنده همان که نوشته شد. */
 export function blockText(block: Block, values: PlaceholderValues): string {
+  if (block.type === 'block') return `[[${block.raw}]]`;
   return block.type === 'list' ? block.items.map((item) => inlineText(item.children, values)).join('\n') : inlineText(block.children, values);
 }
 
 /** جای‌نگهدارهایی که متن به کار برده. */
-export function placeholdersIn(nodes: readonly InlineNode[]): PlaceholderName[] {
+export function placeholdersIn(nodes: readonly InlineNode[]): AnyPlaceholderName[] {
   return nodes.flatMap((node) =>
     node.type === 'ph' ? [node.name] : node.type === 'link' ? node.children.flatMap((child) => (child.type === 'ph' ? [child.name] : [])) : [],
   );
 }
 
-export function blockPlaceholders(blocks: readonly Block[]): PlaceholderName[] {
-  return blocks.flatMap((block) => (block.type === 'list' ? block.items.flatMap((item) => placeholdersIn(item.children)) : placeholdersIn(block.children)));
+export function blockPlaceholders(blocks: readonly Block[]): AnyPlaceholderName[] {
+  return blocks.flatMap((block) =>
+    block.type === 'block' ? [] : block.type === 'list' ? block.items.flatMap((item) => placeholdersIn(item.children)) : placeholdersIn(block.children),
+  );
+}
+
+/** پیوندهای درون یک بخش، با خطش: سنجش «روی سایت هست؟» صفحه‌های فرود (۱۵٫۲، سؤال ۴۶۴). */
+export function linksIn(blocks: readonly Block[]): { line: number; href: string }[] {
+  const of = (line: number, nodes: readonly InlineNode[]) => nodes.flatMap((node) => (node.type === 'link' ? [{ line, href: node.href }] : []));
+  return blocks.flatMap((block) =>
+    block.type === 'block' ? [] : block.type === 'list' ? block.items.flatMap((item) => of(item.line, item.children)) : of(block.line, block.children),
+  );
 }

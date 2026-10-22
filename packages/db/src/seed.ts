@@ -88,6 +88,15 @@ export async function loadActivePriceList({ db }: Database): Promise<PriceList> 
   return loadPriceList({ db } as Database, head.version);
 }
 
+/**
+ * زمان فعال شدن تعرفهٔ فعال (برش ۱۵٫۱): «آخرین تغییر» صفحهٔ اصلی در نقشهٔ سایت، چون جدول تعرفهٔ همان صفحه از آن است. نسخهٔ فعال همیشه زمان
+ * دارد (`price_lists_active_activated`)؛ null فقط وقتی تعرفهٔ فعالی نیست.
+ */
+export async function activePriceListActivatedAt({ db }: Database): Promise<Date | null> {
+  const [head] = await db.select({ at: priceLists.activatedAt }).from(priceLists).where(eq(priceLists.isActive, true)).limit(1);
+  return head?.at ?? null;
+}
+
 export async function loadPriceList({ db }: Database, version: number): Promise<PriceList> {
   const list = await readPriceList(db, version);
   if (!list) throw new Error(`تعرفهٔ نسخهٔ ${version} پیدا نشد.`);

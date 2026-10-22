@@ -14,6 +14,9 @@ import { defineConfig } from 'vitest/config';
  * می‌آمد — یعنی `pnpm -r test` قرمز می‌شد بدون اینکه حتی یک تست اجرا شده باشد.
  */
 export default defineConfig({
+  // JSX با runtime خودکار React: tsconfig اپ‌ها `jsx: preserve` است (نکست JSX را خودش می‌سازد)، و بی این، کامپوننت اپی که تست واحد رسمش
+  // می‌کند (HTML سرور ماشین‌حساب «تعرفه»، ۱۵٫۲) «React is not defined» می‌داد. پکیج‌ها از پیش `react-jsx` بودند.
+  esbuild: { jsx: 'automatic' },
   test: {
     include: ['**/src/**/*.test.ts', '**/lib/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/.next/**', '**/tests/**'],

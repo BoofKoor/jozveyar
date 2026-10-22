@@ -9,7 +9,7 @@
  *   تعرفهٔ پایه نه: پس از ویرایش تعرفه (۴٫۵) همان عددی نیست که سرور حساب می‌کند.
  */
 
-import { createOrderStore, getDb, readSetting, type OrderStore } from '@jozveyar/db';
+import { activePriceListActivatedAt, createOrderStore, getDb, readSetting, type OrderStore } from '@jozveyar/db';
 import { pausedOf } from '@jozveyar/pricing';
 
 import { SEED_TARIFF, type SiteTariff } from '../tariff';
@@ -49,6 +49,23 @@ export async function siteTariff(
     return await loadTariff(sourceOf());
   } catch (error) {
     console.error('✗ صفحهٔ اصلی: تعرفه از پایگاه داده خوانده نشد؛ نسخهٔ قبلی صفحه می‌ماند.', error);
+    throw error;
+  }
+}
+
+/**
+ * زمان فعال شدن تعرفهٔ فعال (برش ۱۵٫۱): «آخرین تغییر» صفحهٔ اصلی در نقشهٔ سایت، چون جدول تعرفه و نرخ‌های متن همان صفحه از آن‌اند. build و بی
+ * پایگاه داده هیچ؛ خطای پایگاه داده بالا می‌رود، تا ISR نقشهٔ قبلی را نگه دارد.
+ */
+export async function siteTariffChangedAt(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  read: () => Promise<Date | null> = () => activePriceListActivatedAt(getDb()),
+): Promise<Date | null> {
+  if (env.NEXT_PHASE === BUILD_PHASE || !env.DATABASE_URL) return null;
+  try {
+    return await read();
+  } catch (error) {
+    console.error('✗ نقشهٔ سایت: زمان فعال شدن تعرفه از پایگاه داده خوانده نشد؛ نسخهٔ قبلی می‌ماند.', error);
     throw error;
   }
 }

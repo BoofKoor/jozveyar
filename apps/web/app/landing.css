@@ -1,0 +1,254 @@
+/*
+ * صفحه‌های فرود، «تعرفه» با ماشین‌حساب، و مسیر دیدنی (برش ۱۵٫۲، ADR-071؛ طرح تأییدشدهٔ docs/ui/mockups/seo.html، سؤال‌های ۴۵۳ تا ۴۵۸). کارت
+ * «قیمت نمونه» و جدول‌های تعرفه در کیت‌اند (`@jozveyar/ui/blocks.css`)، چون پیش‌نمایش پنل هم همان را دارد. رنگ فقط توکن، فقط logical properties.
+ */
+@layer components {
+  /*
+   * ===== مسیر دیدنی (سؤال ۴۵۳؛ `BreadcrumbList` همان) =====
+   * بالای تیتر صفحهٔ فرود و «تعرفه»؛ صفحهٔ اصلی و صفحه‌های ثابت نه. متن کوچک green-700؛ جداکنندهٔ chevron برند که به «جلو» می‌چرخد. هر پیوند هدف
+   * لمسی ۴۴ است بی آنکه خط بلند شود (margin منفی). آخرین تکه خود صفحه است، بی پیوند.
+   */
+  .site-crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 4px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .site-crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    margin-block: -10px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--color-green-300);
+  }
+  .site-crumbs a:hover {
+    color: var(--color-ink);
+    text-decoration-color: currentColor;
+  }
+  .site-crumbs .jy-icon {
+    width: 14px;
+    height: 14px;
+    rotate: 90deg;
+    color: var(--color-green-500);
+  }
+  .site-crumbs [aria-current='page'] {
+    color: var(--color-ink);
+  }
+
+  /*
+   * ===== صفحهٔ فرود (lp-، سؤال ۴۵۴) =====
+   * همان قهرمان صفحهٔ اصلی (`home-hero`، با کارت بارگذاری و سه نوید)؛ به جای «خط بالای تیتر» مسیر دیدنی. بخش‌های پایین `home-sec`اند و متن خود
+   * صفحه نثر صفحه‌های ثابت را دارد (`lp-prose`).
+   */
+  .lp-crumbs {
+    margin-block-end: 4px;
+  }
+  .lp-title {
+    display: block;
+    font-size: var(--text-h1);
+    font-weight: 600;
+    line-height: 1.35;
+    text-wrap: balance;
+  }
+  .lp-prose {
+    max-width: 42rem;
+  }
+  .lp-prose p {
+    line-height: 1.9;
+  }
+  .lp-prose > * + * {
+    margin-block-start: 12px;
+  }
+  .lp-prose h2 {
+    margin-block: 32px 8px;
+    font-size: var(--text-h3);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .lp-prose > h2:first-child {
+    margin-block-start: 0;
+  }
+  .lp-prose ul {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .lp-prose ul li {
+    position: relative;
+    padding-inline-start: 18px;
+    line-height: 1.9;
+  }
+  .lp-prose ul li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 2px;
+    inset-block-start: 0.85em;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-green-600);
+  }
+  /* «همهٔ قیمت‌ها و ماشین‌حساب»: پیوند تنها در خط خودش، با هدف لمسی ۴۴ */
+  .lp-more {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  @media (max-width: 520px) {
+    .lp-title {
+      font-size: var(--text-h3);
+    }
+  }
+
+  /*
+   * پس از فایل، درست مثل صفحهٔ اصلی (سؤال ۴۵۴): مسیر دیدنی و متن صفحه کنار می‌روند و تیتر فقط برای صفحه‌خوان می‌ماند؛ سؤال‌ها در ستون سفارش.
+   */
+  :where(body:has([data-jozve])) :is(.lp-crumbs, .lp-sec),
+  :where([data-restoring] > body) :is(.lp-crumbs, .lp-sec) {
+    display: none;
+  }
+  :where(body:has([data-jozve])) .lp-title,
+  :where([data-restoring] > body) .lp-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /*
+   * ===== «تعرفه» (tf-، سؤال‌های ۴۵۷ و ۴۵۸) =====
+   * یک صفحه که فقط قیمت است: سرصفحه، ماشین‌حساب، جدول‌ها و نمونه‌ها؛ جدول‌ها از همان تعرفهٔ فعال.
+   */
+  .tf {
+    padding-block: 32px 64px;
+  }
+  .tf-head {
+    max-width: 46rem;
+  }
+  .tf-title {
+    margin-block-start: 8px;
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .tf-meta {
+    margin-block-start: 4px;
+    font-size: var(--text-small);
+    color: var(--color-muted);
+  }
+  .tf-lead {
+    margin-block-start: 12px;
+    line-height: 1.9;
+    color: var(--color-muted);
+  }
+  .tf-calc {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 24px 32px;
+    margin-block-start: 24px;
+  }
+  .tf-calc__sub {
+    margin-block-start: 4px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .tf-calc__form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .tf-calc__form .home-field + .home-field {
+    margin-block-start: 0;
+  }
+  .tf-calc__pagesfield {
+    max-width: 10rem;
+  }
+  .tf-calc .jy-stepper {
+    align-self: start;
+  }
+  .tf-calc__fixed {
+    display: flex;
+    gap: 8px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: var(--color-muted);
+  }
+  .tf-calc__fixed .jy-icon {
+    flex: none;
+    margin-block-start: 2px;
+  }
+  .tf-calc__out {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-self: start;
+    padding: 20px;
+    background: var(--color-band);
+    border-radius: var(--radius-lg);
+  }
+  .tf-calc__out h3 {
+    font-weight: 600;
+  }
+  .tf-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: var(--text-small);
+  }
+  .tf-row span:last-child {
+    white-space: nowrap;
+  }
+  .tf-row--total {
+    padding-block-start: 8px;
+    border-block-start: 1px solid var(--color-line);
+    font-size: var(--text-base);
+    font-weight: 600;
+  }
+  .tf-ship {
+    font-size: var(--text-small);
+    line-height: 1.8;
+  }
+  .tf-calc__out .jy-btn {
+    margin-block-start: 8px;
+  }
+  .tf-calc__out .jy-note {
+    font-size: var(--text-small);
+  }
+  .tf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 0 32px;
+  }
+  /* بخش‌های «تعرفه» نزدیک‌تر از صفحهٔ اصلی، با تیتر یک پله کوچک‌تر: صفحه فهرست عدد است، نه داستان */
+  .tf .home-sec {
+    padding-block-start: 48px;
+  }
+  .tf .home-sec__title {
+    margin-block-end: 16px;
+    font-size: var(--text-h3);
+  }
+  @media (width <= 860px) {
+    .tf-calc {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 520px) {
+    .tf {
+      padding-block: 24px 48px;
+    }
+    .tf-title {
+      font-size: var(--text-h3);
+    }
+  }
+}

@@ -859,6 +859,44 @@ describe('رویدادها', () => {
     expect(['content.upload', 'content.logo', 'content.banner'].map((action) => inEventKind(action, 'content'))).toEqual([true, true, true]);
     expect(inEventKind('content.logo', 'settings')).toBe(false);
   });
+
+  it('صفحه‌ها (۱۵٫۲، سؤال‌های ۴۶۵ و ۴۶۶): نشانی و نسخه، زمان‌دار با روز و ساعتش، برگرداندن، نشانی قبلی، پس گرفتن و برداشتن؛ متن صفحه هرگز', () => {
+    const page = (action: string, detail: Record<string, unknown>) => event(action, { targetType: 'site_page', targetId: String(detail.page), detail });
+    const friday = '2026-10-23T05:30:00.000Z'; // جمعه ۱ آبان، ۰۹:۰۰ تهران
+    const lines = eventLines([
+      page('content.page_publish', { page: 3, kind: 'landing', slug: 'print-pdf', version: 1, restored: null, scheduled: null }),
+      page('content.page_publish', { page: 3, kind: 'landing', slug: 'print-pdf', version: 2, restored: null, scheduled: null, from: 'chap-pdf' }),
+      page('content.page_publish', { page: 3, kind: 'landing', slug: 'print-pdf-online', version: 3, restored: null, scheduled: friday, from: 'print-pdf' }),
+      page('content.page_withdraw', { page: 3, version: 3, slug: 'print-pdf-online', scheduled: friday }),
+      page('content.page_publish', { page: 3, kind: 'landing', slug: 'print-pdf', version: 4, restored: 1, scheduled: null }),
+      page('content.page_publish', { page: 3, kind: 'landing', slug: 'print-pdf', version: 5, restored: 2, scheduled: friday }),
+      page('content.page_publish', { page: 1, kind: 'tariff', slug: 'tarefe', version: 2, restored: 0, scheduled: null }),
+      page('content.page_remove', { page: 3, version: 6, slug: 'print-pdf', mode: 'moved', to: 1, toPath: '/tarefe' }),
+      page('content.page_remove', { page: 4, version: 2, slug: 'konkur', mode: 'moved', to: null, toPath: '/' }),
+      page('content.page_remove', { page: 5, version: 2, slug: 'sahafi', mode: 'gone', to: null, toPath: null }),
+    ]);
+    expect(lines.map((line) => line.text)).toEqual([
+      ['صفحهٔ ', { ltr: '/print-pdf' }, ' منتشر شد، نسخهٔ ', { ltr: '1' }, '، با کد تازه'],
+      ['صفحهٔ ', { ltr: '/print-pdf' }, ' منتشر شد، نسخهٔ ', { ltr: '2' }, '، با کد تازه؛ ', { ltr: '/chap-pdf' }, ' از این پس به نشانی تازه می‌رود'],
+      [
+        'صفحهٔ ',
+        { ltr: '/print-pdf-online' },
+        ' زمان‌دار شد، روی سایت جمعه 1 آبان، ساعت 09:00، نسخهٔ ',
+        { ltr: '3' },
+        '، با کد تازه؛ ',
+        { ltr: '/print-pdf' },
+        ' از همان ساعت به نشانی تازه می‌رود',
+      ],
+      ['زمان‌دار صفحهٔ ', { ltr: '/print-pdf-online' }, ' (نسخهٔ ', { ltr: '3' }, '، برای جمعه 1 آبان، ساعت 09:00) پس گرفته شد'],
+      ['صفحهٔ ', { ltr: '/print-pdf' }, ' به نسخهٔ ', { ltr: '1' }, ' برگشت، نسخهٔ ', { ltr: '4' }, '، با کد تازه'],
+      ['صفحهٔ ', { ltr: '/print-pdf' }, ' به نسخهٔ ', { ltr: '2' }, ' برمی‌گردد، روی سایت جمعه 1 آبان، ساعت 09:00، نسخهٔ ', { ltr: '5' }, '، با کد تازه'],
+      ['صفحهٔ «تعرفه» به متن پیش‌فرض برگشت، نسخهٔ ', { ltr: '2' }, '، با کد تازه'],
+      ['صفحهٔ ', { ltr: '/print-pdf' }, ' از سایت برداشته شد، به ', { ltr: '/tarefe' }, '، با کد تازه'],
+      ['صفحهٔ ', { ltr: '/konkur' }, ' از سایت برداشته شد، به صفحهٔ اصلی، با کد تازه'],
+      ['صفحهٔ ', { ltr: '/sahafi' }, ' از سایت برداشته شد، «پیدا نشد»، با کد تازه'],
+    ]);
+    expect(['content.page_publish', 'content.page_withdraw', 'content.page_remove'].map((action) => inEventKind(action, 'content'))).toEqual([true, true, true]);
+  });
 });
 
 describe('نقش در سربرگ و فهرست ادمین‌ها', () => {

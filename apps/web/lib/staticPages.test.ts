@@ -11,34 +11,45 @@ import { formatJalaliNumeric } from '@jozveyar/text';
 
 import type { SitePublished } from './server/content';
 import { pageMetadata } from './server/pageMetadata';
-import { ACCOUNT_PAGE, STATIC_PAGES, footerGroups, pageDate, sitemapPages } from './staticPages';
+import { ACCOUNT_PAGE, STATIC_PAGES, TARIFF_PAGE, footerGroups, pageDate, sitemapPages } from './staticPages';
 
 const paths = (pages: readonly { path: string }[]) => pages.map(({ path }) => path);
 const KINDS = Object.keys(STATIC_PAGES) as (keyof typeof STATIC_PAGES)[];
 
 describe('صفحه‌های ثابت', () => {
-  it('پاورقی: دو گروه طرح؛ «سفارش‌های من» اول «جزوه‌یار» (۱۲٫۱)، و «تماس» فقط وقتی راهی برای تماس هست', () => {
+  it('پاورقی: سه گروه طرح (۱۵٫۲)؛ «سفارش‌های من» اول «جزوه‌یار» (۱۲٫۱)، «تماس» فقط وقتی راهی برای تماس هست، و «چاپ جزوه» با «تعرفه» و صفحه‌های فرود', () => {
     expect(footerGroups(false).map(({ heading, pages }) => [heading, paths(pages)])).toEqual([
       ['جزوه‌یار', ['/orders', '/about']],
+      ['چاپ جزوه', ['/tarefe']],
       ['قوانین', ['/terms', '/privacy']],
     ]);
-    expect(footerGroups(true).map(({ heading, pages }) => [heading, paths(pages)])).toEqual([
-      ['جزوه‌یار', ['/orders', '/about', '/contact']],
-      ['قوانین', ['/terms', '/privacy']],
+    const landings = [
+      { path: '/print-pdf', label: 'پرینت PDF' },
+      { path: '/chap-rangi', label: 'چاپ رنگی' },
+    ] as const;
+    expect(footerGroups(true, landings).map(({ heading, pages, many }) => [heading, paths(pages), many ?? false])).toEqual([
+      ['جزوه‌یار', ['/orders', '/about', '/contact'], false],
+      ['چاپ جزوه', ['/tarefe', '/print-pdf', '/chap-rangi'], true],
+      ['قوانین', ['/terms', '/privacy'], false],
     ]);
     expect(footerGroups(true).flatMap(({ pages }) => pages).map(({ label }) => label)).toEqual([
       'سفارش‌های من',
       'دربارهٔ ما',
       'تماس',
+      'تعرفه',
       'قوانین و مقررات',
       'حریم خصوصی',
     ]);
   });
 
-  it('نقشهٔ سایت همان صفحه‌های پاورقی است، جز «سفارش‌های من» که خصوصی هر مشتری است', () => {
+  it('نقشهٔ سایت: صفحه‌های ثابت پاورقی، جز «سفارش‌های من» که خصوصی هر مشتری است؛ «تعرفه» و صفحه‌های فرود ردیف خودشان را دارند', () => {
     expect(paths(sitemapPages(false))).toEqual(['/about', '/terms', '/privacy']);
     expect(paths(sitemapPages(true))).toEqual(['/about', '/contact', '/terms', '/privacy']);
-    expect(sitemapPages(true)).toEqual(footerGroups(true).flatMap(({ pages }) => pages).filter(({ path }) => path !== ACCOUNT_PAGE.path));
+    expect(sitemapPages(true)).toEqual(
+      footerGroups(true)
+        .flatMap(({ pages }) => pages)
+        .filter(({ path }) => path !== ACCOUNT_PAGE.path && path !== TARIFF_PAGE.path),
+    );
   });
 
   it('متادیتا: عنوان و توضیح گوگل از متن صفحه، canonical خود صفحه، و openGraph پایهٔ سایت با تصویر بالادست', async () => {

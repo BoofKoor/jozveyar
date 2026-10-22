@@ -27,6 +27,8 @@ import { createSupportStore, SUPPORT_TARGET, type InboxPage, type SupportTarget 
 import { checkingPaymentSql, createAccountStore } from './account.js';
 import { supportMessages, supportThreads } from './schema.js';
 import { CONTENT_TARGET, createSiteContentStore } from './content.js';
+import { PAGE_TARGET, createSitePageStore, pageStateAt } from './pages.js';
+import { RESERVED_PAGE_SLUGS, sitePageDrafts, sitePageSlugs, sitePageVersions, sitePages } from './schema.js';
 import { BUILD_SITE_IMAGE_JOB, SITE_IMAGE_TARGET, createSiteImageStore } from './siteImages.js';
 import { siteImageFiles, siteImages } from './schema.js';
 import { BANNER_SETTING, LOGO_SETTING } from './reference.js';
@@ -35,7 +37,7 @@ import { mobileBlocks, orderReviews } from './schema.js';
 import { discountCodes, discountTiers } from './schema.js';
 import { DISCOUNT_TIERS_MAX, TIER_PERCENT_MAX } from '@jozveyar/contracts';
 import { runMigrations } from './migrate.js';
-import { loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
+import { activePriceListActivatedAt, loadActivePriceList, loadPriceList, seedPriceList, activatePriceList } from './seed.js';
 import {
   bindingRateBands,
   cities,
@@ -240,6 +242,13 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     expect(() => priceListSchema.parse(SEED_PRICE_LIST)).not.toThrow();
     const fromDb = await loadActivePriceList(conn);
     expect(() => priceListSchema.parse(fromDb)).not.toThrow();
+  });
+
+  it('زمان فعال شدن تعرفهٔ فعال، «آخرین تغییر» صفحهٔ اصلی در نقشهٔ سایت (برش ۱۵٫۱)', async () => {
+    const [head] = await conn.db.select({ at: priceLists.activatedAt }).from(priceLists).where(eq(priceLists.isActive, true));
+    const at = await activePriceListActivatedAt(conn);
+    expect(at).toBeInstanceOf(Date);
+    expect(at).toEqual(head!.at);
   });
 
   it('قیمت از پایگاه داده همان قیمت از seed است', async () => {
@@ -3269,7 +3278,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
      */
     async function clearAdmin() {
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
     }
 
@@ -3798,7 +3807,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -4277,7 +4286,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const admins = createAdminStore(conn);
@@ -5328,7 +5337,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -5712,7 +5721,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const created = await createAdminStore(conn).createInvite({
@@ -6192,7 +6201,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await resetPartners();
       const created = await createAdminStore(conn).createInvite({
@@ -7646,7 +7655,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearPriceLists(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -8022,7 +8031,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'sara', displayName: 'سارا رضایی' }).returning();
@@ -8541,7 +8550,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await reset();
       const admins = createAdminStore(conn);
@@ -10324,7 +10333,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeAll(async () => {
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, checkout_previews, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
       const [admin] = await conn.db.insert(adminUsers).values({ username: 'owner75', displayName: 'سارا رضایی' }).returning();
@@ -10802,7 +10811,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     beforeAll(async () => {
       await clearOrders(conn);
       await conn.db.execute(
-        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
+        sql`TRUNCATE paper_stock_moves, paper_stock_items, partner_ledger, report_exports, refunds, admin_events, admin_login_attempts, admin_sessions, admin_invites, admin_user_roles, admin_users, support_messages, order_notes, ticket_templates, site_content_versions, site_content_drafts, site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, order_tickets, order_status_events, order_assignments, shipments, shipment_import_rows, shipment_imports, jobs`,
       );
       await conn.db.execute(sql`TRUNCATE print_partners CASCADE`);
       await seedReferenceData(conn, { priceList: SEED_PRICE_LIST });
@@ -12250,6 +12259,459 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
     });
   });
 
+  describe('صفحه‌های فرود و «تعرفه» روی پستگرس (برش ۱۵٫۲)', () => {
+    const NOW = new Date('2026-10-21T07:30:00Z');
+    const MINUTE = 60_000;
+    const later = (minutes: number) => new Date(NOW.getTime() + minutes * MINUTE);
+    let owner = '';
+    const actor = () => ({ adminUserId: owner, ipHash: 'h'.repeat(64) });
+    const store = () => createSitePageStore(conn);
+    const page = (slug: string, title = 'تیتر') => ({ slug, name: 'نام', title, lead: 'جمله', body: 'متن', faq: [], desk: {}, inFooter: true, seo: { title: 't', description: 'd' } });
+    const pageEvents = () => conn.db.select().from(adminEvents).where(eq(adminEvents.targetType, PAGE_TARGET)).orderBy(asc(adminEvents.id));
+    const outcome = (r: { ok: boolean; reason?: string }) => (r.ok ? 'ok' : r.reason);
+
+    /** صفحهٔ فرود تازه با پیش‌نویس و انتشار همین حالا. */
+    async function published(slug: string, at = NOW): Promise<number> {
+      const { pageId } = await store().saveDraft({ pageId: null, kind: 'landing', content: page(slug), actor: actor(), at });
+      const done = await store().publish({
+        pageId,
+        expectedVersion: 0,
+        source: { type: 'draft', content: page(slug), slug, verify: () => true },
+        liveFrom: at,
+        actor: actor(),
+        at,
+      });
+      expect(done).toEqual({ ok: true, version: 1 });
+      return pageId;
+    }
+
+    beforeAll(async () => {
+      const [admin] = await conn.db.insert(adminUsers).values({ username: `owner152-${randomUUID().slice(0, 8)}`, displayName: 'سارا رضایی' }).returning();
+      owner = admin!.id;
+    });
+
+    beforeEach(async () => {
+      // نسخه، نشانی و رویداد پاک‌نشدنی‌اند (`site_page_versions_append_only`، `site_page_slugs_append_only`)؛ TRUNCATE تریگر ردیفی ندارد.
+      await conn.db.execute(sql`TRUNCATE site_page_drafts, site_page_versions, site_page_slugs, site_pages, admin_events`);
+    });
+
+    it('فهرست نام‌های رزرو همان `RESERVED_SLUGS` محتواست', async () => {
+      const content = await import('../../content/src/pages.js');
+      expect([...RESERVED_PAGE_SLUGS]).toEqual([...content.RESERVED_SLUGS]);
+    });
+
+    it('پیش‌نویس صفحهٔ تازه، انتشار، نشانی تازه با ۳۰۱ از قبلی، و رویداد بی متن', async () => {
+      const { pageId, draft } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('print-pdf'), actor: actor(), at: NOW });
+      expect(draft).toMatchObject({ pageId, baseVersion: 0, updatedByName: 'سارا رضایی' });
+      expect(await store().live(NOW)).toEqual([]);
+      expect(await store().resolve('print-pdf', NOW)).toEqual({ kind: 'none' });
+
+      const publish = (expectedVersion: number, slug: string, verify = () => true, at = NOW) =>
+        store().publish({ pageId, expectedVersion, source: { type: 'draft', content: page(slug), slug, verify }, liveFrom: at, actor: actor(), at });
+      expect(await publish(1, 'print-pdf')).toEqual({ ok: false, reason: 'stale' });
+      expect(await publish(0, 'print-pdf', () => false)).toEqual({ ok: false, reason: 'draft_changed' });
+      expect(await publish(0, 'print-pdf')).toEqual({ ok: true, version: 1 });
+      expect((await store().detail(pageId))!.draft).toBeNull();
+      expect(await store().live(NOW)).toEqual([{ pageId, kind: 'landing', slug: 'print-pdf', content: page('print-pdf'), version: 1, since: NOW }]);
+      expect(await store().resolve('print-pdf', NOW)).toMatchObject({ kind: 'page', page: { pageId, slug: 'print-pdf', version: 1 } });
+      expect(await store().routes(NOW)).toEqual({ redirects: new Map(), pages: new Set(['print-pdf']) });
+
+      // نشانی تازه: قبلی برای همیشه ۳۰۱ به تازه.
+      await store().saveDraft({ pageId, kind: 'landing', content: page('print-pdf-online'), actor: actor(), at: later(1) });
+      expect(await publish(1, 'print-pdf-online', () => true, later(1))).toEqual({ ok: true, version: 2 });
+      expect(await store().resolve('print-pdf', later(2))).toEqual({ kind: 'redirect', to: '/print-pdf-online' });
+      expect(await store().routes(later(2))).toEqual({ redirects: new Map([['print-pdf', '/print-pdf-online']]), pages: new Set(['print-pdf-online']) });
+      expect((await store().detail(pageId))!.slugs).toEqual(['print-pdf', 'print-pdf-online']);
+      expect(await store().slugOwner('print-pdf')).toBe(pageId);
+
+      // نشانی صفحهٔ دیگر را صفحهٔ تازه نمی‌گیرد، حتی نشانی قبلی‌اش را.
+      const { pageId: other } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('print-pdf'), actor: actor(), at: later(2) });
+      expect(
+        await store().publish({ pageId: other, expectedVersion: 0, source: { type: 'draft', content: page('print-pdf'), slug: 'print-pdf', verify: () => true }, liveFrom: later(2), actor: actor(), at: later(2) }),
+      ).toEqual({ ok: false, reason: 'slug_taken' });
+
+      expect((await pageEvents()).map((e) => [e.action, e.targetId, e.detail])).toEqual([
+        ['content.page_publish', String(pageId), { page: pageId, kind: 'landing', slug: 'print-pdf', version: 1, restored: null, scheduled: null }],
+        ['content.page_publish', String(pageId), { page: pageId, kind: 'landing', slug: 'print-pdf-online', version: 2, restored: null, scheduled: null, from: 'print-pdf' }],
+      ]);
+      expect(JSON.stringify(await pageEvents())).not.toContain('جمله');
+    });
+
+    it('زمان‌دار: تا ساعتش روی سایت نیست، یکی در راه، پس گرفتن بی‌کد که پیش‌نویس را برمی‌گرداند', async () => {
+      // «پس گرفتن» را محافظ با ساعت خود پایگاه داده می‌سنجد (`site_page_versions_withdraw_live`)، پس این صحنه از همین حالا است، نه زمان ثابت.
+      const NOW = new Date(Math.floor(Date.now() / MINUTE) * MINUTE);
+      const later = (minutes: number) => new Date(NOW.getTime() + minutes * MINUTE);
+      const { pageId } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('print-rangi'), actor: actor(), at: NOW });
+      const at = later(60);
+      const scheduled = await store().publish({
+        pageId,
+        expectedVersion: 0,
+        source: { type: 'draft', content: page('print-rangi'), slug: 'print-rangi', verify: () => true },
+        liveFrom: at,
+        actor: actor(),
+        at: NOW,
+      });
+      expect(scheduled).toEqual({ ok: true, version: 1 });
+      expect(await store().live(later(59))).toEqual([]);
+      expect(await store().resolve('print-rangi', later(59))).toEqual({ kind: 'none' });
+      expect((await store().live(at)).map((row) => row.slug)).toEqual(['print-rangi']);
+      const state = pageStateAt((await store().detail(pageId))!.versions, later(1));
+      expect([state.live, state.pending?.version, state.latest]).toEqual([null, 1, 1]);
+
+      // نسخهٔ دیگری تا زمان‌دار در راه است نه.
+      await store().saveDraft({ pageId, kind: 'landing', content: page('print-rangi', 'تازه'), actor: actor(), at: later(1) });
+      expect(
+        await store().publish({ pageId, expectedVersion: 1, source: { type: 'draft', content: page('print-rangi', 'تازه'), slug: 'print-rangi', verify: () => true }, liveFrom: later(1), actor: actor(), at: later(1) }),
+      ).toEqual({ ok: false, reason: 'pending' });
+
+      // پس گرفتن: پیش‌نویس تازه‌تر می‌ماند؛ بی پیش‌نویس، متن زمان‌دار پیش‌نویس می‌شود.
+      expect(await store().withdraw({ pageId, version: 1, actor: actor(), at: later(2) })).toEqual({ ok: true, version: 1 });
+      expect((await store().detail(pageId))!.draft?.content).toEqual(page('print-rangi', 'تازه'));
+      expect(await store().withdraw({ pageId, version: 1, actor: actor(), at: later(3) })).toEqual({ ok: false, reason: 'stale' });
+      expect(await store().live(at)).toEqual([]);
+
+      await store().discardDraft(pageId);
+      const again = await store().publish({
+        pageId,
+        expectedVersion: 1,
+        source: { type: 'restore', version: 1 },
+        liveFrom: later(120),
+        actor: actor(),
+        at: later(4),
+      });
+      expect(again).toEqual({ ok: true, version: 2 });
+      expect(await store().withdraw({ pageId, version: 2, actor: actor(), at: later(5) })).toEqual({ ok: true, version: 2 });
+      expect((await store().detail(pageId))!.draft).toMatchObject({ content: page('print-rangi'), baseVersion: 2 });
+      // پس از رسیدن، پس گرفتنی نیست.
+      await store().discardDraft(pageId);
+      expect(await store().publish({ pageId, expectedVersion: 2, source: { type: 'restore', version: 1 }, liveFrom: later(6), actor: actor(), at: later(6) })).toEqual({
+        ok: true,
+        version: 3,
+      });
+      expect(await store().withdraw({ pageId, version: 3, actor: actor(), at: later(7) })).toEqual({ ok: false, reason: 'live' });
+
+      expect((await pageEvents()).map((e) => [e.action, (e.detail as { version: number }).version])).toEqual([
+        ['content.page_publish', 1],
+        ['content.page_withdraw', 1],
+        ['content.page_publish', 2],
+        ['content.page_withdraw', 2],
+        ['content.page_publish', 3],
+      ]);
+    });
+
+    it('نشانی تازهٔ زمان‌دار تا ساعتش ۴۰۴ است، نه ۳۰۱ به نشانی امروز، و پس‌گرفته‌اش هم؛ مال همان صفحه می‌ماند', async () => {
+      // همان ساعت خود پایگاه داده (`site_page_versions_withdraw_live`): صحنه از همین حالا.
+      const NOW = new Date(Math.floor(Date.now() / MINUTE) * MINUTE);
+      const later = (minutes: number) => new Date(NOW.getTime() + minutes * MINUTE);
+      const { pageId } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('print-pdf'), actor: actor(), at: NOW });
+      const publish = (expectedVersion: number, slug: string, liveFrom: Date) =>
+        store().publish({ pageId, expectedVersion, source: { type: 'draft', content: page(slug), slug, verify: () => true }, liveFrom, actor: actor(), at: NOW });
+      expect(await publish(0, 'print-pdf', NOW)).toEqual({ ok: true, version: 1 });
+      await store().saveDraft({ pageId, kind: 'landing', content: page('print-pdf-online'), actor: actor(), at: NOW });
+      expect(await publish(1, 'print-pdf-online', later(60))).toEqual({ ok: true, version: 2 });
+
+      // پیش از ساعت: نشانی تازه هیچ مسیری ندارد؛ اگر ۳۰۱ به /print-pdf بود، ساعت ۶۰ جهتش برمی‌گشت و مرورگر میان دو نشانی می‌چرخید.
+      expect(await store().resolve('print-pdf-online', later(59))).toEqual({ kind: 'none' });
+      expect(await store().routes(later(59))).toEqual({ redirects: new Map(), pages: new Set(['print-pdf']) });
+      expect(await store().routes(later(60))).toEqual({ redirects: new Map([['print-pdf', '/print-pdf-online']]), pages: new Set(['print-pdf-online']) });
+
+      // پس‌گرفته هرگز روی سایت نرفت: باز ۴۰۴، و نشانی مال همین صفحه، که بعداً می‌گیردش.
+      expect(await store().withdraw({ pageId, version: 2, actor: actor(), at: later(1) })).toEqual({ ok: true, version: 2 });
+      expect(await store().resolve('print-pdf-online', later(61))).toEqual({ kind: 'none' });
+      expect(await store().routes(later(61))).toEqual({ redirects: new Map(), pages: new Set(['print-pdf']) });
+      expect(await store().slugOwner('print-pdf-online')).toBe(pageId);
+    });
+
+    it('برداشتن: «پیدا نشد» و «به صفحهٔ دیگری»، پرش‌های پشت‌سرهم، و انتشار دوباره همان نشانی', async () => {
+      const arzan = await published('print-arzan');
+      const sahafi = await published('sahafi');
+      expect(await store().remove({ pageId: arzan, expectedVersion: 0, mode: 'gone', movedTo: null, actor: actor(), at: later(1) })).toEqual({
+        ok: false,
+        reason: 'stale',
+      });
+      expect(await store().remove({ pageId: arzan, expectedVersion: 1, mode: 'moved', movedTo: sahafi, actor: actor(), at: later(1) })).toEqual({
+        ok: true,
+        version: 2,
+      });
+      expect(await store().resolve('print-arzan', later(2))).toEqual({ kind: 'redirect', to: '/sahafi' });
+      // مقصد هم برداشته شد و به صفحهٔ اصلی رفت: دو پرش به `/`.
+      expect(await store().remove({ pageId: sahafi, expectedVersion: 1, mode: 'moved', movedTo: null, actor: actor(), at: later(3) })).toEqual({ ok: true, version: 2 });
+      expect(await store().resolve('print-arzan', later(4))).toEqual({ kind: 'redirect', to: '/' });
+      expect(await store().routes(later(4))).toEqual({ redirects: new Map([['print-arzan', '/'], ['sahafi', '/']]), pages: new Set() });
+      expect(await store().live(later(4))).toEqual([]);
+      // برداشته را دوباره برداشتن نه؛ انتشار دوباره همان نشانی را برمی‌گرداند و دیگر ۳۰۱ نیست.
+      expect(await store().remove({ pageId: sahafi, expectedVersion: 2, mode: 'gone', movedTo: null, actor: actor(), at: later(5) })).toEqual({ ok: false, reason: 'not_live' });
+      expect(await store().publish({ pageId: sahafi, expectedVersion: 2, source: { type: 'restore', version: 1 }, liveFrom: later(6), actor: actor(), at: later(6) })).toEqual({ ok: true, version: 3 });
+      expect(await store().resolve('sahafi', later(7))).toMatchObject({ kind: 'page' });
+      expect(await store().resolve('print-arzan', later(7))).toEqual({ kind: 'redirect', to: '/sahafi' });
+
+      const gone = await published('daneshjooyi', later(8));
+      expect(await store().remove({ pageId: gone, expectedVersion: 1, mode: 'gone', movedTo: null, actor: actor(), at: later(9) })).toEqual({ ok: true, version: 2 });
+      expect(await store().resolve('daneshjooyi', later(10))).toEqual({ kind: 'gone' });
+      expect((await pageEvents()).filter((e) => e.action === 'content.page_remove').map((e) => e.detail)).toEqual([
+        { page: arzan, version: 2, slug: 'print-arzan', mode: 'moved', to: sahafi, toPath: '/sahafi' },
+        { page: sahafi, version: 2, slug: 'sahafi', mode: 'moved', to: null, toPath: '/' },
+        { page: gone, version: 2, slug: 'daneshjooyi', mode: 'gone', to: null, toPath: null },
+      ]);
+
+      // به «تعرفه»ای که هرگز ذخیره نشده: همین برداشتن ردیفش را می‌سازد، و ۳۰۱ به `/tarefe` است، با متن پیش‌فرض هم.
+      expect(await store().tariff()).toBeNull();
+      const konkur = await published('konkur', later(11));
+      expect(await store().remove({ pageId: konkur, expectedVersion: 1, mode: 'moved', movedTo: 'tariff', actor: actor(), at: later(12) })).toEqual({
+        ok: true,
+        version: 2,
+      });
+      const tariff = await store().tariff();
+      expect(tariff?.versions).toEqual([]);
+      expect(await store().resolve('konkur', later(13))).toEqual({ kind: 'redirect', to: '/tarefe' });
+      expect((await store().routes(later(13))).redirects.get('konkur')).toBe('/tarefe');
+      // «تعرفه»ای که مقصد است با دور انداختن پیش‌نویسش پاک نمی‌شود (کلید خارجی `moved_to` هم نمی‌گذاشت، با خطای خام).
+      await store().saveDraft({ pageId: null, kind: 'tariff', content: { title: 'قیمت' }, actor: actor(), at: later(14) });
+      expect(await store().discardDraft(tariff!.page.id)).toEqual({ discarded: true, deleted: false });
+      expect(await store().resolve('konkur', later(15))).toEqual({ kind: 'redirect', to: '/tarefe' });
+
+      // مقصد نادرست زیر همان قفل: خود صفحه، صفحه‌ای که نیست، برداشته، و صفحه‌ای که فقط پیش‌نویس دارد.
+      const ersal = await published('ersal', later(16));
+      const { pageId: draftOnly } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('moalem'), actor: actor(), at: later(16) });
+      for (const movedTo of [ersal, 999_999, gone, draftOnly]) {
+        expect(await store().remove({ pageId: ersal, expectedVersion: 1, mode: 'moved', movedTo, actor: actor(), at: later(17) }), String(movedTo)).toEqual({
+          ok: false,
+          reason: 'bad_target',
+        });
+      }
+      expect(await store().remove({ pageId: ersal, expectedVersion: 1, mode: 'moved', movedTo: konkur, actor: actor(), at: later(17) })).toEqual({
+        ok: false,
+        reason: 'bad_target',
+      });
+      expect(await store().remove({ pageId: ersal, expectedVersion: 1, mode: 'moved', movedTo: tariff!.page.id, actor: actor(), at: later(17) })).toEqual({
+        ok: true,
+        version: 2,
+      });
+      expect(await store().resolve('ersal', later(18))).toEqual({ kind: 'redirect', to: '/tarefe' });
+      expect((await pageEvents()).filter((e) => e.action === 'content.page_remove').map((e) => (e.detail as { toPath: unknown }).toPath)).toEqual([
+        '/sahafi',
+        '/',
+        null,
+        '/tarefe',
+        '/tarefe',
+      ]);
+    });
+
+    it('«تعرفه»: یکی، با اولین ذخیره ساخته می‌شود، نشانی ثابت و برگشت به متن پیش‌فرض', async () => {
+      expect(await store().tariff()).toBeNull();
+      const tariff = { title: 'قیمت', lead: 'جمله', faq: [], seo: { title: 't', description: 'd' } };
+      const { pageId } = await store().saveDraft({ pageId: null, kind: 'tariff', content: tariff, actor: actor(), at: NOW });
+      expect((await store().saveDraft({ pageId: null, kind: 'tariff', content: tariff, actor: actor(), at: later(1) })).pageId).toBe(pageId);
+      const publish = (expectedVersion: number, source: Parameters<ReturnType<typeof store>['publish']>[0]['source']) =>
+        store().publish({ pageId, expectedVersion, source, liveFrom: later(2), actor: actor(), at: later(2) });
+      expect(await publish(0, { type: 'draft', content: tariff, slug: 'whatever', verify: () => true })).toEqual({ ok: true, version: 1 });
+      expect((await store().live(later(3))).map((row) => [row.kind, row.slug])).toEqual([['tariff', 'tarefe']]);
+      // «تعرفه» مسیر ثابت سایت است، نه صفحه‌ای که میان‌افزار رسمش را به مسیر صفحه‌های فرود بفرستد.
+      expect(await store().routes(later(3))).toEqual({ redirects: new Map(), pages: new Set() });
+      expect(await publish(1, { type: 'default' })).toEqual({ ok: true, version: 2 });
+      expect(await publish(2, { type: 'default' })).toEqual({ ok: false, reason: 'noop' });
+      expect(await store().live(later(3))).toEqual([]);
+      expect(await store().remove({ pageId, expectedVersion: 2, mode: 'gone', movedTo: null, actor: actor(), at: later(4) })).toEqual({ ok: false, reason: 'not_found' });
+      expect(await rejectedConstraint(conn.db.insert(sitePages).values({ kind: 'tariff', createdBy: owner }))).toBe('site_pages_one_tariff');
+    });
+
+    it('دور انداختن پیش‌نویس صفحه‌ای که هرگز منتشر نشد خود صفحه را هم می‌برد؛ صفحهٔ با نسخه نه', async () => {
+      const { pageId } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('konkur'), actor: actor(), at: NOW });
+      expect(await store().discardDraft(pageId)).toEqual({ discarded: true, deleted: true });
+      expect(await store().detail(pageId)).toBeNull();
+      const live = await published('konkur');
+      await store().saveDraft({ pageId: live, kind: 'landing', content: page('konkur', 'تازه'), actor: actor(), at: later(1) });
+      expect(await store().discardDraft(live)).toEqual({ discarded: true, deleted: false });
+      expect(await rejectedConstraint(conn.db.delete(sitePages).where(eq(sitePages.id, live)))).toBe('site_pages_has_versions');
+    });
+
+    it('انتشارهای هم‌زمان یک صفحه زیر قفل پشت‌سرهم‌اند', async () => {
+      const { pageId } = await store().saveDraft({ pageId: null, kind: 'landing', content: page('ersal'), actor: actor(), at: NOW });
+      const runs = await Promise.all(
+        [0, 1, 2, 3, 4].map(() =>
+          store().publish({ pageId, expectedVersion: 0, source: { type: 'draft', content: page('ersal'), slug: 'ersal', verify: () => true }, liveFrom: NOW, actor: actor(), at: NOW }),
+        ),
+      );
+      expect(runs.map(outcome).sort()).toEqual(['ok', 'stale', 'stale', 'stale', 'stale']);
+    });
+
+    it('محافظ‌های نسخه: پاک و عوض نمی‌شود، پس گرفتن یک بار و پیش از رسیدن، شماره، نشانی، برداشتن، برگرداندن و هر نسخه تغییری است', async () => {
+      const id = await published('print-word');
+      const where = and(eq(sitePageVersions.pageId, id), eq(sitePageVersions.version, 1));
+      const insert = (over: Partial<typeof sitePageVersions.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(sitePageVersions).values({ pageId: id, version: 2, slug: 'print-word', content: page('print-word', 'دو'), createdBy: owner, ...over }));
+      expect(await rejectedConstraint(conn.db.delete(sitePageVersions).where(where))).toBe('site_page_versions_append_only');
+      expect(await rejectedConstraint(conn.db.update(sitePageVersions).set({ content: page('print-word', 'سه') }).where(where))).toBe('site_page_versions_frozen');
+      expect(await rejectedConstraint(conn.db.update(sitePageVersions).set({ withdrawnAt: new Date(), withdrawnBy: owner }).where(where))).toBe(
+        'site_page_versions_withdraw_live',
+      );
+      expect(await insert({ version: 3 })).toBe('site_page_versions_sequence');
+      expect(await insert({ withdrawnAt: new Date(), withdrawnBy: owner, liveFrom: new Date(Date.now() + 3_600_000) })).toBe('site_page_versions_insert_state');
+      expect(await insert({ content: page('print-word') })).toBe('site_page_versions_noop');
+      expect(await insert({ slug: 'print-word-2' })).toBe('site_page_versions_slug_claim');
+      expect(await insert({ slug: 'Print_Word' })).toBe('site_page_versions_slug_claim');
+      expect(await insert({ content: null })).toBe('site_page_versions_landing');
+      expect(await insert({ content: null, removal: 'gone', slug: 'print-word' })).toBeUndefined();
+      expect(await insert({ version: 3, content: null, removal: 'gone' })).toBe('site_page_versions_removal');
+      expect(await insert({ version: 3, restoredFrom: 2 })).toBe('site_page_versions_restored_same');
+      expect(await insert({ version: 3, restoredFrom: 0 })).toBe('site_page_versions_shape');
+      expect(await insert({ version: 3, content: page('print-word', 'نه'), restoredFrom: 1 })).toBe('site_page_versions_restored_same');
+      expect(await insert({ version: 3, content: page('print-word'), restoredFrom: 1 })).toBeUndefined();
+      expect(await insert({ version: 4, content: null, removal: 'moved', movedTo: id })).toBe('site_page_versions_shape');
+      const now = new Date();
+      expect(await insert({ version: 4, liveFrom: new Date(now.getTime() - MINUTE), createdAt: now })).toBe('site_page_versions_times');
+      expect(await insert({ version: 4, content: ['آرایه'] })).toBe('site_page_versions_content');
+      expect(await insert({ version: 4, content: { body: 'ا'.repeat(70_000) } })).toBe('site_page_versions_content');
+
+      // زمان‌دار آینده: پس گرفتن یک بار، بی دست زدن به ستون دیگر؛ و تا در راه است نسخهٔ تازه نه.
+      const future = new Date(Date.now() + 3_600_000);
+      expect(await insert({ version: 4, liveFrom: future, createdAt: new Date() })).toBeUndefined();
+      expect(await insert({ version: 5, content: page('print-word', 'پنج'), createdAt: new Date() })).toBe('site_page_versions_one_pending');
+      const pending = and(eq(sitePageVersions.pageId, id), eq(sitePageVersions.version, 4));
+      expect(await rejectedConstraint(conn.db.update(sitePageVersions).set({ withdrawnAt: new Date(), withdrawnBy: owner, slug: 'x-y' }).where(pending))).toBe(
+        'site_page_versions_frozen',
+      );
+      expect(await rejectedConstraint(conn.db.update(sitePageVersions).set({ withdrawnAt: new Date(), withdrawnBy: owner }).where(pending))).toBeUndefined();
+      expect(await rejectedConstraint(conn.db.update(sitePageVersions).set({ withdrawnAt: new Date(), withdrawnBy: owner }).where(pending))).toBe(
+        'site_page_versions_withdraw_once',
+      );
+      expect(await rejectedConstraint(conn.db.update(sitePageVersions).set({ withdrawnAt: null, withdrawnBy: null }).where(pending))).toBe('site_page_versions_frozen');
+    });
+
+    it('محافظ‌های «تعرفه»، نشانی‌ها، صفحه و پیش‌نویس', async () => {
+      const [tariff] = await conn.db.insert(sitePages).values({ kind: 'tariff', createdBy: owner }).returning();
+      const insertTariff = (over: Partial<typeof sitePageVersions.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(sitePageVersions).values({ pageId: tariff!.id, version: 1, slug: 'tarefe', content: { title: 't' }, createdBy: owner, ...over }));
+      expect(await insertTariff({ slug: 'tarefe-2' })).toBe('site_page_versions_tariff');
+      expect(await insertTariff({ content: null, removal: 'gone' })).toBe('site_page_versions_tariff');
+      expect(await insertTariff({ content: null, restoredFrom: 0 })).toBeUndefined();
+
+      const id = await published('print-powerpoint');
+      expect(await rejectedConstraint(conn.db.insert(sitePageSlugs).values({ slug: 'tarefe', pageId: id }))).toBe('site_page_slugs_reserved');
+      expect(await rejectedConstraint(conn.db.insert(sitePageSlugs).values({ slug: 'Bad Slug', pageId: id }))).toBe('site_page_slugs_shape');
+      expect(await rejectedConstraint(conn.db.insert(sitePageSlugs).values({ slug: 'tariff-slug', pageId: tariff!.id }))).toBe('site_page_slugs_landing');
+      expect(await rejectedConstraint(conn.db.delete(sitePageSlugs).where(eq(sitePageSlugs.slug, 'print-powerpoint')))).toBe('site_page_slugs_append_only');
+      expect(await rejectedConstraint(conn.db.update(sitePageSlugs).set({ pageId: tariff!.id }).where(eq(sitePageSlugs.slug, 'print-powerpoint')))).toBe(
+        'site_page_slugs_frozen',
+      );
+      expect(await rejectedConstraint(conn.db.update(sitePages).set({ kind: 'tariff' }).where(eq(sitePages.id, id)))).toBe('site_pages_frozen');
+      const insertDraft = (over: Partial<typeof sitePageDrafts.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(sitePageDrafts).values({ pageId: id, content: page('x'), baseVersion: 0, updatedBy: owner, ...over }));
+      expect(await insertDraft({ baseVersion: 7 })).toBe('site_page_drafts_base_exists');
+      expect(await insertDraft({ baseVersion: -1 })).toBe('site_page_drafts_base_exists');
+      expect(await insertDraft({ content: 'متن' })).toBe('site_page_drafts_content');
+      expect(await insertDraft({ createdAt: NOW, updatedAt: new Date(NOW.getTime() - MINUTE) })).toBe('site_page_drafts_times');
+      expect(await insertDraft({ baseVersion: 1 })).toBeUndefined();
+      // پایهٔ پیش‌نویس با عوض شدن هم سنجیده می‌شود، نه فقط با درج.
+      expect(await rejectedConstraint(conn.db.update(sitePageDrafts).set({ baseVersion: 9 }).where(eq(sitePageDrafts.pageId, id)))).toBe(
+        'site_page_drafts_base_exists',
+      );
+    });
+
+    it('محافظ‌ها، لبه‌ها: هر نام رزرو، طول نشانی، «تعرفه»ی بی متن، برداشتن با نشانی دیگر یا بی نسخهٔ روی سایت، و برگرداندن با نشانی دیگر', async () => {
+      const id = await published('print-excel');
+      const claim = (slug: string, pageId = id) => rejectedConstraint(conn.db.insert(sitePageSlugs).values({ slug, pageId }));
+      // هر نام رزرو سایت، با همان فهرست کد (`RESERVED_PAGE_SLUGS`)، نه فقط یکی.
+      for (const slug of RESERVED_PAGE_SLUGS) expect(await claim(slug), slug).toBe('site_page_slugs_reserved');
+      expect(await claim('a')).toBe('site_page_slugs_shape');
+      expect(await claim(`a${'b'.repeat(60)}`)).toBe('site_page_slugs_shape');
+      expect(await claim(`a${'b'.repeat(59)}`)).toBeUndefined();
+
+      const [tariff] = await conn.db.insert(sitePages).values({ kind: 'tariff', createdBy: owner }).returning();
+      // متن خالی «تعرفه» فقط برگشت به متن پیش‌فرض است؛ محافظ «تعرفه» پیش از CHECK شکل می‌گیردش.
+      expect(await rejectedConstraint(conn.db.insert(sitePageVersions).values({ pageId: tariff!.id, version: 1, slug: 'tarefe', content: null, createdBy: owner }))).toBe(
+        'site_page_versions_tariff',
+      );
+
+      const insert = (pageId: number, over: Partial<typeof sitePageVersions.$inferInsert> & { version: number; slug: string }) =>
+        rejectedConstraint(conn.db.insert(sitePageVersions).values({ pageId, content: null, createdBy: owner, ...over }));
+      // نشانی تازه روی سایت است؛ برداشتن نشانی قبلی همان صفحه نه، چون آنچه روی سایت است نشانی دیگری دارد.
+      await store().saveDraft({ pageId: id, kind: 'landing', content: page('print-excel-online'), actor: actor(), at: later(1) });
+      const moved = await store().publish({
+        pageId: id,
+        expectedVersion: 1,
+        source: { type: 'draft', content: page('print-excel-online'), slug: 'print-excel-online', verify: () => true },
+        liveFrom: later(1),
+        actor: actor(),
+        at: later(1),
+      });
+      expect(moved).toEqual({ ok: true, version: 2 });
+      expect(await insert(id, { version: 3, slug: 'print-excel', removal: 'gone' })).toBe('site_page_versions_removal');
+      // برگرداندن نسخهٔ 1 با نشانی‌ای جز نشانی همان نسخه دروغ است، حتی اگر صفحه آن نشانی را دارد.
+      expect(await insert(id, { version: 3, slug: 'print-excel-online', content: page('print-excel'), restoredFrom: 1 })).toBe('site_page_versions_restored_same');
+      expect(await insert(id, { version: 3, slug: 'print-excel', content: page('print-excel'), restoredFrom: 1 })).toBeUndefined();
+
+      // صفحه‌ای که هرگز روی سایت نبود چیزی برای برداشتن ندارد، و نشانی صفحهٔ دیگر را هم نمی‌گیرد؛ پیش‌نویسش پایه‌ای جز نسخهٔ خودش ندارد.
+      const [fresh] = await conn.db.insert(sitePages).values({ kind: 'landing', createdBy: owner }).returning();
+      expect(await claim('print-ketab', fresh!.id)).toBeUndefined();
+      expect(await insert(fresh!.id, { version: 1, slug: 'print-ketab', removal: 'gone' })).toBe('site_page_versions_removal');
+      expect(await insert(fresh!.id, { version: 1, slug: 'print-excel', content: page('print-excel', 'دیگری') })).toBe('site_page_versions_slug_claim');
+      const draft = (over: Partial<typeof sitePageDrafts.$inferInsert>) =>
+        rejectedConstraint(conn.db.insert(sitePageDrafts).values({ pageId: fresh!.id, content: page('print-ketab'), baseVersion: 0, updatedBy: owner, ...over }));
+      expect(await draft({ baseVersion: 1 })).toBe('site_page_drafts_base_exists');
+      expect(await draft({ content: { body: 'ا'.repeat(70_000) } })).toBe('site_page_drafts_content');
+    });
+
+    it('محافظ‌ها، شکل و زمان: برگرداندن منفی، برداشتن با برگرداندن یا مقصد بی «به صفحهٔ دیگری»، و پس گرفتن ناجور', async () => {
+      const id = await published('print-jozve');
+      const [other] = await conn.db.insert(sitePages).values({ kind: 'landing', createdBy: owner }).returning();
+      const insert = (over: Partial<typeof sitePageVersions.$inferInsert> & { version: number }) =>
+        rejectedConstraint(conn.db.insert(sitePageVersions).values({ pageId: id, slug: 'print-jozve', content: null, createdBy: owner, ...over }));
+      expect(await insert({ version: 2, content: page('print-jozve', 'دو'), restoredFrom: -1 })).toBe('site_page_versions_shape');
+      expect(await insert({ version: 2, removal: 'gone', restoredFrom: 0 })).toBe('site_page_versions_shape');
+      expect(await insert({ version: 2, removal: 'gone', movedTo: other!.id })).toBe('site_page_versions_shape');
+
+      // زمان‌دار: «پس گرفتن» با زمان و کسی که پس گرفت، پس از ساختن و پیش از رسیدن.
+      const created = new Date();
+      const future = new Date(created.getTime() + 3_600_000);
+      expect(await insert({ version: 2, content: page('print-jozve', 'زمان‌دار'), liveFrom: future, createdAt: created })).toBeUndefined();
+      const pending = and(eq(sitePageVersions.pageId, id), eq(sitePageVersions.version, 2));
+      const withdraw = (set: Partial<typeof sitePageVersions.$inferInsert>) => rejectedConstraint(conn.db.update(sitePageVersions).set(set).where(pending));
+      expect(await withdraw({ withdrawnAt: new Date() })).toBe('site_page_versions_times');
+      expect(await withdraw({ withdrawnAt: new Date(future.getTime() + MINUTE), withdrawnBy: owner })).toBe('site_page_versions_times');
+      expect(await withdraw({ withdrawnAt: new Date(created.getTime() - MINUTE), withdrawnBy: owner })).toBe('site_page_versions_times');
+      // «پس گرفتن» هیچ ستون دیگری را با خودش عوض نمی‌کند، هر کدام جدا.
+      const other_: Partial<typeof sitePageVersions.$inferInsert> = {
+        pageId: other!.id,
+        version: 9,
+        slug: 'print-jozve-dige',
+        content: page('print-jozve', 'دیگر'),
+        restoredFrom: 1,
+        removal: 'gone',
+        movedTo: other!.id,
+        liveFrom: new Date(future.getTime() + MINUTE),
+        createdBy: randomUUID(),
+        createdAt: new Date(created.getTime() - 1),
+      };
+      for (const [column, value] of Object.entries(other_)) {
+        expect(await withdraw({ withdrawnAt: new Date(), withdrawnBy: owner, [column]: value }), column).toBe('site_page_versions_frozen');
+      }
+      expect(await withdraw({ withdrawnAt: new Date(), withdrawnBy: owner })).toBeUndefined();
+    });
+
+    it('دو درج هم‌زمان نسخهٔ یک صفحه بی قفل ذخیره‌گاه: دومی پشت قفل ردیف صفحه می‌ماند و شماره را خودش رد می‌کند', async () => {
+      const id = await published('print-scan');
+      const held = await conn.client.reserve();
+      try {
+        await held`BEGIN`;
+        await held`INSERT INTO site_page_versions (page_id, version, slug, content, created_by)
+                   VALUES (${id}, 2, 'print-scan', ${JSON.stringify(page('print-scan', 'اول'))}::jsonb, ${owner})`;
+        // دومی پشت قفل ردیف صفحه (`FOR UPDATE` محافظ) می‌ماند، نه پشت شاخص یکتا.
+        const second = conn.client.begin(
+          (tx) => tx`INSERT INTO site_page_versions (page_id, version, slug, content, created_by)
+                     VALUES (${id}, 2, 'print-scan', ${JSON.stringify(page('print-scan', 'دوم'))}::jsonb, ${owner})`,
+        );
+        expect(await Promise.race([second.then(() => 'done', () => 'failed'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 300))])).toBe('waiting');
+        await held`COMMIT`;
+        expect(await rejectedConstraint(second)).toBe('site_page_versions_sequence');
+      } finally {
+        await held`ROLLBACK`.catch(() => {});
+        held.release();
+      }
+      expect((await store().detail(id))!.versions.map((row) => row.version)).toEqual([2, 1]);
+    });
+  });
+
   describe('تصویرهای سایت روی پستگرس (برش ۱۱٫۲)', () => {
     const NOW = new Date('2026-10-19T08:00:00Z');
     const MINUTE = 60_000;
@@ -12301,7 +12763,7 @@ describe.skipIf(!DATABASE_URL)('پایگاه دادهٔ واقعی', () => {
 
     beforeEach(async () => {
       // بارگذاری روی سایت رفته و رویداد پاک‌نشدنی‌اند؛ TRUNCATE تریگر ردیفی ندارد.
-      await conn.db.execute(sql`TRUNCATE site_images, site_image_files, admin_events CASCADE`);
+      await conn.db.execute(sql`TRUNCATE site_images, site_image_files, site_page_drafts, site_page_versions, site_page_slugs, site_pages, admin_events CASCADE`);
       await conn.db.update(settings).set({ value: DEFAULT_SETTINGS[LOGO_SETTING] }).where(eq(settings.key, LOGO_SETTING));
       await conn.db.update(settings).set({ value: DEFAULT_SETTINGS[BANNER_SETTING] }).where(eq(settings.key, BANNER_SETTING));
     });

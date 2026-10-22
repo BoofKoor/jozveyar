@@ -6,7 +6,8 @@
 
 import { fieldsOf, readPath, type AnyContent, type ContentKind, type FaqContent, type FieldSpec } from './kinds.js';
 import { blockText, inlineText, parseInline, parseMarkdown, type Block, type InlineFormat } from './markdown.js';
-import type { PlaceholderValues } from './placeholders.js';
+import type { AnyPageContent, DeskPreset, LandingContent, SitePageKind } from './pages.js';
+import type { PageValues, PlaceholderValues } from './placeholders.js';
 
 export type DiffSegment = { text: string; mark?: 'ins' | 'del' };
 
@@ -89,12 +90,12 @@ function textChange(section: string, before: string, after: string): ContentChan
   return { section, before: diff.before, after: diff.after };
 }
 
-/** متن یک فیلد همان‌طور که روی سایت خوانده می‌شود. */
-function fieldText(spec: FieldSpec, value: string, values: PlaceholderValues): string {
-  if (spec.format === 'markdown') return parseMarkdown(value).blocks.map((block) => blockText(block, values)).join('\n');
+/** متن یک فیلد همان‌طور که روی سایت خوانده می‌شود؛ `page` با بلوک‌ها و دو جای‌نگهدار صفحه‌های فرود و «تعرفه» (۱۵٫۲). */
+function fieldText(spec: Pick<FieldSpec, 'format'>, value: string, values: PlaceholderValues, page = false): string {
+  if (spec.format === 'markdown') return parseMarkdown(value, { page }).blocks.map((block) => blockText(block, values)).join('\n');
   const inline: InlineFormat | null =
     spec.format === 'plain' || spec.format === 'line' || spec.format === 'emphasis' || spec.format === 'paragraph' ? spec.format : null;
-  return inline ? inlineText(parseInline(value, inline).nodes, values) : value;
+  return inline ? inlineText(parseInline(value, inline, { page }).nodes, values) : value;
 }
 
 interface Section {
@@ -113,9 +114,9 @@ function sections(blocks: readonly Block[], values: PlaceholderValues): Section[
   });
 }
 
-function bodyChanges(before: string, after: string, values: PlaceholderValues): { changes: ContentChange[]; anyKept: boolean } {
-  const a = sections(parseMarkdown(before).blocks, values);
-  const b = sections(parseMarkdown(after).blocks, values);
+function bodyChanges(before: string, after: string, values: PlaceholderValues, page = false): { changes: ContentChange[]; anyKept: boolean } {
+  const a = sections(parseMarkdown(before, { page }).blocks, values);
+  const b = sections(parseMarkdown(after, { page }).blocks, values);
   const pairs = common(a, b, (x, y) => x.key === y.key);
   const changes: ContentChange[] = [];
   let i = 0;
@@ -134,8 +135,8 @@ function bodyChanges(before: string, after: string, values: PlaceholderValues): 
   return { changes, anyKept: pairs.length > 0 };
 }
 
-function faqDiff(before: FaqContent, after: FaqContent, values: PlaceholderValues): ContentDiff {
-  const answer = (a: string) => inlineText(parseInline(a, 'paragraph').nodes, values);
+function faqDiff(before: FaqContent, after: FaqContent, values: PlaceholderValues, page = false): ContentDiff {
+  const answer = (a: string) => inlineText(parseInline(a, 'paragraph', { page }).nodes, values);
   const changes: ContentChange[] = [];
   const oldByQ = new Map(before.items.map((item, i) => [item.q, { item, i }]));
   const newQs = new Set(after.items.map((item) => item.q));
@@ -174,4 +175,50 @@ export function contentDiff(kind: ContentKind, before: AnyContent, after: AnyCon
     changes.push(textChange(spec.label, fieldText(spec, old, values), fieldText(spec, fresh, values)));
   }
   return { changes, unchanged, reordered: false };
+}
+
+/**
+ * «چه عوض می‌شود» صفحه‌های فرود و «تعرفه» (برش ۱۵٫۲، سؤال ۴۶۵): همان بند به بند ۱۱٫۱، با بلوک‌های زنده همان‌طور که نوشته شدند و دو جای‌نگهدار
+ * صفحه‌ها با عدد امروز؛ و برای صفحهٔ فرود نشانی، پیش‌فرض میز (`deskText`، با نام‌های تعرفه) و «در پاورقی» هم.
+ */
+export function pageDiff(
+  kind: SitePageKind,
+  before: AnyPageContent,
+  after: AnyPageContent,
+  values: PageValues,
+  options: { deskText: (desk: DeskPreset) => string },
+): ContentDiff {
+  const changes: ContentChange[] = [];
+  const unchanged: string[] = [];
+  const field = (label: string, old: string, fresh: string) => {
+    if (old === fresh) unchanged.push(label);
+    else changes.push(textChange(label, old, fresh));
+  };
+  const line = (text: string) => fieldText({ format: 'line' }, text, values, true);
+  if (kind === 'landing') {
+    const a = before as LandingContent;
+    const b = after as LandingContent;
+    field('نشانی', `/${a.slug}`, `/${b.slug}`);
+    field('نام کوتاه', a.name, b.name);
+  }
+  field('تیتر صفحه', line(before.title), line(after.title));
+  field('جملهٔ زیر تیتر', line(before.lead), line(after.lead));
+  if (kind === 'landing') {
+    const body = bodyChanges((before as LandingContent).body, (after as LandingContent).body, values, true);
+    changes.push(...body.changes);
+    if (body.changes.length === 0) unchanged.push('متن صفحه');
+    else if (body.anyKept) unchanged.push('بقیهٔ متن صفحه');
+  }
+  const faq = faqDiff({ items: before.faq }, { items: after.faq }, values, true);
+  changes.push(...faq.changes);
+  if (faq.changes.length === 0 && !faq.reordered) unchanged.push('سؤال‌های صفحه');
+  if (kind === 'landing') {
+    const a = before as LandingContent;
+    const b = after as LandingContent;
+    field('میز سفارش', options.deskText(a.desk), options.deskText(b.desk));
+    field('در پاورقی', a.inFooter ? 'بله' : 'نه', b.inFooter ? 'بله' : 'نه');
+  }
+  field('عنوان گوگل', line(before.seo.title), line(after.seo.title));
+  field('توضیح گوگل', line(before.seo.description), line(after.seo.description));
+  return { changes, unchanged, reordered: faq.reordered };
 }
